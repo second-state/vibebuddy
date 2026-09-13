@@ -38,11 +38,16 @@ else
   echo "ioreg=$?" >>"$command_status"
 fi
 
-if find /dev -maxdepth 1 \( -name 'cu.*' -o -name 'tty.*' \) -print 2>"$output_dir/serial-devices.stderr.txt" \
-  | sort >"$output_dir/serial-devices.txt"; then
-  echo "serial_devices=0" >>"$command_status"
+if ls /dev/cu.* >"$output_dir/cu-devices.txt" 2>"$output_dir/cu-devices.stderr.txt"; then
+  echo "cu_devices=0" >>"$command_status"
 else
-  echo "serial_devices=$?" >>"$command_status"
+  echo "cu_devices=$?" >>"$command_status"
+fi
+
+if ls /dev/tty.* >"$output_dir/tty-devices.txt" 2>"$output_dir/tty-devices.stderr.txt"; then
+  echo "tty_devices=0" >>"$command_status"
+else
+  echo "tty_devices=$?" >>"$command_status"
 fi
 
 echo "saved USB snapshot: $output_dir"
