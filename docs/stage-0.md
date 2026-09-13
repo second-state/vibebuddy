@@ -80,5 +80,6 @@ Stage 0 **尚未通过**。开发主机身份和未连接基线已经确认，�
 - [ ] native USB 或 USB-UART bridge 的证据。
 - [ ] 烧录路径与运行时串口路径。
 - [ ] PCB 完整型号/版本。
-- [ ] 与该版本匹配的官方 schematic、BSP 和 examples。
+- [x] 已整理 DNESP32S3 开发板和 BOX3 两套候选官方资料，并明确不可混用。
+- [ ] 确定实机版本，并取得与该版本匹配的官方 schematic、BSP 和 examples。
 - [ ] LCD、touch、audio、microphone、buzzer、K0/K1/K2 的官方引脚/器件依据。
