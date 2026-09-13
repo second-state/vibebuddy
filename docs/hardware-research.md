@@ -169,7 +169,7 @@ BOX3 官方简介的功能列表和板载资源表均未列蜂鸣器。因此若
 
 - **若确认为 BOX3**：正点原子官方环境文档明确要求其 ESP32-S3 例程使用 ESP-IDF `v5.3.x` 及以上，当前资料包示例提供 `v5.5.3` 离线安装包。[BOX3 官方安装说明](https://github.com/openedv/openedv-wiki-boards-dnesp32s3b3/blob/c6f9797b64aef2666547206b4b274017d6d28a3d/set-up-development-environment/esp-idf-install.md)
 - **若确认为 DNESP32S3 开发板或老款 BOX**：已找到的 DNESP32S3 官方仓库没有声明可复现的最低/固定 ESP-IDF 版本；老款 BOX 的精确资料包又尚未取得。因此不能把 BOX3 的 `>=5.3.x` 要求外推给它们。[DNESP32S3 官方开发说明](https://github.com/openedv/ATK-DNESP32S3-Board/blob/c7434a3da5b9e6feda05added5d6a686f1c95f13/1_docs/Developing_With_ESP_IDF.md)
-- **AgentBeacon 的选择规则**：不要跟随 `latest` 或 `master`。先在精确板型的官方最低支持线内选择一个固定 release tag；候选版本只有在厂商原始例程与 AgentBeacon 最小探针都通过“编译、烧录、重启、USB 重枚举、LCD、触摸、按键、音频采放”后才能锁定。乐鑫也明确建议依赖 ESP-IDF 的项目先遵循该项目自己的兼容版本说明。[乐鑫 ESP-IDF 版本说明](https://docs.espressif.com/projects/esp-idf/en/stable/esp32/api-guides/tools/idf-version.html)
+- **AgentBeacon 的选择规则**：不要跟随 `latest` 或 `master`。先在精确板型的官方最低支持线内选择一个固定 release tag；候选版本只有在厂商原始例程与 AgentBeacon 最小探针都通过“编译、烧录、重启、USB 重枚举、LCD、触摸、按键、音频采放”后才能锁定。乐鑫也明确建议依赖 ESP-IDF 的项目先遵循该项目自己的兼容版本说明。[乐鑫 ESP-IDF 版本说明](https://docs.espressif.com/projects/esp-idf/en/latest/esp32/versions.html)
 - **当前建议**：若实机是 BOX3，以官方资料中的 `v5.5.3` 作为第一条复现基线，再单独验证同一 `release/v5.5` 系列的最新 bugfix tag；没有完整回归前不升 ESP-IDF 6.x。若不是 BOX3，在拿到对应资料包前不冻结 IDF 版本。
 
 ## 建议下一步
