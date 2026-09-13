@@ -38,6 +38,12 @@ else
   echo "ioreg=$?" >>"$command_status"
 fi
 
+LC_ALL=C awk '
+  /\+-o / || /"(USB Product Name|USB Vendor Name|USB Serial Number|idVendor|idProduct|locationID)" =/
+' "$output_dir/ioreg-usb.txt" \
+  | sed -E 's/[[:space:]]+<class.*$//' \
+  >"$output_dir/ioreg-usb-summary.txt"
+
 if ls /dev/cu.* >"$output_dir/cu-devices.txt" 2>"$output_dir/cu-devices.stderr.txt"; then
   echo "cu_devices=0" >>"$command_status"
 else

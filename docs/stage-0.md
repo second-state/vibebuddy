@@ -4,7 +4,7 @@
 
 ## 当前结论
 
-Stage 0 **尚未通过**。开发主机身份已经确认，通用开发环境前置依赖已经补齐；但还没有完成经用户确认的 USB 拔插对比，也没有确认准确 PCB 型号、VID/PID、烧录路径和运行时串口。
+Stage 0 **尚未通过**。开发主机身份和未连接基线已经确认，通用开发环境前置依赖已经补齐；但还没有采集开发板接入后的快照，也没有确认准确 PCB 型号、VID/PID、烧录路径和运行时串口。
 
 ## 主机身份
 
@@ -54,33 +54,31 @@ Stage 0 **尚未通过**。开发主机身份已经确认，通用开发环境�
 - [EIM 官方说明与 macOS Homebrew 安装方式](https://docs.espressif.com/projects/idf-im-ui/en/latest/)
 - [EIM 前置依赖](https://docs.espressif.com/projects/idf-im-cli/en/latest/prerequisites.html)
 
-## USB 初始观察
+## USB 未连接基线
 
-未经过用户确认连接状态的 `pre-change` 快照中：
+用户确认开发板尚未接入 Mac Studio 后，已保存 `.probe/baseline`。该快照中：
 
 - `system_profiler SPUSBDataType` 退出码为 0，但在 macOS 26.6.2 上返回空结果。
 - `ioreg -p IOUSB -l -w 0` 正常返回 USB 树。
 - `/dev/cu.*` 与 `/dev/tty.*` 只出现 Bluetooth、Bose QC Earbuds 和系统 debug 节点。
 - 未观察到名称包含 ESP、CP210、CH34、FTDI、USB Serial/JTAG 或 CDC 的设备/串口。
 
-这只能说明该时刻没有观察到目标设备，不能证明开发板未连接，也不能推导目标板采用哪种 USB 实现。
+这构成开发板未连接时的正式基线，但仍不能推导目标板采用哪种 USB 实现。原始 `ioreg` 包含不断变化的统计计数器；探测脚本同时生成只保留设备树、VID/PID、产品名、厂商名、序列号和 location ID 的归一化摘要，后续差异以摘要为主、原始输出为证据补充。
 
 ## 待执行的实机对比
 
-1. 用户确认开发板已经拔开。
-2. 运行 `./tools/detect-device.sh baseline`。
-3. 用户用计划采用的 USB-C 线把开发板直接接到 Mac Studio，并报告供电/指示现象。
-4. 运行 `./tools/detect-device.sh connected`。
-5. 对 `.probe/baseline` 与 `.probe/connected` 做结构化差异，记录 VID/PID、产品名、串口节点和 USB 类型。
-6. 必要时再让用户操作 BOOT/RESET，区分正常运行枚举与下载模式枚举。
+1. 用户用计划采用的 USB-C 线把开发板直接接到 Mac Studio，并报告供电/指示现象。
+2. 运行 `./tools/detect-device.sh connected`。
+3. 对 `.probe/baseline` 与 `.probe/connected` 做结构化差异，记录 VID/PID、产品名、串口节点和 USB 类型。
+4. 必要时再让用户操作 BOOT/RESET，区分正常运行枚举与下载模式枚举。
 
 ## Stage 0 剩余门禁
 
-- [ ] 经确认的拔插前后 USB 差异。
+- [x] 经用户确认的未连接 USB 基线。
+- [ ] 连接后快照及拔插前后 USB 差异。
 - [ ] VID/PID 与设备名称。
 - [ ] native USB 或 USB-UART bridge 的证据。
 - [ ] 烧录路径与运行时串口路径。
 - [ ] PCB 完整型号/版本。
 - [ ] 与该版本匹配的官方 schematic、BSP 和 examples。
 - [ ] LCD、touch、audio、microphone、buzzer、K0/K1/K2 的官方引脚/器件依据。
-

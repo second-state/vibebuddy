@@ -32,7 +32,7 @@ Local Programs / Agents / Codex / Scripts
 - `agent-beacon-fw`：ESP32-S3 固件，仅负责设备 I/O 和 Beacon Protocol 消息处理。
 - Beacon Protocol：与 transport 解耦的可扩展 NDJSON 协议。
 
-更完整的边界与决定见 [`docs/architecture.md`](docs/architecture.md)，阶段门禁见 [`docs/roadmap.md`](docs/roadmap.md)，当前 Stage 0 证据见 [`docs/stage-0.md`](docs/stage-0.md)。
+更完整的边界与决定见 [`docs/architecture.md`](docs/architecture.md)，阶段门禁见 [`docs/roadmap.md`](docs/roadmap.md)，当前 Stage 0 证据见 [`docs/stage-0.md`](docs/stage-0.md)，外部项目的借鉴边界见 [`docs/references.md`](docs/references.md)。
 
 ## Stage 0 USB 探测
 
