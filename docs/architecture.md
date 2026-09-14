@@ -8,11 +8,11 @@ AgentBeacon 把本地程序的状态事件变成实体宠物的画面与声音�
 
 ### `beacond`
 
-- 通过 `POST /v1/events` 接收通用事件，通过 `POST /v1/codex-hooks` 接收经过最小化的 Codex 生命周期事件。
+- 通过 `POST /v1/events` 接收通用事件，通过 `POST /v1/codex-hooks` 和 `POST /v1/claude-hooks` 接收经过最小化的 Agent 生命周期事件。
 - 校验并编码 Beacon Protocol 消息。
 - 管理设备发现、串口连接、断线重连和设备状态。
 - 把设备上报的按钮事件路由回本机消费者。
-- 聚合多个 Codex 会话，生成最多 3 张“最新在最上”的任务卡；需要用户确认的会话优先控制宠物全局状态。
+- 聚合所有 Agent 的会话，生成最多 3 张“最新在最上”的任务卡；需要用户确认的活动优先控制宠物全局状态。
 - 定时清除长时间没有事件的活动，避免异常退出的会话永久占用任务卡。
 
 ### `beacon`
@@ -35,8 +35,9 @@ AgentBeacon 把本地程序的状态事件变成实体宠物的画面与声音�
 ## 数据流
 
 ```text
-Codex Hook -> privacy filter -> POST /v1/codex-hooks --+
-Other producer -----------> POST /v1/events -----------+-> beacond -> USB -> ESP32-S3
+Codex Hook -------> privacy filter -> POST /v1/codex-hooks ---+
+Claude Code Hook -> privacy filter -> POST /v1/claude-hooks --+
+Other producer ------------------> POST /v1/events -----------+-> beacond -> USB -> ESP32-S3
 ```
 
 首版只实现 `SerialTransport`。Transport 接口只抽象连接、发送、接收和关闭所需的最小能力；在第二个真实 transport 出现前不设计复杂插件系统。
@@ -52,3 +53,4 @@ Other producer -----------> POST /v1/events -----------+-> beacond -> USB -> ESP
 7. 不抓取 Codex UI，也不解析不稳定的 transcript。V1 只使用官方 Hook；适配脚本在进程边界前丢弃 prompt、transcript 与工具内容。
 8. 多任务卡按最近活动排序，最多 3 张；全局表情的优先级是“需要确认 > 工作中”。动画和语音资产留在固件中，Mac 只发送状态快照。
 9. Hook 生命周期不保证收尾事件，活动必须能自行过期。工作中按 30 分钟、需要确认按 4 小时计时；两档时限不同，因为前者无事件通常意味着进程已经消失，后者只意味着用户尚未回来。清理由 60 秒一次的后台扫描驱动，不能只在收到新 Hook 时惰性触发。
+10. 每个 Agent 一个 Adapter，但所有 Adapter 写入同一个聚合器。设备只有一块屏幕和一只小灯灵，两个聚合器会各自维护任务卡栈并互相覆盖。Adapter 因此不持有状态，只做事件翻译和活动身份合成；任务卡标题带 Agent 前缀，因为两个 Agent 常在同一目录下工作。

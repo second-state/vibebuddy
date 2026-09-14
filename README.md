@@ -6,7 +6,7 @@ AgentBeacon 是运行在 ESP32-S3 盒子里的实体 Agent 宠物。原创角色
 
 ## 当前状态
 
-**Stage 4 — 小灯灵显示与语音已通过实机验收。** Codex 生命周期事件可经本机 Hook、`beacond`、USB Serial/JTAG 到达盒子。小灯灵支持空闲、工作中、需要确认、完成和失败动画；最多显示 3 张任务卡，最新在最上；需要确认、完成和失败各播报一次短语音，工作中保持安静。
+**Stage 4 — 小灯灵显示与语音已通过实机验收，Codex 与 Claude Code 均已接入。** 两个 Agent 的生命周期事件都可经本机 Hook、`beacond`、USB Serial/JTAG 到达盒子，并共享同一个任务卡栈。小灯灵支持空闲、工作中、需要确认、完成和失败动画；最多显示 3 张任务卡，最新在最上；需要确认、完成和失败各播报一次短语音，工作中保持安静。
 
 ## 目标架构
 
@@ -77,9 +77,14 @@ curl -H 'content-type: application/json' \
 
 当前 Mac Studio 已安装 `com.agentbeacon.beacond` LaunchAgent，登录后会自动运行 release binary；配置模板在 [`packaging/com.agentbeacon.beacond.plist`](packaging/com.agentbeacon.beacond.plist)。
 
-## Codex 宠物接入
+## Agent 接入
 
-仓库的 [`tools/codex-hook.py`](tools/codex-hook.py) 只抽取 Hook 的 `session_id`、`turn_id`、`hook_event_name` 和 `cwd`；对于等待用户回答的 `Stop`，它会在本机生成 `response_kind`。脚本不会转发 prompt、助手回复、transcript 或工具结果。用户级 `~/.codex/hooks.json` 需要为六个生命周期事件配置该脚本，并在 Codex 的 `/hooks` 页面审查、信任配置；详见 [`docs/codex-adapter.md`](docs/codex-adapter.md)。
+Codex 与 Claude Code 都由本机 Hook 接入，各有一个隐私过滤脚本，两者写入同一个聚合器。任务卡标题带 Agent 前缀：Codex 为 `CX·`，Claude Code 为 `CC·`。
+
+- Codex：`~/.codex/hooks.json` 为六个事件配置 [`tools/codex-hook.py`](tools/codex-hook.py)，并在 Codex 的 `/hooks` 页面审查、信任配置；详见 [`docs/codex-adapter.md`](docs/codex-adapter.md)。
+- Claude Code：`~/.claude/settings.json` 为八个事件配置 [`tools/claude-hook.py`](tools/claude-hook.py)；详见 [`docs/claude-adapter.md`](docs/claude-adapter.md)。
+
+两个脚本都只抽取会话与回合标识、事件名和工作目录，不转发 prompt、助手回复、transcript 或工具结果。判断助手是否在等待回答的规则由 [`tools/hook_filter.py`](tools/hook_filter.py) 共用。
 
 ## 仓库布局
 
