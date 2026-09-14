@@ -1,5 +1,5 @@
 ---
-status: accepted
+status: superseded by ADR-0002
 ---
 
 # Claude Adapter 不解析 transcript，接受 `Stop` 的语义损失
