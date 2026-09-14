@@ -6,7 +6,7 @@ AgentBeacon 是运行在 ESP32-S3 盒子里的实体 Agent 宠物。原创角色
 
 ## 当前状态
 
-**Stage 4 — 小灯灵显示与语音已通过实机验收，Codex 与 Claude Code 均已接入。** 两个 Agent 的生命周期事件都可经本机 Hook、`beacond`、USB Serial/JTAG 到达盒子，并共享同一个任务卡栈。小灯灵支持空闲、工作中、需要确认、完成和失败动画；最多显示 3 张任务卡，最新在最上；需要确认、完成和失败各播报一次短语音，工作中保持安静。
+**Stage 4 — 小灯灵显示与语音已通过实机验收，Codex 与 Claude Code 均已接入。** 两个 Agent 的生命周期事件都经本机 Hook、`beacond` 和 USB Serial/JTAG 到达盒子，并共享同一个任务卡栈。小灯灵支持空闲、工作中、需要确认、完成、失败和失联；最多显示 3 张任务卡，最新在最上，每张卡显示它在当前状态里待了多久；需要确认、完成和失败各播报一次短语音，工作中保持安静；空闲时轮播当日战绩并偶尔做个小动作。
 
 ## 目标架构
 
@@ -32,7 +32,7 @@ Local Programs / Agents / Codex / Scripts
 - `agent-beacon-fw`：ESP32-S3 固件，仅负责设备 I/O 和 Beacon Protocol 消息处理。
 - Beacon Protocol：与 transport 解耦的可扩展 NDJSON 协议。
 
-更完整的边界与决定见 [`docs/architecture.md`](docs/architecture.md)，小灯灵设计见 [`docs/pet.md`](docs/pet.md)，Codex 接入见 [`docs/codex-adapter.md`](docs/codex-adapter.md)，协议决定见 [`docs/protocol.md`](docs/protocol.md)，阶段门禁见 [`docs/roadmap.md`](docs/roadmap.md)，外部项目的借鉴边界见 [`docs/references.md`](docs/references.md)。
+更完整的边界与决定见 [`docs/architecture.md`](docs/architecture.md)，领域词汇见 [`CONTEXT.md`](CONTEXT.md)，小灯灵设计见 [`docs/pet.md`](docs/pet.md)，Codex 接入见 [`docs/codex-adapter.md`](docs/codex-adapter.md)，协议决定见 [`docs/protocol.md`](docs/protocol.md)，阶段门禁见 [`docs/roadmap.md`](docs/roadmap.md)，外部项目的借鉴边界见 [`docs/references.md`](docs/references.md)。
 
 ## Stage 0 USB 探测
 

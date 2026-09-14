@@ -76,11 +76,38 @@ static size_t parse_tasks(const cJSON *message, agent_display_task_t *tasks) {
     if (!cJSON_IsString(title) || !cJSON_IsString(status)) {
       continue;
     }
+    const cJSON *elapsed = cJSON_GetObjectItemCaseSensitive(item, "elapsed_s");
     tasks[count].title = title->valuestring;
     tasks[count].state = task_state(status->valuestring);
+    tasks[count].elapsed_s = cJSON_IsNumber(elapsed) ? (int)elapsed->valuedouble : 0;
     count++;
   }
   return count;
+}
+
+/// 当日战绩随每条状态事件下发，空闲屏用它轮播。
+///
+/// 不能只在 `agent.idle` 上取：`task.done` 之后设备是自己回到空闲的，
+/// 那一刻正是用户会看的一眼，缓存的战绩必须已经包含刚完成的这一件。
+static void parse_stats(const cJSON *message) {
+  const cJSON *stat_list = cJSON_GetObjectItemCaseSensitive(message, "stats");
+  if (!cJSON_IsArray(stat_list)) {
+    return;
+  }
+
+  const char *lines[AGENT_DISPLAY_MAX_STATS];
+  size_t count = 0;
+  const cJSON *item;
+  cJSON_ArrayForEach(item, stat_list) {
+    if (count == AGENT_DISPLAY_MAX_STATS) {
+      break;
+    }
+    if (!cJSON_IsString(item)) {
+      continue;
+    }
+    lines[count++] = item->valuestring;
+  }
+  agent_display_set_stats(lines, count);
 }
 
 static void show_event(const cJSON *message, const char *event,
@@ -136,11 +163,16 @@ static void show_event(const cJSON *message, const char *event,
 
   const cJSON *announcement =
       cJSON_GetObjectItemCaseSensitive(message, "announcement");
-  if (cJSON_IsString(announcement) &&
-      strcmp(announcement->valuestring, "done") == 0) {
-    prompt = AGENT_AUDIO_DONE;
-    prompt_label = "DONE";
-    play_prompt = true;
+  if (cJSON_IsString(announcement)) {
+    if (strcmp(announcement->valuestring, "done") == 0) {
+      prompt = AGENT_AUDIO_DONE;
+      prompt_label = "DONE";
+      play_prompt = true;
+    } else if (strcmp(announcement->valuestring, "failed") == 0) {
+      prompt = AGENT_AUDIO_FAILED;
+      prompt_label = "FAILED";
+      play_prompt = true;
+    }
   }
 
   if (agent_display_show_tasks(state, title, tasks, task_count) != ESP_OK) {
@@ -192,6 +224,7 @@ static void handle_line(char *line, size_t length) {
     return;
   }
 
+  parse_stats(message);
   usb_write_value_line("EVENT ", event->valuestring);
   if (title != NULL) {
     usb_write_value_line("TITLE ", title->valuestring);

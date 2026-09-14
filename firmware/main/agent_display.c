@@ -4,6 +4,7 @@
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -53,6 +54,12 @@
 #define COLOR_PET_HIGHLIGHT 0x7e5f
 
 #define TITLE_BYTES 64
+
+/// 空闲时每隔 IDLE_MOOD_PERIOD 帧做一个小动作，持续 IDLE_MOOD_FRAMES 帧。
+#define IDLE_MOOD_PERIOD 40
+#define IDLE_MOOD_FRAMES 8
+/// 空闲时标题与战绩的轮播间隔（帧）。空闲动画每 500 ms 一帧。
+#define IDLE_ROTATE_FRAMES 6
 
 static const char *TAG = "agent_display";
 
@@ -110,8 +117,14 @@ static char current_title[TITLE_BYTES];
 static struct {
   char title[TITLE_BYTES];
   agent_display_state_t state;
+  /// 收到这张卡时它已经持续了多久，以及收到的时刻。可见状态不变时 Mac
+  /// 端不会再发消息，卡片上的数字却必须继续走，所以由设备自己接着算。
+  int elapsed_base;
+  TickType_t received_tick;
 } current_tasks[AGENT_DISPLAY_MAX_TASKS];
 static size_t current_task_count;
+static char current_stats[AGENT_DISPLAY_MAX_STATS][TITLE_BYTES];
+static size_t current_stat_count;
 static uint32_t animation_frame;
 static TickType_t next_animation_at;
 
@@ -248,6 +261,29 @@ static void draw_text_centered(int y, const char *text, int scale,
   draw_text((DISPLAY_WIDTH - width) / 2, y, text, scale, color, max_characters);
 }
 
+typedef enum {
+  IDLE_MOOD_NONE,
+  IDLE_MOOD_NAP,
+  IDLE_MOOD_LOOK,
+  IDLE_MOOD_STRETCH,
+} idle_mood_t;
+
+/// 小动作已经进行了几帧；负数表示当前没有小动作。
+static int idle_mood_phase(uint32_t frame) {
+  return (int)(frame % IDLE_MOOD_PERIOD) - (IDLE_MOOD_PERIOD - IDLE_MOOD_FRAMES);
+}
+
+/// 空闲时轮流做三个小动作。呼吸和眨眼之外还得有点别的，否则一台一直亮着
+/// 的设备看上去更像卡住了而不是在待命。
+static idle_mood_t idle_mood(uint32_t frame) {
+  static const idle_mood_t cycle[] = {IDLE_MOOD_NAP, IDLE_MOOD_LOOK,
+                                      IDLE_MOOD_STRETCH};
+  if (idle_mood_phase(frame) < 0) {
+    return IDLE_MOOD_NONE;
+  }
+  return cycle[(frame / IDLE_MOOD_PERIOD) % 3];
+}
+
 static void draw_pet_face(agent_display_state_t state, uint32_t frame,
                           int x_offset, int y_offset, uint16_t color) {
   int face_y = 79 + y_offset;
@@ -278,10 +314,23 @@ static void draw_pet_face(agent_display_state_t state, uint32_t frame,
     fill_rect(169 + x_offset, face_y + 14, 8, 3, color);
     draw_line(154 + x_offset, face_y + 25, 166 + x_offset, face_y + 25, color);
   } else {
+    idle_mood_t mood = idle_mood(frame);
+    if (mood == IDLE_MOOD_NAP) {
+      // 打盹：闭眼加一个飘起来的 Z。和失联的闭眼靠颜色与这个 Z 区分。
+      fill_rect(143 + x_offset, face_y + 14, 8, 3, color);
+      fill_rect(169 + x_offset, face_y + 14, 8, 3, color);
+      draw_line(154 + x_offset, face_y + 25, 166 + x_offset, face_y + 25,
+                color);
+      draw_text(172 + x_offset, 44 + y_offset - idle_mood_phase(frame), "Z", 2,
+                color, 1);
+      return;
+    }
+    // 左顾右盼：只平移眼睛，看上去像在打量房间。
+    int gaze = mood == IDLE_MOOD_LOOK ? (frame % 4 < 2 ? -3 : 3) : 0;
     bool blinking = frame % 8 == 7;
-    fill_rect(143 + x_offset, face_y + (blinking ? 14 : 8), 8,
+    fill_rect(143 + x_offset + gaze, face_y + (blinking ? 14 : 8), 8,
               blinking ? 3 : 10, color);
-    fill_rect(169 + x_offset, face_y + (blinking ? 14 : 8), 8,
+    fill_rect(169 + x_offset + gaze, face_y + (blinking ? 14 : 8), 8,
               blinking ? 3 : 10, color);
     draw_line(154 + x_offset, face_y + 24, 160 + x_offset, face_y + 27, color);
     draw_line(160 + x_offset, face_y + 27, 166 + x_offset, face_y + 24, color);
@@ -301,8 +350,14 @@ static void draw_beaconling(agent_display_state_t state, uint32_t frame,
     y_offset = 1;
   }
 
-  fill_rect(157 + x_offset, 48 + y_offset, 6, 13, COLOR_PET_HIGHLIGHT);
-  fill_rect(153 + x_offset, 44 + y_offset, 14, 10, color);
+  // 伸懒腰时只拉长天线、身体不动，才像伸展而不是整只跳一下。
+  int antenna = state == AGENT_DISPLAY_IDLE &&
+                        idle_mood(frame) == IDLE_MOOD_STRETCH
+                    ? 5
+                    : 0;
+  fill_rect(157 + x_offset, 48 + y_offset - antenna, 6, 13 + antenna,
+            COLOR_PET_HIGHLIGHT);
+  fill_rect(153 + x_offset, 44 + y_offset - antenna, 14, 10, color);
 
   fill_rect(113 + x_offset, 65 + y_offset, 94, 52, COLOR_PET);
   fill_rect(121 + x_offset, 59 + y_offset, 78, 64, COLOR_PET);
@@ -352,6 +407,26 @@ static const char *short_state_label(agent_display_state_t state) {
   return "RUN";
 }
 
+/// 收到卡片时的秒数加上设备自己走过的时间。
+static int task_elapsed_seconds(size_t index) {
+  TickType_t ticks = xTaskGetTickCount() - current_tasks[index].received_tick;
+  return current_tasks[index].elapsed_base + (int)(pdTICKS_TO_MS(ticks) / 1000);
+}
+
+/// 卡片右下角只有三格宽，超过一小时就只报小时。
+static void format_elapsed(char *out, size_t size, int seconds) {
+  if (seconds < 0) {
+    seconds = 0;
+  }
+  if (seconds < 60) {
+    snprintf(out, size, "%dS", seconds);
+  } else if (seconds < 3600) {
+    snprintf(out, size, "%dM", seconds / 60);
+  } else {
+    snprintf(out, size, "%dH", seconds / 3600);
+  }
+}
+
 static void draw_task_cards(void) {
   for (size_t index = 0; index < current_task_count; index++) {
     int x = 8 + (int)index * 4;
@@ -365,7 +440,37 @@ static void draw_task_cards(void) {
     draw_text(x + 12, y + 5, current_tasks[index].title, 1, COLOR_TEXT, 26);
     draw_text(x + 12, y + 17, short_state_label(current_tasks[index].state), 1,
               color, 4);
+
+    char elapsed[8];
+    format_elapsed(elapsed, sizeof(elapsed), task_elapsed_seconds(index));
+    int elapsed_width = (int)strlen(elapsed) * 6 - 1;
+    // 等待确认时把时长也点亮：这一栏回答的正是「等了多久」。
+    uint16_t elapsed_color =
+        current_tasks[index].state == AGENT_DISPLAY_INPUT_REQUIRED ? color
+                                                                   : COLOR_MUTED;
+    draw_text(x + width - 8 - elapsed_width, y + 17, elapsed, 1, elapsed_color,
+              sizeof(elapsed));
   }
+}
+
+/// 空闲时在标题与战绩之间轮播。空闲屏出现得最频繁，只写一句固定的话太浪费。
+static void draw_idle_line(void) {
+  const char *lines[1 + AGENT_DISPLAY_MAX_STATS];
+  size_t count = 0;
+  bool has_title = current_title[0] != '\0';
+  if (has_title) {
+    lines[count++] = current_title;
+  }
+  for (size_t index = 0; index < current_stat_count; index++) {
+    lines[count++] = current_stats[index];
+  }
+  if (count == 0) {
+    draw_text_centered(195, "YOUR AGENT PET", 2, COLOR_MUTED);
+    return;
+  }
+  size_t slot = (animation_frame / IDLE_ROTATE_FRAMES) % count;
+  draw_text_centered(195, lines[slot], 2,
+                     has_title && slot == 0 ? COLOR_TEXT : COLOR_MUTED);
 }
 
 static esp_err_t present(void) {
@@ -416,10 +521,11 @@ static esp_err_t render_current_state(void) {
                      status_color);
   if (current_task_count > 0) {
     draw_text_centered(195, "LATEST ON TOP", 1, COLOR_MUTED);
+  } else if (current_state == AGENT_DISPLAY_IDLE && !link_lost) {
+    // 失联时不轮播：会动的画面看上去像还活着，正好与 NO LINK 相反。
+    draw_idle_line();
   } else if (current_title[0] != '\0') {
     draw_text_centered(195, current_title, 2, COLOR_TEXT);
-  } else if (current_state == AGENT_DISPLAY_IDLE) {
-    draw_text_centered(195, "YOUR AGENT PET", 2, COLOR_MUTED);
   }
   draw_text_centered(228, "BEACONLING  USB ONLINE", 1, COLOR_MUTED);
   return present();
@@ -471,9 +577,21 @@ esp_err_t agent_display_show_tasks(agent_display_state_t state,
             sizeof(current_tasks[index].title) - 1);
     current_tasks[index].title[sizeof(current_tasks[index].title) - 1] = '\0';
     current_tasks[index].state = tasks[index].state;
+    current_tasks[index].elapsed_base = tasks[index].elapsed_s;
+    current_tasks[index].received_tick = xTaskGetTickCount();
   }
   next_animation_at = xTaskGetTickCount() + animation_period(current_state);
   return render_current_state();
+}
+
+void agent_display_set_stats(const char *const *lines, size_t count) {
+  current_stat_count =
+      count > AGENT_DISPLAY_MAX_STATS ? AGENT_DISPLAY_MAX_STATS : count;
+  for (size_t index = 0; index < current_stat_count; index++) {
+    const char *line = lines[index] == NULL ? "" : lines[index];
+    strncpy(current_stats[index], line, sizeof(current_stats[index]) - 1);
+    current_stats[index][sizeof(current_stats[index]) - 1] = '\0';
+  }
 }
 
 void agent_display_set_link_lost(bool lost) {

@@ -8,6 +8,7 @@ use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
 use beacon_protocol::{Event, VERSION};
+use serde::{Deserialize, Serialize};
 use serde_json::json;
 
 const MAX_VISIBLE_TASKS: usize = 3;
@@ -38,6 +39,28 @@ struct Activity {
     title: String,
     sequence: u64,
     updated_at: Instant,
+    /// 进入当前状态的时刻。与 `updated_at` 不同：工具事件每几秒刷新一次
+    /// `updated_at`，但卡片要回答的是「这个 turn 跑了多久」「等了多久」。
+    status_since: Instant,
+}
+
+/// 空闲屏轮播的当日战绩。
+#[derive(Debug, Default)]
+struct DailyStats {
+    day: String,
+    done: u32,
+    asks: u32,
+    busy_seconds: u64,
+    /// 当前这段「至少有一个活动」的起点；没有活动时为 `None`。
+    busy_since: Option<Instant>,
+}
+
+#[derive(Debug, Default, Deserialize, Serialize)]
+struct StoredStats {
+    day: String,
+    done: u32,
+    asks: u32,
+    busy_seconds: u64,
 }
 
 #[derive(Default)]
@@ -45,9 +68,31 @@ pub struct ActivityTracker {
     activities: HashMap<String, Activity>,
     sequence: u64,
     last_visible: Option<Event>,
+    stats: DailyStats,
+    stats_file: Option<PathBuf>,
 }
 
 impl ActivityTracker {
+    /// 把战绩存到磁盘。只放在内存里的话，每次重启 daemon 数字都会归零，
+    /// 而屏幕上写的是「今天」，归零后它显示的就是错的。
+    pub fn with_stats_file(path: PathBuf) -> Self {
+        let stored: StoredStats = std::fs::read_to_string(&path)
+            .ok()
+            .and_then(|text| serde_json::from_str(&text).ok())
+            .unwrap_or_default();
+        Self {
+            stats: DailyStats {
+                day: stored.day,
+                done: stored.done,
+                asks: stored.asks,
+                busy_seconds: stored.busy_seconds,
+                busy_since: None,
+            },
+            stats_file: Some(path),
+            ..Self::default()
+        }
+    }
+
     /// 记录活动的当前状态，返回需要下发的可见状态。
     pub fn observe(
         &mut self,
@@ -69,6 +114,7 @@ impl ActivityTracker {
             return None;
         }
         self.set_activity(id, title, ActivityStatus::InputRequired);
+        self.record(|stats| stats.asks += 1);
         let visible = self.activity_snapshot()?;
         self.last_visible = Some(visible.clone());
         Some(visible)
@@ -79,6 +125,8 @@ impl ActivityTracker {
         if self.activities.remove(&id.key).is_none() {
             return self.visible_activity();
         }
+        self.sync_busy();
+        self.record(|stats| stats.done += 1);
         if let Some(visible) = self.activity_snapshot() {
             // 状态快照用于去重；announcement 是一次性边沿事件，不能被状态合并吞掉。
             self.last_visible = Some(visible.clone());
@@ -95,9 +143,34 @@ impl ActivityTracker {
         }
     }
 
+    /// 活动以失败告终，产生一次失败播报。
+    ///
+    /// 与 `discard` 的区别是失败是任务的结果，必须让用户知道；`discard`
+    /// 用于「不知道结果」的收尾，不播报。
+    pub fn fail(&mut self, id: &ActivityId, title: &str) -> Option<Event> {
+        if self.activities.remove(&id.key).is_none() {
+            return self.visible_activity();
+        }
+        self.sync_busy();
+        if let Some(visible) = self.activity_snapshot() {
+            self.last_visible = Some(visible.clone());
+            let mut announced = visible;
+            announced
+                .extra
+                .insert("announcement".to_owned(), json!("failed"));
+            announced
+                .extra
+                .insert("announcement_id".to_owned(), json!(id.key));
+            Some(announced)
+        } else {
+            self.deduplicate(event("task.error", &id.key, title))
+        }
+    }
+
     /// 丢弃一个活动，不播报成功。
     pub fn discard(&mut self, id: &ActivityId, idle_title: &str) -> Option<Event> {
         self.activities.remove(&id.key);
+        self.sync_busy();
         self.idle_or_refresh(&id.session_id, idle_title)
     }
 
@@ -111,6 +184,7 @@ impl ActivityTracker {
     pub fn clear_session(&mut self, session_id: &str) {
         self.activities
             .retain(|_, activity| activity.session_id != session_id);
+        self.sync_busy();
     }
 
     /// 清除已被遗弃的活动。Agent 被强制结束时不会发送收尾事件，
@@ -132,6 +206,7 @@ impl ActivityTracker {
             }
             alive
         });
+        self.sync_busy();
         let expired_session = expired_session?;
         self.idle_or_refresh(&expired_session, "TIMED OUT")
     }
@@ -151,6 +226,13 @@ impl ActivityTracker {
 
     fn set_activity(&mut self, id: &ActivityId, title: &str, status: ActivityStatus) {
         self.sequence = self.sequence.wrapping_add(1);
+        let now = Instant::now();
+        // 状态没变就保留起点，否则每次 PostToolUse 都会把计时清零。
+        let status_since = self
+            .activities
+            .get(&id.key)
+            .filter(|existing| existing.status == status)
+            .map_or(now, |existing| existing.status_since);
         self.activities.insert(
             id.key.clone(),
             Activity {
@@ -158,9 +240,11 @@ impl ActivityTracker {
                 status,
                 title: title.to_owned(),
                 sequence: self.sequence,
-                updated_at: Instant::now(),
+                updated_at: now,
+                status_since,
             },
         );
+        self.sync_busy();
     }
 
     fn visible_activity(&mut self) -> Option<Event> {
@@ -211,12 +295,125 @@ impl ActivityTracker {
         Some(visible)
     }
 
+    /// 盖上只在发送这一刻才有意义的字段：卡片计时和当日战绩。
+    ///
+    /// 它们不能进 `activity_snapshot`，因为那份快照要参与去重。这两个字段
+    /// 每秒都在变，一旦进入快照，每个工具事件都会绕过去重变成一帧重绘，
+    /// 把工作中的动画不断打回第一帧。
+    pub fn stamp_live_fields(&mut self, event: &mut Event) {
+        self.roll_day();
+        event
+            .extra
+            .insert("stats".to_owned(), json!(self.stats_lines()));
+
+        let now = Instant::now();
+        let mut activities: Vec<&Activity> = self.activities.values().collect();
+        activities.sort_by_key(|activity| std::cmp::Reverse(activity.sequence));
+        let Some(tasks) = event
+            .extra
+            .get_mut("tasks")
+            .and_then(|tasks| tasks.as_array_mut())
+        else {
+            return;
+        };
+        for (task, activity) in tasks.iter_mut().zip(activities) {
+            let Some(task) = task.as_object_mut() else {
+                continue;
+            };
+            task.insert(
+                "elapsed_s".to_owned(),
+                json!(
+                    now.saturating_duration_since(activity.status_since)
+                        .as_secs()
+                ),
+            );
+        }
+    }
+
+    fn stats_lines(&self) -> Vec<String> {
+        let busy = self.stats.busy_seconds
+            + self
+                .stats
+                .busy_since
+                .map_or(0, |since| since.elapsed().as_secs());
+        vec![
+            format!("{} DONE", self.stats.done),
+            format!("{} ASKS", self.stats.asks),
+            format!("{} BUSY", format_duration(busy)),
+        ]
+    }
+
+    fn record(&mut self, change: impl FnOnce(&mut DailyStats)) {
+        self.roll_day();
+        change(&mut self.stats);
+        self.save_stats();
+    }
+
+    /// 跨过本地自然日就清零。屏幕上写的是「今天」，就必须按今天算。
+    fn roll_day(&mut self) {
+        let today = chrono::Local::now().format("%Y-%m-%d").to_string();
+        if self.stats.day == today {
+            return;
+        }
+        self.stats.day = today;
+        self.stats.done = 0;
+        self.stats.asks = 0;
+        self.stats.busy_seconds = 0;
+        if self.stats.busy_since.is_some() {
+            // 跨零点时仍在进行的活动从零点重新计时，不把昨天算进今天。
+            self.stats.busy_since = Some(Instant::now());
+        }
+    }
+
+    /// 维护「至少有一个活动」的累计时长。
+    fn sync_busy(&mut self) {
+        match (self.activities.is_empty(), self.stats.busy_since) {
+            (false, None) => self.stats.busy_since = Some(Instant::now()),
+            (true, Some(since)) => {
+                self.stats.busy_seconds += since.elapsed().as_secs();
+                self.stats.busy_since = None;
+                self.save_stats();
+            }
+            _ => {}
+        }
+    }
+
+    fn save_stats(&self) {
+        let Some(path) = self.stats_file.as_ref() else {
+            return;
+        };
+        let stored = StoredStats {
+            day: self.stats.day.clone(),
+            done: self.stats.done,
+            asks: self.stats.asks,
+            busy_seconds: self.stats.busy_seconds,
+        };
+        let Ok(text) = serde_json::to_string(&stored) else {
+            return;
+        };
+        if let Some(parent) = path.parent() {
+            let _ = std::fs::create_dir_all(parent);
+        }
+        // 战绩丢了只是少一行展示，不值得让事件下发失败。
+        let _ = std::fs::write(path, text);
+    }
+
     fn deduplicate(&mut self, event: Event) -> Option<Event> {
         if self.last_visible.as_ref() == Some(&event) {
             return None;
         }
         self.last_visible = Some(event.clone());
         Some(event)
+    }
+}
+
+/// 战绩行里的时长：一小时以内只给分钟，超过就给 `1H23`。
+fn format_duration(seconds: u64) -> String {
+    let minutes = seconds / 60;
+    if minutes < 60 {
+        format!("{minutes}M")
+    } else {
+        format!("{}H{:02}", minutes / 60, minutes % 60)
     }
 }
 
@@ -243,6 +440,11 @@ pub fn project_title(prefix: &str, cwd: Option<&str>, fallback: &str) -> String 
         .and_then(|path| path.file_name())
         .and_then(|name| name.to_str())
         .unwrap_or(fallback);
+    display_title(prefix, raw, fallback)
+}
+
+/// 把任意名字压成任务卡放得下的标题：只保留字母数字和连字符，全大写。
+pub fn display_title(prefix: &str, raw: &str, fallback: &str) -> String {
     let title: String = raw
         .chars()
         .filter_map(|character| {
@@ -378,6 +580,95 @@ mod tests {
         let emitted = tracker.discard(&other, "INTERRUPTED");
         let emitted = emitted.expect("丢弃后应刷新为剩余活动");
         assert_eq!(emitted.event, "task.start", "仍有活动时不得报告空闲");
+    }
+
+    #[test]
+    fn the_card_counts_from_the_status_change_not_the_last_event() {
+        let mut tracker = ActivityTracker::default();
+        let turn = id("s", "s:1");
+        tracker.observe(&turn, "ALPHA", ActivityStatus::Working);
+        tracker
+            .activities
+            .get_mut("s:1")
+            .expect("活动应存在")
+            .status_since = Instant::now() - Duration::from_secs(600);
+
+        let mut snapshot = tracker.activity_snapshot().expect("应有可见活动");
+        tracker.stamp_live_fields(&mut snapshot);
+
+        assert_eq!(
+            snapshot.extra["tasks"][0]["elapsed_s"].as_u64(),
+            Some(600),
+            "卡片要回答这个 turn 跑了多久，而不是上一个工具事件多久以前"
+        );
+    }
+
+    #[test]
+    fn a_repeated_tool_event_stays_deduplicated_while_the_card_counts() {
+        let mut tracker = ActivityTracker::default();
+        let turn = id("s", "s:1");
+        tracker.observe(&turn, "ALPHA", ActivityStatus::Working);
+        tracker
+            .activities
+            .get_mut("s:1")
+            .expect("活动应存在")
+            .status_since = Instant::now() - Duration::from_secs(600);
+
+        assert!(
+            tracker
+                .observe(&turn, "ALPHA", ActivityStatus::Working)
+                .is_none(),
+            "计时不得绕过去重：每个工具事件都重绘会把工作中的动画打回第一帧"
+        );
+    }
+
+    #[test]
+    fn a_failed_activity_reports_an_error_instead_of_success() {
+        let mut tracker = ActivityTracker::default();
+        let broken = id("ci", "ci:1");
+        tracker.observe(&broken, "CI:ALPHA", ActivityStatus::Working);
+
+        let failed = tracker.fail(&broken, "CI:ALPHA").expect("失败应可见");
+        assert_eq!(failed.event, "task.error");
+        assert_eq!(failed.title.as_deref(), Some("CI:ALPHA"));
+    }
+
+    #[test]
+    fn a_failure_behind_other_work_still_announces() {
+        let mut tracker = ActivityTracker::default();
+        tracker.observe(&id("agent", "agent:1"), "CC:ALPHA", ActivityStatus::Working);
+        let broken = id("ci", "ci:1");
+        tracker.observe(&broken, "CI:ALPHA", ActivityStatus::Working);
+
+        let failed = tracker.fail(&broken, "CI:ALPHA").expect("失败应可见");
+        assert_eq!(
+            failed
+                .extra
+                .get("announcement")
+                .and_then(|value| value.as_str()),
+            Some("failed"),
+            "画面仍要显示别的任务，但失败不能被吞掉"
+        );
+    }
+
+    #[test]
+    fn stats_count_what_happened_today() {
+        let mut tracker = ActivityTracker::default();
+        let turn = id("s", "s:1");
+        tracker.observe(&turn, "ALPHA", ActivityStatus::Working);
+        tracker.require_input(&turn, "ALPHA");
+        tracker.finish(&turn, "ALPHA");
+
+        let lines = tracker.stats_lines();
+        assert_eq!(lines[0], "1 DONE");
+        assert_eq!(lines[1], "1 ASKS");
+    }
+
+    #[test]
+    fn busy_time_stays_short_enough_for_one_line() {
+        assert_eq!(format_duration(0), "0M");
+        assert_eq!(format_duration(59 * 60), "59M");
+        assert_eq!(format_duration(83 * 60), "1H23");
     }
 
     #[test]

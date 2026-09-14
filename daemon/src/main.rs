@@ -5,6 +5,7 @@ mod serial_transport;
 
 use std::env;
 use std::net::SocketAddr;
+use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -55,9 +56,13 @@ async fn main() {
         .unwrap_or_else(|error| panic!("BEACON_BIND 无效：{error}"));
     let serial_config = SerialConfig::from_env();
     let transport: Arc<dyn Transport> = Arc::new(SerialTransport::spawn(serial_config));
+    let activities = match stats_file() {
+        Some(path) => ActivityTracker::with_stats_file(path),
+        None => ActivityTracker::default(),
+    };
     let state = AppState {
         transport,
-        activities: Arc::new(Mutex::new(ActivityTracker::default())),
+        activities: Arc::new(Mutex::new(activities)),
     };
     tokio::spawn(sweep_expired_activities(state.clone()));
     tokio::spawn(send_heartbeats(state.clone()));
@@ -70,6 +75,15 @@ async fn main() {
     axum::serve(listener, app)
         .await
         .unwrap_or_else(|error| panic!("HTTP server 失败：{error}"));
+}
+
+/// 当日战绩的存放位置。缺少 `HOME` 时退回内存计数，不让 daemon 起不来。
+fn stats_file() -> Option<PathBuf> {
+    if let Ok(path) = env::var("BEACON_STATS_FILE") {
+        return Some(PathBuf::from(path));
+    }
+    let home = env::var("HOME").ok()?;
+    Some(PathBuf::from(home).join("Library/Application Support/AgentBeacon/stats.json"))
 }
 
 fn app(state: AppState) -> Router {
@@ -108,18 +122,30 @@ async fn sweep_expired_activities(state: AppState) {
     let mut ticker = tokio::time::interval(SWEEP_INTERVAL);
     loop {
         ticker.tick().await;
-        let Some(event) = state.activities.lock().await.sweep_expired() else {
+        let event = {
+            let mut tracker = state.activities.lock().await;
+            tracker.sweep_expired().map(|mut event| {
+                tracker.stamp_live_fields(&mut event);
+                event
+            })
+        };
+        let Some(event) = event else {
             continue;
         };
-        info!(event = %event.event, "清除过期的 Codex 活动");
-        match event.to_ndjson() {
-            Ok(frame) => {
-                if let Err(error) = state.transport.send(frame) {
-                    warn!(?error, "过期状态未能进入发送队列");
-                }
+        info!(event = %event.event, "清除过期的活动");
+        send_event(&state, event);
+    }
+}
+
+/// 后台任务发事件的共用路径。队列满或编码失败只记日志，不影响下一轮。
+fn send_event(state: &AppState, event: Event) {
+    match event.to_ndjson() {
+        Ok(frame) => {
+            if let Err(error) = state.transport.send(frame) {
+                warn!(?error, "状态未能进入发送队列");
             }
-            Err(error) => warn!(%error, "过期状态编码失败"),
         }
+        Err(error) => warn!(%error, "状态编码失败"),
     }
 }
 
@@ -169,7 +195,13 @@ async fn post_codex_hook(
     State(state): State<AppState>,
     Json(hook): Json<CodexHook>,
 ) -> (StatusCode, Json<ApiResponse>) {
-    let event = codex_hooks::apply(&mut *state.activities.lock().await, hook);
+    let event = {
+        let mut tracker = state.activities.lock().await;
+        codex_hooks::apply(&mut tracker, hook).map(|mut event| {
+            tracker.stamp_live_fields(&mut event);
+            event
+        })
+    };
     forward(state, event).await
 }
 
@@ -177,7 +209,13 @@ async fn post_claude_hook(
     State(state): State<AppState>,
     Json(hook): Json<ClaudeHook>,
 ) -> (StatusCode, Json<ApiResponse>) {
-    let event = claude_hooks::apply(&mut *state.activities.lock().await, hook);
+    let event = {
+        let mut tracker = state.activities.lock().await;
+        claude_hooks::apply(&mut tracker, hook).map(|mut event| {
+            tracker.stamp_live_fields(&mut event);
+            event
+        })
+    };
     forward(state, event).await
 }
 

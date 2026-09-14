@@ -45,12 +45,16 @@ Mac 到设备的首批事件：
 `beacond` 可附加最多 3 项的 `tasks` 数组。数组按最近活动倒序，设备按给定顺序绘制任务卡：
 
 ```json
-{"version":1,"event":"task.start","title":"GAMMA","tasks":[{"title":"GAMMA","status":"working"},{"title":"BETA","status":"input_required"}]}
+{"version":1,"event":"task.start","title":"GAMMA","tasks":[{"title":"GAMMA","status":"working","elapsed_s":75},{"title":"BETA","status":"input_required","elapsed_s":900}],"stats":["7 DONE","4 ASKS","1H23 BUSY"]}
 ```
 
-每项包含 `title` 和 `status`；当前状态值为 `working`、`input_required`、`done`、`failed`。旧固件会按 v1 规则忽略 `tasks`。未来事件可以包括 `task.progress`、`task.cancelled`、`agent.waiting`、`message`、`system` 和 `device.status`。
+每项包含 `title`、`status` 和 `elapsed_s`；当前状态值为 `working`、`input_required`、`done`、`failed`。旧固件会按 v1 规则忽略 `tasks`。未来事件可以包括 `task.progress`、`task.cancelled`、`agent.waiting`、`message`、`system` 和 `device.status`。
 
-当一个后台任务完成、但画面仍需显示其他活动任务时，`beacond` 会在当前状态事件上附加 `"announcement":"done"`。这是一次性语音通知，不改变画面状态；`announcement_id` 用于标识对应 turn。设备收到它时排队播放一次“任务完成”。
+`elapsed_s` 是该活动进入**当前状态**已经过去的秒数，不是距上一个事件的秒数：工作中的卡片回答「这个 turn 跑了多久」，等待确认的卡片回答「等了多久」。设备收到后自行继续计时，因为可见状态不变时 `beacond` 会去重、不再发消息，而屏幕上的数字必须一直走。也正因为要去重，`elapsed_s` 与 `stats` 都在去重之后才盖到事件上；放进快照会让每个工具事件都变成一次重绘，把工作中的动画不断打回第一帧。
+
+`stats` 是最多 3 行当日战绩，空闲屏轮播它们。它随每条状态事件下发而不只随 `agent.idle`：`task.done` 之后设备是自己回到空闲的，那一刻正是用户会看的一眼，缓存的战绩必须已经包含刚刚完成的那一件。计数按本地自然日归零，并持久化到 `~/Library/Application Support/AgentBeacon/stats.json`，否则每次重启 daemon 屏幕上写着「今天」的数字都会归零。
+
+当一个后台任务完成、但画面仍需显示其他活动任务时，`beacond` 会在当前状态事件上附加 `"announcement":"done"`。这是一次性语音通知，不改变画面状态；`announcement_id` 用于标识对应 turn。设备收到它时排队播放一次“任务完成”。失败走同一条路径，取值为 `"announcement":"failed"`，播放一次“任务遇到问题”。
 
 当聚合任务变化仅需重绘既有的输入等待状态时，`beacond` 会附加 `"suppress_audio":true`。设备继续显示 `agent.input_required`，但不重复播放已经播过的提醒。`announcement` 的一次性通知优先于此字段。
 
