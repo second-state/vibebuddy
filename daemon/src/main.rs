@@ -128,7 +128,8 @@ async fn poll_ci(state: AppState) {
     loop {
         ticker.tick().await;
         // 先取数据再上锁：`gh` 可能跑上几秒，持锁等它会把 Hook 全堵住。
-        let fetched = watcher.fetch().await;
+        let workspaces = state.activities.lock().await.recent_workspaces();
+        let fetched = watcher.fetch(&workspaces).await;
         if fetched.is_empty() {
             continue;
         }

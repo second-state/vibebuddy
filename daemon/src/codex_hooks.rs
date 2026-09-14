@@ -26,6 +26,7 @@ pub struct CodexHook {
 }
 
 pub fn apply(tracker: &mut ActivityTracker, hook: CodexHook) -> Option<Event> {
+    tracker.note_workspace(hook.cwd.as_deref());
     let id = activity_id(&hook);
     let title = project_title(PREFIX, hook.cwd.as_deref(), FALLBACK_TITLE);
     match hook.hook_event_name.as_str() {

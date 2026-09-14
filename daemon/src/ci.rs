@@ -4,7 +4,7 @@
 //! 真正比笔记本屏幕有用的场景，因此 CI 与 Agent 共用同一套任务卡和播报。
 
 use std::collections::{HashMap, HashSet};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use beacon_protocol::Event;
@@ -37,14 +37,25 @@ pub struct CiWatcher {
     running: HashMap<String, u64>,
     /// 已经报过错的仓库。错误持续存在时不再重复刷日志。
     quiet: HashSet<String>,
+    /// 已经记过一行日志的仓库。
+    announced: HashSet<String>,
 }
 
 impl CiWatcher {
     /// 取回各仓库最近一次 run。不持有聚合器的锁，因为 `gh` 可能要跑上几秒。
-    pub async fn fetch(&mut self) -> Vec<(String, Run)> {
+    pub async fn fetch(&mut self, workspaces: &[PathBuf]) -> Vec<(String, Run)> {
+        let repos = watched_repos(workspaces);
+        if repos.is_empty() {
+            return Vec::new();
+        }
+        let program = gh_program();
         let mut fetched = Vec::new();
-        for repo in watched_repos() {
-            match latest_run(&repo).await {
+        for repo in repos {
+            // 第一次关注某个仓库时记一行，否则「CI 怎么没显示」无从查起。
+            if self.announced.insert(repo.clone()) {
+                info!(%repo, "开始关注 CI");
+            }
+            match latest_run(&program, &repo).await {
                 Ok(Some(run)) => {
                     if self.quiet.remove(&repo) {
                         info!(%repo, "CI 状态已恢复");
@@ -103,8 +114,11 @@ impl CiWatcher {
     }
 }
 
-/// 监听哪些仓库。每轮都重新读，加一个仓库不需要重启 daemon。
-fn watched_repos() -> Vec<String> {
+/// 关注哪些仓库：Agent 最近工作过的那些 GitHub 仓库。
+///
+/// 不需要用户维护清单——daemon 已经知道你在哪儿干活，这个事实在解析任务卡
+/// 标题时就算出来了。`BEACON_CI_REPOS` 可以覆盖，用于观察本机没有检出的仓库。
+fn watched_repos(workspaces: &[PathBuf]) -> Vec<String> {
     if let Ok(value) = std::env::var("BEACON_CI_REPOS") {
         return value
             .split(',')
@@ -113,27 +127,68 @@ fn watched_repos() -> Vec<String> {
             .map(str::to_owned)
             .collect();
     }
-    let Some(path) = config_path() else {
-        return Vec::new();
-    };
-    let Ok(text) = std::fs::read_to_string(path) else {
-        return Vec::new();
-    };
-    text.lines()
-        .map(|line| line.split('#').next().unwrap_or("").trim())
-        .filter(|line| !line.is_empty())
-        .map(str::to_owned)
-        .collect()
+    let mut repos: Vec<String> = workspaces
+        .iter()
+        .filter_map(|root| github_slug(root))
+        .collect();
+    repos.sort();
+    repos.dedup();
+    repos
 }
 
-fn config_path() -> Option<PathBuf> {
-    let home = std::env::var("HOME").ok()?;
-    Some(PathBuf::from(home).join(".config/agentbeacon/ci-repos"))
+/// 从项目根读出 GitHub 仓库名。只读 `.git/config`，不调用网络也不调用 git。
+fn github_slug(root: &Path) -> Option<String> {
+    let config = std::fs::read_to_string(root.join(".git").join("config")).ok()?;
+    parse_slug(&origin_url(&config)?)
 }
 
-async fn latest_run(repo: &str) -> Result<Option<Run>, String> {
-    // LaunchAgent 的 PATH 很短，`gh` 常常不在里面，所以留一个显式覆盖。
-    let program = std::env::var("BEACON_GH").unwrap_or_else(|_| "gh".to_owned());
+fn origin_url(config: &str) -> Option<String> {
+    let mut in_origin = false;
+    for line in config.lines() {
+        let line = line.trim();
+        if line.starts_with('[') {
+            in_origin = line.starts_with("[remote \"origin\"]");
+        } else if in_origin && let Some(value) = line.strip_prefix("url") {
+            return Some(value.trim_start().strip_prefix('=')?.trim().to_owned());
+        }
+    }
+    None
+}
+
+/// 支持 `https://`、`ssh://` 和 `git@host:` 三种远端写法。
+fn parse_slug(url: &str) -> Option<String> {
+    let rest = url.split_once("github.com")?.1;
+    // 分隔符必须紧跟在主机名之后，否则 `github.com.example.org` 也会被认成 GitHub。
+    if !rest.starts_with(':') && !rest.starts_with('/') {
+        return None;
+    }
+    let rest = rest[1..].trim_start_matches('/');
+    let rest = rest.strip_suffix(".git").unwrap_or(rest);
+    let mut parts = rest.split('/').filter(|part| !part.is_empty());
+    let owner = parts.next()?;
+    let repo = parts.next()?;
+    Some(format!("{owner}/{repo}"))
+}
+
+/// 找到 `gh`。launchd 只给四个系统目录的 `PATH`，`gh` 通常不在里面；
+/// 而让用户去改 plist 正是这个功能想省掉的那一步。
+fn gh_program() -> String {
+    if let Ok(path) = std::env::var("BEACON_GH") {
+        return path;
+    }
+    let home = std::env::var("HOME").unwrap_or_default();
+    [
+        format!("{home}/bin/gh"),
+        "/opt/homebrew/bin/gh".to_owned(),
+        "/usr/local/bin/gh".to_owned(),
+        "/usr/bin/gh".to_owned(),
+    ]
+    .into_iter()
+    .find(|path| Path::new(path).is_file())
+    .unwrap_or_else(|| "gh".to_owned())
+}
+
+async fn latest_run(program: &str, repo: &str) -> Result<Option<Run>, String> {
     let command = tokio::process::Command::new(program)
         .args([
             "run",
@@ -170,6 +225,43 @@ mod tests {
             status: status.to_owned(),
             conclusion: conclusion.to_owned(),
         }
+    }
+
+    #[test]
+    fn every_common_remote_spelling_resolves_to_the_same_repository() {
+        for url in [
+            "https://github.com/longzhi/agent-beacon.git",
+            "git@github.com:longzhi/agent-beacon.git",
+            "ssh://git@github.com/longzhi/agent-beacon",
+        ] {
+            assert_eq!(
+                parse_slug(url).as_deref(),
+                Some("longzhi/agent-beacon"),
+                "{url}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_lookalike_host_is_not_github() {
+        assert_eq!(parse_slug("https://github.com.example.org/a/b"), None);
+        assert_eq!(parse_slug("https://gitlab.com/a/b.git"), None);
+    }
+
+    #[test]
+    fn the_origin_remote_wins_over_the_others() {
+        let config = concat!(
+            "[remote \"upstream\"]\n",
+            "\turl = https://github.com/someone/fork.git\n",
+            "[remote \"origin\"]\n",
+            "\turl = https://github.com/longzhi/agent-beacon.git\n",
+            "[branch \"main\"]\n",
+            "\tremote = origin\n",
+        );
+        assert_eq!(
+            origin_url(config).as_deref(),
+            Some("https://github.com/longzhi/agent-beacon.git")
+        );
     }
 
     #[test]

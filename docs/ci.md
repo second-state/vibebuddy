@@ -19,33 +19,21 @@ CI 与 Agent 共用同一套任务卡、同一只小灯灵和同一组播报，�
 
 **只报告亲眼见过在跑的 run。** 某次 run 已经结束、而 `beacond` 从没见过它处于运行中，就什么都不做。没有这条规则，daemon 每次重启都会把每个仓库最近一次历史结果重新宣告一遍，包括昨天那次失败。代价是：一次 run 若在两次轮询之间开始并结束，它不会被播报。
 
-## 配置
+## 关注哪些仓库
 
-监听哪些仓库写在 `~/.config/agentbeacon/ci-repos`，一行一个 `owner/repo`，`#` 之后是注释：
+没有配置文件，也不需要你列清单。`beacond` 关注的就是 **Agent 最近一小时工作过的 GitHub 仓库**：每个 Hook 都带 `cwd`，适配器为了生成任务卡标题本来就要把它解析成 git 项目根，CI 复用同一个事实，再从 `.git/config` 的 `origin` 远端读出 `owner/repo`。
 
-```text
-# 每次轮询都会重新读这个文件，加仓库不用重启 daemon
-longzhi/agent-beacon
-someone/another-repo
-```
+这个推导只读本地文件，不调用 git 也不调用网络。子目录和 worktree 都会归到主仓库。没有 GitHub 远端的项目、以及一小时内没有 Agent 活动的项目，都不会被轮询；没有任何项目在跟踪时，整个功能不发一次请求。
 
-文件不存在或为空时，整个功能静默关闭，不发任何请求。`BEACON_CI_REPOS` 环境变量（逗号分隔）可以覆盖它，便于测试。
+一小时这个窗口对应的是「我正在这个仓库上干活，所以我关心它的 CI」。CI 通常在推送后几分钟内出结果，而推送前总会有 Agent 活动。
 
-## `gh` 的路径
+`BEACON_CI_REPOS`（逗号分隔）可以覆盖自动推导，用于观察本机没有检出的仓库。
 
-`beacond` 通过 `gh run list` 读取状态，沿用用户已有的 GitHub 登录，不自己保存 token。
+## `gh` 的位置
 
-LaunchAgent 启动的进程只有一个很短的 `PATH`（`/usr/bin:/bin:/usr/sbin:/sbin`），`gh` 通常不在里面。如果日志里出现 `无法执行 gh`，在 plist 里补上路径：
+`beacond` 通过 `gh run list` 读取状态，沿用你已有的 GitHub 登录，不自己保存 token。
 
-```xml
-<key>EnvironmentVariables</key>
-<dict>
-  <key>PATH</key>
-  <string>/Users/dragon/bin:/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
-</dict>
-```
-
-也可以用 `BEACON_GH` 直接指定可执行文件的绝对路径。
+launchd 启动的进程只有一个很短的 `PATH`（`/usr/bin:/bin:/usr/sbin:/sbin`），`gh` 通常不在里面，所以 `beacond` 会依次尝试 `~/bin`、`/opt/homebrew/bin`、`/usr/local/bin`、`/usr/bin`，都找不到才回退到 `PATH`。装在别处可以用 `BEACON_GH` 指定绝对路径。不需要改 plist。
 
 ## 边界
 

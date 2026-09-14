@@ -27,6 +27,7 @@ pub struct ClaudeHook {
 }
 
 pub fn apply(tracker: &mut ActivityTracker, hook: ClaudeHook) -> Option<Event> {
+    tracker.note_workspace(hook.cwd.as_deref());
     let id = activity_id(&hook);
     let title = project_title(PREFIX, hook.cwd.as_deref(), FALLBACK_TITLE);
     match hook.hook_event_name.as_str() {

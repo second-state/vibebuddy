@@ -18,6 +18,9 @@ const MAX_TITLE_CHARS: usize = 26;
 const WORKING_TTL: Duration = Duration::from_secs(30 * 60);
 /// 等待用户回应可以持续很久，过期时间必须长到足够用户离开再回来。
 const INPUT_REQUIRED_TTL: Duration = Duration::from_secs(4 * 60 * 60);
+/// Agent 工作过的项目根保留多久。超过这段时间没人在那儿干活，就不必再
+/// 关心它的 CI 了。
+const WORKSPACE_TTL: Duration = Duration::from_secs(60 * 60);
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ActivityStatus {
@@ -70,6 +73,8 @@ pub struct ActivityTracker {
     last_visible: Option<Event>,
     stats: DailyStats,
     stats_file: Option<PathBuf>,
+    /// Agent 最近工作过的项目根及最后一次看到的时间。
+    workspaces: HashMap<PathBuf, Instant>,
 }
 
 impl ActivityTracker {
@@ -91,6 +96,25 @@ impl ActivityTracker {
             stats_file: Some(path),
             ..Self::default()
         }
+    }
+
+    /// 记下 Agent 正在哪个项目里工作。
+    ///
+    /// 这是个与 Agent 无关的事实，解析工作也已经为任务卡标题做过一遍。
+    /// CI 靠它自动得出该关注哪些仓库，用户因此不必维护一份仓库清单。
+    pub fn note_workspace(&mut self, cwd: Option<&str>) {
+        let Some(root) = cwd.map(Path::new).and_then(project_root) else {
+            return;
+        };
+        self.workspaces.insert(root, Instant::now());
+    }
+
+    /// 最近有 Agent 活动的项目根。
+    pub fn recent_workspaces(&mut self) -> Vec<PathBuf> {
+        let now = Instant::now();
+        self.workspaces
+            .retain(|_, seen| now.saturating_duration_since(*seen) < WORKSPACE_TTL);
+        self.workspaces.keys().cloned().collect()
     }
 
     /// 记录活动的当前状态，返回需要下发的可见状态。
@@ -669,6 +693,22 @@ mod tests {
         assert_eq!(format_duration(0), "0M");
         assert_eq!(format_duration(59 * 60), "59M");
         assert_eq!(format_duration(83 * 60), "1H23");
+    }
+
+    #[test]
+    fn the_working_directory_reveals_the_project_without_being_configured() {
+        let base = temp_tree("workspace");
+        let repo = base.join("my-project");
+        std::fs::create_dir_all(repo.join(".git")).expect("创建 .git 目录");
+        std::fs::create_dir_all(repo.join("tools")).expect("创建子目录");
+
+        let mut tracker = ActivityTracker::default();
+        tracker.note_workspace(repo.join("tools").to_str());
+        tracker.note_workspace(Some("/definitely/not/a/repository"));
+        let seen = tracker.recent_workspaces();
+
+        let _ = std::fs::remove_dir_all(&base);
+        assert_eq!(seen, vec![repo], "子目录应归到项目根，非仓库路径应忽略");
     }
 
     #[test]

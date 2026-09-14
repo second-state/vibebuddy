@@ -88,7 +88,7 @@ Codex 与 Claude Code 都由本机 Hook 接入，各有一个隐私过滤脚本�
 
 ## CI 接入
 
-GitHub Actions 不走 Hook，由 `beacond` 每 30 秒用 `gh run list` 主动轮询。监听哪些仓库写在 `~/.config/agentbeacon/ci-repos`，一行一个 `owner/repo`；文件不存在时功能静默关闭。任务卡前缀为 `CI:`，详见 [`docs/ci.md`](docs/ci.md)。
+GitHub Actions 不走 Hook，由 `beacond` 每 30 秒用 `gh run list` 主动轮询，沿用你已有的 GitHub 登录。**不需要配置**：关注哪些仓库由 Agent 最近一小时工作过的项目自动推导，`owner/repo` 从 `.git/config` 的 `origin` 远端读出。任务卡前缀为 `CI:`，详见 [`docs/ci.md`](docs/ci.md)。
 
 ## 仓库布局
 
