@@ -457,33 +457,30 @@ static void draw_task_cards(void) {
   }
 }
 
-/// 只比对 git 描述，不比对时间：两边的编译时刻本来就不会相同。
-static bool same_revision(const char *left, const char *right) {
-  size_t length = strcspn(left, " ");
-  return strcspn(right, " ") == length && strncmp(left, right, length) == 0;
-}
-
-/// 页脚显示构建标识，并替用户比对固件与 Mac 端。
+/// 页脚显示两侧的构建标识：本机固件，以及心跳捎来的 Mac 端。
 ///
-/// 一致时只占一行，不一致时分两行并变色——不一致才是要被看见的那个信号。
-/// 还没收到心跳时不算不一致，那只是还不知道。
+/// 只显示，不判断。固件要插 USB、停 daemon 才能烧，daemon 改一行就重启，
+/// 两边大部分时间本来就不在同一个 commit 上；把「不一致」当成告警，几天内
+/// 就会被彻底无视。真正会出事的是协议能力不匹配，而那不是 commit 能回答的。
+///
+/// 两行左对齐到同一列——逐字比对靠的是对齐，不是颜色。
 static void draw_build_footer(void) {
-  char line[BUILD_BYTES + 8];
-  if (firmware_build[0] == '\0') {
-    draw_text_centered(228, "BEACONLING", 1, COLOR_MUTED);
-  } else if (daemon_build[0] == '\0') {
-    snprintf(line, sizeof(line), "FW %s", firmware_build);
-    draw_text_centered(228, line, 1, COLOR_MUTED);
-  } else if (same_revision(firmware_build, daemon_build)) {
-    snprintf(line, sizeof(line), "BUILD %s", firmware_build);
-    draw_text_centered(228, line, 1, COLOR_MUTED);
-  } else {
-    uint16_t color = link_lost ? COLOR_MUTED : COLOR_FAILED;
-    snprintf(line, sizeof(line), "FW  %s", firmware_build);
-    draw_text_centered(216, line, 1, color);
-    snprintf(line, sizeof(line), "MAC %s", daemon_build);
-    draw_text_centered(228, line, 1, color);
+  char firmware_line[BUILD_BYTES + 8];
+  char daemon_line[BUILD_BYTES + 8];
+  snprintf(firmware_line, sizeof(firmware_line), "FW     %s",
+           firmware_build[0] == '\0' ? "?" : firmware_build);
+  snprintf(daemon_line, sizeof(daemon_line), "DAEMON %s",
+           daemon_build[0] == '\0' ? "?" : daemon_build);
+
+  size_t firmware_length = strlen(firmware_line);
+  size_t daemon_length = strlen(daemon_line);
+  size_t longest = firmware_length > daemon_length ? firmware_length : daemon_length;
+  int x = (DISPLAY_WIDTH - (int)(longest * 6 - 1)) / 2;
+  if (x < 2) {
+    x = 2;
   }
+  draw_text(x, 216, firmware_line, 1, COLOR_MUTED, sizeof(firmware_line));
+  draw_text(x, 228, daemon_line, 1, COLOR_MUTED, sizeof(daemon_line));
 }
 
 /// 空闲时在标题与战绩之间轮播。空闲屏出现得最频繁，只写一句固定的话太浪费。
