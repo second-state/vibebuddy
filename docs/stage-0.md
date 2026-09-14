@@ -4,7 +4,11 @@
 
 ## 当前结论
 
-Stage 0 **尚未完全通过**。开发主机、USB 插拔差异、运行时串口和 ROM 下载链路已经实机确认；芯片、Flash/PSRAM 容量以及当前运行固件的板型标识也已确认。剩余门禁是 PCB 丝印中的准确硬件版本，以及与该版本匹配的厂家原理图/BSP。未取得这些依据前，不冻结外设 GPIO，也不进入 LCD、音频或按键实现。
+Stage 0 **已通过**。开发主机、USB 插拔差异、运行时串口和 ROM 下载链路已经实机确认；芯片、Flash/PSRAM 容量、PCB 版本以及当前运行固件的板型标识也已确认。
+
+2026-09-14 的实物照片显示 PCB `V1.1` 丝印、ATK-MWS3S `N16R8` 模组、`B0/K1/K2`、`USB-SLAVE`、`HOST` 和 `UART` 接口，以及麦克风、扬声器、蜂鸣器和 TF 卡座。结合当前固件自报的 `atk-dnesp32s3-box`，实机可识别为 **正点原子 ATK-DNESP32S3-BOX V1.1**，不是 DNESP32S3 开发板、BOX0、BOX2 或 BOX3。
+
+厂家针对这款老 BOX V1.1 的原理图/BSP 仍未从当前官方站点或 GitHub 组织取得。这个缺口不阻塞仅使用芯片原生 USB Serial/JTAG、且不访问外设 GPIO 的 Stage 1；它继续阻塞 LCD、音频、蜂鸣器和按键实现。未取得厂家依据前，不冻结这些外设的 GPIO。
 
 Stage 1 所需的最小 USB 前置条件已经满足：同一根 USB-C 线可供电、读取运行时日志，并让 `esptool` 进入 ESP32-S3 ROM 下载链路。这里的“下载链路已确认”不等于“AgentBeacon 固件已烧录”；本阶段没有擦除或写入 Flash。
 
@@ -125,14 +129,14 @@ EIM 在仓库根目录生成了包含本机绝对路径的 `eim_config.toml`。�
 - [`xiaozhi-esp32` v1.9.4 固定提交](https://github.com/78/xiaozhi-esp32/tree/3ced7709c65a39494f5684e99111854a5bcbd8c7)
 - [该版本的 `atk-dnesp32s3-box/config.h`](https://github.com/78/xiaozhi-esp32/blob/3ced7709c65a39494f5684e99111854a5bcbd8c7/main/boards/atk-dnesp32s3-box/config.h)
 
-## Stage 0 剩余门禁
+## Stage 0 门禁
 
 - [x] 经用户确认的未连接 USB 基线。
 - [x] 连接后快照及拔插前后 USB 差异。
 - [x] VID/PID 与设备名称。
 - [x] native USB 或 USB-UART bridge 的证据。
 - [x] ROM 下载路径与当前固件运行时串口路径；实际 AgentBeacon 烧录后仍需复验。
-- [ ] PCB 完整型号/版本。
+- [x] PCB 完整型号/版本：ATK-DNESP32S3-BOX V1.1。
 - [x] 已整理 DNESP32S3 开发板和 BOX3 两套候选官方资料，并明确不可混用。
-- [ ] 确定实机版本，并取得与该版本匹配的官方 schematic、BSP 和 examples。
+- [x] 确定实机版本；厂家 schematic、BSP 和 examples 仍缺失并继续锁定外设阶段。
 - [ ] LCD、touch、audio、microphone、buzzer、K0/K1/K2 的官方引脚/器件依据。

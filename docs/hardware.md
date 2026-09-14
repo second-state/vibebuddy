@@ -37,6 +37,8 @@
 - 运行日志确认 ESP32-S3 revision v0.2、16 MB QIO Flash、8 MB Octal PSRAM，以及当前固件板型标识 `atk-dnesp32s3-box`。
 - 只读 `esptool flash_id` 成功连接 ROM 下载通路并复核 16 MB Flash、8 MB embedded PSRAM 和 USB-Serial/JTAG mode；未擦除或写入 Flash。
 - 打开原生 USB 串口会触发 `USB_UART_CHIP_RESET`，因此运行时重连设计必须容忍设备复位和重新枚举。
+- 2026-09-14 的背面照片显示 PCB `V1.1` 丝印、ATK-MWS3S `N16R8` 模组、`B0/K1/K2`、`USB-SLAVE`、`HOST`、`UART`、麦克风、扬声器、蜂鸣器和 TF 卡座。
+- 实物布局与当前固件自报标识共同确认板型为 **ATK-DNESP32S3-BOX V1.1**；不是 DNESP32S3 开发板、BOX0、BOX2 或 BOX3。
 
 ## 当前运行固件旁证
 
@@ -47,8 +49,6 @@
 
 ## 待验证
 
-- PCB 丝印中的完整型号和硬件版本。
-- 所有 USB 口、UART、HOST、OTG、SLAVE、DOWNLOAD/JTAG 的实物丝印。
 - 与准确 PCB 版本匹配的厂家 schematic、BSP 和 examples。
 - AgentBeacon 固件实际烧录后的枚举、复位和运行时串口路径。
 - LCD 控制器、分辨率和接线。
