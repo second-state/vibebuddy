@@ -98,15 +98,13 @@ impl ActivityTracker {
     /// 丢弃一个活动，不播报成功。
     pub fn discard(&mut self, id: &ActivityId, idle_title: &str) -> Option<Event> {
         self.activities.remove(&id.key);
-        self.visible_activity()
-            .or_else(|| self.deduplicate(event("agent.idle", &id.session_id, idle_title)))
+        self.idle_or_refresh(&id.session_id, idle_title)
     }
 
     /// 丢弃整个会话的活动，不播报成功。
     pub fn discard_session(&mut self, session_id: &str, idle_title: &str) -> Option<Event> {
         self.clear_session(session_id);
-        self.visible_activity()
-            .or_else(|| self.deduplicate(event("agent.idle", session_id, idle_title)))
+        self.idle_or_refresh(session_id, idle_title)
     }
 
     /// 清除某个会话的既有活动，不产生事件。
@@ -135,8 +133,20 @@ impl ActivityTracker {
             alive
         });
         let expired_session = expired_session?;
-        self.visible_activity()
-            .or_else(|| self.deduplicate(event("agent.idle", &expired_session, "TIMED OUT")))
+        self.idle_or_refresh(&expired_session, "TIMED OUT")
+    }
+
+    /// 活动清空时回到空闲，否则只刷新画面。
+    ///
+    /// 不能写成 `visible_activity().or_else(idle)`：`visible_activity` 返回
+    /// `None` 有两种含义，没有活动和被去重吞掉，后者误报空闲会让仍在工作的
+    /// 任务从屏幕上消失。
+    fn idle_or_refresh(&mut self, session_id: &str, idle_title: &str) -> Option<Event> {
+        if self.activities.is_empty() {
+            self.deduplicate(event("agent.idle", session_id, idle_title))
+        } else {
+            self.visible_activity()
+        }
     }
 
     fn set_activity(&mut self, id: &ActivityId, title: &str, status: ActivityStatus) {
@@ -316,6 +326,32 @@ mod tests {
         let tasks = refreshed.extra["tasks"].as_array().expect("tasks 应为数组");
         assert_eq!(tasks.len(), 1);
         assert_eq!(tasks[0]["title"], "FRESH");
+    }
+
+    #[test]
+    fn ending_one_session_does_not_report_idle_while_another_works() {
+        let mut tracker = ActivityTracker::default();
+        let alive = id("alive", "alive:1");
+        tracker.observe(&alive, "ALIVE", ActivityStatus::Working);
+
+        // 另一个会话结束。它没有活动，画面也不该变化。
+        let emitted = tracker.discard_session("other", "ALL QUIET");
+        assert!(
+            emitted.is_none(),
+            "仍有活动时不得报告空闲，实际发出了 {emitted:?}"
+        );
+    }
+
+    #[test]
+    fn discarding_one_activity_does_not_report_idle_while_another_works() {
+        let mut tracker = ActivityTracker::default();
+        tracker.observe(&id("a", "a:1"), "ALPHA", ActivityStatus::Working);
+        let other = id("b", "b:1");
+        tracker.observe(&other, "BETA", ActivityStatus::Working);
+        // 让 BETA 成为当前可见状态后再丢弃它，迫使剩余快照与上一次不同。
+        let emitted = tracker.discard(&other, "INTERRUPTED");
+        let emitted = emitted.expect("丢弃后应刷新为剩余活动");
+        assert_eq!(emitted.event, "task.start", "仍有活动时不得报告空闲");
     }
 
     #[test]
