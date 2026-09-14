@@ -41,3 +41,10 @@
 3. 插板后重点观察 `/dev/cu.usbmodem*`、USB Serial/JTAG 与多 USB 口角色，但不预设结果。
 4. 许可证策略未确定前，参考仓库只用于架构比较和排障线索。
 
+## 当前设备运行固件：`78/xiaozhi-esp32`
+
+核查版本：[`v1.9.4 / 3ced7709c65a39494f5684e99111854a5bcbd8c7`](https://github.com/78/xiaozhi-esp32/tree/3ced7709c65a39494f5684e99111854a5bcbd8c7)
+
+2026-09-14 的实机启动日志自报应用 `xiaozhi` 1.9.4、ESP-IDF v5.5 和板型 `atk-dnesp32s3-box`，与该固定源码版本相符。这个仓库因此是“当前设备运行固件”的一手实现来源，可用于理解当前可工作的板级配置和选择兼容 ESP-IDF 版本。
+
+适用边界：它不是正点原子的厂家原理图/BSP，也没有给出用户手中 PCB 的硬件版本。其 [`config.h`](https://github.com/78/xiaozhi-esp32/blob/3ced7709c65a39494f5684e99111854a5bcbd8c7/main/boards/atk-dnesp32s3-box/config.h) 中的 GPIO、LCD 和音频参数只能作为待核对候选，不能单独成为 AgentBeacon 的最终硬件依据。

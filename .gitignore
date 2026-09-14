@@ -1,7 +1,7 @@
 .DS_Store
 .probe/
+eim_config.toml
 target/
 build/
 sdkconfig
 sdkconfig.old
-
