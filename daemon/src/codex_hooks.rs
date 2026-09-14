@@ -9,7 +9,7 @@ use serde::Deserialize;
 use crate::activity::{ActivityId, ActivityStatus, ActivityTracker, project_title};
 
 /// 任务卡上区分 Agent 的前缀。
-const PREFIX: &str = "CX\u{b7}";
+const PREFIX: &str = "CX:";
 /// 工作目录不可用时的任务卡标题。
 const FALLBACK_TITLE: &str = "CODEX";
 
@@ -89,7 +89,7 @@ mod tests {
         )
         .expect("开始事件应可见");
         assert_eq!(working.event, "task.start");
-        assert_eq!(working.title.as_deref(), Some("CX\u{b7}AGENT-BEACON"));
+        assert_eq!(working.title.as_deref(), Some("CX:AGENT-BEACON"));
 
         let waiting = apply(
             &mut tracker,
@@ -152,12 +152,12 @@ mod tests {
         )
         .expect("需要输入应成为可见状态");
         assert_eq!(waiting.event, "agent.input_required");
-        assert_eq!(waiting.title.as_deref(), Some("CX\u{b7}BETA"));
+        assert_eq!(waiting.title.as_deref(), Some("CX:BETA"));
 
         let fallback = apply(&mut tracker, hook("waiting", "Stop", "/work/beta"))
             .expect("高优先级任务结束后应恢复另一个工作任务");
         assert_eq!(fallback.event, "task.start");
-        assert_eq!(fallback.title.as_deref(), Some("CX\u{b7}ALPHA"));
+        assert_eq!(fallback.title.as_deref(), Some("CX:ALPHA"));
     }
 
     #[test]
@@ -197,9 +197,9 @@ mod tests {
 
         let tasks = latest.extra["tasks"].as_array().expect("tasks 应为数组");
         assert_eq!(tasks.len(), 3);
-        assert_eq!(tasks[0]["title"], "CX\u{b7}FOUR");
-        assert_eq!(tasks[1]["title"], "CX\u{b7}THREE");
-        assert_eq!(tasks[2]["title"], "CX\u{b7}TWO");
+        assert_eq!(tasks[0]["title"], "CX:FOUR");
+        assert_eq!(tasks[1]["title"], "CX:THREE");
+        assert_eq!(tasks[2]["title"], "CX:TWO");
     }
 
     #[test]
@@ -212,7 +212,7 @@ mod tests {
             .expect("后台任务结束也应刷新卡片栈");
         let tasks = refreshed.extra["tasks"].as_array().expect("tasks 应为数组");
         assert_eq!(tasks.len(), 1);
-        assert_eq!(tasks[0]["title"], "CX\u{b7}NEW");
+        assert_eq!(tasks[0]["title"], "CX:NEW");
     }
 
     #[test]
@@ -258,7 +258,7 @@ mod tests {
         )
         .expect("用户回答后应开始新 turn");
         assert_eq!(resumed.event, "task.start");
-        assert_eq!(resumed.title.as_deref(), Some("CX\u{b7}BETA"));
+        assert_eq!(resumed.title.as_deref(), Some("CX:BETA"));
 
         let replay = apply(
             &mut tracker,

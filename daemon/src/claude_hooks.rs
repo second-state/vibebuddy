@@ -8,7 +8,7 @@ use serde::Deserialize;
 use crate::activity::{ActivityId, ActivityStatus, ActivityTracker, project_title};
 
 /// 任务卡上区分 Agent 的前缀。
-const PREFIX: &str = "CC\u{b7}";
+const PREFIX: &str = "CC:";
 /// 工作目录不可用时的任务卡标题。
 const FALLBACK_TITLE: &str = "CLAUDE";
 
@@ -99,7 +99,7 @@ mod tests {
         let working = apply(&mut tracker, hook("UserPromptSubmit", "/work/agent-beacon"))
             .expect("开始事件应可见");
         assert_eq!(working.event, "task.start");
-        assert_eq!(working.title.as_deref(), Some("CC\u{b7}AGENT-BEACON"));
+        assert_eq!(working.title.as_deref(), Some("CC:AGENT-BEACON"));
 
         let waiting = apply(
             &mut tracker,
@@ -164,7 +164,7 @@ mod tests {
 
         let tasks = resumed.extra["tasks"].as_array().expect("tasks 应为数组");
         assert_eq!(tasks.len(), 1, "同一会话的上一个 turn 应被清除");
-        assert_eq!(tasks[0]["title"], "CC\u{b7}BETA");
+        assert_eq!(tasks[0]["title"], "CC:BETA");
     }
 
     #[test]
@@ -195,7 +195,7 @@ mod tests {
 
         let tasks = mixed.extra["tasks"].as_array().expect("tasks 应为数组");
         assert_eq!(tasks.len(), 2, "同一目录下的两个 Agent 应各占一张卡");
-        assert_eq!(tasks[0]["title"], "CX\u{b7}AGENT-BEACON");
-        assert_eq!(tasks[1]["title"], "CC\u{b7}AGENT-BEACON");
+        assert_eq!(tasks[0]["title"], "CX:AGENT-BEACON");
+        assert_eq!(tasks[1]["title"], "CC:AGENT-BEACON");
     }
 }

@@ -4,7 +4,7 @@
 //! 优先级、去重、一次性播报和过期清理都只在这里实现一次。
 
 use std::collections::HashMap;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
 use beacon_protocol::{Event, VERSION};
@@ -236,8 +236,11 @@ fn event(name: &str, session_id: &str, title: &str) -> Event {
 /// `prefix` 区分是哪个 Agent 在跑，`fallback` 用于工作目录不可用时。
 /// 两个 Agent 可能在同一个目录下工作，只有前缀能告诉用户该切到哪个窗口。
 pub fn project_title(prefix: &str, cwd: Option<&str>, fallback: &str) -> String {
-    let raw = cwd
-        .and_then(|cwd| Path::new(cwd).file_name())
+    let root = cwd.map(Path::new).and_then(project_root);
+    let raw = root
+        .as_deref()
+        .or_else(|| cwd.map(Path::new))
+        .and_then(|path| path.file_name())
         .and_then(|name| name.to_str())
         .unwrap_or(fallback);
     let title: String = raw
@@ -258,6 +261,29 @@ pub fn project_title(prefix: &str, cwd: Option<&str>, fallback: &str) -> String 
     } else {
         format!("{prefix}{title}")
     }
+}
+
+/// 从工作目录向上找到项目根。
+///
+/// 直接取工作目录的名字会把 `repo/tools` 显示成 TOOLS，把 git worktree 显示成
+/// 分支目录名；用户认得项目名，不认得这两者。worktree 的 `.git` 是文件而非目录，
+/// 内容指回主仓库，因此两种情况都能还原成同一个项目名。
+fn project_root(cwd: &Path) -> Option<PathBuf> {
+    for dir in cwd.ancestors() {
+        let git = dir.join(".git");
+        if git.is_dir() {
+            return Some(dir.to_path_buf());
+        }
+        if git.is_file() {
+            let gitdir = std::fs::read_to_string(&git).ok()?;
+            let gitdir = gitdir.strip_prefix("gitdir:")?.trim();
+            return match gitdir.find("/.git/") {
+                Some(index) => Some(PathBuf::from(&gitdir[..index])),
+                None => Some(dir.to_path_buf()),
+            };
+        }
+    }
+    None
 }
 
 #[cfg(test)]
@@ -357,27 +383,57 @@ mod tests {
     #[test]
     fn project_title_falls_back_when_cwd_is_unusable() {
         assert_eq!(
-            project_title("CX\u{b7}", Some("/work/agent-beacon"), "CODEX"),
-            "CX\u{b7}AGENT-BEACON"
+            project_title("CX:", Some("/work/agent-beacon"), "CODEX"),
+            "CX:AGENT-BEACON"
         );
-        assert_eq!(
-            project_title("CX\u{b7}", Some("/"), "CODEX"),
-            "CX\u{b7}CODEX"
-        );
-        assert_eq!(project_title("CC\u{b7}", None, "CLAUDE"), "CC\u{b7}CLAUDE");
+        assert_eq!(project_title("CX:", Some("/"), "CODEX"), "CX:CODEX");
+        assert_eq!(project_title("CC:", None, "CLAUDE"), "CC:CLAUDE");
+    }
+
+    fn temp_tree(tag: &str) -> PathBuf {
+        let base = std::env::temp_dir().join(format!("agentbeacon-{}-{tag}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&base);
+        base
+    }
+
+    #[test]
+    fn title_uses_the_project_root_not_the_working_directory() {
+        let base = temp_tree("root");
+        let repo = base.join("my-project");
+        let nested = repo.join("tools");
+        std::fs::create_dir_all(&nested).expect("创建测试目录");
+        std::fs::create_dir_all(repo.join(".git")).expect("创建 .git 目录");
+
+        let title = project_title("CC:", nested.to_str(), "CLAUDE");
+        let _ = std::fs::remove_dir_all(&base);
+        assert_eq!(title, "CC:MY-PROJECT", "子目录不应成为任务卡标题");
+    }
+
+    #[test]
+    fn title_resolves_a_worktree_back_to_the_main_repository() {
+        let base = temp_tree("worktree");
+        let repo = base.join("my-project");
+        let worktree = repo.join(".claude").join("worktrees").join("branch-xyz");
+        std::fs::create_dir_all(&worktree).expect("创建 worktree 目录");
+        std::fs::create_dir_all(repo.join(".git")).expect("创建 .git 目录");
+        std::fs::write(
+            worktree.join(".git"),
+            format!("gitdir: {}/.git/worktrees/branch-xyz\n", repo.display()),
+        )
+        .expect("写入 worktree 的 .git");
+
+        let title = project_title("CC:", worktree.to_str(), "CLAUDE");
+        let _ = std::fs::remove_dir_all(&base);
+        assert_eq!(title, "CC:MY-PROJECT", "worktree 应显示主仓库名");
     }
 
     #[test]
     fn title_stays_within_the_display_limit() {
-        let long = project_title(
-            "CC\u{b7}",
-            Some("/work/a-very-long-project-name-here"),
-            "CLAUDE",
-        );
+        let long = project_title("CC:", Some("/work/a-very-long-project-name-here"), "CLAUDE");
         assert!(
             long.chars().count() <= MAX_TITLE_CHARS,
             "标题不得超过显示上限"
         );
-        assert!(long.starts_with("CC\u{b7}"));
+        assert!(long.starts_with("CC:"));
     }
 }

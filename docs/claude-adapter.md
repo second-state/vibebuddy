@@ -26,9 +26,11 @@ Claude Code 的 `prompt_id` 与 Codex 的 `turn_id` 语义对齐，都标识一�
 
 ## 与 Codex 并存
 
-两个 Adapter 写入同一个聚合器，因为设备只有一块屏幕和一只小灯灵。任务卡标题带 Agent 前缀：Codex 为 `CX·`，Claude Code 为 `CC·`。两个 Agent 常常在同一个目录下工作，而标题派生自工作目录，没有前缀就无法区分该切回哪个窗口。
+两个 Adapter 写入同一个聚合器，因为设备只有一块屏幕和一只小灯灵。任务卡标题带 Agent 前缀：Codex 为 `CX:`，Claude Code 为 `CC:`。两个 Agent 常常在同一个目录下工作，没有前缀就无法区分该切回哪个窗口。
 
-在 git worktree 中工作时，标题取的是 worktree 目录名而非项目名。
+前缀只能使用固件字体支持的字符：`A-Z`、`0-9` 以及 `-.:/!?>` 等少数符号。固件按单字节渲染，非 ASCII 分隔符会被拆成两个未知字形。
+
+标题取自 git 项目根而非工作目录：直接用工作目录会把 `repo/tools` 显示成 `TOOLS`，把 worktree 显示成分支目录名。worktree 的 `.git` 是指回主仓库的文件，因此两种情况都能还原成同一个项目名。
 
 ## 隐私边界
 
