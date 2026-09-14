@@ -73,10 +73,12 @@ Mac 到设备的首批事件：
 设备到 Mac 的事件同样使用 NDJSON，例如：
 
 ```json
-{"version":1,"event":"button","button":"K0","action":"press"}
+{"version":1,"event":"button","button":"K2","action":"press"}
 ```
 
-Stage 1 固件输出的 `READY`、`EVENT`、`TITLE` 和 `ERROR` 行是实机链路验收用的诊断文本，不是设备到 Mac 的正式 JSON 事件。按钮事件到 Stage 5 才实现。
+当前只实现 K2 单击。`beacond` 收到后选择与屏幕主状态相同的活动：需要输入的任务优先，否则选择最新工作项；Codex 顶层活动打开自身 thread，子 Agent 活动打开拥有它的父 thread；Claude Code 用 `claude://resume?session=<session_id>` 打开 Claude App 中的对应 Code 会话；GitHub Actions 打开对应 run。当前没有活动时不打开窗口。K0、K1 和长按/释放尚未绑定。
+
+固件输出的 `READY`、`EVENT`、`TITLE` 和 `ERROR` 行是实机链路验收用的诊断文本，不是设备到 Mac 的正式 JSON 事件。
 
 ## Stage 1 错误输出
 

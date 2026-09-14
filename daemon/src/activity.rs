@@ -28,6 +28,15 @@ pub enum ActivityStatus {
     InputRequired,
 }
 
+/// K2 可以切回的 Mac 来源。这里只保存打开窗口所需的最小定位信息，
+/// 不保存 prompt、回复正文或命令内容。
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum ActivitySource {
+    Codex { thread_id: String },
+    ClaudeCode { session_id: String },
+    GitHubActions { repo: String, run_id: u64 },
+}
+
 /// 活动的身份。`key` 在所有会话中唯一，`session_id` 用于会话级操作。
 #[derive(Clone, Debug)]
 pub struct ActivityId {
@@ -45,6 +54,7 @@ struct Activity {
     /// 进入当前状态的时刻。与 `updated_at` 不同：工具事件每几秒刷新一次
     /// `updated_at`，但卡片要回答的是「这个 turn 跑了多久」「等了多久」。
     status_since: Instant,
+    source: Option<ActivitySource>,
 }
 
 /// 空闲屏轮播的当日战绩。
@@ -115,6 +125,19 @@ impl ActivityTracker {
         self.workspaces
             .retain(|_, seen| now.saturating_duration_since(*seen) < WORKSPACE_TTL);
         self.workspaces.keys().cloned().collect()
+    }
+
+    /// 给活动补上 K2 所需的来源定位。Adapter 在翻译事件后调用，因此事件若已
+    /// 把活动收起，这里会自然地成为 no-op。
+    pub fn associate_source(&mut self, id: &ActivityId, source: ActivitySource) {
+        if let Some(activity) = self.activities.get_mut(&id.key) {
+            activity.source = Some(source);
+        }
+    }
+
+    /// 与屏幕主状态使用同一套选择规则：需要输入优先，其次才是最新的工作项。
+    pub fn focus_source(&self) -> Option<ActivitySource> {
+        self.focused_activity()?.source.clone()
     }
 
     /// 记录活动的当前状态，返回需要下发的可见状态。
@@ -257,6 +280,10 @@ impl ActivityTracker {
             .get(&id.key)
             .filter(|existing| existing.status == status)
             .map_or(now, |existing| existing.status_since);
+        let source = self
+            .activities
+            .get(&id.key)
+            .and_then(|existing| existing.source.clone());
         self.activities.insert(
             id.key.clone(),
             Activity {
@@ -266,6 +293,7 @@ impl ActivityTracker {
                 sequence: self.sequence,
                 updated_at: now,
                 status_since,
+                source,
             },
         );
         self.sync_busy();
@@ -283,13 +311,7 @@ impl ActivityTracker {
     }
 
     fn activity_snapshot(&self) -> Option<Event> {
-        let (_, activity) = self.activities.iter().max_by_key(|(_, activity)| {
-            let priority = match activity.status {
-                ActivityStatus::InputRequired => 2,
-                ActivityStatus::Working => 1,
-            };
-            (priority, activity.sequence)
-        })?;
+        let activity = self.focused_activity()?;
 
         let event_name = match activity.status {
             ActivityStatus::Working => "task.start",
@@ -317,6 +339,16 @@ impl ActivityTracker {
             ),
         );
         Some(visible)
+    }
+
+    fn focused_activity(&self) -> Option<&Activity> {
+        self.activities.values().max_by_key(|activity| {
+            let priority = match activity.status {
+                ActivityStatus::InputRequired => 2,
+                ActivityStatus::Working => 1,
+            };
+            (priority, activity.sequence)
+        })
     }
 
     /// 盖上只在发送这一刻才有意义的字段：卡片计时和当日战绩。
@@ -521,6 +553,44 @@ mod tests {
             session_id: session.to_owned(),
             key: key.to_owned(),
         }
+    }
+
+    #[test]
+    fn k2_targets_the_same_high_priority_activity_as_the_screen() {
+        let mut tracker = ActivityTracker::default();
+        let working = id("working", "working:1");
+        tracker.observe(&working, "CI:BUILD", ActivityStatus::Working);
+        tracker.associate_source(
+            &working,
+            ActivitySource::GitHubActions {
+                repo: "longzhi/agent-beacon".to_owned(),
+                run_id: 42,
+            },
+        );
+
+        let waiting = id("waiting", "waiting:1");
+        tracker.require_input(&waiting, "CX:AGENT-BEACON");
+        let codex = ActivitySource::Codex {
+            thread_id: "waiting".to_owned(),
+        };
+        tracker.associate_source(&waiting, codex.clone());
+
+        assert_eq!(tracker.focus_source(), Some(codex));
+    }
+
+    #[test]
+    fn source_survives_activity_refreshes() {
+        let mut tracker = ActivityTracker::default();
+        let turn = id("session", "session:turn");
+        tracker.observe(&turn, "CC:PROJECT", ActivityStatus::Working);
+        let source = ActivitySource::ClaudeCode {
+            session_id: "session-a".to_owned(),
+        };
+        tracker.associate_source(&turn, source.clone());
+
+        tracker.observe(&turn, "CC:PROJECT", ActivityStatus::Working);
+
+        assert_eq!(tracker.focus_source(), Some(source));
     }
 
     #[test]

@@ -11,7 +11,7 @@ use beacon_protocol::Event;
 use serde::Deserialize;
 use tracing::{info, warn};
 
-use crate::activity::{ActivityId, ActivityStatus, ActivityTracker, display_title};
+use crate::activity::{ActivityId, ActivitySource, ActivityStatus, ActivityTracker, display_title};
 
 /// 任务卡上区分来源的前缀。
 const PREFIX: &str = "CI:";
@@ -97,7 +97,15 @@ impl CiWatcher {
 
         if run.status != "completed" {
             self.running.insert(repo.to_owned(), run.database_id);
-            return tracker.observe(&id, &title, ActivityStatus::Working);
+            let event = tracker.observe(&id, &title, ActivityStatus::Working);
+            tracker.associate_source(
+                &id,
+                ActivitySource::GitHubActions {
+                    repo: repo.to_owned(),
+                    run_id: run.database_id,
+                },
+            );
+            return event;
         }
 
         // 只报告亲眼看着跑起来的 run。否则 daemon 每次重启都会把仓库里

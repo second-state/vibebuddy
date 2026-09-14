@@ -36,9 +36,11 @@
 
 实机探测到 ES8311，并确认 I2S 与扬声器使能链路。需要确认、完成和失败使用固件内置的 24 kHz PCM 中文短语音；工作中与空闲保持静音。用户已听觉确认“需要你确认”。
 
-### Stage 5 — Buttons
+### Stage 5 — Buttons（K2 已完成，2026-09-14）
 
-实现 K0 静音、K1 最近事件、K2 acknowledge，并向 Mac 上报按钮事件。
+K2“打开当前来源”的按键与 Mac 激活链路已经通过实机验收：探针确认 K2 为 XL9555 P0.3、低电平有效（`P0: 0xFF → 0xF7 → 0xFF`）；设备通过 NDJSON 上报单击，用户短按后 `beacond` 能拉起目标应用。精确路由已修正两处：Codex 子 Agent 映射到父 thread；Claude Code 不再聚焦 Ghostty，而是用 `claude://resume` 打开 Claude App 的对应 Code 会话。两条 deeplink 均已单独验证，完整 K2 页面跳转仍需一次实机短按确认。
+
+Stage 5 整体尚未完成：K0 静音、K1 最近事件，以及 K2 在无活动/已完成状态下的扩展行为仍未实现。
 
 ### Stage 6 — `beacon`
 

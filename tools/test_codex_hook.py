@@ -1,6 +1,8 @@
 import importlib.util
+import json
 from pathlib import Path
 import sys
+import tempfile
 import unittest
 
 
@@ -13,6 +15,73 @@ SPEC.loader.exec_module(CODEX_HOOK)
 
 
 class SanitizedPayloadTests(unittest.TestCase):
+    def test_subagent_activity_opens_its_parent_desktop_thread(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            transcript = Path(directory) / "rollout-child.jsonl"
+            transcript.write_text(
+                json.dumps(
+                    {
+                        "type": "session_meta",
+                        "payload": {
+                            "id": "child-session",
+                            "thread_source": "subagent",
+                            "source": {
+                                "subagent": {
+                                    "thread_spawn": {
+                                        "parent_thread_id": "parent-thread",
+                                        "depth": 1,
+                                    }
+                                }
+                            },
+                        },
+                    }
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            source = {
+                "session_id": "child-session",
+                "turn_id": "child-turn",
+                "hook_event_name": "PostToolUse",
+                "cwd": "/work/memories",
+                "transcript_path": str(transcript),
+            }
+
+            payload = CODEX_HOOK.sanitized_payload(source)
+
+        self.assertEqual(payload.get("thread_id"), "parent-thread")
+        self.assertNotIn("transcript_path", payload)
+
+    def test_user_activity_opens_its_own_desktop_thread(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            transcript = Path(directory) / "rollout-user.jsonl"
+            transcript.write_text(
+                json.dumps(
+                    {
+                        "type": "session_meta",
+                        "payload": {
+                            "id": "user-session",
+                            "thread_source": "user",
+                            "source": "vscode",
+                        },
+                    }
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            source = {
+                "session_id": "user-session",
+                "turn_id": "user-turn",
+                "hook_event_name": "PostToolUse",
+                "cwd": "/work/agent-beacon",
+                "transcript_path": str(transcript),
+            }
+
+            payload = CODEX_HOOK.sanitized_payload(source)
+
+        self.assertEqual(payload.get("thread_id"), "user-session")
+        self.assertNotIn("transcript_path", payload)
+
     def test_question_is_classified_without_forwarding_message_text(self) -> None:
         source = {
             "session_id": "session-a",

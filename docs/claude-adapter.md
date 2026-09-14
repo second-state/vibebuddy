@@ -32,6 +32,16 @@ Claude Code 的 `prompt_id` 与 Codex 的 `turn_id` 语义对齐，都标识一�
 
 标题取自 git 项目根而非工作目录：直接用工作目录会把 `repo/tools` 显示成 `TOOLS`，把 worktree 显示成分支目录名。worktree 的 `.git` 是指回主仓库的文件，因此两种情况都能还原成同一个项目名。
 
+## K2 导航
+
+Claude Code 虽然可以运行在终端里，但 K2 的用户目标是 Claude App 中拥有该 Activity 的 Code 会话，不是承载 CLI 的 terminal。`beacond` 使用 Hook 已提供的 `session_id` 打开：
+
+```text
+claude://resume?session=<session_id>
+```
+
+2026-09-14 已用本机 Claude 1.52386.6 验证：应用记录 `Resume deep link: importing CLI session …`，随后进入 `/epitaxy/local_<session_id>` 对应页面。Claude 的后台 agent 与父会话共享 `session_id`，因此也会回到正确的父 Code 会话。
+
 ## 隐私边界
 
 Hook 的原始载荷含 `prompt`、`tool_input`、`tool_response`、`transcript_path`、`session_title` 和 `last_assistant_message`。[`tools/claude-hook.py`](../tools/claude-hook.py) 在发送 HTTP 前只保留：

@@ -6,7 +6,7 @@
 use beacon_protocol::Event;
 use serde::Deserialize;
 
-use crate::activity::{ActivityId, ActivityStatus, ActivityTracker, project_title};
+use crate::activity::{ActivityId, ActivitySource, ActivityStatus, ActivityTracker, project_title};
 
 /// 任务卡上区分 Agent 的前缀。
 const PREFIX: &str = "CX:";
@@ -18,6 +18,8 @@ pub struct CodexHook {
     pub session_id: String,
     #[serde(default)]
     pub turn_id: Option<String>,
+    #[serde(default)]
+    pub thread_id: Option<String>,
     pub hook_event_name: String,
     #[serde(default)]
     pub cwd: Option<String>,
@@ -29,7 +31,13 @@ pub fn apply(tracker: &mut ActivityTracker, hook: CodexHook) -> Option<Event> {
     tracker.note_workspace(hook.cwd.as_deref());
     let id = activity_id(&hook);
     let title = project_title(PREFIX, hook.cwd.as_deref(), FALLBACK_TITLE);
-    match hook.hook_event_name.as_str() {
+    let source = ActivitySource::Codex {
+        thread_id: hook
+            .thread_id
+            .clone()
+            .unwrap_or_else(|| hook.session_id.clone()),
+    };
+    let event = match hook.hook_event_name.as_str() {
         "UserPromptSubmit" => {
             tracker.clear_session(&hook.session_id);
             tracker.observe(&id, &title, ActivityStatus::Working)
@@ -38,14 +46,17 @@ pub fn apply(tracker: &mut ActivityTracker, hook: CodexHook) -> Option<Event> {
         "PostToolUse" => tracker.observe(&id, &title, ActivityStatus::Working),
         "Stop" => {
             if hook.response_kind.as_deref() == Some("input_required") {
-                return tracker.require_input(&id, &title);
+                tracker.require_input(&id, &title)
+            } else {
+                tracker.finish(&id, &title)
             }
-            tracker.finish(&id, &title)
         }
         "Interrupt" => tracker.discard(&id, "INTERRUPTED"),
         "SessionEnd" => tracker.discard_session(&hook.session_id, "ALL QUIET"),
         _ => None,
-    }
+    };
+    tracker.associate_source(&id, source);
+    event
 }
 
 /// Codex 用 `session_id` 与 `turn_id` 合成活动身份。
@@ -74,10 +85,33 @@ mod tests {
         CodexHook {
             session_id: session.to_owned(),
             turn_id: Some(turn.to_owned()),
+            thread_id: None,
             hook_event_name: name.to_owned(),
             cwd: Some(cwd.to_owned()),
             response_kind: None,
         }
+    }
+
+    #[test]
+    fn codex_source_uses_explicit_navigable_thread_id() {
+        let mut tracker = ActivityTracker::default();
+        let hook: CodexHook = serde_json::from_value(json!({
+            "session_id": "child-session",
+            "turn_id": "child-turn",
+            "thread_id": "parent-thread",
+            "hook_event_name": "UserPromptSubmit",
+            "cwd": "/work/memories"
+        }))
+        .expect("带可导航线程的 Hook 应可解析");
+
+        apply(&mut tracker, hook);
+
+        assert_eq!(
+            tracker.focus_source(),
+            Some(ActivitySource::Codex {
+                thread_id: "parent-thread".to_owned(),
+            })
+        );
     }
 
     #[test]

@@ -3,6 +3,7 @@ mod ci;
 mod claude_hooks;
 mod codex_hooks;
 mod serial_transport;
+mod source_opener;
 
 use std::env;
 use std::net::SocketAddr;
@@ -59,7 +60,8 @@ async fn main() {
         .parse::<SocketAddr>()
         .unwrap_or_else(|error| panic!("BEACON_BIND 无效：{error}"));
     let serial_config = SerialConfig::from_env();
-    let transport: Arc<dyn Transport> = Arc::new(SerialTransport::spawn(serial_config));
+    let (serial_transport, device_events) = SerialTransport::spawn(serial_config);
+    let transport: Arc<dyn Transport> = Arc::new(serial_transport);
     let activities = match stats_file() {
         Some(path) => ActivityTracker::with_stats_file(path),
         None => ActivityTracker::default(),
@@ -71,6 +73,7 @@ async fn main() {
     tokio::spawn(sweep_expired_activities(state.clone()));
     tokio::spawn(send_heartbeats(state.clone()));
     tokio::spawn(poll_ci(state.clone()));
+    tokio::spawn(handle_device_events(state.clone(), device_events));
     let app = app(state);
     let listener = tokio::net::TcpListener::bind(bind_address)
         .await
@@ -80,6 +83,33 @@ async fn main() {
     axum::serve(listener, app)
         .await
         .unwrap_or_else(|error| panic!("HTTP server 失败：{error}"));
+}
+
+/// 设备到 Mac 的事件目前只开放 K2 单击。无活动时保持安静，避免按钮意外
+/// 拉起一个与当前状态无关的窗口。
+async fn handle_device_events(state: AppState, mut events: tokio::sync::mpsc::Receiver<Event>) {
+    while let Some(event) = events.recv().await {
+        if !is_k2_press(&event) {
+            info!(event = %event.event, "忽略未绑定的设备事件");
+            continue;
+        }
+        let source = state.activities.lock().await.focus_source();
+        let Some(source) = source else {
+            info!("K2 已按下，但当前没有可打开的活动");
+            continue;
+        };
+        if let Err(error) = source_opener::open(source).await {
+            warn!(%error, "K2 打开来源失败");
+        } else {
+            info!("K2 已打开当前活动来源");
+        }
+    }
+}
+
+fn is_k2_press(event: &Event) -> bool {
+    event.event == "button"
+        && event.extra.get("button").and_then(|value| value.as_str()) == Some("K2")
+        && event.extra.get("action").and_then(|value| value.as_str()) == Some("press")
 }
 
 /// daemon 的构建标识：git 描述加上二进制自己的时间戳。
@@ -328,5 +358,20 @@ mod tests {
             transport.frames.lock().expect("mutex 不应中毒").as_slice(),
             [b"{\"version\":1,\"event\":\"task.done\",\"title\":\"Hello\"}\n"]
         );
+    }
+
+    #[test]
+    fn only_a_k2_press_requests_source_opening() {
+        let event: Event = serde_json::from_str(
+            r#"{"version":1,"event":"button","button":"K2","action":"press"}"#,
+        )
+        .expect("按钮事件应可解析");
+        assert!(is_k2_press(&event));
+
+        let release: Event = serde_json::from_str(
+            r#"{"version":1,"event":"button","button":"K2","action":"release"}"#,
+        )
+        .expect("释放事件应可解析");
+        assert!(!is_k2_press(&release));
     }
 }

@@ -2,6 +2,7 @@ use std::collections::VecDeque;
 use std::env;
 use std::time::Duration;
 
+use beacon_protocol::Event;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::sync::mpsc;
 use tokio_serial::{SerialPortBuilderExt, SerialPortType, SerialStream};
@@ -10,6 +11,7 @@ use tracing::{info, warn};
 const ESPRESSIF_VID: u16 = 0x303a;
 const USB_SERIAL_JTAG_PID: u16 = 0x1001;
 const QUEUE_CAPACITY: usize = 64;
+const DEVICE_EVENT_CAPACITY: usize = 16;
 const BAUD_RATE: u32 = 115_200;
 const RECONNECT_DELAY: Duration = Duration::from_millis(500);
 const CONNECT_SETTLE_DELAY: Duration = Duration::from_millis(1_500);
@@ -44,10 +46,11 @@ pub struct SerialTransport {
 }
 
 impl SerialTransport {
-    pub fn spawn(config: SerialConfig) -> Self {
+    pub fn spawn(config: SerialConfig) -> (Self, mpsc::Receiver<Event>) {
         let (sender, receiver) = mpsc::channel(QUEUE_CAPACITY);
-        tokio::spawn(serial_worker(config, receiver));
-        Self { sender }
+        let (device_event_sender, device_event_receiver) = mpsc::channel(DEVICE_EVENT_CAPACITY);
+        tokio::spawn(serial_worker(config, receiver, device_event_sender));
+        (Self { sender }, device_event_receiver)
     }
 }
 
@@ -60,7 +63,11 @@ impl Transport for SerialTransport {
     }
 }
 
-async fn serial_worker(config: SerialConfig, mut receiver: mpsc::Receiver<Vec<u8>>) {
+async fn serial_worker(
+    config: SerialConfig,
+    mut receiver: mpsc::Receiver<Vec<u8>>,
+    device_event_sender: mpsc::Sender<Event>,
+) {
     let mut pending: VecDeque<Vec<u8>> = VecDeque::new();
 
     loop {
@@ -119,7 +126,11 @@ async fn serial_worker(config: SerialConfig, mut receiver: mpsc::Receiver<Vec<u8
                             warn!(port = %port_name, "串口已关闭，开始重连");
                             break;
                         }
-                        Ok(count) => log_device_lines(&read_buffer[..count], &mut line_buffer),
+                        Ok(count) => process_device_bytes(
+                            &read_buffer[..count],
+                            &mut line_buffer,
+                            &device_event_sender,
+                        ),
                         Err(error) => {
                             warn!(port = %port_name, %error, "串口读取失败，开始重连");
                             break;
@@ -190,14 +201,19 @@ fn serials_equal(actual: &str, expected: &str) -> bool {
     normalize(actual) == normalize(expected)
 }
 
-fn log_device_lines(bytes: &[u8], line_buffer: &mut Vec<u8>) {
+fn process_device_bytes(
+    bytes: &[u8],
+    line_buffer: &mut Vec<u8>,
+    event_sender: &mpsc::Sender<Event>,
+) {
     for byte in bytes {
         if *byte == b'\n' {
-            let line = String::from_utf8_lossy(line_buffer);
-            let line = line.trim_end_matches('\r');
-            if !line.is_empty() {
-                info!(message = %line, "设备消息");
-            }
+            let length = if line_buffer.last() == Some(&b'\r') {
+                line_buffer.len().saturating_sub(1)
+            } else {
+                line_buffer.len()
+            };
+            process_device_line(&line_buffer[..length], event_sender);
             line_buffer.clear();
         } else if line_buffer.len() < 4096 {
             line_buffer.push(*byte);
@@ -208,6 +224,34 @@ fn log_device_lines(bytes: &[u8], line_buffer: &mut Vec<u8>) {
     }
 }
 
+fn process_device_line(line: &[u8], event_sender: &mpsc::Sender<Event>) {
+    if line.is_empty() {
+        return;
+    }
+    if line.first() == Some(&b'{') {
+        match serde_json::from_slice::<Event>(line) {
+            Ok(event) => match event.validate() {
+                Ok(()) => match event_sender.try_send(event) {
+                    Ok(()) => return,
+                    Err(mpsc::error::TrySendError::Full(_)) => {
+                        warn!("设备事件队列已满，已丢弃事件");
+                        return;
+                    }
+                    Err(mpsc::error::TrySendError::Closed(_)) => {
+                        warn!("设备事件接收器已关闭");
+                        return;
+                    }
+                },
+                Err(error) => warn!(%error, "设备事件无效"),
+            },
+            Err(error) => warn!(%error, "设备事件 JSON 无法解析"),
+        }
+        return;
+    }
+    let line = String::from_utf8_lossy(line);
+    info!(message = %line, "设备消息");
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -215,5 +259,35 @@ mod tests {
     #[test]
     fn usb_serial_comparison_ignores_case_and_separators() {
         assert!(serials_equal("98:88:E0:06:8B:CC", "9888e0068bcc"));
+    }
+
+    #[test]
+    fn chunked_button_event_reaches_the_mac_event_queue() {
+        let (sender, mut receiver) = mpsc::channel(1);
+        let mut buffer = Vec::new();
+
+        process_device_bytes(
+            br#"{"version":1,"event":"button","button":"K"#,
+            &mut buffer,
+            &sender,
+        );
+        assert!(receiver.try_recv().is_err(), "半行不能提前成为事件");
+        process_device_bytes(b"2\",\"action\":\"press\"}\r\n", &mut buffer, &sender);
+
+        let event = receiver.try_recv().expect("完整行应进入事件队列");
+        assert_eq!(event.event, "button");
+        assert_eq!(event.extra["button"], "K2");
+        assert_eq!(event.extra["action"], "press");
+    }
+
+    #[test]
+    fn diagnostic_lines_do_not_become_events() {
+        let (sender, mut receiver) = mpsc::channel(1);
+        let mut buffer = Vec::new();
+
+        process_device_bytes(b"DISPLAY READY\n", &mut buffer, &sender);
+
+        assert!(receiver.try_recv().is_err());
+        assert!(buffer.is_empty());
     }
 }

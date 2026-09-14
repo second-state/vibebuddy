@@ -38,6 +38,7 @@ AgentBeacon 把本地程序的状态事件变成实体宠物的画面与声音�
 Codex Hook -------> privacy filter -> POST /v1/codex-hooks ---+
 Claude Code Hook -> privacy filter -> POST /v1/claude-hooks --+
 Other producer ------------------> POST /v1/events -----------+-> beacond -> USB -> ESP32-S3
+Codex / Claude / Browser <---------- open source <------------+<- beacond <- K2
 ```
 
 首版只实现 `SerialTransport`。Transport 接口只抽象连接、发送、接收和关闭所需的最小能力；在第二个真实 transport 出现前不设计复杂插件系统。
@@ -55,3 +56,4 @@ Other producer ------------------> POST /v1/events -----------+-> beacond -> USB
 9. Hook 生命周期不保证收尾事件，活动必须能自行过期。工作中按 30 分钟、需要确认按 4 小时计时；两档时限不同，因为前者无事件通常意味着进程已经消失，后者只意味着用户尚未回来。清理由 60 秒一次的后台扫描驱动，不能只在收到新 Hook 时惰性触发。
 10. 每个 Agent 一个 Adapter，但所有 Adapter 写入同一个聚合器。设备只有一块屏幕和一只小灯灵，两个聚合器会各自维护任务卡栈并互相覆盖。Adapter 因此不持有状态，只做事件翻译和活动身份合成；任务卡标题带 Agent 前缀，因为两个 Agent 常在同一目录下工作。
 11. CI 与 Agent 共用同一套任务卡和播报，只是来源不同：GitHub Actions 由 `beacond` 主动轮询，不靠 Hook。只有亲眼见过某次 run 在跑，它结束时才播报；否则每次重启 daemon 都会把仓库里最近一次历史结果重新宣告一遍。关注哪些仓库不需要用户配置：Hook 已经带来了 `cwd`，Agent 最近工作过的项目就是该关心 CI 的那些，仓库名从本地 `.git/config` 推导。
+12. K2 打开的来源必须与屏幕主状态使用同一套优先级，不能另做一个“最近窗口”列表。聚合器只保存定位所需的 thread id、session id 或 repo/run id，不保存 prompt 与回复；外部参数不经过 shell。Codex 子 Agent 的生命周期 session 不是桌面可导航 thread，Hook 必须把它映射到父 thread 后再关联来源；Claude Code 的 `session_id` 则通过 `claude://resume` 导入并打开 Claude App 的对应 Code 会话。

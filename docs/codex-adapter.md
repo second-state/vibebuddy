@@ -30,6 +30,7 @@ Hook 的原始 JSON 可能含 prompt、transcript 路径、工具输入和工具
 
 - `session_id`
 - `turn_id`
+- `thread_id`（K2 导航目标；顶层会话等于 `session_id`，子 Agent 映射到拥有它的父会话）
 - `hook_event_name`
 - `cwd`
 
@@ -46,6 +47,8 @@ Hook 的原始 JSON 可能含 prompt、transcript 路径、工具输入和工具
 ```
 
 Hook 配置新增或变更后，Codex 会按精确定义哈希要求重新审查。打开 `/hooks`，核对脚本路径与六个事件后再信任；不要绕过信任机制。新会话或重新加载后的 Codex 才会使用新配置。
+
+Codex 的子 Agent 有自己的生命周期 `session_id`，但这个内部线程不一定能被桌面端 deeplink 打开。Hook 脚本只读取 transcript 第一行的 `session_meta`，在本机把 `source.subagent.thread_spawn.parent_thread_id` 派生为 `thread_id`；正文和 transcript 路径都不会发给 `beacond`。活动去重仍使用子 Agent 的 `session_id + turn_id`，只有 K2 导航使用父线程，不能混用这两个身份。
 
 ## 后台运行
 

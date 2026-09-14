@@ -5,6 +5,7 @@
 #include <string.h>
 
 #include "agent_audio.h"
+#include "agent_buttons.h"
 #include "agent_display.h"
 #include "cJSON.h"
 #include "esp_app_desc.h"
@@ -46,6 +47,11 @@ static void usb_write_value_line(const char *label, const char *value) {
     value++;
   }
   usb_write_literal("\n");
+}
+
+static void on_k2_pressed(void) {
+  usb_write_literal(
+      "{\"version\":1,\"event\":\"button\",\"button\":\"K2\",\"action\":\"press\"}\n");
 }
 
 static agent_display_state_t task_state(const char *status) {
@@ -284,6 +290,11 @@ void app_main(void) {
   } else {
     usb_write_value_line("AUDIO ERROR ", agent_audio_status());
   }
+  if (agent_buttons_init(on_k2_pressed) == ESP_OK) {
+    usb_write_literal("BUTTON K2 READY\n");
+  } else {
+    usb_write_literal("BUTTON K2 ERROR\n");
+  }
 
   last_message_tick = xTaskGetTickCount();
 
@@ -343,6 +354,7 @@ void app_main(void) {
         usb_write_literal("DISPLAY ERROR\n");
       }
     }
+    agent_buttons_tick();
     agent_display_tick();
   }
 }

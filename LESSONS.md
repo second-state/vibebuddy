@@ -1,5 +1,17 @@
 # 经验教训
 
+## 运行载体不等于用户要返回的产品界面
+
+Claude Code 可以运行在 Ghostty 里，但这不代表 K2 应该把用户送回 terminal。首次实现把“进程在哪里运行”误当成“用户希望在哪里继续处理会话”，忽略了 Claude App 已能通过 `claude://resume?session=<UUID>` 导入并打开对应 Code 会话。
+
+设计“打开来源”时先确定 canonical user surface：对话 Activity 返回其会话 App，CI 返回 run 页面，只有不存在会话界面时才退回 terminal。实现前必须检查目标 App 已注册的 deeplink 和本机消费者日志，不能因为 cwd 更容易取得就自行降低产品目标。
+
+## 拉起应用不等于导航到目标资源
+
+外部 `open` 命令返回 0，只能证明 macOS 接受了 URL 并激活应用，不能证明应用内部成功加载目标。K2 首次验收只看了 `beacond` 的“已打开”日志，遗漏了 Codex 消费端随后记录的 `thread not loaded`，因此把“打开应用”误报成了“打开对应会话”。
+
+跨应用 deeplink 必须同时验收生产者与消费者：先确认命令调用成功，再检查目标应用的路由日志或可见页面。还要区分生命周期身份和导航身份；Codex 子 Agent 的 `session_id` 用于活动去重，但桌面导航必须使用拥有它的父 `thread_id`。
+
 ## EIM 激活脚本不要从自动化脚本中直接 source
 
 EIM 0.19.0 生成的 `activate_idf_v5.5.3.sh` 会读取调用者的 `$0`、`$1` 和 shell 变量来判断是否被 source。它从启用 `set -u` 的 Bash 脚本调用时，可能先因未定义的 `ZSH_VERSION` 失败；即使临时关闭 nounset，也会把调用脚本名误判为“直接执行”并 `exit 1`。

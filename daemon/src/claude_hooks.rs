@@ -5,7 +5,7 @@
 use beacon_protocol::Event;
 use serde::Deserialize;
 
-use crate::activity::{ActivityId, ActivityStatus, ActivityTracker, project_title};
+use crate::activity::{ActivityId, ActivitySource, ActivityStatus, ActivityTracker, project_title};
 
 /// 任务卡上区分 Agent 的前缀。
 const PREFIX: &str = "CC:";
@@ -30,7 +30,10 @@ pub fn apply(tracker: &mut ActivityTracker, hook: ClaudeHook) -> Option<Event> {
     tracker.note_workspace(hook.cwd.as_deref());
     let id = activity_id(&hook);
     let title = project_title(PREFIX, hook.cwd.as_deref(), FALLBACK_TITLE);
-    match hook.hook_event_name.as_str() {
+    let source = ActivitySource::ClaudeCode {
+        session_id: hook.session_id.clone(),
+    };
+    let event = match hook.hook_event_name.as_str() {
         "UserPromptSubmit" => {
             tracker.clear_session(&hook.session_id);
             tracker.observe(&id, &title, ActivityStatus::Working)
@@ -39,16 +42,19 @@ pub fn apply(tracker: &mut ActivityTracker, hook: ClaudeHook) -> Option<Event> {
         "PostToolUse" | "SubagentStart" => tracker.observe(&id, &title, ActivityStatus::Working),
         "Stop" => {
             if hook.response_kind.as_deref() == Some("input_required") {
-                return tracker.require_input(&id, &title);
+                tracker.require_input(&id, &title)
+            } else {
+                tracker.finish(&id, &title)
             }
-            tracker.finish(&id, &title)
         }
         "SubagentStop" => tracker.finish(&id, &title),
         // 回合因 API 错误结束：既不是成功也不是任务失败。
         "StopFailure" => tracker.discard(&id, "STOPPED"),
         "SessionEnd" => tracker.discard_session(&hook.session_id, "ALL QUIET"),
         _ => None,
-    }
+    };
+    tracker.associate_source(&id, source);
+    event
 }
 
 /// Claude Code 的后台 agent 共享父会话的 `session_id` 与 `prompt_id`，
@@ -188,6 +194,7 @@ mod tests {
         let codex = CodexHook {
             session_id: "codex-session".to_owned(),
             turn_id: Some("codex-turn".to_owned()),
+            thread_id: None,
             hook_event_name: "UserPromptSubmit".to_owned(),
             cwd: Some("/work/agent-beacon".to_owned()),
             response_kind: None,
