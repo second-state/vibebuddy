@@ -29,6 +29,8 @@ use tracing_subscriber::EnvFilter;
 const SWEEP_INTERVAL: Duration = Duration::from_secs(60);
 /// 心跳间隔。设备按这个节奏判断链路是否还活着，固件的超时是它的三倍。
 const HEARTBEAT_INTERVAL: Duration = Duration::from_secs(5);
+/// 构建时的 git 描述，由 `build.rs` 写入。
+const BUILD_REVISION: &str = env!("BEACON_BUILD");
 
 #[derive(Clone)]
 struct AppState {
@@ -80,6 +82,25 @@ async fn main() {
         .unwrap_or_else(|error| panic!("HTTP server 失败：{error}"));
 }
 
+/// daemon 的构建标识：git 描述加上二进制自己的时间戳。
+///
+/// 时间戳取可执行文件的 mtime，不用编译期常量。`build.rs` 只在它声明的依赖
+/// 变化时才重跑；改一行源码重新链接时，编译期写下的时刻不会更新，正好在你
+/// 最需要它准的时候骗你。
+fn build_identity() -> String {
+    let built = std::env::current_exe()
+        .and_then(|path| path.metadata())
+        .and_then(|metadata| metadata.modified())
+        .ok()
+        .map(|time| {
+            chrono::DateTime::<chrono::Local>::from(time)
+                .format("%Y-%m-%d %H:%M")
+                .to_string()
+        })
+        .unwrap_or_default();
+    format!("{BUILD_REVISION} {built}").trim_end().to_owned()
+}
+
 /// 当日战绩的存放位置。缺少 `HOME` 时退回内存计数，不让 daemon 起不来。
 fn stats_file() -> Option<PathBuf> {
     if let Ok(path) = env::var("BEACON_STATS_FILE") {
@@ -102,6 +123,8 @@ fn app(state: AppState) -> Router {
 /// 没有心跳时，daemon 崩溃或串口断开后设备会一直显示最后一个状态，
 /// 看上去任务仍在进行。状态设备最严重的失败是显示过时状态而不自知。
 async fn send_heartbeats(state: AppState) {
+    let build = build_identity();
+    info!(build = %build, "Mac 端构建标识");
     let mut ticker = tokio::time::interval(HEARTBEAT_INTERVAL);
     loop {
         ticker.tick().await;
@@ -111,7 +134,10 @@ async fn send_heartbeats(state: AppState) {
             id: None,
             title: None,
             message: None,
-            extra: Default::default(),
+            // 随心跳一起发：设备可能随时重启，一次性的握手会丢。
+            extra: [("build".to_owned(), serde_json::json!(build))]
+                .into_iter()
+                .collect(),
         };
         match heartbeat.to_ndjson() {
             // 队列满意味着设备已经收不到东西，这时心跳没有意义，丢弃即可。

@@ -39,3 +39,8 @@ void agent_display_set_link_lost(bool lost);
 
 /// 记录当日战绩，空闲屏会轮播这几行。下一次绘制时生效。
 void agent_display_set_stats(const char *const *lines, size_t count);
+
+/// 设置本机固件与 Mac 端的构建标识。设备会替用户比对两者：让人去读两串
+/// 哈希再自己对比并不可靠，而不一致本身正是要看见的信号。
+void agent_display_set_firmware_build(const char *build);
+void agent_display_set_daemon_build(const char *build);

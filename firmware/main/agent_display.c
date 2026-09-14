@@ -54,6 +54,8 @@
 #define COLOR_PET_HIGHLIGHT 0x7e5f
 
 #define TITLE_BYTES 64
+/// 构建标识：git 描述加上编译时刻。
+#define BUILD_BYTES 48
 
 /// 空闲时每隔 IDLE_MOOD_PERIOD 帧做一个小动作，持续 IDLE_MOOD_FRAMES 帧。
 #define IDLE_MOOD_PERIOD 40
@@ -125,6 +127,8 @@ static struct {
 static size_t current_task_count;
 static char current_stats[AGENT_DISPLAY_MAX_STATS][TITLE_BYTES];
 static size_t current_stat_count;
+static char firmware_build[BUILD_BYTES];
+static char daemon_build[BUILD_BYTES];
 static uint32_t animation_frame;
 static TickType_t next_animation_at;
 
@@ -453,6 +457,35 @@ static void draw_task_cards(void) {
   }
 }
 
+/// 只比对 git 描述，不比对时间：两边的编译时刻本来就不会相同。
+static bool same_revision(const char *left, const char *right) {
+  size_t length = strcspn(left, " ");
+  return strcspn(right, " ") == length && strncmp(left, right, length) == 0;
+}
+
+/// 页脚显示构建标识，并替用户比对固件与 Mac 端。
+///
+/// 一致时只占一行，不一致时分两行并变色——不一致才是要被看见的那个信号。
+/// 还没收到心跳时不算不一致，那只是还不知道。
+static void draw_build_footer(void) {
+  char line[BUILD_BYTES + 8];
+  if (firmware_build[0] == '\0') {
+    draw_text_centered(228, "BEACONLING", 1, COLOR_MUTED);
+  } else if (daemon_build[0] == '\0') {
+    snprintf(line, sizeof(line), "FW %s", firmware_build);
+    draw_text_centered(228, line, 1, COLOR_MUTED);
+  } else if (same_revision(firmware_build, daemon_build)) {
+    snprintf(line, sizeof(line), "BUILD %s", firmware_build);
+    draw_text_centered(228, line, 1, COLOR_MUTED);
+  } else {
+    uint16_t color = link_lost ? COLOR_MUTED : COLOR_FAILED;
+    snprintf(line, sizeof(line), "FW  %s", firmware_build);
+    draw_text_centered(216, line, 1, color);
+    snprintf(line, sizeof(line), "MAC %s", daemon_build);
+    draw_text_centered(228, line, 1, color);
+  }
+}
+
 /// 空闲时在标题与战绩之间轮播。空闲屏出现得最频繁，只写一句固定的话太浪费。
 static void draw_idle_line(void) {
   const char *lines[1 + AGENT_DISPLAY_MAX_STATS];
@@ -527,7 +560,7 @@ static esp_err_t render_current_state(void) {
   } else if (current_title[0] != '\0') {
     draw_text_centered(195, current_title, 2, COLOR_TEXT);
   }
-  draw_text_centered(228, "BEACONLING  USB ONLINE", 1, COLOR_MUTED);
+  draw_build_footer();
   return present();
 }
 
@@ -592,6 +625,27 @@ void agent_display_set_stats(const char *const *lines, size_t count) {
     strncpy(current_stats[index], line, sizeof(current_stats[index]) - 1);
     current_stats[index][sizeof(current_stats[index]) - 1] = '\0';
   }
+}
+
+/// 心跳每 5 秒一次，标识没变就不能重画。
+static void set_build(char *slot, const char *build) {
+  const char *value = build == NULL ? "" : build;
+  if (strncmp(slot, value, BUILD_BYTES - 1) == 0) {
+    return;
+  }
+  strncpy(slot, value, BUILD_BYTES - 1);
+  slot[BUILD_BYTES - 1] = '\0';
+  if (display_ready) {
+    (void)render_current_state();
+  }
+}
+
+void agent_display_set_firmware_build(const char *build) {
+  set_build(firmware_build, build);
+}
+
+void agent_display_set_daemon_build(const char *build) {
+  set_build(daemon_build, build);
 }
 
 void agent_display_set_link_lost(bool lost) {

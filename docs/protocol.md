@@ -58,11 +58,13 @@ Mac 到设备的首批事件：
 
 当聚合任务变化仅需重绘既有的输入等待状态时，`beacond` 会附加 `"suppress_audio":true`。设备继续显示 `agent.input_required`，但不重复播放已经播过的提醒。`announcement` 的一次性通知优先于此字段。
 
-`beacond` 每 5 秒发送一次心跳：
+`beacond` 每 5 秒发送一次心跳，并捎上自己的构建标识：
 
 ```json
-{"version":1,"event":"device.heartbeat"}
+{"version":1,"event":"device.heartbeat","build":"9b642af 2026-09-14 17:41"}
 ```
+
+`build` 是 `git describe --always --tags --dirty` 加上二进制的时间戳。它随心跳重复发送而不是握手一次，因为设备可能随时重启，一次性的握手会丢。设备只在取值变化时才重绘，否则每 5 秒就要刷一次屏。
 
 设备超过 15 秒没有收到**任何**消息即判定失联，覆盖显示为 `NO LINK` 并把画面转灰；收到任何一行合法消息即恢复。判定依据是所有消息而不只是心跳，因为繁忙时真实事件本身就足以证明链路存活。固件不为心跳输出 `EVENT` 诊断行，否则每天会产生上万行日志。
 

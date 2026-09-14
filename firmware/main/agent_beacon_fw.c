@@ -1,11 +1,13 @@
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
+#include <stdio.h>
 #include <string.h>
 
 #include "agent_audio.h"
 #include "agent_display.h"
 #include "cJSON.h"
+#include "esp_app_desc.h"
 #include "driver/usb_serial_jtag.h"
 #include "esp_check.h"
 #include "freertos/FreeRTOS.h"
@@ -219,7 +221,12 @@ static void handle_line(char *line, size_t length) {
   }
 
   // 心跳只用于证明链路存活，不显示也不回显；每 5 秒一次的诊断行会淹没日志。
+  // 它顺带捎来 Mac 端的构建标识：设备可能随时重启，一次性的握手会丢。
   if (strcmp(event->valuestring, "device.heartbeat") == 0) {
+    const cJSON *build = cJSON_GetObjectItemCaseSensitive(message, "build");
+    if (cJSON_IsString(build)) {
+      agent_display_set_daemon_build(build->valuestring);
+    }
     cJSON_Delete(message);
     return;
   }
@@ -235,6 +242,26 @@ static void handle_line(char *line, size_t length) {
   cJSON_Delete(message);
 }
 
+/// esp_app_desc 给的是 "Sep 14 2026" 与 "17:35:12"，统一成与 Mac 端相同的
+/// 写法。两行要逐字比对，格式必须一致。
+static void describe_firmware_build(char *out, size_t size) {
+  static const char MONTHS[] = "JanFebMarAprMayJunJulAugSepOctNovDec";
+  const esp_app_desc_t *desc = esp_app_get_description();
+  char month_name[4] = {0};
+  int day = 0;
+  int year = 0;
+  if (sscanf(desc->date, "%3s %d %d", month_name, &day, &year) != 3) {
+    snprintf(out, size, "%.24s", desc->version);
+    return;
+  }
+  const char *found = strstr(MONTHS, month_name);
+  unsigned month = found == NULL ? 0u : (unsigned)(found - MONTHS) / 3u + 1u;
+  // 各字段都取模收窄：页脚只有一行，也让编译器能确定不会截断。
+  snprintf(out, size, "%.24s %04u-%02u-%02u %.5s", desc->version,
+           (unsigned)year % 10000u, month % 100u, (unsigned)day % 100u,
+           desc->time);
+}
+
 void app_main(void) {
   usb_serial_jtag_driver_config_t usb_config = {
       .rx_buffer_size = LINE_BUFFER_BYTES,
@@ -242,8 +269,12 @@ void app_main(void) {
   };
   ESP_ERROR_CHECK(usb_serial_jtag_driver_install(&usb_config));
 
+  char firmware_build[48];
+  describe_firmware_build(firmware_build, sizeof(firmware_build));
+
   if (agent_display_init() == ESP_OK) {
-    usb_write_literal("DISPLAY READY\n");
+    agent_display_set_firmware_build(firmware_build);
+    usb_write_value_line("DISPLAY READY BUILD ", firmware_build);
   } else {
     usb_write_literal("DISPLAY ERROR\n");
   }
