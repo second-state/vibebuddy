@@ -17,6 +17,9 @@
 
 static bool ready_scheduled;
 static TickType_t ready_deadline;
+/// 超过这个时间没有收到任何消息，就认为与 Mac 端失联。
+#define LINK_TIMEOUT_MS 15000
+static TickType_t last_message_tick;
 
 static void usb_write_all(const char *data, size_t length) {
   while (length > 0) {
@@ -183,6 +186,12 @@ static void handle_line(char *line, size_t length) {
     return;
   }
 
+  // 心跳只用于证明链路存活，不显示也不回显；每 5 秒一次的诊断行会淹没日志。
+  if (strcmp(event->valuestring, "device.heartbeat") == 0) {
+    cJSON_Delete(message);
+    return;
+  }
+
   usb_write_value_line("EVENT ", event->valuestring);
   if (title != NULL) {
     usb_write_value_line("TITLE ", title->valuestring);
@@ -212,6 +221,8 @@ void app_main(void) {
     usb_write_value_line("AUDIO ERROR ", agent_audio_status());
   }
 
+  last_message_tick = xTaskGetTickCount();
+
   char line[LINE_BUFFER_BYTES];
   uint8_t input[USB_BUFFER_BYTES];
   size_t line_length = 0;
@@ -237,6 +248,8 @@ void app_main(void) {
             usb_write_literal("ERROR input_too_large\n");
           } else {
             line[line_length] = '\0';
+            last_message_tick = xTaskGetTickCount();
+            agent_display_set_link_lost(false);
             handle_line(line, line_length);
           }
         }
@@ -252,6 +265,11 @@ void app_main(void) {
           line[line_length++] = byte;
         }
       }
+    }
+
+    if ((int32_t)(xTaskGetTickCount() - last_message_tick) >=
+        (int32_t)pdMS_TO_TICKS(LINK_TIMEOUT_MS)) {
+      agent_display_set_link_lost(true);
     }
 
     if (ready_scheduled &&

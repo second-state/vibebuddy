@@ -105,6 +105,7 @@ static i2c_master_dev_handle_t xl9555_handle;
 static SemaphoreHandle_t transfer_done;
 static bool display_ready;
 static agent_display_state_t current_state = AGENT_DISPLAY_IDLE;
+static bool link_lost = false;
 static char current_title[TITLE_BYTES];
 static struct {
   char title[TITLE_BYTES];
@@ -271,6 +272,11 @@ static void draw_pet_face(agent_display_state_t state, uint32_t frame,
     draw_line(167 + x_offset, face_y + 7, 180 + x_offset, face_y + 18, color);
     draw_line(180 + x_offset, face_y + 7, 167 + x_offset, face_y + 18, color);
     draw_line(153 + x_offset, face_y + 25, 167 + x_offset, face_y + 25, color);
+  } else if (state == AGENT_DISPLAY_OFFLINE) {
+    // 闭眼与平直的嘴：睡着，而不是出错。
+    fill_rect(143 + x_offset, face_y + 14, 8, 3, color);
+    fill_rect(169 + x_offset, face_y + 14, 8, 3, color);
+    draw_line(154 + x_offset, face_y + 25, 166 + x_offset, face_y + 25, color);
   } else {
     bool blinking = frame % 8 == 7;
     fill_rect(143 + x_offset, face_y + (blinking ? 14 : 8), 8,
@@ -314,6 +320,10 @@ static void draw_beaconling(agent_display_state_t state, uint32_t frame,
 }
 
 static uint16_t state_color(agent_display_state_t state) {
+  if (link_lost) {
+    // 失联期间所有颜色转灰：状态可能已经过时，不该继续用鲜艳色宣称它成立。
+    return COLOR_MUTED;
+  }
   if (state == AGENT_DISPLAY_WORKING) {
     return COLOR_WORKING;
   }
@@ -387,6 +397,10 @@ static esp_err_t render_current_state(void) {
     label = "FAILED";
     status_color = COLOR_FAILED;
   }
+  if (link_lost) {
+    label = "NO LINK";
+    status_color = COLOR_MUTED;
+  }
 
   fill_rect(0, 0, DISPLAY_WIDTH, DISPLAY_HEIGHT, COLOR_BACKGROUND);
   fill_rect(0, 0, DISPLAY_WIDTH, 4, status_color);
@@ -394,8 +408,9 @@ static esp_err_t render_current_state(void) {
   if (current_task_count > 0) {
     draw_task_cards();
   }
-  draw_beaconling(current_state, animation_frame,
-                  current_task_count > 0 ? 96 : 0, status_color);
+  draw_beaconling(link_lost ? AGENT_DISPLAY_OFFLINE : current_state,
+                  animation_frame, current_task_count > 0 ? 96 : 0,
+                  status_color);
   draw_text_centered(162, label,
                      current_state == AGENT_DISPLAY_INPUT_REQUIRED ? 2 : 3,
                      status_color);
@@ -459,6 +474,14 @@ esp_err_t agent_display_show_tasks(agent_display_state_t state,
   }
   next_animation_at = xTaskGetTickCount() + animation_period(current_state);
   return render_current_state();
+}
+
+void agent_display_set_link_lost(bool lost) {
+  if (link_lost == lost) {
+    return;
+  }
+  link_lost = lost;
+  (void)render_current_state();
 }
 
 void agent_display_tick(void) {

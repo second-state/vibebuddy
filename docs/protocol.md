@@ -40,6 +40,7 @@ Mac 到设备的首批事件：
 - `task.done`：完成，播放一次“任务完成”，5 秒后回到空闲。
 - `task.error` / `agent.blocked`：失败，播放一次“任务遇到问题”。
 - `agent.idle`：回到空闲，不播放语音。
+- `device.heartbeat`：证明链路存活，不显示、不回显诊断行、不播放语音。
 
 `beacond` 可附加最多 3 项的 `tasks` 数组。数组按最近活动倒序，设备按给定顺序绘制任务卡：
 
@@ -52,6 +53,14 @@ Mac 到设备的首批事件：
 当一个后台任务完成、但画面仍需显示其他活动任务时，`beacond` 会在当前状态事件上附加 `"announcement":"done"`。这是一次性语音通知，不改变画面状态；`announcement_id` 用于标识对应 turn。设备收到它时排队播放一次“任务完成”。
 
 当聚合任务变化仅需重绘既有的输入等待状态时，`beacond` 会附加 `"suppress_audio":true`。设备继续显示 `agent.input_required`，但不重复播放已经播过的提醒。`announcement` 的一次性通知优先于此字段。
+
+`beacond` 每 5 秒发送一次心跳：
+
+```json
+{"version":1,"event":"device.heartbeat"}
+```
+
+设备超过 15 秒没有收到**任何**消息即判定失联，覆盖显示为 `NO LINK` 并把画面转灰；收到任何一行合法消息即恢复。判定依据是所有消息而不只是心跳，因为繁忙时真实事件本身就足以证明链路存活。固件不为心跳输出 `EVENT` 诊断行，否则每天会产生上万行日志。
 
 设备到 Mac 的事件同样使用 NDJSON，例如：
 

@@ -13,7 +13,7 @@ use axum::extract::State;
 use axum::http::StatusCode;
 use axum::routing::post;
 use axum::{Json, Router};
-use beacon_protocol::Event;
+use beacon_protocol::{Event, VERSION};
 use claude_hooks::ClaudeHook;
 use codex_hooks::CodexHook;
 use serde::Serialize;
@@ -24,6 +24,8 @@ use tracing_subscriber::EnvFilter;
 
 /// 最后一个会话僵死后不会再有 Hook 事件，只能靠定时扫描释放画面。
 const SWEEP_INTERVAL: Duration = Duration::from_secs(60);
+/// 心跳间隔。设备按这个节奏判断链路是否还活着，固件的超时是它的三倍。
+const HEARTBEAT_INTERVAL: Duration = Duration::from_secs(5);
 
 #[derive(Clone)]
 struct AppState {
@@ -58,6 +60,7 @@ async fn main() {
         activities: Arc::new(Mutex::new(ActivityTracker::default())),
     };
     tokio::spawn(sweep_expired_activities(state.clone()));
+    tokio::spawn(send_heartbeats(state.clone()));
     let app = app(state);
     let listener = tokio::net::TcpListener::bind(bind_address)
         .await
@@ -75,6 +78,30 @@ fn app(state: AppState) -> Router {
         .route("/v1/codex-hooks", post(post_codex_hook))
         .route("/v1/claude-hooks", post(post_claude_hook))
         .with_state(state)
+}
+
+/// 定期告诉设备链路还活着。
+///
+/// 没有心跳时，daemon 崩溃或串口断开后设备会一直显示最后一个状态，
+/// 看上去任务仍在进行。状态设备最严重的失败是显示过时状态而不自知。
+async fn send_heartbeats(state: AppState) {
+    let mut ticker = tokio::time::interval(HEARTBEAT_INTERVAL);
+    loop {
+        ticker.tick().await;
+        let heartbeat = Event {
+            version: VERSION,
+            event: "device.heartbeat".to_owned(),
+            id: None,
+            title: None,
+            message: None,
+            extra: Default::default(),
+        };
+        match heartbeat.to_ndjson() {
+            // 队列满意味着设备已经收不到东西，这时心跳没有意义，丢弃即可。
+            Ok(frame) => drop(state.transport.send(frame)),
+            Err(error) => warn!(%error, "心跳编码失败"),
+        }
+    }
 }
 
 async fn sweep_expired_activities(state: AppState) {
