@@ -10,12 +10,6 @@
   </array>
   <key>WorkingDirectory</key>
   <string>/Users/dragon/workspace/agent-beacon</string>
-  <!-- launchd 只给一个很短的 PATH，CI 轮询要用的 gh 不在里面。 -->
-  <key>EnvironmentVariables</key>
-  <dict>
-    <key>PATH</key>
-    <string>/Users/dragon/bin:/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
-  </dict>
   <key>RunAtLoad</key>
   <true/>
   <key>KeepAlive</key>
