@@ -1,4 +1,5 @@
 mod activity;
+mod ci;
 mod claude_hooks;
 mod codex_hooks;
 mod serial_transport;
@@ -15,6 +16,7 @@ use axum::http::StatusCode;
 use axum::routing::post;
 use axum::{Json, Router};
 use beacon_protocol::{Event, VERSION};
+use ci::CiWatcher;
 use claude_hooks::ClaudeHook;
 use codex_hooks::CodexHook;
 use serde::Serialize;
@@ -66,6 +68,7 @@ async fn main() {
     };
     tokio::spawn(sweep_expired_activities(state.clone()));
     tokio::spawn(send_heartbeats(state.clone()));
+    tokio::spawn(poll_ci(state.clone()));
     let app = app(state);
     let listener = tokio::net::TcpListener::bind(bind_address)
         .await
@@ -114,6 +117,32 @@ async fn send_heartbeats(state: AppState) {
             // 队列满意味着设备已经收不到东西，这时心跳没有意义，丢弃即可。
             Ok(frame) => drop(state.transport.send(frame)),
             Err(error) => warn!(%error, "心跳编码失败"),
+        }
+    }
+}
+
+/// 轮询 GitHub Actions。没有配置仓库时它什么也不做。
+async fn poll_ci(state: AppState) {
+    let mut watcher = CiWatcher::default();
+    let mut ticker = tokio::time::interval(ci::POLL_INTERVAL);
+    loop {
+        ticker.tick().await;
+        // 先取数据再上锁：`gh` 可能跑上几秒，持锁等它会把 Hook 全堵住。
+        let fetched = watcher.fetch().await;
+        if fetched.is_empty() {
+            continue;
+        }
+        let events = {
+            let mut tracker = state.activities.lock().await;
+            let mut events = watcher.apply(&mut tracker, fetched);
+            for event in &mut events {
+                tracker.stamp_live_fields(event);
+            }
+            events
+        };
+        for event in events {
+            info!(event = %event.event, "CI 状态变化");
+            send_event(&state, event);
         }
     }
 }
