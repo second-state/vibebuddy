@@ -171,7 +171,7 @@ static esp_err_t init_es8311(i2c_master_bus_handle_t i2c_bus) {
     audio_status = "ES8311 OPEN";
     return ESP_FAIL;
   }
-  if (esp_codec_dev_set_out_vol(device, 45) != ESP_CODEC_DEV_OK) {
+  if (esp_codec_dev_set_out_vol(device, 65) != ESP_CODEC_DEV_OK) {
     audio_status = "ES8311 VOLUME";
     return ESP_FAIL;
   }
