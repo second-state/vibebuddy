@@ -15,6 +15,7 @@
 #include "esp_lcd_panel_vendor.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
+#include "freertos/task.h"
 
 #define DISPLAY_WIDTH 320
 #define DISPLAY_HEIGHT 240
@@ -45,8 +46,13 @@
 #define COLOR_TEXT 0xffff
 #define COLOR_READY 0x2dff
 #define COLOR_WORKING 0xfd20
+#define COLOR_INPUT 0xffe0
 #define COLOR_DONE 0x07e0
 #define COLOR_FAILED 0xf800
+#define COLOR_PET 0x3c9f
+#define COLOR_PET_HIGHLIGHT 0x7e5f
+
+#define TITLE_BYTES 64
 
 static const char *TAG = "agent_display";
 
@@ -98,6 +104,10 @@ static esp_lcd_panel_handle_t panel_handle;
 static i2c_master_dev_handle_t xl9555_handle;
 static SemaphoreHandle_t transfer_done;
 static bool display_ready;
+static agent_display_state_t current_state = AGENT_DISPLAY_IDLE;
+static char current_title[TITLE_BYTES];
+static uint32_t animation_frame;
+static TickType_t next_animation_at;
 
 static bool on_color_transfer_done(esp_lcd_panel_io_handle_t panel_io,
                                    esp_lcd_panel_io_event_data_t *event_data,
@@ -189,6 +199,19 @@ static uint8_t glyph_row(char character, int row) {
   if (uppercase == '/') {
     return (uint8_t)(1U << (row < 5 ? 4 - row : 0));
   }
+  if (uppercase == '!') {
+    return row < 5 || row == 6 ? 0x04 : 0;
+  }
+  if (uppercase == '?') {
+    static const uint8_t question[7] = {0x0e, 0x11, 0x01, 0x02,
+                                        0x04, 0x00, 0x04};
+    return question[row];
+  }
+  if (uppercase == '>') {
+    static const uint8_t chevron[7] = {0x10, 0x08, 0x04, 0x02,
+                                       0x04, 0x08, 0x10};
+    return chevron[row];
+  }
   if (uppercase == ' ' || uppercase == '_') {
     return uppercase == '_' && row == 6 ? 0x1f : 0;
   }
@@ -219,22 +242,68 @@ static void draw_text_centered(int y, const char *text, int scale,
   draw_text((DISPLAY_WIDTH - width) / 2, y, text, scale, color, max_characters);
 }
 
-static void draw_status_icon(agent_display_state_t state, uint16_t color) {
-  if (state == AGENT_DISPLAY_DONE) {
-    draw_line(139, 96, 153, 109, color);
-    draw_line(153, 109, 181, 79, color);
+static void draw_pet_face(agent_display_state_t state, uint32_t frame,
+                          int y_offset, uint16_t color) {
+  int face_y = 79 + y_offset;
+  if (state == AGENT_DISPLAY_WORKING) {
+    draw_text(139, face_y + 5, ">", 2, color, 1);
+    int dot_count = (int)(frame % 3) + 1;
+    for (int index = 0; index < dot_count; index++) {
+      fill_rect(163 + index * 8, face_y + 17, 5, 3, color);
+    }
+  } else if (state == AGENT_DISPLAY_INPUT_REQUIRED) {
+    draw_text(141, face_y + 5, "!?", 2, color, 2);
+  } else if (state == AGENT_DISPLAY_DONE) {
+    draw_line(140, face_y + 12, 147, face_y + 6, color);
+    draw_line(147, face_y + 6, 154, face_y + 12, color);
+    draw_line(166, face_y + 12, 173, face_y + 6, color);
+    draw_line(173, face_y + 6, 180, face_y + 12, color);
+    draw_line(151, face_y + 19, 160, face_y + 23, color);
+    draw_line(160, face_y + 23, 169, face_y + 19, color);
   } else if (state == AGENT_DISPLAY_FAILED) {
-    draw_line(143, 81, 177, 115, color);
-    draw_line(177, 81, 143, 115, color);
-  } else if (state == AGENT_DISPLAY_WORKING) {
-    fill_rect(137, 94, 9, 9, color);
-    fill_rect(156, 94, 9, 9, color);
-    fill_rect(175, 94, 9, 9, color);
+    draw_line(140, face_y + 7, 153, face_y + 18, color);
+    draw_line(153, face_y + 7, 140, face_y + 18, color);
+    draw_line(167, face_y + 7, 180, face_y + 18, color);
+    draw_line(180, face_y + 7, 167, face_y + 18, color);
+    draw_line(153, face_y + 25, 167, face_y + 25, color);
   } else {
-    fill_rect(144, 82, 32, 32, color);
-    fill_rect(150, 88, 20, 20, COLOR_BACKGROUND);
-    fill_rect(157, 95, 6, 6, color);
+    bool blinking = frame % 8 == 7;
+    fill_rect(143, face_y + (blinking ? 14 : 8), 8, blinking ? 3 : 10, color);
+    fill_rect(169, face_y + (blinking ? 14 : 8), 8, blinking ? 3 : 10, color);
+    draw_line(154, face_y + 24, 160, face_y + 27, color);
+    draw_line(160, face_y + 27, 166, face_y + 24, color);
   }
+}
+
+static void draw_beaconling(agent_display_state_t state, uint32_t frame,
+                            uint16_t color) {
+  int y_offset = 0;
+  if (state == AGENT_DISPLAY_WORKING) {
+    y_offset = frame % 2 == 0 ? 0 : 2;
+  } else if (state == AGENT_DISPLAY_DONE) {
+    y_offset = frame % 2 == 0 ? -5 : 0;
+  } else if (state == AGENT_DISPLAY_FAILED) {
+    y_offset = 3;
+  } else if (state == AGENT_DISPLAY_IDLE && frame % 8 == 0) {
+    y_offset = 1;
+  }
+
+  fill_rect(157, 48 + y_offset, 6, 13, COLOR_PET_HIGHLIGHT);
+  fill_rect(153, 44 + y_offset, 14, 10, color);
+
+  fill_rect(113, 65 + y_offset, 94, 52, COLOR_PET);
+  fill_rect(121, 59 + y_offset, 78, 64, COLOR_PET);
+  fill_rect(105, 78 + y_offset, 12, 28, COLOR_PET_HIGHLIGHT);
+  fill_rect(203, 78 + y_offset, 12, 28, COLOR_PET_HIGHLIGHT);
+  fill_rect(128, 75 + y_offset, 64, 40, COLOR_BACKGROUND);
+  fill_rect(132, 79 + y_offset, 56, 32, 0x10a4);
+  draw_pet_face(state, frame, y_offset, color);
+
+  fill_rect(139, 121 + y_offset, 42, 25, COLOR_PET);
+  fill_rect(126, 125 + y_offset, 13, 17, COLOR_PET_HIGHLIGHT);
+  fill_rect(181, 125 + y_offset, 13, 17, COLOR_PET_HIGHLIGHT);
+  fill_rect(143, 145 + y_offset, 13, 8, COLOR_PET_HIGHLIGHT);
+  fill_rect(164, 145 + y_offset, 13, 8, COLOR_PET_HIGHLIGHT);
 }
 
 static esp_err_t present(void) {
@@ -250,36 +319,83 @@ static esp_err_t present(void) {
   return ESP_OK;
 }
 
-esp_err_t agent_display_show(agent_display_state_t state, const char *title) {
-  if (!display_ready) {
-    return ESP_ERR_INVALID_STATE;
-  }
-
+static esp_err_t render_current_state(void) {
   const char *label = "READY";
   uint16_t status_color = COLOR_READY;
-  if (state == AGENT_DISPLAY_WORKING) {
+  if (current_state == AGENT_DISPLAY_WORKING) {
     label = "WORKING";
     status_color = COLOR_WORKING;
-  } else if (state == AGENT_DISPLAY_DONE) {
+  } else if (current_state == AGENT_DISPLAY_INPUT_REQUIRED) {
+    label = "INPUT REQUIRED";
+    status_color = COLOR_INPUT;
+  } else if (current_state == AGENT_DISPLAY_DONE) {
     label = "DONE";
     status_color = COLOR_DONE;
-  } else if (state == AGENT_DISPLAY_FAILED) {
+  } else if (current_state == AGENT_DISPLAY_FAILED) {
     label = "FAILED";
     status_color = COLOR_FAILED;
   }
 
   fill_rect(0, 0, DISPLAY_WIDTH, DISPLAY_HEIGHT, COLOR_BACKGROUND);
-  fill_rect(0, 0, DISPLAY_WIDTH, 5, status_color);
-  draw_text_centered(22, "AgentBeacon", 3, COLOR_TEXT);
-  draw_status_icon(state, status_color);
-  draw_text_centered(134, label, 3, status_color);
-  if (title != NULL && title[0] != '\0') {
-    draw_text_centered(181, title, 2, COLOR_TEXT);
-  } else if (state == AGENT_DISPLAY_IDLE) {
-    draw_text_centered(181, "WAITING FOR EVENTS", 2, COLOR_MUTED);
+  fill_rect(0, 0, DISPLAY_WIDTH, 4, status_color);
+  draw_text_centered(12, "AgentBeacon", 2, COLOR_TEXT);
+  draw_beaconling(current_state, animation_frame, status_color);
+  draw_text_centered(162, label,
+                     current_state == AGENT_DISPLAY_INPUT_REQUIRED ? 2 : 3,
+                     status_color);
+  if (current_title[0] != '\0') {
+    draw_text_centered(195, current_title, 2, COLOR_TEXT);
+  } else if (current_state == AGENT_DISPLAY_IDLE) {
+    draw_text_centered(195, "YOUR AGENT PET", 2, COLOR_MUTED);
   }
-  draw_text_centered(226, "USB ONLINE", 1, COLOR_MUTED);
+  draw_text_centered(228, "BEACONLING  USB ONLINE", 1, COLOR_MUTED);
   return present();
+}
+
+static TickType_t animation_period(agent_display_state_t state) {
+  if (state == AGENT_DISPLAY_WORKING) {
+    return pdMS_TO_TICKS(250);
+  }
+  if (state == AGENT_DISPLAY_DONE) {
+    return pdMS_TO_TICKS(200);
+  }
+  if (state == AGENT_DISPLAY_INPUT_REQUIRED) {
+    return pdMS_TO_TICKS(350);
+  }
+  if (state == AGENT_DISPLAY_FAILED) {
+    return pdMS_TO_TICKS(700);
+  }
+  return pdMS_TO_TICKS(500);
+}
+
+esp_err_t agent_display_show(agent_display_state_t state, const char *title) {
+  if (!display_ready) {
+    return ESP_ERR_INVALID_STATE;
+  }
+
+  current_state = state;
+  animation_frame = 0;
+  if (title == NULL) {
+    current_title[0] = '\0';
+  } else {
+    strncpy(current_title, title, sizeof(current_title) - 1);
+    current_title[sizeof(current_title) - 1] = '\0';
+  }
+  next_animation_at = xTaskGetTickCount() + animation_period(current_state);
+  return render_current_state();
+}
+
+void agent_display_tick(void) {
+  if (!display_ready ||
+      (int32_t)(xTaskGetTickCount() - next_animation_at) < 0) {
+    return;
+  }
+
+  animation_frame++;
+  next_animation_at = xTaskGetTickCount() + animation_period(current_state);
+  if (render_current_state() != ESP_OK) {
+    next_animation_at = xTaskGetTickCount() + pdMS_TO_TICKS(1000);
+  }
 }
 
 esp_err_t agent_display_init(void) {

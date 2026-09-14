@@ -49,12 +49,17 @@ static void show_event(const char *event, const char *title) {
     state = AGENT_DISPLAY_WORKING;
     state_label = "WORKING";
     ready_scheduled = false;
+  } else if (strcmp(event, "agent.input_required") == 0) {
+    state = AGENT_DISPLAY_INPUT_REQUIRED;
+    state_label = "INPUT REQUIRED";
+    ready_scheduled = false;
   } else if (strcmp(event, "task.done") == 0) {
     state = AGENT_DISPLAY_DONE;
     state_label = "DONE";
     ready_scheduled = true;
     ready_deadline = xTaskGetTickCount() + pdMS_TO_TICKS(5000);
-  } else if (strcmp(event, "task.error") == 0) {
+  } else if (strcmp(event, "task.error") == 0 ||
+             strcmp(event, "agent.blocked") == 0) {
     state = AGENT_DISPLAY_FAILED;
     state_label = "FAILED";
     ready_scheduled = false;
@@ -169,5 +174,6 @@ void app_main(void) {
         usb_write_literal("DISPLAY ERROR\n");
       }
     }
+    agent_display_tick();
   }
 }
