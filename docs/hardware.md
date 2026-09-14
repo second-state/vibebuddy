@@ -10,7 +10,7 @@
 - 外设：LCD、Speaker、Microphone、Buzzer、K0/K1/K2、TF/microSD、USB-C、USB-A Host、UART。
 - 期望：一根 USB-C 线同时供电、烧录和运行时通信。
 
-同一根 USB-C 线完成供电、运行时串口和 ROM 下载链路已经实测成立；实际 AgentBeacon 固件写入及写入后的重新枚举仍待 Stage 1 验收。
+同一根 USB-C 线完成供电、运行时串口、ROM 下载、AgentBeacon 固件写入和写入后的重新枚举已经实测成立。
 
 ## 当前主机确认
 
@@ -39,6 +39,8 @@
 - 打开原生 USB 串口会触发 `USB_UART_CHIP_RESET`，因此运行时重连设计必须容忍设备复位和重新枚举。
 - 2026-09-14 的背面照片显示 PCB `V1.1` 丝印、ATK-MWS3S `N16R8` 模组、`B0/K1/K2`、`USB-SLAVE`、`HOST`、`UART`、麦克风、扬声器、蜂鸣器和 TF 卡座。
 - 实物布局与当前固件自报标识共同确认板型为 **ATK-DNESP32S3-BOX V1.1**；不是 DNESP32S3 开发板、BOX0、BOX2 或 BOX3。
+- Stage 2 真实拔掉 `USB-SLAVE` 后，`beacond` 记录到 `Device not configured`；插回后自动重新发现同一串口节点并恢复通信。
+- 完整 USB 断电后，原小智固件遗留画面消失而屏幕保持黑色；这证明旧画面是 LCD 残留状态，不代表旧固件仍在运行，也不证明 AgentBeacon 已有 LCD 驱动。
 
 ## 当前运行固件旁证
 
@@ -50,7 +52,6 @@
 ## 待验证
 
 - 与准确 PCB 版本匹配的厂家 schematic、BSP 和 examples。
-- AgentBeacon 固件实际烧录后的枚举、复位和运行时串口路径。
 - LCD 控制器、分辨率和接线。
 - 触摸控制器（如有）。
 - audio codec、功放和麦克风接口。

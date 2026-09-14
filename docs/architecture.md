@@ -46,4 +46,4 @@ Producer <- HTTP/Unix Socket <- beacond <- Transport <- ESP32-S3 button event
 3. Beacon Protocol v1 使用 NDJSON，一行一个 JSON object。
 4. 固件硬件配置必须来自精确板型的官方资料或实机验证，不借用相似板卡 GPIO。
 5. 编译、模拟链路和实机验收是三种不同证据；只有实机链路满足对应阶段门禁。
-
+6. Stage 2 的 `SerialTransport` 使用 64 条有界队列；HTTP `202 Accepted` 只表示事件已入队，不谎称设备已经处理。串口写入失败时保留当前帧，重新按 `303A:1001` 发现设备并重试。

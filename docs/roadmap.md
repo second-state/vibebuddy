@@ -22,9 +22,11 @@
 
 实机结论：ESP-IDF v5.5.3 构建和烧录成功；Mac 发送 `{"version":1,"event":"task.done","title":"Hello"}` 后，ESP32 实际返回 `EVENT task.done` 与 `TITLE Hello`。原厂 16 MB Flash 已在写入前完成本地受限权限备份。
 
-### Stage 2 — `beacond`
+### Stage 2 — `beacond`（已完成，2026-09-14）
 
 实现 `POST /v1/events`、最小 Transport 抽象、`SerialTransport` 和断线重连；用 HTTP 请求完成实机验收。
+
+实机结论：`beacond` 按 `303A:1001` 自动发现 `/dev/cu.usbmodem8401`；HTTP 事件到达 ESP32 并得到对应诊断输出。真实拔掉 `USB-SLAVE` 后记录到 `Device not configured`，插回后自动重新连接；重连后的 `task.done` 事件成功到达设备。
 
 ### Stage 3 — LCD
 
