@@ -11,6 +11,8 @@ use beacon_protocol::{Event, VERSION};
 use serde_json::json;
 
 const MAX_VISIBLE_TASKS: usize = 3;
+/// 任务卡标题的显示上限，含区分 Agent 的前缀。
+const MAX_TITLE_CHARS: usize = 26;
 /// 工作中的活动若长时间没有任何事件，通常是 Agent 进程已经消失。
 const WORKING_TTL: Duration = Duration::from_secs(30 * 60);
 /// 等待用户回应可以持续很久，过期时间必须长到足够用户离开再回来。
@@ -220,8 +222,10 @@ fn event(name: &str, session_id: &str, title: &str) -> Event {
 }
 
 /// 从工作目录派生任务卡标题。不读取 prompt 或会话内容。
-/// `fallback` 由 Adapter 提供，用于工作目录不可用时仍能指出是哪个 Agent。
-pub fn project_title(cwd: Option<&str>, fallback: &str) -> String {
+///
+/// `prefix` 区分是哪个 Agent 在跑，`fallback` 用于工作目录不可用时。
+/// 两个 Agent 可能在同一个目录下工作，只有前缀能告诉用户该切到哪个窗口。
+pub fn project_title(prefix: &str, cwd: Option<&str>, fallback: &str) -> String {
     let raw = cwd
         .and_then(|cwd| Path::new(cwd).file_name())
         .and_then(|name| name.to_str())
@@ -237,12 +241,12 @@ pub fn project_title(cwd: Option<&str>, fallback: &str) -> String {
                 None
             }
         })
-        .take(26)
+        .take(MAX_TITLE_CHARS.saturating_sub(prefix.chars().count()))
         .collect();
     if title.is_empty() {
-        fallback.to_owned()
+        format!("{prefix}{fallback}")
     } else {
-        title
+        format!("{prefix}{title}")
     }
 }
 
@@ -317,10 +321,27 @@ mod tests {
     #[test]
     fn project_title_falls_back_when_cwd_is_unusable() {
         assert_eq!(
-            project_title(Some("/work/agent-beacon"), "CODEX"),
-            "AGENT-BEACON"
+            project_title("CX\u{b7}", Some("/work/agent-beacon"), "CODEX"),
+            "CX\u{b7}AGENT-BEACON"
         );
-        assert_eq!(project_title(Some("/"), "CODEX"), "CODEX");
-        assert_eq!(project_title(None, "CODEX"), "CODEX");
+        assert_eq!(
+            project_title("CX\u{b7}", Some("/"), "CODEX"),
+            "CX\u{b7}CODEX"
+        );
+        assert_eq!(project_title("CC\u{b7}", None, "CLAUDE"), "CC\u{b7}CLAUDE");
+    }
+
+    #[test]
+    fn title_stays_within_the_display_limit() {
+        let long = project_title(
+            "CC\u{b7}",
+            Some("/work/a-very-long-project-name-here"),
+            "CLAUDE",
+        );
+        assert!(
+            long.chars().count() <= MAX_TITLE_CHARS,
+            "标题不得超过显示上限"
+        );
+        assert!(long.starts_with("CC\u{b7}"));
     }
 }

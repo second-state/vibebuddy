@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""把 Codex 生命周期事件最小化后转发给本机 AgentBeacon。"""
+"""把 Claude Code 生命周期事件最小化后转发给本机 AgentBeacon。"""
 
 import json
 import sys
@@ -11,8 +11,15 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from hook_filter import requires_user_input  # noqa: E402
 
 
-ENDPOINT = "http://127.0.0.1:7331/v1/codex-hooks"
-ALLOWED_FIELDS = ("session_id", "turn_id", "hook_event_name", "cwd")
+ENDPOINT = "http://127.0.0.1:7331/v1/claude-hooks"
+ALLOWED_FIELDS = (
+    "session_id",
+    "prompt_id",
+    "hook_event_name",
+    "cwd",
+    "agent_id",
+    "agent_type",
+)
 
 
 def sanitized_payload(source: object) -> dict[str, str]:
@@ -25,6 +32,7 @@ def sanitized_payload(source: object) -> dict[str, str]:
     }
     if "session_id" not in payload or "hook_event_name" not in payload:
         return {}
+    # 子 agent 的最后一段是写给父会话的报告，不是向用户提问，因此只判定主会话。
     if payload["hook_event_name"] == "Stop" and requires_user_input(
         source.get("last_assistant_message")
     ):
@@ -47,7 +55,7 @@ def main() -> int:
         with urllib.request.urlopen(request, timeout=0.5):
             pass
     except (OSError, ValueError):
-        # AgentBeacon 未运行或输入无效时，不能干扰 Codex 主流程。
+        # AgentBeacon 未运行或输入无效时，不能干扰 Claude Code 主流程。
         pass
     return 0
 

@@ -1,4 +1,5 @@
 mod activity;
+mod claude_hooks;
 mod codex_hooks;
 mod serial_transport;
 
@@ -7,12 +8,14 @@ use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::Duration;
 
+use activity::ActivityTracker;
 use axum::extract::State;
 use axum::http::StatusCode;
 use axum::routing::post;
 use axum::{Json, Router};
 use beacon_protocol::Event;
-use codex_hooks::{CodexActivityTracker, CodexHook};
+use claude_hooks::ClaudeHook;
+use codex_hooks::CodexHook;
 use serde::Serialize;
 use serial_transport::{SerialConfig, SerialTransport, Transport, TransportError};
 use tokio::sync::Mutex;
@@ -25,7 +28,8 @@ const SWEEP_INTERVAL: Duration = Duration::from_secs(60);
 #[derive(Clone)]
 struct AppState {
     transport: Arc<dyn Transport>,
-    codex_activities: Arc<Mutex<CodexActivityTracker>>,
+    /// 所有 Agent 共享一个聚合器：设备只有一块屏幕和一只小灯灵。
+    activities: Arc<Mutex<ActivityTracker>>,
 }
 
 #[derive(Serialize)]
@@ -51,7 +55,7 @@ async fn main() {
     let transport: Arc<dyn Transport> = Arc::new(SerialTransport::spawn(serial_config));
     let state = AppState {
         transport,
-        codex_activities: Arc::new(Mutex::new(CodexActivityTracker::default())),
+        activities: Arc::new(Mutex::new(ActivityTracker::default())),
     };
     tokio::spawn(sweep_expired_activities(state.clone()));
     let app = app(state);
@@ -69,6 +73,7 @@ fn app(state: AppState) -> Router {
     Router::new()
         .route("/v1/events", post(post_event))
         .route("/v1/codex-hooks", post(post_codex_hook))
+        .route("/v1/claude-hooks", post(post_claude_hook))
         .with_state(state)
 }
 
@@ -76,7 +81,7 @@ async fn sweep_expired_activities(state: AppState) {
     let mut ticker = tokio::time::interval(SWEEP_INTERVAL);
     loop {
         ticker.tick().await;
-        let Some(event) = state.codex_activities.lock().await.sweep_expired() else {
+        let Some(event) = state.activities.lock().await.sweep_expired() else {
             continue;
         };
         info!(event = %event.event, "清除过期的 Codex 活动");
@@ -137,7 +142,19 @@ async fn post_codex_hook(
     State(state): State<AppState>,
     Json(hook): Json<CodexHook>,
 ) -> (StatusCode, Json<ApiResponse>) {
-    let event = state.codex_activities.lock().await.apply(hook);
+    let event = codex_hooks::apply(&mut *state.activities.lock().await, hook);
+    forward(state, event).await
+}
+
+async fn post_claude_hook(
+    State(state): State<AppState>,
+    Json(hook): Json<ClaudeHook>,
+) -> (StatusCode, Json<ApiResponse>) {
+    let event = claude_hooks::apply(&mut *state.activities.lock().await, hook);
+    forward(state, event).await
+}
+
+async fn forward(state: AppState, event: Option<Event>) -> (StatusCode, Json<ApiResponse>) {
     let Some(event) = event else {
         return (
             StatusCode::ACCEPTED,
@@ -178,9 +195,7 @@ mod tests {
         let (status, Json(response)) = post_event(
             State(AppState {
                 transport: transport.clone(),
-                codex_activities: Arc::new(
-                    tokio::sync::Mutex::new(CodexActivityTracker::default()),
-                ),
+                activities: Arc::new(tokio::sync::Mutex::new(ActivityTracker::default())),
             }),
             Json(event),
         )
