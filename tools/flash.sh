@@ -14,8 +14,13 @@ else
         exit 1
     fi
 
+    caller_path="${PATH}"
     while IFS='=' read -r key value; do
-        export "${key}=${value}"
+        if [[ "${key}" == "PATH" ]]; then
+            export PATH="${value}:${caller_path}"
+        elif [[ "${key}" != "SYSTEM_PATH" ]]; then
+            export "${key}=${value}"
+        fi
     done < <("${activation_script}" -e)
 
     idf_command=("${IDF_PYTHON_ENV_PATH}/bin/python" "${IDF_PATH}/tools/idf.py")
