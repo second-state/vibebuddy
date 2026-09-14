@@ -30,7 +30,8 @@ pub enum ActivityStatus {
 
 /// K2 可以切回的 Mac 来源。这里只保存打开窗口所需的最小定位信息，
 /// 不保存 prompt、回复正文或命令内容。
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
 pub enum ActivitySource {
     Codex { thread_id: String },
     ClaudeCode { session_id: String },
@@ -74,6 +75,8 @@ struct StoredStats {
     done: u32,
     asks: u32,
     busy_seconds: u64,
+    #[serde(default)]
+    last_source: Option<ActivitySource>,
 }
 
 #[derive(Default)]
@@ -83,6 +86,9 @@ pub struct ActivityTracker {
     last_visible: Option<Event>,
     stats: DailyStats,
     stats_file: Option<PathBuf>,
+    /// 最近一次可定位的 Agent/CI 来源。当前活动结束或 daemon 重启后，K2
+    /// 仍应能回到刚才那件事，而不是变成一个只在“工作中”才有效的按钮。
+    last_source: Option<ActivitySource>,
     /// Agent 最近工作过的项目根及最后一次看到的时间。
     workspaces: HashMap<PathBuf, Instant>,
 }
@@ -103,6 +109,7 @@ impl ActivityTracker {
                 busy_seconds: stored.busy_seconds,
                 busy_since: None,
             },
+            last_source: stored.last_source,
             stats_file: Some(path),
             ..Self::default()
         }
@@ -131,13 +138,20 @@ impl ActivityTracker {
     /// 把活动收起，这里会自然地成为 no-op。
     pub fn associate_source(&mut self, id: &ActivityId, source: ActivitySource) {
         if let Some(activity) = self.activities.get_mut(&id.key) {
-            activity.source = Some(source);
+            activity.source = Some(source.clone());
+            if self.last_source.as_ref() != Some(&source) {
+                self.last_source = Some(source);
+                self.save_stats();
+            }
         }
     }
 
     /// 与屏幕主状态使用同一套选择规则：需要输入优先，其次才是最新的工作项。
     pub fn focus_source(&self) -> Option<ActivitySource> {
-        self.focused_activity()?.source.clone()
+        match self.focused_activity() {
+            Some(activity) => activity.source.clone(),
+            None => self.last_source.clone(),
+        }
     }
 
     /// 记录活动的当前状态，返回需要下发的可见状态。
@@ -443,6 +457,7 @@ impl ActivityTracker {
             done: self.stats.done,
             asks: self.stats.asks,
             busy_seconds: self.stats.busy_seconds,
+            last_source: self.last_source.clone(),
         };
         let Ok(text) = serde_json::to_string(&stored) else {
             return;
@@ -591,6 +606,49 @@ mod tests {
         tracker.observe(&turn, "CC:PROJECT", ActivityStatus::Working);
 
         assert_eq!(tracker.focus_source(), Some(source));
+    }
+
+    #[test]
+    fn k2_falls_back_to_the_last_completed_source() {
+        let mut tracker = ActivityTracker::default();
+        let turn = id("session", "session:turn");
+        tracker.observe(&turn, "CC:PROJECT", ActivityStatus::Working);
+        let source = ActivitySource::ClaudeCode {
+            session_id: "session-a".to_owned(),
+        };
+        tracker.associate_source(&turn, source.clone());
+
+        tracker.finish(&turn, "CC:PROJECT");
+
+        assert_eq!(
+            tracker.focus_source(),
+            Some(source),
+            "任务刚完成后，K2 仍应能返回对应会话"
+        );
+    }
+
+    #[test]
+    fn k2_source_survives_daemon_restart() {
+        let base = temp_tree("last-source");
+        let state_file = base.join("stats.json");
+        let source = ActivitySource::Codex {
+            thread_id: "thread-a".to_owned(),
+        };
+        {
+            let mut tracker = ActivityTracker::with_stats_file(state_file.clone());
+            let turn = id("session", "session:turn");
+            tracker.observe(&turn, "CX:PROJECT", ActivityStatus::Working);
+            tracker.associate_source(&turn, source.clone());
+        }
+
+        let restored = ActivityTracker::with_stats_file(state_file);
+        let _ = std::fs::remove_dir_all(&base);
+
+        assert_eq!(
+            restored.focus_source(),
+            Some(source),
+            "daemon 重启不应让 K2 忘记最近会话"
+        );
     }
 
     #[test]

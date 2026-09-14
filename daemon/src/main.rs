@@ -85,8 +85,8 @@ async fn main() {
         .unwrap_or_else(|error| panic!("HTTP server 失败：{error}"));
 }
 
-/// 设备到 Mac 的事件目前只开放 K2 单击。无活动时保持安静，避免按钮意外
-/// 拉起一个与当前状态无关的窗口。
+/// 设备到 Mac 的事件目前只开放 K2 单击。优先打开当前活动；空闲时返回最近
+/// 一次可定位的 Agent/CI 来源。
 async fn handle_device_events(state: AppState, mut events: tokio::sync::mpsc::Receiver<Event>) {
     while let Some(event) = events.recv().await {
         if !is_k2_press(&event) {
