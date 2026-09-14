@@ -8,6 +8,7 @@
 #include "agent_buttons.h"
 #include "agent_display.h"
 #include "cJSON.h"
+#include "driver/uart.h"
 #include "esp_app_desc.h"
 #include "driver/usb_serial_jtag.h"
 #include "esp_check.h"
@@ -16,7 +17,7 @@
 
 #define MAX_LINE_BYTES 1024
 #define LINE_BUFFER_BYTES (MAX_LINE_BYTES + 2)
-#define USB_BUFFER_BYTES 256
+#define IO_BUFFER_BYTES 256
 
 static bool ready_scheduled;
 static TickType_t ready_deadline;
@@ -24,7 +25,9 @@ static TickType_t ready_deadline;
 #define LINK_TIMEOUT_MS 15000
 static TickType_t last_message_tick;
 
-static void usb_write_all(const char *data, size_t length) {
+static void transport_write_all(const char *data, size_t length) {
+  uart_write_bytes(UART_NUM_0, data, length);
+
   while (length > 0) {
     int written = usb_serial_jtag_write_bytes(data, length, portMAX_DELAY);
     if (written <= 0) {
@@ -35,22 +38,22 @@ static void usb_write_all(const char *data, size_t length) {
   }
 }
 
-static void usb_write_literal(const char *text) {
-  usb_write_all(text, strlen(text));
+static void transport_write_literal(const char *text) {
+  transport_write_all(text, strlen(text));
 }
 
-static void usb_write_value_line(const char *label, const char *value) {
-  usb_write_literal(label);
+static void transport_write_value_line(const char *label, const char *value) {
+  transport_write_literal(label);
   while (*value != '\0') {
     char output = (*value == '\r' || *value == '\n') ? ' ' : *value;
-    usb_write_all(&output, 1);
+    transport_write_all(&output, 1);
     value++;
   }
-  usb_write_literal("\n");
+  transport_write_literal("\n");
 }
 
 static void on_k2_pressed(void) {
-  usb_write_literal(
+  transport_write_literal(
       "{\"version\":1,\"event\":\"button\",\"button\":\"K2\",\"action\":\"press\"}\n");
 }
 
@@ -184,15 +187,15 @@ static void show_event(const cJSON *message, const char *event,
   }
 
   if (agent_display_show_tasks(state, title, tasks, task_count) != ESP_OK) {
-    usb_write_literal("DISPLAY ERROR\n");
+    transport_write_literal("DISPLAY ERROR\n");
   } else {
-    usb_write_value_line("DISPLAY STATE ", state_label);
+    transport_write_value_line("DISPLAY STATE ", state_label);
   }
   if (play_prompt) {
     if (agent_audio_play(prompt) != ESP_OK) {
-      usb_write_literal("AUDIO ERROR\n");
+      transport_write_literal("AUDIO ERROR\n");
     } else {
-      usb_write_value_line("AUDIO QUEUED ", prompt_label);
+      transport_write_value_line("AUDIO QUEUED ", prompt_label);
     }
   }
 }
@@ -204,7 +207,7 @@ static void handle_line(char *line, size_t length) {
 
   cJSON *message = cJSON_ParseWithLength(line, length);
   if (message == NULL) {
-    usb_write_literal("ERROR invalid_json\n");
+    transport_write_literal("ERROR invalid_json\n");
     return;
   }
 
@@ -215,13 +218,13 @@ static void handle_line(char *line, size_t length) {
   if (!cJSON_IsObject(message) || !cJSON_IsNumber(version) ||
       !cJSON_IsString(event) || event->valuestring[0] == '\0' ||
       (title != NULL && !cJSON_IsString(title))) {
-    usb_write_literal("ERROR invalid_message\n");
+    transport_write_literal("ERROR invalid_message\n");
     cJSON_Delete(message);
     return;
   }
 
   if (version->valuedouble != 1.0) {
-    usb_write_literal("ERROR unsupported_version\n");
+    transport_write_literal("ERROR unsupported_version\n");
     cJSON_Delete(message);
     return;
   }
@@ -238,9 +241,9 @@ static void handle_line(char *line, size_t length) {
   }
 
   parse_stats(message);
-  usb_write_value_line("EVENT ", event->valuestring);
+  transport_write_value_line("EVENT ", event->valuestring);
   if (title != NULL) {
-    usb_write_value_line("TITLE ", title->valuestring);
+    transport_write_value_line("TITLE ", title->valuestring);
   }
   show_event(message, event->valuestring,
              title == NULL ? NULL : title->valuestring);
@@ -269,6 +272,9 @@ static void describe_firmware_build(char *out, size_t size) {
 }
 
 void app_main(void) {
+  ESP_ERROR_CHECK(
+      uart_driver_install(UART_NUM_0, LINE_BUFFER_BYTES, 0, 0, NULL, 0));
+
   usb_serial_jtag_driver_config_t usb_config = {
       .rx_buffer_size = LINE_BUFFER_BYTES,
       .tx_buffer_size = MAX_LINE_BYTES + 1,
@@ -280,47 +286,50 @@ void app_main(void) {
 
   if (agent_display_init() == ESP_OK) {
     agent_display_set_firmware_build(firmware_build);
-    usb_write_value_line("DISPLAY READY BUILD ", firmware_build);
+    transport_write_value_line("DISPLAY READY BUILD ", firmware_build);
   } else {
-    usb_write_literal("DISPLAY ERROR\n");
+    transport_write_literal("DISPLAY ERROR\n");
   }
   if (agent_audio_init() == ESP_OK) {
-    usb_write_literal("AUDIO READY\n");
-    usb_write_value_line("AUDIO CODEC ", agent_audio_status());
+    transport_write_literal("AUDIO READY\n");
+    transport_write_value_line("AUDIO CODEC ", agent_audio_status());
   } else {
-    usb_write_value_line("AUDIO ERROR ", agent_audio_status());
+    transport_write_value_line("AUDIO ERROR ", agent_audio_status());
   }
   if (agent_buttons_init(on_k2_pressed) == ESP_OK) {
-    usb_write_literal("BUTTON K2 READY\n");
+    transport_write_literal("BUTTON K2 READY\n");
   } else {
-    usb_write_literal("BUTTON K2 ERROR\n");
+    transport_write_literal("BUTTON K2 ERROR\n");
   }
 
   last_message_tick = xTaskGetTickCount();
 
   char line[LINE_BUFFER_BYTES];
-  uint8_t input[USB_BUFFER_BYTES];
+  uint8_t input[IO_BUFFER_BYTES];
   size_t line_length = 0;
   bool discarding = false;
 
-  usb_write_literal("READY agent-beacon-fw 0.1.0\n");
+  transport_write_literal("READY agent-beacon-fw 0.1.0\n");
 
   while (true) {
-    int received =
-        usb_serial_jtag_read_bytes(input, sizeof(input), pdMS_TO_TICKS(100));
+    int received = uart_read_bytes(UART_NUM_0, input, sizeof(input), 0);
+    if (received == 0) {
+      received =
+          usb_serial_jtag_read_bytes(input, sizeof(input), pdMS_TO_TICKS(100));
+    }
 
     for (int index = 0; index < received; index++) {
       char byte = (char)input[index];
 
       if (byte == '\n') {
         if (discarding) {
-          usb_write_literal("ERROR input_too_large\n");
+          transport_write_literal("ERROR input_too_large\n");
         } else {
           if (line_length > 0 && line[line_length - 1] == '\r') {
             line_length--;
           }
           if (line_length > MAX_LINE_BYTES) {
-            usb_write_literal("ERROR input_too_large\n");
+            transport_write_literal("ERROR input_too_large\n");
           } else {
             line[line_length] = '\0';
             last_message_tick = xTaskGetTickCount();
@@ -351,7 +360,7 @@ void app_main(void) {
         (int32_t)(xTaskGetTickCount() - ready_deadline) >= 0) {
       ready_scheduled = false;
       if (agent_display_show(AGENT_DISPLAY_IDLE, NULL) != ESP_OK) {
-        usb_write_literal("DISPLAY ERROR\n");
+        transport_write_literal("DISPLAY ERROR\n");
       }
     }
     agent_buttons_tick();
