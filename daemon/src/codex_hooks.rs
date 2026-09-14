@@ -15,6 +15,8 @@ pub struct CodexHook {
     pub hook_event_name: String,
     #[serde(default)]
     pub cwd: Option<String>,
+    #[serde(default)]
+    pub response_kind: Option<String>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -42,18 +44,19 @@ impl CodexActivityTracker {
     pub fn apply(&mut self, hook: CodexHook) -> Option<Event> {
         match hook.hook_event_name.as_str() {
             "UserPromptSubmit" => {
+                self.remove_session_activities(&hook.session_id);
                 self.set_activity(&hook, ActivityStatus::Working);
                 self.visible_activity()
             }
-            "PermissionRequest" => {
-                self.set_activity(&hook, ActivityStatus::InputRequired);
-                self.visible_activity()
-            }
+            "PermissionRequest" => self.require_input(&hook),
             "PostToolUse" => {
                 self.set_activity(&hook, ActivityStatus::Working);
                 self.visible_activity()
             }
             "Stop" => {
+                if hook.response_kind.as_deref() == Some("input_required") {
+                    return self.require_input(&hook);
+                }
                 let activity_id = activity_id(&hook);
                 if self.activities.remove(&activity_id).is_none() {
                     return self.visible_activity();
@@ -90,9 +93,35 @@ impl CodexActivityTracker {
         );
     }
 
+    fn require_input(&mut self, hook: &CodexHook) -> Option<Event> {
+        let activity_id = activity_id(hook);
+        if self
+            .activities
+            .get(&activity_id)
+            .is_some_and(|activity| activity.status == ActivityStatus::InputRequired)
+        {
+            return None;
+        }
+        self.set_activity(hook, ActivityStatus::InputRequired);
+        let visible = self.activity_snapshot()?;
+        self.last_visible = Some(visible.clone());
+        Some(visible)
+    }
+
+    fn remove_session_activities(&mut self, session_id: &str) {
+        self.activities
+            .retain(|_, activity| activity.session_id != session_id);
+    }
+
     fn visible_activity(&mut self) -> Option<Event> {
         let visible = self.activity_snapshot()?;
-        self.deduplicate(visible)
+        let mut emitted = self.deduplicate(visible)?;
+        if emitted.event == "agent.input_required" {
+            emitted
+                .extra
+                .insert("suppress_audio".to_owned(), json!(true));
+        }
+        Some(emitted)
     }
 
     fn activity_snapshot(&self) -> Option<Event> {
@@ -217,6 +246,7 @@ mod tests {
             turn_id: Some(turn.to_owned()),
             hook_event_name: name.to_owned(),
             cwd: Some(cwd.to_owned()),
+            response_kind: None,
         }
     }
 
@@ -247,6 +277,24 @@ mod tests {
     }
 
     #[test]
+    fn stop_that_waits_for_a_reply_requests_input_instead_of_reporting_done() {
+        let mut tracker = CodexActivityTracker::default();
+        tracker.apply(hook("session-a", "UserPromptSubmit", "/work/agent-beacon"));
+        let stop: CodexHook = serde_json::from_value(json!({
+            "session_id": "session-a",
+            "turn_id": "session-a-turn",
+            "hook_event_name": "Stop",
+            "cwd": "/work/agent-beacon",
+            "response_kind": "input_required"
+        }))
+        .expect("等待回答的 Stop 载荷应可解析");
+
+        let waiting = tracker.apply(stop).expect("等待回答应产生可见事件");
+        assert_eq!(waiting.event, "agent.input_required");
+        assert!(!waiting.extra.contains_key("announcement"));
+    }
+
+    #[test]
     fn input_required_has_priority_over_other_work() {
         let mut tracker = CodexActivityTracker::default();
         tracker.apply(hook("working", "UserPromptSubmit", "/work/alpha"));
@@ -263,6 +311,22 @@ mod tests {
             .expect("高优先级任务结束后应恢复另一个工作任务");
         assert_eq!(fallback.event, "task.start");
         assert_eq!(fallback.title.as_deref(), Some("ALPHA"));
+    }
+
+    #[test]
+    fn background_refresh_does_not_reannounce_existing_input_request() {
+        let mut tracker = CodexActivityTracker::default();
+        tracker.apply(hook("waiting", "UserPromptSubmit", "/work/waiting"));
+        let first = tracker
+            .apply(hook("waiting", "PermissionRequest", "/work/waiting"))
+            .expect("首次等待输入应可见");
+        assert!(!first.extra.contains_key("suppress_audio"));
+
+        let refreshed = tracker
+            .apply(hook("working", "UserPromptSubmit", "/work/working"))
+            .expect("后台任务变化应刷新卡片");
+        assert_eq!(refreshed.event, "agent.input_required");
+        assert_eq!(refreshed.extra["suppress_audio"], true);
     }
 
     #[test]
@@ -309,7 +373,7 @@ mod tests {
     }
 
     #[test]
-    fn turns_in_one_session_complete_once_without_overwriting_each_other() {
+    fn reply_starts_a_new_turn_and_clears_the_previous_waiting_turn() {
         let mut tracker = CodexActivityTracker::default();
         tracker.apply(hook_with_turn(
             "session-a",
@@ -317,21 +381,32 @@ mod tests {
             "UserPromptSubmit",
             "/work/alpha",
         ));
-        tracker.apply(hook_with_turn(
-            "session-a",
-            "turn-b",
-            "UserPromptSubmit",
-            "/work/beta",
-        ));
+        let waiting: CodexHook = serde_json::from_value(json!({
+            "session_id": "session-a",
+            "turn_id": "turn-a",
+            "hook_event_name": "Stop",
+            "cwd": "/work/alpha",
+            "response_kind": "input_required"
+        }))
+        .expect("等待回答的 Stop 载荷应可解析");
+        assert_eq!(
+            tracker.apply(waiting).expect("提问应等待回答").event,
+            "agent.input_required"
+        );
 
-        let first = tracker
-            .apply(hook_with_turn("session-a", "turn-a", "Stop", "/work/alpha"))
-            .expect("第一个 turn 应产生完成通知");
-        assert_eq!(first.extra["announcement"], "done");
-        assert_eq!(first.title.as_deref(), Some("BETA"));
+        let resumed = tracker
+            .apply(hook_with_turn(
+                "session-a",
+                "turn-b",
+                "UserPromptSubmit",
+                "/work/beta",
+            ))
+            .expect("用户回答后应开始新 turn");
+        assert_eq!(resumed.event, "task.start");
+        assert_eq!(resumed.title.as_deref(), Some("BETA"));
 
         let replay = tracker.apply(hook_with_turn("session-a", "turn-a", "Stop", "/work/alpha"));
-        assert!(replay.is_none(), "重复 Stop 不应再次播报");
+        assert!(replay.is_none(), "旧 turn 的重复 Stop 不应改变新 turn");
 
         let second = tracker
             .apply(hook_with_turn("session-a", "turn-b", "Stop", "/work/beta"))

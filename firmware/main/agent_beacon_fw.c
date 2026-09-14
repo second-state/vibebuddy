@@ -85,7 +85,7 @@ static void show_event(const cJSON *message, const char *event,
   agent_display_state_t state;
   agent_display_task_t tasks[AGENT_DISPLAY_MAX_TASKS];
   size_t task_count = parse_tasks(message, tasks);
-  agent_audio_prompt_t prompt;
+  agent_audio_prompt_t prompt = AGENT_AUDIO_INPUT_REQUIRED;
   bool play_prompt = false;
   const char *prompt_label = NULL;
   const char *state_label;
@@ -122,6 +122,13 @@ static void show_event(const cJSON *message, const char *event,
     ready_scheduled = false;
   } else {
     return;
+  }
+
+  const cJSON *suppress_audio =
+      cJSON_GetObjectItemCaseSensitive(message, "suppress_audio");
+  if (cJSON_IsTrue(suppress_audio)) {
+    play_prompt = false;
+    prompt_label = NULL;
   }
 
   const cJSON *announcement =

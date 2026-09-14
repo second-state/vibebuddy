@@ -11,11 +11,14 @@ AgentBeacon 使用以下映射：
 | `UserPromptSubmit` | 工作中 |
 | `PermissionRequest` | 需要确认 |
 | `PostToolUse` | 恢复工作中 |
-| `Stop` | 完成 |
+| `Stop`（回复正在等待用户回答） | 需要确认 |
+| `Stop`（其他回复） | 完成 |
 | `Interrupt` | 空闲，标题为 `INTERRUPTED`，不误报成功 |
 | `SessionEnd` | 空闲 |
 
-多会话由 `beacond` 聚合：任务卡按最近活动排序，最多 3 张；需要确认的会话优先控制宠物表情。活动身份由 `session_id` 与 `turn_id` 共同确定。每个已跟踪 turn 的 `Stop` 都会产生一次完成通知，即使画面仍需显示其他工作中的任务；同一 turn 的重复 `Stop` 不会重复播报。
+多会话由 `beacond` 聚合：任务卡按最近活动排序，最多 3 张；需要确认的会话优先控制宠物表情。活动身份由 `session_id` 与 `turn_id` 共同确定。每个已跟踪、且不等待用户回答的 turn，其 `Stop` 都会产生一次完成通知，即使画面仍需显示其他工作中的任务；同一 turn 的重复 `Stop` 不会重复播报。等待回答的 turn 保持为需要确认，用户提交下一条消息时再切回工作中。其他任务造成卡片刷新时，画面仍显示需要确认，但不会重复播放同一条输入提醒。
+
+Codex Hook 没有直接提供“这条助手回复是否要求用户回答”的结构化字段。`Stop` 会提供 `last_assistant_message`，隐私过滤脚本仅在本机检查最后一段是否包含明确问题或回复指令，然后生成 `response_kind: input_required`。这是保守的文本规则，不是对回复正文做远端语义分析。
 
 ## 隐私边界
 
@@ -25,6 +28,8 @@ Hook 的原始 JSON 可能含 prompt、transcript 路径、工具输入和工具
 - `turn_id`
 - `hook_event_name`
 - `cwd`
+
+当且仅当 `Stop` 被本机规则判定为等待回答时，脚本还会加入派生字段 `response_kind`。`last_assistant_message` 本身不会发送给 daemon。
 
 它只请求 `http://127.0.0.1:7331/v1/codex-hooks`，超时为 0.5 秒；daemon 未运行、载荷无效或连接失败时静默退出 0，不阻塞 Codex。不要改成直接 `curl --data-binary @-`，否则敏感字段会越过适配器边界。
 
