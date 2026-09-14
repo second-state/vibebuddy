@@ -1,3 +1,4 @@
+mod codex_hooks;
 mod serial_transport;
 
 use std::env;
@@ -9,14 +10,17 @@ use axum::http::StatusCode;
 use axum::routing::post;
 use axum::{Json, Router};
 use beacon_protocol::Event;
+use codex_hooks::{CodexActivityTracker, CodexHook};
 use serde::Serialize;
 use serial_transport::{SerialConfig, SerialTransport, Transport, TransportError};
+use tokio::sync::Mutex;
 use tracing::info;
 use tracing_subscriber::EnvFilter;
 
 #[derive(Clone)]
 struct AppState {
     transport: Arc<dyn Transport>,
+    codex_activities: Arc<Mutex<CodexActivityTracker>>,
 }
 
 #[derive(Serialize)]
@@ -54,7 +58,11 @@ async fn main() {
 fn app(transport: Arc<dyn Transport>) -> Router {
     Router::new()
         .route("/v1/events", post(post_event))
-        .with_state(AppState { transport })
+        .route("/v1/codex-hooks", post(post_codex_hook))
+        .with_state(AppState {
+            transport,
+            codex_activities: Arc::new(Mutex::new(CodexActivityTracker::default())),
+        })
 }
 
 async fn post_event(
@@ -99,6 +107,23 @@ async fn post_event(
     }
 }
 
+async fn post_codex_hook(
+    State(state): State<AppState>,
+    Json(hook): Json<CodexHook>,
+) -> (StatusCode, Json<ApiResponse>) {
+    let event = state.codex_activities.lock().await.apply(hook);
+    let Some(event) = event else {
+        return (
+            StatusCode::ACCEPTED,
+            Json(ApiResponse {
+                accepted: true,
+                message: "Hook 已接收，可见状态未变化".to_owned(),
+            }),
+        );
+    };
+    post_event(State(state), Json(event)).await
+}
+
 #[cfg(test)]
 mod tests {
     use std::sync::Mutex;
@@ -127,6 +152,9 @@ mod tests {
         let (status, Json(response)) = post_event(
             State(AppState {
                 transport: transport.clone(),
+                codex_activities: Arc::new(
+                    tokio::sync::Mutex::new(CodexActivityTracker::default()),
+                ),
             }),
             Json(event),
         )

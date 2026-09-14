@@ -28,13 +28,13 @@
 
 实机结论：`beacond` 按 `303A:1001` 自动发现 `/dev/cu.usbmodem8401`；HTTP 事件到达 ESP32 并得到对应诊断输出。真实拔掉 `USB-SLAVE` 后记录到 `Device not configured`，插回后自动重新连接；重连后的 `task.done` 事件成功到达设备。
 
-### Stage 3 — LCD
+### Stage 3 — LCD（已完成，2026-09-14）
 
-在官方参数/BSP 经确认后实现 Ready、Working、Done、Failed 状态。
+实机确认 320×240 ST7789 i80 与 XL9555 背光控制后，实现小灯灵的 Ready、Working、Input Required、Done、Failed 动画。Mac 端多任务快照可绘制最多 3 张卡片，最新在最上。
 
-### Stage 4 — Buzzer / Audio
+### Stage 4 — Audio（已完成，2026-09-14）
 
-先实现最简单可靠的成功和失败提示音，不做 TTS。
+实机探测到 ES8311，并确认 I2S 与扬声器使能链路。需要确认、完成和失败使用固件内置的 24 kHz PCM 中文短语音；工作中与空闲保持静音。用户已听觉确认“需要你确认”。
 
 ### Stage 5 — Buttons
 
@@ -46,4 +46,4 @@
 
 ## Later
 
-TTS、microphone、voice interaction、task history、Wi-Fi、WebSocket transport、richer UI、progress、多 Agent、多设备。
+可选任务标题、microphone、voice interaction、长期任务历史、Wi-Fi、WebSocket transport、progress、多设备。多 Agent 的三任务实时卡片已提前进入 Stage 4。

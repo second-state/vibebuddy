@@ -106,6 +106,11 @@ static SemaphoreHandle_t transfer_done;
 static bool display_ready;
 static agent_display_state_t current_state = AGENT_DISPLAY_IDLE;
 static char current_title[TITLE_BYTES];
+static struct {
+  char title[TITLE_BYTES];
+  agent_display_state_t state;
+} current_tasks[AGENT_DISPLAY_MAX_TASKS];
+static size_t current_task_count;
 static uint32_t animation_frame;
 static TickType_t next_animation_at;
 
@@ -243,40 +248,42 @@ static void draw_text_centered(int y, const char *text, int scale,
 }
 
 static void draw_pet_face(agent_display_state_t state, uint32_t frame,
-                          int y_offset, uint16_t color) {
+                          int x_offset, int y_offset, uint16_t color) {
   int face_y = 79 + y_offset;
   if (state == AGENT_DISPLAY_WORKING) {
-    draw_text(139, face_y + 5, ">", 2, color, 1);
+    draw_text(139 + x_offset, face_y + 5, ">", 2, color, 1);
     int dot_count = (int)(frame % 3) + 1;
     for (int index = 0; index < dot_count; index++) {
-      fill_rect(163 + index * 8, face_y + 17, 5, 3, color);
+      fill_rect(163 + x_offset + index * 8, face_y + 17, 5, 3, color);
     }
   } else if (state == AGENT_DISPLAY_INPUT_REQUIRED) {
-    draw_text(141, face_y + 5, "!?", 2, color, 2);
+    draw_text(141 + x_offset, face_y + 5, "!?", 2, color, 2);
   } else if (state == AGENT_DISPLAY_DONE) {
-    draw_line(140, face_y + 12, 147, face_y + 6, color);
-    draw_line(147, face_y + 6, 154, face_y + 12, color);
-    draw_line(166, face_y + 12, 173, face_y + 6, color);
-    draw_line(173, face_y + 6, 180, face_y + 12, color);
-    draw_line(151, face_y + 19, 160, face_y + 23, color);
-    draw_line(160, face_y + 23, 169, face_y + 19, color);
+    draw_line(140 + x_offset, face_y + 12, 147 + x_offset, face_y + 6, color);
+    draw_line(147 + x_offset, face_y + 6, 154 + x_offset, face_y + 12, color);
+    draw_line(166 + x_offset, face_y + 12, 173 + x_offset, face_y + 6, color);
+    draw_line(173 + x_offset, face_y + 6, 180 + x_offset, face_y + 12, color);
+    draw_line(151 + x_offset, face_y + 19, 160 + x_offset, face_y + 23, color);
+    draw_line(160 + x_offset, face_y + 23, 169 + x_offset, face_y + 19, color);
   } else if (state == AGENT_DISPLAY_FAILED) {
-    draw_line(140, face_y + 7, 153, face_y + 18, color);
-    draw_line(153, face_y + 7, 140, face_y + 18, color);
-    draw_line(167, face_y + 7, 180, face_y + 18, color);
-    draw_line(180, face_y + 7, 167, face_y + 18, color);
-    draw_line(153, face_y + 25, 167, face_y + 25, color);
+    draw_line(140 + x_offset, face_y + 7, 153 + x_offset, face_y + 18, color);
+    draw_line(153 + x_offset, face_y + 7, 140 + x_offset, face_y + 18, color);
+    draw_line(167 + x_offset, face_y + 7, 180 + x_offset, face_y + 18, color);
+    draw_line(180 + x_offset, face_y + 7, 167 + x_offset, face_y + 18, color);
+    draw_line(153 + x_offset, face_y + 25, 167 + x_offset, face_y + 25, color);
   } else {
     bool blinking = frame % 8 == 7;
-    fill_rect(143, face_y + (blinking ? 14 : 8), 8, blinking ? 3 : 10, color);
-    fill_rect(169, face_y + (blinking ? 14 : 8), 8, blinking ? 3 : 10, color);
-    draw_line(154, face_y + 24, 160, face_y + 27, color);
-    draw_line(160, face_y + 27, 166, face_y + 24, color);
+    fill_rect(143 + x_offset, face_y + (blinking ? 14 : 8), 8,
+              blinking ? 3 : 10, color);
+    fill_rect(169 + x_offset, face_y + (blinking ? 14 : 8), 8,
+              blinking ? 3 : 10, color);
+    draw_line(154 + x_offset, face_y + 24, 160 + x_offset, face_y + 27, color);
+    draw_line(160 + x_offset, face_y + 27, 166 + x_offset, face_y + 24, color);
   }
 }
 
 static void draw_beaconling(agent_display_state_t state, uint32_t frame,
-                            uint16_t color) {
+                            int x_offset, uint16_t color) {
   int y_offset = 0;
   if (state == AGENT_DISPLAY_WORKING) {
     y_offset = frame % 2 == 0 ? 0 : 2;
@@ -288,22 +295,67 @@ static void draw_beaconling(agent_display_state_t state, uint32_t frame,
     y_offset = 1;
   }
 
-  fill_rect(157, 48 + y_offset, 6, 13, COLOR_PET_HIGHLIGHT);
-  fill_rect(153, 44 + y_offset, 14, 10, color);
+  fill_rect(157 + x_offset, 48 + y_offset, 6, 13, COLOR_PET_HIGHLIGHT);
+  fill_rect(153 + x_offset, 44 + y_offset, 14, 10, color);
 
-  fill_rect(113, 65 + y_offset, 94, 52, COLOR_PET);
-  fill_rect(121, 59 + y_offset, 78, 64, COLOR_PET);
-  fill_rect(105, 78 + y_offset, 12, 28, COLOR_PET_HIGHLIGHT);
-  fill_rect(203, 78 + y_offset, 12, 28, COLOR_PET_HIGHLIGHT);
-  fill_rect(128, 75 + y_offset, 64, 40, COLOR_BACKGROUND);
-  fill_rect(132, 79 + y_offset, 56, 32, 0x10a4);
-  draw_pet_face(state, frame, y_offset, color);
+  fill_rect(113 + x_offset, 65 + y_offset, 94, 52, COLOR_PET);
+  fill_rect(121 + x_offset, 59 + y_offset, 78, 64, COLOR_PET);
+  fill_rect(105 + x_offset, 78 + y_offset, 12, 28, COLOR_PET_HIGHLIGHT);
+  fill_rect(203 + x_offset, 78 + y_offset, 12, 28, COLOR_PET_HIGHLIGHT);
+  fill_rect(128 + x_offset, 75 + y_offset, 64, 40, COLOR_BACKGROUND);
+  fill_rect(132 + x_offset, 79 + y_offset, 56, 32, 0x10a4);
+  draw_pet_face(state, frame, x_offset, y_offset, color);
 
-  fill_rect(139, 121 + y_offset, 42, 25, COLOR_PET);
-  fill_rect(126, 125 + y_offset, 13, 17, COLOR_PET_HIGHLIGHT);
-  fill_rect(181, 125 + y_offset, 13, 17, COLOR_PET_HIGHLIGHT);
-  fill_rect(143, 145 + y_offset, 13, 8, COLOR_PET_HIGHLIGHT);
-  fill_rect(164, 145 + y_offset, 13, 8, COLOR_PET_HIGHLIGHT);
+  fill_rect(139 + x_offset, 121 + y_offset, 42, 25, COLOR_PET);
+  fill_rect(126 + x_offset, 125 + y_offset, 13, 17, COLOR_PET_HIGHLIGHT);
+  fill_rect(181 + x_offset, 125 + y_offset, 13, 17, COLOR_PET_HIGHLIGHT);
+  fill_rect(143 + x_offset, 145 + y_offset, 13, 8, COLOR_PET_HIGHLIGHT);
+  fill_rect(164 + x_offset, 145 + y_offset, 13, 8, COLOR_PET_HIGHLIGHT);
+}
+
+static uint16_t state_color(agent_display_state_t state) {
+  if (state == AGENT_DISPLAY_WORKING) {
+    return COLOR_WORKING;
+  }
+  if (state == AGENT_DISPLAY_INPUT_REQUIRED) {
+    return COLOR_INPUT;
+  }
+  if (state == AGENT_DISPLAY_DONE) {
+    return COLOR_DONE;
+  }
+  if (state == AGENT_DISPLAY_FAILED) {
+    return COLOR_FAILED;
+  }
+  return COLOR_READY;
+}
+
+static const char *short_state_label(agent_display_state_t state) {
+  if (state == AGENT_DISPLAY_INPUT_REQUIRED) {
+    return "ASK";
+  }
+  if (state == AGENT_DISPLAY_DONE) {
+    return "DONE";
+  }
+  if (state == AGENT_DISPLAY_FAILED) {
+    return "FAIL";
+  }
+  return "RUN";
+}
+
+static void draw_task_cards(void) {
+  for (size_t index = 0; index < current_task_count; index++) {
+    int x = 8 + (int)index * 4;
+    int y = 50 + (int)index * 38;
+    int width = 188 - (int)index * 4;
+    uint16_t card_color = index == 0 ? 0x18c6 : 0x1083;
+    uint16_t color = state_color(current_tasks[index].state);
+    fill_rect(x, y, width, 32, COLOR_MUTED);
+    fill_rect(x + 2, y + 2, width - 4, 28, card_color);
+    fill_rect(x + 2, y + 2, 4, 28, color);
+    draw_text(x + 12, y + 5, current_tasks[index].title, 1, COLOR_TEXT, 26);
+    draw_text(x + 12, y + 17, short_state_label(current_tasks[index].state), 1,
+              color, 4);
+  }
 }
 
 static esp_err_t present(void) {
@@ -339,11 +391,17 @@ static esp_err_t render_current_state(void) {
   fill_rect(0, 0, DISPLAY_WIDTH, DISPLAY_HEIGHT, COLOR_BACKGROUND);
   fill_rect(0, 0, DISPLAY_WIDTH, 4, status_color);
   draw_text_centered(12, "AgentBeacon", 2, COLOR_TEXT);
-  draw_beaconling(current_state, animation_frame, status_color);
+  if (current_task_count > 0) {
+    draw_task_cards();
+  }
+  draw_beaconling(current_state, animation_frame,
+                  current_task_count > 0 ? 96 : 0, status_color);
   draw_text_centered(162, label,
                      current_state == AGENT_DISPLAY_INPUT_REQUIRED ? 2 : 3,
                      status_color);
-  if (current_title[0] != '\0') {
+  if (current_task_count > 0) {
+    draw_text_centered(195, "LATEST ON TOP", 1, COLOR_MUTED);
+  } else if (current_title[0] != '\0') {
     draw_text_centered(195, current_title, 2, COLOR_TEXT);
   } else if (current_state == AGENT_DISPLAY_IDLE) {
     draw_text_centered(195, "YOUR AGENT PET", 2, COLOR_MUTED);
@@ -369,6 +427,13 @@ static TickType_t animation_period(agent_display_state_t state) {
 }
 
 esp_err_t agent_display_show(agent_display_state_t state, const char *title) {
+  return agent_display_show_tasks(state, title, NULL, 0);
+}
+
+esp_err_t agent_display_show_tasks(agent_display_state_t state,
+                                   const char *title,
+                                   const agent_display_task_t *tasks,
+                                   size_t task_count) {
   if (!display_ready) {
     return ESP_ERR_INVALID_STATE;
   }
@@ -380,6 +445,17 @@ esp_err_t agent_display_show(agent_display_state_t state, const char *title) {
   } else {
     strncpy(current_title, title, sizeof(current_title) - 1);
     current_title[sizeof(current_title) - 1] = '\0';
+  }
+  current_task_count = task_count > AGENT_DISPLAY_MAX_TASKS
+                           ? AGENT_DISPLAY_MAX_TASKS
+                           : task_count;
+  for (size_t index = 0; index < current_task_count; index++) {
+    const char *task_title =
+        tasks[index].title == NULL ? "CODEX" : tasks[index].title;
+    strncpy(current_tasks[index].title, task_title,
+            sizeof(current_tasks[index].title) - 1);
+    current_tasks[index].title[sizeof(current_tasks[index].title) - 1] = '\0';
+    current_tasks[index].state = tasks[index].state;
   }
   next_animation_at = xTaskGetTickCount() + animation_period(current_state);
   return render_current_state();

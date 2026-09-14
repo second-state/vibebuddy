@@ -5,3 +5,4 @@ target/
 build/
 sdkconfig
 sdkconfig.old
+/firmware/managed_components/

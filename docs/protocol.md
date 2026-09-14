@@ -33,7 +33,21 @@ Mac 到设备的首批事件：
 - `task.done`
 - `task.error`
 
-未来事件可以包括 `task.progress`、`task.cancelled`、`agent.waiting`、`agent.input_required`、`message`、`system` 和 `device.status`。
+当前固件识别：
+
+- `task.start`：工作中，不播放语音。
+- `agent.input_required`：需要用户确认，播放一次“需要你确认”。
+- `task.done`：完成，播放一次“任务完成”，5 秒后回到空闲。
+- `task.error` / `agent.blocked`：失败，播放一次“任务遇到问题”。
+- `agent.idle`：回到空闲，不播放语音。
+
+`beacond` 可附加最多 3 项的 `tasks` 数组。数组按最近活动倒序，设备按给定顺序绘制任务卡：
+
+```json
+{"version":1,"event":"task.start","title":"GAMMA","tasks":[{"title":"GAMMA","status":"working"},{"title":"BETA","status":"input_required"}]}
+```
+
+每项包含 `title` 和 `status`；当前状态值为 `working`、`input_required`、`done`、`failed`。旧固件会按 v1 规则忽略 `tasks`。未来事件可以包括 `task.progress`、`task.cancelled`、`agent.waiting`、`message`、`system` 和 `device.status`。
 
 设备到 Mac 的事件同样使用 NDJSON，例如：
 

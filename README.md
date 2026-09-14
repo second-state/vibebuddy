@@ -2,11 +2,11 @@ AgentBeacon is a physical status terminal for local AI agents and long-running t
 
 # AgentBeacon
 
-AgentBeacon 是面向本地 AI Agent、开发工具和长时间运行任务的桌面硬件状态终端，不绑定某个 ChatGPT/Codex 客户端。未来可接入本地 Agent、Python/Rust、Shell、视频生成、模型训练、FFmpeg/Blender、CI/Build 等。
+AgentBeacon 是运行在 ESP32-S3 盒子里的实体 Agent 宠物。原创角色“小灯灵”用动画、任务卡片和短语音呈现本地 AI Agent 与长任务的状态；Codex 是第一个适配器，但设备协议不绑定某个客户端。
 
 ## 当前状态
 
-**Stage 2 — `beacond` 已通过实机验收。** 本机 HTTP 请求已经经由 `beacond`、自动发现的 ESP32-S3 原生 USB Serial/JTAG 和 Beacon Protocol 到达固件；真实拔插后 daemon 自动重新发现并连接设备，重连后的事件也已送达。设备当前不初始化 LCD、audio 或 buttons；Stage 3 正在调查准确屏幕参数和 BSP。
+**Stage 4 — 小灯灵显示与语音已通过实机验收。** Codex 生命周期事件可经本机 Hook、`beacond`、USB Serial/JTAG 到达盒子。小灯灵支持空闲、工作中、需要确认、完成和失败动画；最多显示 3 张任务卡，最新在最上；需要确认、完成和失败各播报一次短语音，工作中保持安静。
 
 ## 目标架构
 
@@ -24,7 +24,7 @@ Local Programs / Agents / Codex / Scripts
                 v
            ESP32S3-BOX
                 |
-      LCD / Speaker / Buzzer / Buttons
+      LCD / Speaker / Buttons
 ```
 
 - `beacond`：本机守护进程，负责事件接入、设备连接、重连、路由和状态。
@@ -32,7 +32,7 @@ Local Programs / Agents / Codex / Scripts
 - `agent-beacon-fw`：ESP32-S3 固件，仅负责设备 I/O 和 Beacon Protocol 消息处理。
 - Beacon Protocol：与 transport 解耦的可扩展 NDJSON 协议。
 
-更完整的边界与决定见 [`docs/architecture.md`](docs/architecture.md)，协议决定见 [`docs/protocol.md`](docs/protocol.md)，阶段门禁见 [`docs/roadmap.md`](docs/roadmap.md)，实机证据见 [`docs/stage-0.md`](docs/stage-0.md)、[`docs/stage-1.md`](docs/stage-1.md) 和 [`docs/stage-2.md`](docs/stage-2.md)，外部项目的借鉴边界见 [`docs/references.md`](docs/references.md)。
+更完整的边界与决定见 [`docs/architecture.md`](docs/architecture.md)，小灯灵设计见 [`docs/pet.md`](docs/pet.md)，Codex 接入见 [`docs/codex-adapter.md`](docs/codex-adapter.md)，协议决定见 [`docs/protocol.md`](docs/protocol.md)，阶段门禁见 [`docs/roadmap.md`](docs/roadmap.md)，外部项目的借鉴边界见 [`docs/references.md`](docs/references.md)。
 
 ## Stage 0 USB 探测
 
@@ -74,6 +74,12 @@ curl -H 'content-type: application/json' \
 ```
 
 可用 `BEACON_BIND` 修改监听地址、`BEACON_SERIAL_PORT` 显式指定串口，或用 `BEACON_USB_SERIAL` 在多块相同设备中选择目标。HTTP `202 Accepted` 表示事件进入有界发送队列；设备实际接收结果以 daemon 记录的设备响应为准。
+
+当前 Mac Studio 已安装 `com.agentbeacon.beacond` LaunchAgent，登录后会自动运行 release binary；配置模板在 [`packaging/com.agentbeacon.beacond.plist`](packaging/com.agentbeacon.beacond.plist)。
+
+## Codex 宠物接入
+
+仓库的 [`tools/codex-hook.py`](tools/codex-hook.py) 只抽取 Hook 的 `session_id`、`hook_event_name` 和 `cwd`，不会转发 prompt、transcript 或工具结果。用户级 `~/.codex/hooks.json` 需要为六个生命周期事件配置该脚本，并在 Codex 的 `/hooks` 页面审查、信任配置；详见 [`docs/codex-adapter.md`](docs/codex-adapter.md)。
 
 ## 仓库布局
 

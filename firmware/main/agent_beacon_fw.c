@@ -3,6 +3,7 @@
 #include <stdint.h>
 #include <string.h>
 
+#include "agent_audio.h"
 #include "agent_display.h"
 #include "cJSON.h"
 #include "driver/usb_serial_jtag.h"
@@ -42,35 +43,90 @@ static void usb_write_value_line(const char *label, const char *value) {
   usb_write_literal("\n");
 }
 
-static void show_event(const char *event, const char *title) {
+static agent_display_state_t task_state(const char *status) {
+  if (strcmp(status, "input_required") == 0) {
+    return AGENT_DISPLAY_INPUT_REQUIRED;
+  }
+  if (strcmp(status, "done") == 0) {
+    return AGENT_DISPLAY_DONE;
+  }
+  if (strcmp(status, "failed") == 0) {
+    return AGENT_DISPLAY_FAILED;
+  }
+  return AGENT_DISPLAY_WORKING;
+}
+
+static size_t parse_tasks(const cJSON *message, agent_display_task_t *tasks) {
+  const cJSON *task_list = cJSON_GetObjectItemCaseSensitive(message, "tasks");
+  if (!cJSON_IsArray(task_list)) {
+    return 0;
+  }
+
+  size_t count = 0;
+  const cJSON *item;
+  cJSON_ArrayForEach(item, task_list) {
+    if (count == AGENT_DISPLAY_MAX_TASKS) {
+      break;
+    }
+    const cJSON *title = cJSON_GetObjectItemCaseSensitive(item, "title");
+    const cJSON *status = cJSON_GetObjectItemCaseSensitive(item, "status");
+    if (!cJSON_IsString(title) || !cJSON_IsString(status)) {
+      continue;
+    }
+    tasks[count].title = title->valuestring;
+    tasks[count].state = task_state(status->valuestring);
+    count++;
+  }
+  return count;
+}
+
+static void show_event(const cJSON *message, const char *event,
+                       const char *title) {
   agent_display_state_t state;
+  agent_display_task_t tasks[AGENT_DISPLAY_MAX_TASKS];
+  size_t task_count = parse_tasks(message, tasks);
+  agent_audio_prompt_t prompt;
+  bool play_prompt = false;
   const char *state_label;
   if (strcmp(event, "task.start") == 0) {
     state = AGENT_DISPLAY_WORKING;
     state_label = "WORKING";
     ready_scheduled = false;
+  } else if (strcmp(event, "agent.idle") == 0) {
+    state = AGENT_DISPLAY_IDLE;
+    state_label = "READY";
+    ready_scheduled = false;
   } else if (strcmp(event, "agent.input_required") == 0) {
     state = AGENT_DISPLAY_INPUT_REQUIRED;
+    prompt = AGENT_AUDIO_INPUT_REQUIRED;
+    play_prompt = true;
     state_label = "INPUT REQUIRED";
     ready_scheduled = false;
   } else if (strcmp(event, "task.done") == 0) {
     state = AGENT_DISPLAY_DONE;
+    prompt = AGENT_AUDIO_DONE;
+    play_prompt = true;
     state_label = "DONE";
     ready_scheduled = true;
     ready_deadline = xTaskGetTickCount() + pdMS_TO_TICKS(5000);
   } else if (strcmp(event, "task.error") == 0 ||
              strcmp(event, "agent.blocked") == 0) {
     state = AGENT_DISPLAY_FAILED;
+    prompt = AGENT_AUDIO_FAILED;
+    play_prompt = true;
     state_label = "FAILED";
     ready_scheduled = false;
   } else {
     return;
   }
 
-  if (agent_display_show(state, title) != ESP_OK) {
+  if (agent_display_show_tasks(state, title, tasks, task_count) != ESP_OK) {
     usb_write_literal("DISPLAY ERROR\n");
   } else {
     usb_write_value_line("DISPLAY STATE ", state_label);
+  }
+  if (play_prompt && agent_audio_play(prompt) != ESP_OK) {
+    usb_write_literal("AUDIO ERROR\n");
   }
 }
 
@@ -107,7 +163,8 @@ static void handle_line(char *line, size_t length) {
   if (title != NULL) {
     usb_write_value_line("TITLE ", title->valuestring);
   }
-  show_event(event->valuestring, title == NULL ? NULL : title->valuestring);
+  show_event(message, event->valuestring,
+             title == NULL ? NULL : title->valuestring);
 
   cJSON_Delete(message);
 }
@@ -123,6 +180,12 @@ void app_main(void) {
     usb_write_literal("DISPLAY READY\n");
   } else {
     usb_write_literal("DISPLAY ERROR\n");
+  }
+  if (agent_audio_init() == ESP_OK) {
+    usb_write_literal("AUDIO READY\n");
+    usb_write_value_line("AUDIO CODEC ", agent_audio_status());
+  } else {
+    usb_write_value_line("AUDIO ERROR ", agent_audio_status());
   }
 
   char line[LINE_BUFFER_BYTES];

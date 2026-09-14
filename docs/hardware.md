@@ -41,6 +41,9 @@
 - 实物布局与当前固件自报标识共同确认板型为 **ATK-DNESP32S3-BOX V1.1**；不是 DNESP32S3 开发板、BOX0、BOX2 或 BOX3。
 - Stage 2 真实拔掉 `USB-SLAVE` 后，`beacond` 记录到 `Device not configured`；插回后自动重新发现同一串口节点并恢复通信。
 - 完整 USB 断电后，原小智固件遗留画面消失而屏幕保持黑色；这证明旧画面是 LCD 残留状态，不代表旧固件仍在运行，也不证明 AgentBeacon 已有 LCD 驱动。
+- LCD 已由 AgentBeacon 实机驱动并通过视觉验收：320×240 ST7789、8 位 i80，总线数据 GPIO40/39/38/12/11/10/9/46，CS/DC/RD/WR 为 GPIO1/2/41/42，背光由 XL9555 P0.7 控制。
+- I2C 在 7 位地址 `0x18` 探测到 ES8311；音频 I2S BCLK/WS/DOUT 为 GPIO21/13/14，采样率 24 kHz，扬声器使能由 XL9555 P0.5 控制。
+- 固件启动已回报 `AUDIO READY` 与 `AUDIO CODEC ES8311`；用户已实际听到“需要你确认”语音。
 
 ## 当前运行固件旁证
 
@@ -52,7 +55,6 @@
 ## 待验证
 
 - 与准确 PCB 版本匹配的厂家 schematic、BSP 和 examples。
-- LCD 控制器、分辨率和接线。
 - 触摸控制器（如有）。
-- audio codec、功放和麦克风接口。
+- 麦克风输入链路。
 - buzzer 与 K0/K1/K2 的 GPIO 和有效电平。
