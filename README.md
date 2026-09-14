@@ -6,7 +6,7 @@ AgentBeacon 是面向本地 AI Agent、开发工具和长时间运行任务的�
 
 ## 当前状态
 
-项目处于 **Stage 0 — Hardware Probe**。当前只建立架构、路线图和可重复的 Mac USB 探测流程；在准确板型、USB 枚举、烧录路径和运行时串口得到实机确认前，不进入固件实现。
+**Stage 1 — Serial Hello 已通过实机验收。** Mac Studio 已通过同一根 USB-C 线完成 ESP32-S3 原生 USB Serial/JTAG 枚举、固件烧录和运行时 NDJSON 传输。设备当前运行最小 `agent-beacon-fw`，不初始化 LCD、audio 或 buttons；Stage 2 尚未开始。
 
 ## 目标架构
 
@@ -32,7 +32,7 @@ Local Programs / Agents / Codex / Scripts
 - `agent-beacon-fw`：ESP32-S3 固件，仅负责设备 I/O 和 Beacon Protocol 消息处理。
 - Beacon Protocol：与 transport 解耦的可扩展 NDJSON 协议。
 
-更完整的边界与决定见 [`docs/architecture.md`](docs/architecture.md)，阶段门禁见 [`docs/roadmap.md`](docs/roadmap.md)，当前 Stage 0 证据见 [`docs/stage-0.md`](docs/stage-0.md)，外部项目的借鉴边界见 [`docs/references.md`](docs/references.md)。
+更完整的边界与决定见 [`docs/architecture.md`](docs/architecture.md)，协议决定见 [`docs/protocol.md`](docs/protocol.md)，阶段门禁见 [`docs/roadmap.md`](docs/roadmap.md)，实机证据见 [`docs/stage-0.md`](docs/stage-0.md) 和 [`docs/stage-1.md`](docs/stage-1.md)，外部项目的借鉴边界见 [`docs/references.md`](docs/references.md)。
 
 ## Stage 0 USB 探测
 
@@ -45,6 +45,17 @@ diff -ru .probe/baseline .probe/connected
 ```
 
 探测结果可能包含本机 USB 设备标识。`.probe/` 默认不纳入 Git。
+
+## Stage 1 固件
+
+连接 ATK-DNESP32S3-BOX V1.1 的 `USB-SLAVE` 口后执行：
+
+```bash
+./tools/flash.sh /dev/cu.usbmodem8401
+uv run --with pyserial python tools/serial-hello.py /dev/cu.usbmodem8401
+```
+
+`flash.sh` 会覆盖当前固件。2026-09-14 的原厂 `xiaozhi` 1.9.4 整片备份保存在本机 `.probe/factory/`，权限为 `600`，不会提交到 Git。
 
 ## 仓库布局
 
