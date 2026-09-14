@@ -10,6 +10,8 @@ use tracing::{info, warn};
 
 const ESPRESSIF_VID: u16 = 0x303a;
 const USB_SERIAL_JTAG_PID: u16 = 0x1001;
+const QINHENG_VID: u16 = 0x1a86;
+const USB_SINGLE_SERIAL_PID: u16 = 0x55d3;
 const QUEUE_CAPACITY: usize = 64;
 const DEVICE_EVENT_CAPACITY: usize = 16;
 const BAUD_RATE: u32 = 115_200;
@@ -154,8 +156,7 @@ fn find_port(config: &SerialConfig) -> Result<Option<String>, String> {
         .into_iter()
         .filter_map(|port| match port.port_type {
             SerialPortType::UsbPort(info)
-                if info.vid == ESPRESSIF_VID
-                    && info.pid == USB_SERIAL_JTAG_PID
+                if is_supported_usb_port(info.vid, info.pid)
                     && config.usb_serial.as_ref().is_none_or(|expected| {
                         info.serial_number
                             .as_ref()
@@ -184,6 +185,13 @@ fn find_port(config: &SerialConfig) -> Result<Option<String>, String> {
         [port] => Ok(Some(port.clone())),
         ports => Err(format!("找到多个匹配设备：{}", ports.join(", "))),
     }
+}
+
+fn is_supported_usb_port(vid: u16, pid: u16) -> bool {
+    matches!(
+        (vid, pid),
+        (ESPRESSIF_VID, USB_SERIAL_JTAG_PID) | (QINHENG_VID, USB_SINGLE_SERIAL_PID)
+    )
 }
 
 fn open_port(port_name: &str) -> tokio_serial::Result<SerialStream> {
@@ -259,6 +267,13 @@ mod tests {
     #[test]
     fn usb_serial_comparison_ignores_case_and_separators() {
         assert!(serials_equal("98:88:E0:06:8B:CC", "9888e0068bcc"));
+    }
+
+    #[test]
+    fn supports_both_native_usb_and_box_uart_bridge() {
+        assert!(is_supported_usb_port(0x303a, 0x1001));
+        assert!(is_supported_usb_port(0x1a86, 0x55d3));
+        assert!(!is_supported_usb_port(0x1234, 0x5678));
     }
 
     #[test]
