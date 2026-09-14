@@ -1,11 +1,16 @@
 use std::collections::HashMap;
 use std::path::Path;
+use std::time::{Duration, Instant};
 
 use beacon_protocol::{Event, VERSION};
 use serde::Deserialize;
 use serde_json::json;
 
 const MAX_VISIBLE_TASKS: usize = 3;
+/// 工作中的 turn 若长时间没有任何 Hook 事件，通常是 Codex 进程已经消失。
+const WORKING_TTL: Duration = Duration::from_secs(30 * 60);
+/// 等待用户回答可以持续很久，过期时间必须长到足够用户离开再回来。
+const INPUT_REQUIRED_TTL: Duration = Duration::from_secs(4 * 60 * 60);
 
 #[derive(Debug, Deserialize)]
 pub struct CodexHook {
@@ -31,6 +36,7 @@ struct Activity {
     status: ActivityStatus,
     title: String,
     sequence: u64,
+    updated_at: Instant,
 }
 
 #[derive(Default)]
@@ -80,6 +86,30 @@ impl CodexActivityTracker {
         }
     }
 
+    /// 清除已被遗弃的活动。Codex 被强制结束时不会发送 `SessionEnd`，
+    /// 若没有过期机制，这些活动会永久占用任务卡并让宠物停在需要确认。
+    pub fn sweep_expired(&mut self) -> Option<Event> {
+        self.sweep_expired_at(Instant::now())
+    }
+
+    fn sweep_expired_at(&mut self, now: Instant) -> Option<Event> {
+        let mut expired_session = None;
+        self.activities.retain(|_, activity| {
+            let ttl = match activity.status {
+                ActivityStatus::Working => WORKING_TTL,
+                ActivityStatus::InputRequired => INPUT_REQUIRED_TTL,
+            };
+            let alive = now.duration_since(activity.updated_at) < ttl;
+            if !alive {
+                expired_session = Some(activity.session_id.clone());
+            }
+            alive
+        });
+        let expired_session = expired_session?;
+        self.visible_activity()
+            .or_else(|| self.deduplicate(event("agent.idle", &expired_session, "TIMED OUT")))
+    }
+
     fn set_activity(&mut self, hook: &CodexHook, status: ActivityStatus) {
         self.sequence = self.sequence.wrapping_add(1);
         self.activities.insert(
@@ -89,6 +119,7 @@ impl CodexActivityTracker {
                 status,
                 title: project_title(hook),
                 sequence: self.sequence,
+                updated_at: Instant::now(),
             },
         );
     }
@@ -412,6 +443,65 @@ mod tests {
             .apply(hook_with_turn("session-a", "turn-b", "Stop", "/work/beta"))
             .expect("第二个 turn 应产生完成通知");
         assert_eq!(second.event, "task.done");
+    }
+
+    #[test]
+    fn abandoned_working_activity_expires_instead_of_holding_the_card() {
+        let mut tracker = CodexActivityTracker::default();
+        tracker.apply(hook("killed", "UserPromptSubmit", "/work/alpha"));
+
+        assert!(
+            tracker
+                .sweep_expired_at(Instant::now() + WORKING_TTL / 2)
+                .is_none(),
+            "未超时的工作任务不应被清除"
+        );
+
+        let expired = tracker
+            .sweep_expired_at(Instant::now() + WORKING_TTL + Duration::from_secs(1))
+            .expect("超时的工作任务应清空画面");
+        assert_eq!(expired.event, "agent.idle");
+        assert_eq!(expired.title.as_deref(), Some("TIMED OUT"));
+    }
+
+    #[test]
+    fn waiting_activity_outlives_the_working_ttl() {
+        let mut tracker = CodexActivityTracker::default();
+        tracker.apply(hook("waiting", "UserPromptSubmit", "/work/beta"));
+        tracker.apply(hook("waiting", "PermissionRequest", "/work/beta"));
+
+        assert!(
+            tracker
+                .sweep_expired_at(Instant::now() + WORKING_TTL + Duration::from_secs(1))
+                .is_none(),
+            "用户可能离开很久，等待确认不能按工作中的时限清除"
+        );
+
+        let expired = tracker
+            .sweep_expired_at(Instant::now() + INPUT_REQUIRED_TTL + Duration::from_secs(1))
+            .expect("超过等待时限后应释放状态");
+        assert_eq!(expired.event, "agent.idle");
+    }
+
+    #[test]
+    fn expiring_one_task_keeps_the_others_visible() {
+        let mut tracker = CodexActivityTracker::default();
+        tracker.apply(hook("stale", "UserPromptSubmit", "/work/stale"));
+        let fresh_at = Instant::now() + WORKING_TTL - Duration::from_secs(60);
+        tracker.apply(hook("fresh", "UserPromptSubmit", "/work/fresh"));
+        tracker
+            .activities
+            .get_mut("fresh:fresh-turn")
+            .expect("活动应存在")
+            .updated_at = fresh_at;
+
+        let refreshed = tracker
+            .sweep_expired_at(Instant::now() + WORKING_TTL + Duration::from_secs(1))
+            .expect("清除过期任务后应刷新卡片栈");
+        assert_eq!(refreshed.event, "task.start");
+        let tasks = refreshed.extra["tasks"].as_array().expect("tasks 应为数组");
+        assert_eq!(tasks.len(), 1);
+        assert_eq!(tasks[0]["title"], "FRESH");
     }
 
     #[test]

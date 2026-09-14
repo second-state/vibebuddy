@@ -4,6 +4,7 @@ mod serial_transport;
 use std::env;
 use std::net::SocketAddr;
 use std::sync::Arc;
+use std::time::Duration;
 
 use axum::extract::State;
 use axum::http::StatusCode;
@@ -14,8 +15,11 @@ use codex_hooks::{CodexActivityTracker, CodexHook};
 use serde::Serialize;
 use serial_transport::{SerialConfig, SerialTransport, Transport, TransportError};
 use tokio::sync::Mutex;
-use tracing::info;
+use tracing::{info, warn};
 use tracing_subscriber::EnvFilter;
+
+/// 最后一个会话僵死后不会再有 Hook 事件，只能靠定时扫描释放画面。
+const SWEEP_INTERVAL: Duration = Duration::from_secs(60);
 
 #[derive(Clone)]
 struct AppState {
@@ -44,7 +48,12 @@ async fn main() {
         .unwrap_or_else(|error| panic!("BEACON_BIND 无效：{error}"));
     let serial_config = SerialConfig::from_env();
     let transport: Arc<dyn Transport> = Arc::new(SerialTransport::spawn(serial_config));
-    let app = app(transport);
+    let state = AppState {
+        transport,
+        codex_activities: Arc::new(Mutex::new(CodexActivityTracker::default())),
+    };
+    tokio::spawn(sweep_expired_activities(state.clone()));
+    let app = app(state);
     let listener = tokio::net::TcpListener::bind(bind_address)
         .await
         .unwrap_or_else(|error| panic!("无法监听 {bind_address}：{error}"));
@@ -55,14 +64,30 @@ async fn main() {
         .unwrap_or_else(|error| panic!("HTTP server 失败：{error}"));
 }
 
-fn app(transport: Arc<dyn Transport>) -> Router {
+fn app(state: AppState) -> Router {
     Router::new()
         .route("/v1/events", post(post_event))
         .route("/v1/codex-hooks", post(post_codex_hook))
-        .with_state(AppState {
-            transport,
-            codex_activities: Arc::new(Mutex::new(CodexActivityTracker::default())),
-        })
+        .with_state(state)
+}
+
+async fn sweep_expired_activities(state: AppState) {
+    let mut ticker = tokio::time::interval(SWEEP_INTERVAL);
+    loop {
+        ticker.tick().await;
+        let Some(event) = state.codex_activities.lock().await.sweep_expired() else {
+            continue;
+        };
+        info!(event = %event.event, "清除过期的 Codex 活动");
+        match event.to_ndjson() {
+            Ok(frame) => {
+                if let Err(error) = state.transport.send(frame) {
+                    warn!(?error, "过期状态未能进入发送队列");
+                }
+            }
+            Err(error) => warn!(%error, "过期状态编码失败"),
+        }
+    }
 }
 
 async fn post_event(
