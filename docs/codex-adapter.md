@@ -15,13 +15,14 @@ AgentBeacon 使用以下映射：
 | `Interrupt` | 空闲，标题为 `INTERRUPTED`，不误报成功 |
 | `SessionEnd` | 空闲 |
 
-多会话由 `beacond` 聚合：任务卡按最近活动排序，最多 3 张；需要确认的会话优先控制宠物表情。
+多会话由 `beacond` 聚合：任务卡按最近活动排序，最多 3 张；需要确认的会话优先控制宠物表情。活动身份由 `session_id` 与 `turn_id` 共同确定。每个已跟踪 turn 的 `Stop` 都会产生一次完成通知，即使画面仍需显示其他工作中的任务；同一 turn 的重复 `Stop` 不会重复播报。
 
 ## 隐私边界
 
 Hook 的原始 JSON 可能含 prompt、transcript 路径、工具输入和工具输出。`tools/codex-hook.py` 在发送 HTTP 前只保留：
 
 - `session_id`
+- `turn_id`
 - `hook_event_name`
 - `cwd`
 

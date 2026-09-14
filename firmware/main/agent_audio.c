@@ -241,7 +241,7 @@ esp_err_t agent_audio_init(void) {
     audio_status = "SPEAKER ENABLE";
     return result;
   }
-  prompt_queue = xQueueCreate(3, sizeof(agent_audio_prompt_t));
+  prompt_queue = xQueueCreate(8, sizeof(agent_audio_prompt_t));
   if (prompt_queue == NULL) {
     audio_status = "AUDIO QUEUE";
     return ESP_ERR_NO_MEM;

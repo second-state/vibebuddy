@@ -49,6 +49,8 @@ Mac 到设备的首批事件：
 
 每项包含 `title` 和 `status`；当前状态值为 `working`、`input_required`、`done`、`failed`。旧固件会按 v1 规则忽略 `tasks`。未来事件可以包括 `task.progress`、`task.cancelled`、`agent.waiting`、`message`、`system` 和 `device.status`。
 
+当一个后台任务完成、但画面仍需显示其他活动任务时，`beacond` 会在当前状态事件上附加 `"announcement":"done"`。这是一次性语音通知，不改变画面状态；`announcement_id` 用于标识对应 turn。设备收到它时排队播放一次“任务完成”。
+
 设备到 Mac 的事件同样使用 NDJSON，例如：
 
 ```json

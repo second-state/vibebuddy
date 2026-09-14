@@ -87,6 +87,7 @@ static void show_event(const cJSON *message, const char *event,
   size_t task_count = parse_tasks(message, tasks);
   agent_audio_prompt_t prompt;
   bool play_prompt = false;
+  const char *prompt_label = NULL;
   const char *state_label;
   if (strcmp(event, "task.start") == 0) {
     state = AGENT_DISPLAY_WORKING;
@@ -99,12 +100,14 @@ static void show_event(const cJSON *message, const char *event,
   } else if (strcmp(event, "agent.input_required") == 0) {
     state = AGENT_DISPLAY_INPUT_REQUIRED;
     prompt = AGENT_AUDIO_INPUT_REQUIRED;
+    prompt_label = "INPUT_REQUIRED";
     play_prompt = true;
     state_label = "INPUT REQUIRED";
     ready_scheduled = false;
   } else if (strcmp(event, "task.done") == 0) {
     state = AGENT_DISPLAY_DONE;
     prompt = AGENT_AUDIO_DONE;
+    prompt_label = "DONE";
     play_prompt = true;
     state_label = "DONE";
     ready_scheduled = true;
@@ -113,6 +116,7 @@ static void show_event(const cJSON *message, const char *event,
              strcmp(event, "agent.blocked") == 0) {
     state = AGENT_DISPLAY_FAILED;
     prompt = AGENT_AUDIO_FAILED;
+    prompt_label = "FAILED";
     play_prompt = true;
     state_label = "FAILED";
     ready_scheduled = false;
@@ -120,13 +124,26 @@ static void show_event(const cJSON *message, const char *event,
     return;
   }
 
+  const cJSON *announcement =
+      cJSON_GetObjectItemCaseSensitive(message, "announcement");
+  if (cJSON_IsString(announcement) &&
+      strcmp(announcement->valuestring, "done") == 0) {
+    prompt = AGENT_AUDIO_DONE;
+    prompt_label = "DONE";
+    play_prompt = true;
+  }
+
   if (agent_display_show_tasks(state, title, tasks, task_count) != ESP_OK) {
     usb_write_literal("DISPLAY ERROR\n");
   } else {
     usb_write_value_line("DISPLAY STATE ", state_label);
   }
-  if (play_prompt && agent_audio_play(prompt) != ESP_OK) {
-    usb_write_literal("AUDIO ERROR\n");
+  if (play_prompt) {
+    if (agent_audio_play(prompt) != ESP_OK) {
+      usb_write_literal("AUDIO ERROR\n");
+    } else {
+      usb_write_value_line("AUDIO QUEUED ", prompt_label);
+    }
   }
 }
 

@@ -79,7 +79,7 @@ curl -H 'content-type: application/json' \
 
 ## Codex 宠物接入
 
-仓库的 [`tools/codex-hook.py`](tools/codex-hook.py) 只抽取 Hook 的 `session_id`、`hook_event_name` 和 `cwd`，不会转发 prompt、transcript 或工具结果。用户级 `~/.codex/hooks.json` 需要为六个生命周期事件配置该脚本，并在 Codex 的 `/hooks` 页面审查、信任配置；详见 [`docs/codex-adapter.md`](docs/codex-adapter.md)。
+仓库的 [`tools/codex-hook.py`](tools/codex-hook.py) 只抽取 Hook 的 `session_id`、`turn_id`、`hook_event_name` 和 `cwd`，不会转发 prompt、transcript 或工具结果。用户级 `~/.codex/hooks.json` 需要为六个生命周期事件配置该脚本，并在 Codex 的 `/hooks` 页面审查、信任配置；详见 [`docs/codex-adapter.md`](docs/codex-adapter.md)。
 
 ## 仓库布局
 

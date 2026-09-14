@@ -10,6 +10,8 @@ const MAX_VISIBLE_TASKS: usize = 3;
 #[derive(Debug, Deserialize)]
 pub struct CodexHook {
     pub session_id: String,
+    #[serde(default)]
+    pub turn_id: Option<String>,
     pub hook_event_name: String,
     #[serde(default)]
     pub cwd: Option<String>,
@@ -23,6 +25,7 @@ enum ActivityStatus {
 
 #[derive(Clone, Debug)]
 struct Activity {
+    session_id: String,
     status: ActivityStatus,
     title: String,
     sequence: u64,
@@ -51,19 +54,21 @@ impl CodexActivityTracker {
                 self.visible_activity()
             }
             "Stop" => {
-                self.activities.remove(&hook.session_id);
-                self.visible_activity().or_else(|| {
-                    self.deduplicate(event("task.done", &hook.session_id, &project_title(&hook)))
-                })
+                let activity_id = activity_id(&hook);
+                if self.activities.remove(&activity_id).is_none() {
+                    return self.visible_activity();
+                }
+                self.announce_completion(&activity_id, &project_title(&hook))
             }
             "Interrupt" => {
-                self.activities.remove(&hook.session_id);
+                self.activities.remove(&activity_id(&hook));
                 self.visible_activity().or_else(|| {
                     self.deduplicate(event("agent.idle", &hook.session_id, "INTERRUPTED"))
                 })
             }
             "SessionEnd" => {
-                self.activities.remove(&hook.session_id);
+                self.activities
+                    .retain(|_, activity| activity.session_id != hook.session_id);
                 self.visible_activity().or_else(|| {
                     self.deduplicate(event("agent.idle", &hook.session_id, "ALL QUIET"))
                 })
@@ -75,8 +80,9 @@ impl CodexActivityTracker {
     fn set_activity(&mut self, hook: &CodexHook, status: ActivityStatus) {
         self.sequence = self.sequence.wrapping_add(1);
         self.activities.insert(
-            hook.session_id.clone(),
+            activity_id(hook),
             Activity {
+                session_id: hook.session_id.clone(),
                 status,
                 title: project_title(hook),
                 sequence: self.sequence,
@@ -85,6 +91,11 @@ impl CodexActivityTracker {
     }
 
     fn visible_activity(&mut self) -> Option<Event> {
+        let visible = self.activity_snapshot()?;
+        self.deduplicate(visible)
+    }
+
+    fn activity_snapshot(&self) -> Option<Event> {
         let (session_id, activity) = self.activities.iter().max_by_key(|(_, activity)| {
             let priority = match activity.status {
                 ActivityStatus::InputRequired => 2,
@@ -118,7 +129,24 @@ impl CodexActivityTracker {
                     .collect::<Vec<_>>()
             ),
         );
-        self.deduplicate(visible)
+        Some(visible)
+    }
+
+    fn announce_completion(&mut self, activity_id: &str, title: &str) -> Option<Event> {
+        if let Some(visible) = self.activity_snapshot() {
+            // 状态快照用于去重；announcement 是一次性边沿事件，不能被状态合并吞掉。
+            self.last_visible = Some(visible.clone());
+            let mut announced = visible;
+            announced
+                .extra
+                .insert("announcement".to_owned(), json!("done"));
+            announced
+                .extra
+                .insert("announcement_id".to_owned(), json!(activity_id));
+            Some(announced)
+        } else {
+            self.deduplicate(event("task.done", activity_id, title))
+        }
     }
 
     fn deduplicate(&mut self, event: Event) -> Option<Event> {
@@ -127,6 +155,13 @@ impl CodexActivityTracker {
         }
         self.last_visible = Some(event.clone());
         Some(event)
+    }
+}
+
+fn activity_id(hook: &CodexHook) -> String {
+    match hook.turn_id.as_deref() {
+        Some(turn_id) => format!("{}:{turn_id}", hook.session_id),
+        None => hook.session_id.clone(),
     }
 }
 
@@ -173,8 +208,13 @@ mod tests {
     use super::*;
 
     fn hook(session: &str, name: &str, cwd: &str) -> CodexHook {
+        hook_with_turn(session, &format!("{session}-turn"), name, cwd)
+    }
+
+    fn hook_with_turn(session: &str, turn: &str, name: &str, cwd: &str) -> CodexHook {
         CodexHook {
             session_id: session.to_owned(),
+            turn_id: Some(turn.to_owned()),
             hook_event_name: name.to_owned(),
             cwd: Some(cwd.to_owned()),
         }
@@ -269,6 +309,37 @@ mod tests {
     }
 
     #[test]
+    fn turns_in_one_session_complete_once_without_overwriting_each_other() {
+        let mut tracker = CodexActivityTracker::default();
+        tracker.apply(hook_with_turn(
+            "session-a",
+            "turn-a",
+            "UserPromptSubmit",
+            "/work/alpha",
+        ));
+        tracker.apply(hook_with_turn(
+            "session-a",
+            "turn-b",
+            "UserPromptSubmit",
+            "/work/beta",
+        ));
+
+        let first = tracker
+            .apply(hook_with_turn("session-a", "turn-a", "Stop", "/work/alpha"))
+            .expect("第一个 turn 应产生完成通知");
+        assert_eq!(first.extra["announcement"], "done");
+        assert_eq!(first.title.as_deref(), Some("BETA"));
+
+        let replay = tracker.apply(hook_with_turn("session-a", "turn-a", "Stop", "/work/alpha"));
+        assert!(replay.is_none(), "重复 Stop 不应再次播报");
+
+        let second = tracker
+            .apply(hook_with_turn("session-a", "turn-b", "Stop", "/work/beta"))
+            .expect("第二个 turn 应产生完成通知");
+        assert_eq!(second.event, "task.done");
+    }
+
+    #[test]
     fn interrupt_does_not_report_success() {
         let mut tracker = CodexActivityTracker::default();
         tracker.apply(hook("session-a", "UserPromptSubmit", "/work/alpha"));
@@ -278,5 +349,30 @@ mod tests {
             .expect("中断应回到空闲状态");
         assert_eq!(interrupted.event, "agent.idle");
         assert_eq!(interrupted.title.as_deref(), Some("INTERRUPTED"));
+    }
+
+    #[test]
+    fn every_tracked_stop_announces_completion_with_parallel_tasks() {
+        let mut tracker = CodexActivityTracker::default();
+        for session in ["one", "two", "three"] {
+            tracker.apply(hook(session, "UserPromptSubmit", "/work/project"));
+        }
+
+        let announcements = ["one", "two", "three"]
+            .into_iter()
+            .filter(|session| {
+                let event = tracker
+                    .apply(hook(session, "Stop", "/work/project"))
+                    .expect("每个活动会话结束都应产生事件");
+                event.event == "task.done"
+                    || event
+                        .extra
+                        .get("announcement")
+                        .and_then(|value| value.as_str())
+                        == Some("done")
+            })
+            .count();
+
+        assert_eq!(announcements, 3, "三个会话应分别触发三次完成播报");
     }
 }

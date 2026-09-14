@@ -7,7 +7,7 @@ import urllib.request
 
 
 ENDPOINT = "http://127.0.0.1:7331/v1/codex-hooks"
-ALLOWED_FIELDS = ("session_id", "hook_event_name", "cwd")
+ALLOWED_FIELDS = ("session_id", "turn_id", "hook_event_name", "cwd")
 
 
 def sanitized_payload(source: object) -> dict[str, str]:
