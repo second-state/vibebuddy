@@ -1,3 +1,4 @@
+mod activity;
 mod codex_hooks;
 mod serial_transport;
 
