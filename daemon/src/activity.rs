@@ -21,6 +21,10 @@ const INPUT_REQUIRED_TTL: Duration = Duration::from_secs(4 * 60 * 60);
 /// Agent 工作过的项目根保留多久。超过这段时间没人在那儿干活，就不必再
 /// 关心它的 CI 了。
 const WORKSPACE_TTL: Duration = Duration::from_secs(60 * 60);
+/// 任务结束会播报。播报之后按 K2，用户要回的是刚播报的那件事，哪怕别的任务
+/// 还在跑——结束的活动已经离开卡片栈，不留这一手就永远选不中它。超过这个
+/// 窗口再按，找的就是当前任务了。
+const ANNOUNCED_FOCUS_WINDOW: Duration = Duration::from_secs(30);
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ActivityStatus {
@@ -100,6 +104,9 @@ pub struct ActivityTracker {
     /// 最近一次可定位的 Agent/CI 来源。当前活动结束或 daemon 重启后，K2
     /// 仍应能回到刚才那件事，而不是变成一个只在“工作中”才有效的按钮。
     last_source: Option<ActivitySource>,
+    /// 最近一次播报过结束的活动及其播报时刻。不持久化：daemon 重启后这个
+    /// 窗口早就过期了，留着只会把 K2 指向一件用户早已忘记的事。
+    recently_announced: Option<(ActivitySource, Instant)>,
     /// Agent 最近工作过的项目根及最后一次看到的时间。
     workspaces: HashMap<PathBuf, Instant>,
 }
@@ -157,8 +164,31 @@ impl ActivityTracker {
         }
     }
 
-    /// 与屏幕主状态使用同一套选择规则：需要输入优先，其次才是最新的工作项。
+    /// 记下刚播报过结束的活动，让 K2 在播报之后的短时间内仍能回到它。
+    fn remember_announced(&mut self, activity: Activity) {
+        if let Some(source) = activity.source {
+            self.recently_announced = Some((source, Instant::now()));
+        }
+    }
+
+    /// K2 的落点。与屏幕主状态同源，但多一条：刚播报过结束的活动排在当前
+    /// 工作项之前——用户是听到播报才去按的键。
     pub fn focus_source(&self) -> Option<ActivitySource> {
+        // 有任务在等人回答，那件事最急，先去那里。
+        if let Some(waiting) = self
+            .activities
+            .values()
+            .filter(|activity| activity.status == ActivityStatus::InputRequired)
+            .max_by_key(|activity| activity.sequence)
+            && let Some(source) = waiting.source.clone()
+        {
+            return Some(source);
+        }
+        if let Some((source, announced_at)) = &self.recently_announced
+            && announced_at.elapsed() < ANNOUNCED_FOCUS_WINDOW
+        {
+            return Some(source.clone());
+        }
         match self.focused_activity() {
             Some(activity) => activity.source.clone(),
             None => self.last_source.clone(),
@@ -194,9 +224,10 @@ impl ActivityTracker {
 
     /// 活动正常结束，产生一次完成播报；未被跟踪的活动只刷新画面。
     pub fn finish(&mut self, id: &ActivityId, title: &str) -> Option<Event> {
-        if self.activities.remove(&id.key).is_none() {
+        let Some(finished) = self.activities.remove(&id.key) else {
             return self.visible_activity();
-        }
+        };
+        self.remember_announced(finished);
         self.sync_busy();
         self.record(|stats| stats.done += 1);
         if let Some(visible) = self.activity_snapshot() {
@@ -220,9 +251,10 @@ impl ActivityTracker {
     /// 与 `discard` 的区别是失败是任务的结果，必须让用户知道；`discard`
     /// 用于「不知道结果」的收尾，不播报。
     pub fn fail(&mut self, id: &ActivityId, title: &str) -> Option<Event> {
-        if self.activities.remove(&id.key).is_none() {
+        let Some(failed) = self.activities.remove(&id.key) else {
             return self.visible_activity();
-        }
+        };
+        self.remember_announced(failed);
         self.sync_busy();
         if let Some(visible) = self.activity_snapshot() {
             self.last_visible = Some(visible.clone());
@@ -637,6 +669,97 @@ mod tests {
             tracker.focus_source(),
             Some(source),
             "任务刚完成后，K2 仍应能返回对应会话"
+        );
+    }
+
+    /// 并行跑两个任务时，一个结束会播报，另一个还在跑。用户是听到播报才去
+    /// 按 K2 的，落点必须是刚播报的那件事，而不是恰好还活着的另一件。
+    #[test]
+    fn k2_returns_to_the_task_that_just_announced() {
+        let mut tracker = ActivityTracker::default();
+        let finished = id("session-a", "session-a:turn");
+        let running = id("session-b", "session-b:turn");
+        let finished_source = ActivitySource::Codex {
+            thread_id: "thread-finished".to_owned(),
+        };
+        tracker.observe(&finished, "CX:ALPHA", ActivityStatus::Working);
+        tracker.associate_source(&finished, finished_source.clone());
+        tracker.observe(&running, "CX:BETA", ActivityStatus::Working);
+        tracker.associate_source(
+            &running,
+            ActivitySource::Codex {
+                thread_id: "thread-running".to_owned(),
+            },
+        );
+
+        tracker.finish(&finished, "CX:ALPHA");
+
+        assert_eq!(
+            tracker.focus_source(),
+            Some(finished_source),
+            "K2 应回到刚播报完成的任务，而不是还在跑的那个"
+        );
+    }
+
+    #[test]
+    fn the_running_task_takes_over_once_the_announcement_is_stale() {
+        let mut tracker = ActivityTracker::default();
+        let finished = id("session-a", "session-a:turn");
+        let running = id("session-b", "session-b:turn");
+        let running_source = ActivitySource::Codex {
+            thread_id: "thread-running".to_owned(),
+        };
+        tracker.observe(&finished, "CX:ALPHA", ActivityStatus::Working);
+        tracker.associate_source(
+            &finished,
+            ActivitySource::Codex {
+                thread_id: "thread-finished".to_owned(),
+            },
+        );
+        tracker.observe(&running, "CX:BETA", ActivityStatus::Working);
+        tracker.associate_source(&running, running_source.clone());
+        tracker.finish(&finished, "CX:ALPHA");
+
+        let stale = Instant::now()
+            .checked_sub(ANNOUNCED_FOCUS_WINDOW + Duration::from_secs(1))
+            .expect("测试时钟应可回退");
+        tracker.recently_announced = tracker
+            .recently_announced
+            .take()
+            .map(|(source, _)| (source, stale));
+
+        assert_eq!(
+            tracker.focus_source(),
+            Some(running_source),
+            "播报过去之后，K2 该回到当前还在跑的任务"
+        );
+    }
+
+    /// 等人回答的任务是 blocking 的，排在刚播报完成的任务之前。
+    #[test]
+    fn a_task_waiting_for_a_reply_outranks_the_announcement() {
+        let mut tracker = ActivityTracker::default();
+        let finished = id("session-a", "session-a:turn");
+        let waiting = id("session-b", "session-b:turn");
+        let waiting_source = ActivitySource::Codex {
+            thread_id: "thread-waiting".to_owned(),
+        };
+        tracker.observe(&finished, "CX:ALPHA", ActivityStatus::Working);
+        tracker.associate_source(
+            &finished,
+            ActivitySource::Codex {
+                thread_id: "thread-finished".to_owned(),
+            },
+        );
+        tracker.require_input(&waiting, "CX:BETA");
+        tracker.associate_source(&waiting, waiting_source.clone());
+
+        tracker.finish(&finished, "CX:ALPHA");
+
+        assert_eq!(
+            tracker.focus_source(),
+            Some(waiting_source),
+            "有人在等回答时，K2 先去那里"
         );
     }
 
