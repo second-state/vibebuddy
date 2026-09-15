@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""把 Codex 生命周期事件最小化后转发给本机 AgentBeacon。"""
+"""把 Codex 生命周期事件最小化后转发给本机 Vibe Buddy。"""
 
 # Codex 用 /usr/bin/python3 调这个脚本，macOS 自带的是 3.9，没有 PEP 604 的
 # `X | None`。注解延迟求值，写法就不必迁就解释器版本。
@@ -90,7 +90,7 @@ def main() -> int:
         with urllib.request.urlopen(request, timeout=0.5):
             pass
     except (OSError, ValueError):
-        # AgentBeacon 未运行或输入无效时，不能干扰 Codex 主流程。
+        # Vibe Buddy 未运行或输入无效时，不能干扰 Codex 主流程。
         pass
     return 0
 

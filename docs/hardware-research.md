@@ -1,4 +1,4 @@
-# AgentBeacon Stage 0：正点原子 ESP32-S3 硬件资料核对
+# Vibe Buddy Stage 0：正点原子 ESP32-S3 硬件资料核对
 
 > 调研日期：2026-09-13  
 > 证据范围：正点原子官网、官方 Wiki、官方 GitHub，以及乐鑫官方文档/仓库。第三方项目仅列在“非官方实现参考”，不参与硬件事实确认。
@@ -40,7 +40,7 @@
 
 - 官方仓库包含原理图、ESP-IDF/Arduino/MicroPython 例程、固件和工具。[仓库 README](https://github.com/openedv/ATK-DNESP32S3-Board/blob/c7434a3da5b9e6feda05added5d6a686f1c95f13/README.md)
 - 官方原理图版本为 `ATK_DNESP32S3 V1.2`。[原理图 PDF](https://github.com/openedv/ATK-DNESP32S3-Board/blob/c7434a3da5b9e6feda05added5d6a686f1c95f13/1_docs/1_sch/ATK_DNESP32S3%20V1.2.pdf)
-- 仓库不是乐鑫 `esp-bsp` 中的一个集中式板级包；其 ESP-IDF 例程把厂商驱动放在各例程的 `components/BSP` 下。可以抽取为 AgentBeacon 的板级适配层，但需要自行确定版本、依赖和测试边界。[I2C 扩展例程 BSP 目录](https://github.com/openedv/ATK-DNESP32S3-Board/tree/c7434a3da5b9e6feda05added5d6a686f1c95f13/2_examples/1_ESP_IDF/1_basic_routines/09_iic_exio/components/BSP)
+- 仓库不是乐鑫 `esp-bsp` 中的一个集中式板级包；其 ESP-IDF 例程把厂商驱动放在各例程的 `components/BSP` 下。可以抽取为 Vibe Buddy 的板级适配层，但需要自行确定版本、依赖和测试边界。[I2C 扩展例程 BSP 目录](https://github.com/openedv/ATK-DNESP32S3-Board/tree/c7434a3da5b9e6feda05added5d6a686f1c95f13/2_examples/1_ESP_IDF/1_basic_routines/09_iic_exio/components/BSP)
 
 ### 按键与蜂鸣器
 
@@ -113,7 +113,7 @@ BOX3 官方简介的功能列表和板载资源表均未列蜂鸣器。因此若
 - ESP-IDF 的 TinyUSB Device 栈可实现 CDC、HID、MIDI、MSC、Vendor 和复合设备，CDC-ACM 是应用级 USB 串口实现。[乐鑫 USB Device Stack 文档](https://docs.espressif.com/projects/esp-idf/en/stable/esp32s3/api-reference/peripherals/usb_device.html)
 - 首次通过芯片原生 USB 烧录时，若自动下载未生效，官方流程是按住 BOOT、按一下 RESET，再松开 BOOT。[乐鑫串口连接文档](https://docs.espressif.com/projects/esp-idf/en/stable/esp32s3/get-started/establish-serial-connection.html)
 
-对 AgentBeacon 而言，“一根 USB-C 同时负责供电、烧录、日志和运行期 NDJSON 串口”在芯片能力上可行，但要满足：
+对 Vibe Buddy 而言，“一根 USB-C 同时负责供电、烧录、日志和运行期 NDJSON 串口”在芯片能力上可行，但要满足：
 
 1. 实机 USB-C 确实连接到 GPIO19/20 的原生 USB，而不是只接 CH340C；
 2. 固件选择 USB Serial/JTAG 控制台或 TinyUSB CDC 中的一条明确链路；
@@ -131,7 +131,7 @@ BOX3 官方简介的功能列表和板载资源表均未列蜂鸣器。因此若
 可借鉴：
 
 - 用 Rust + ESP-IDF 组织设备固件，并通过 Cargo feature 选择集成式 BOX 配置；README 展示了 `espflash` 的构建/烧录流程。[项目 README](https://github.com/second-state/echokit_box/blob/4484efca885c2ffd01ffb1acdbb5817421583bd8/README.md)
-- `atom_box.rs` 把屏幕、音频、按键、I2C/I/O 扩展器等集中在一个板级实现中。AgentBeacon 可以借鉴这种“业务逻辑不直接引用裸 GPIO、板型差异封装在 board profile”的结构。[板级实现](https://github.com/second-state/echokit_box/blob/4484efca885c2ffd01ffb1acdbb5817421583bd8/src/boards/atom_box.rs)
+- `atom_box.rs` 把屏幕、音频、按键、I2C/I/O 扩展器等集中在一个板级实现中。Vibe Buddy 可以借鉴这种“业务逻辑不直接引用裸 GPIO、板型差异封装在 board profile”的结构。[板级实现](https://github.com/second-state/echokit_box/blob/4484efca885c2ffd01ffb1acdbb5817421583bd8/src/boards/atom_box.rs)
 - 可参考其 framebuffer、音频任务、按钮任务的并发组织方式，但需要重新用目标板官方资料和实机测试验证时序、缓冲区与引脚。
 
 不可作为依据：该项目自行携带/修改的 HAL 驱动和 `atom_box.rs` 中的 I2C、I2S、LCD、I/O 扩展器引脚，即使注释出现 ALIENTEK 或 ESP32S3 BOX，也只是第三方实现声明。它与上文 BOX3/DNESP32S3 的已确认引脚明显不同，恰好说明“ESP32S3 BOX”名称不足以识别硬件。
@@ -140,7 +140,7 @@ BOX3 官方简介的功能列表和板载资源表均未列蜂鸣器。因此若
 
 可借鉴：设备与服务端分层、WebSocket 会话，以及 ASR→LLM→TTS 服务编排和可配置 provider 的工程组织。[项目 README](https://github.com/second-state/echokit_server/blob/d1d976596f122976095b7da4df3e946baf152b96/README.md)
 
-不可作为依据：这是上层语音代理服务器，不提供正点原子底板的官方硬件证明。AgentBeacon v1 若采用本地守护进程 + USB NDJSON，WebSocket 与完整语音云管线也不应未经需求验证直接引入。
+不可作为依据：这是上层语音代理服务器，不提供正点原子底板的官方硬件证明。Vibe Buddy v1 若采用本地守护进程 + USB NDJSON，WebSocket 与完整语音云管线也不应未经需求验证直接引入。
 
 ## 待实机/丝印确认
 
@@ -169,7 +169,7 @@ BOX3 官方简介的功能列表和板载资源表均未列蜂鸣器。因此若
 
 - **若确认为 BOX3**：正点原子官方环境文档明确要求其 ESP32-S3 例程使用 ESP-IDF `v5.3.x` 及以上，当前资料包示例提供 `v5.5.3` 离线安装包。[BOX3 官方安装说明](https://github.com/openedv/openedv-wiki-boards-dnesp32s3b3/blob/c6f9797b64aef2666547206b4b274017d6d28a3d/set-up-development-environment/esp-idf-install.md)
 - **若确认为 DNESP32S3 开发板或老款 BOX**：已找到的 DNESP32S3 官方仓库没有声明可复现的最低/固定 ESP-IDF 版本；老款 BOX 的精确资料包又尚未取得。因此不能把 BOX3 的 `>=5.3.x` 要求外推给它们。[DNESP32S3 官方开发说明](https://github.com/openedv/ATK-DNESP32S3-Board/blob/c7434a3da5b9e6feda05added5d6a686f1c95f13/1_docs/Developing_With_ESP_IDF.md)
-- **AgentBeacon 的选择规则**：不要跟随 `latest` 或 `master`。先在精确板型的官方最低支持线内选择一个固定 release tag；候选版本只有在厂商原始例程与 AgentBeacon 最小探针都通过“编译、烧录、重启、USB 重枚举、LCD、触摸、按键、音频采放”后才能锁定。乐鑫也明确建议依赖 ESP-IDF 的项目先遵循该项目自己的兼容版本说明。[乐鑫 ESP-IDF 版本说明](https://docs.espressif.com/projects/esp-idf/en/latest/esp32/versions.html)
+- **Vibe Buddy 的选择规则**：不要跟随 `latest` 或 `master`。先在精确板型的官方最低支持线内选择一个固定 release tag；候选版本只有在厂商原始例程与 Vibe Buddy 最小探针都通过“编译、烧录、重启、USB 重枚举、LCD、触摸、按键、音频采放”后才能锁定。乐鑫也明确建议依赖 ESP-IDF 的项目先遵循该项目自己的兼容版本说明。[乐鑫 ESP-IDF 版本说明](https://docs.espressif.com/projects/esp-idf/en/latest/esp32/versions.html)
 - **当前建议**：若实机是 BOX3，以官方资料中的 `v5.5.3` 作为第一条复现基线，再单独验证同一 `release/v5.5` 系列的最新 bugfix tag；没有完整回归前不升 ESP-IDF 6.x。若不是 BOX3，在拿到对应资料包前不冻结 IDF 版本。
 
 ## 建议下一步
@@ -179,4 +179,4 @@ BOX3 官方简介的功能列表和板载资源表均未列蜂鸣器。因此若
 3. **做只读枚举**：在 Mac Studio 上记录每个 USB 口的 VID/PID、产品名、串口节点和重枚举行为，再决定烧录/运行链路。
 4. **做最小硬件探针固件**：只验证串口、三按键、蜂鸣器、LCD 色块、触摸坐标、MIC 电平、扬声器正弦波和 TF 挂载；每项先用候选 BSP，再以逻辑/示波和实机现象复核。
 5. **建立板型隔离**：代码层至少区分 `dnesp32s3_devboard`、`dnesp32s3_box3` 与 `unknown_legacy_box`，型号未确认时禁止选择默认 GPIO 表。
-6. **最后才冻结 AgentBeacon 接口**：硬件探针通过后，再确定一线 USB 的烧录、日志与 NDJSON 生命周期，并把经过验证的引脚表转录到 `docs/hardware.md`。
+6. **最后才冻结 Vibe Buddy 接口**：硬件探针通过后，再确定一线 USB 的烧录、日志与 NDJSON 生命周期，并把经过验证的引脚表转录到 `docs/hardware.md`。

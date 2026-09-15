@@ -6,7 +6,7 @@
 
 Stage 1 **已通过实机验收**。证据链是 Mac Studio → `/dev/cu.usbmodem8401` → ESP32-S3 原生 USB Serial/JTAG → `agent-beacon-fw` → cJSON parse → USB 返回结果，不是本机模拟或仅编译通过。
 
-本阶段没有初始化 LCD、audio、microphone、buzzer 或 buttons。实机烧录后，LCD 继续显示原小智固件最后留下的配网页面；这不是旧固件仍在运行，而是 LCD 控制器显存和背光在 ESP32 软件复位后保持，且 Stage 1 固件没有覆盖画面。随后重复执行 Serial Hello 仍通过，直接证明当前运行的是 AgentBeacon 固件。LCD 清屏和新 UI 必须等待 Stage 3 及厂家硬件依据。
+本阶段没有初始化 LCD、audio、microphone、buzzer 或 buttons。实机烧录后，LCD 继续显示原小智固件最后留下的配网页面；这不是旧固件仍在运行，而是 LCD 控制器显存和背光在 ESP32 软件复位后保持，且 Stage 1 固件没有覆盖画面。随后重复执行 Serial Hello 仍通过，直接证明当前运行的是 Vibe Buddy 固件。LCD 清屏和新 UI 必须等待 Stage 3 及厂家硬件依据。
 
 ## 构建
 
@@ -25,7 +25,7 @@ Stage 1 **已通过实机验收**。证据链是 Mac Studio → `/dev/cu.usbmode
 
 ## 原厂固件备份
 
-写入 AgentBeacon 前，使用 `esptool read_flash` 读取了完整 16 MiB Flash：
+写入 Vibe Buddy 前，使用 `esptool read_flash` 读取了完整 16 MiB Flash：
 
 - 本机文件：`.probe/factory/atk-dnesp32s3-box-v1.1-xiaozhi-1.9.4-2026-09-14.bin`
 - 大小：16,777,216 bytes。
@@ -83,6 +83,6 @@ PASS protocol error, version, extension, CRLF, and size handling
 
 ## 未证明的事项
 
-- 这次验收没有证明 LCD、audio、buzzer、buttons 或 TF 卡可由 AgentBeacon 驱动。
+- 这次验收没有证明 LCD、audio、buzzer、buttons 或 TF 卡可由 Vibe Buddy 驱动。
 - 这次验收没有实现 `beacond`、HTTP API 或 serial reconnect；这些属于 Stage 2。
 - 当前串口节点编号可能随 macOS 枚举变化，后续 daemon 不能写死 `usbmodem8401`，应使用 VID/PID 与 USB serial 发现设备。

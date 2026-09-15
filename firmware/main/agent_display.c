@@ -542,7 +542,7 @@ static void draw_idle_line(void) {
     lines[count++] = tally_line;
   }
   if (count == 0) {
-    draw_text_centered(195, "YOUR AGENT PET", 2, COLOR_MUTED);
+    draw_text_centered(195, "YOUR VIBE BUDDY", 2, COLOR_MUTED);
     return;
   }
   size_t slot = (animation_frame / IDLE_ROTATE_FRAMES) % count;
@@ -1131,7 +1131,7 @@ static esp_err_t render_current_state(void) {
 
   fill_rect(0, 0, DISPLAY_WIDTH, DISPLAY_HEIGHT, COLOR_BACKGROUND);
   fill_rect(0, 0, DISPLAY_WIDTH, 4, status_color);
-  draw_text_centered(12, "AgentBeacon", 2, COLOR_TEXT);
+  draw_text_centered(12, "Vibe Buddy", 2, COLOR_TEXT);
   if (current_mode == AGENT_MODE_POMODORO) {
     draw_pomodoro_scene(label, status_color);
   } else if (current_mode == AGENT_MODE_LEISURE) {

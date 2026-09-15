@@ -4,11 +4,11 @@
 
 CI 出结果的时候，用户通常早就切走做别的事了。笔记本屏幕上的那个页签要主动去看才有用，而这个盒子一直在视野边缘——这是设备真正比屏幕有用的场景之一。
 
-CI 与 Agent 共用同一套任务卡、同一只小灯灵和同一组播报，只是来源不同：Agent 由 Hook 推送，CI 由 `beacond` 主动轮询 GitHub Actions。
+CI 与 Agent 共用同一套任务卡、同一只氛围小助手和同一组播报，只是来源不同：Agent 由 Hook 推送，CI 由 `beacond` 主动轮询 GitHub Actions。
 
 ## 映射
 
-| GitHub Actions run | AgentBeacon 状态 |
+| GitHub Actions run | Vibe Buddy 状态 |
 | --- | --- |
 | `queued` / `in_progress` | 工作中，标题 `CI:<仓库名>` |
 | `completed` + `success` | 完成，播放一次“任务完成” |

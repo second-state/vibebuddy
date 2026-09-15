@@ -1,4 +1,4 @@
-# AgentBeacon 路线图
+# Vibe Buddy 路线图
 
 ## 阶段门禁
 
@@ -30,7 +30,7 @@
 
 ### Stage 3 — LCD（已完成，2026-09-14）
 
-实机确认 320×240 ST7789 i80 与 XL9555 背光控制后，实现小灯灵的 Ready、Working、Input Required、Done、Failed 动画。Mac 端多任务快照可绘制最多 3 张卡片，最新在最上。
+实机确认 320×240 ST7789 i80 与 XL9555 背光控制后，实现氛围小助手的 Ready、Working、Input Required、Done、Failed 动画。Mac 端多任务快照可绘制最多 3 张卡片，最新在最上。
 
 ### Stage 4 — Audio（已完成，2026-09-14）
 

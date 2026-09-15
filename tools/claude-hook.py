@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""把 Claude Code 生命周期事件最小化后转发给本机 AgentBeacon。"""
+"""把 Claude Code 生命周期事件最小化后转发给本机 Vibe Buddy。"""
 
 import json
 import sys
@@ -55,7 +55,7 @@ def main() -> int:
         with urllib.request.urlopen(request, timeout=0.5):
             pass
     except (OSError, ValueError):
-        # AgentBeacon 未运行或输入无效时，不能干扰 Claude Code 主流程。
+        # Vibe Buddy 未运行或输入无效时，不能干扰 Claude Code 主流程。
         pass
     return 0
 

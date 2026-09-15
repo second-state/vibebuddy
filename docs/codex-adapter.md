@@ -4,9 +4,9 @@
 
 Codex 内置宠物的素材、动画状态机和任务卡片渲染没有公开为宠物 API，不能可靠地逐帧镜像到外部设备。可依赖的公开接口是 Codex 生命周期 Hook。
 
-AgentBeacon 使用以下映射：
+Vibe Buddy 使用以下映射：
 
-| Codex Hook | AgentBeacon 状态 |
+| Codex Hook | Vibe Buddy 状态 |
 | --- | --- |
 | `UserPromptSubmit` | 工作中 |
 | `PermissionRequest` | 需要确认 |

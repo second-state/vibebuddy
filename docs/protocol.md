@@ -1,6 +1,6 @@
 # Beacon Protocol v1
 
-Beacon Protocol 是 `beacond` 与 AgentBeacon 设备之间的应用协议。v1 使用 UTF-8 NDJSON；transport 负责可靠地传送字节流，协议不依赖具体串口名称。
+Beacon Protocol 是 `beacond` 与 Vibe Buddy 设备之间的应用协议。v1 使用 UTF-8 NDJSON；transport 负责可靠地传送字节流，协议不依赖具体串口名称。
 
 ## Framing
 

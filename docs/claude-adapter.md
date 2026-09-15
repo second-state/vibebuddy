@@ -2,9 +2,9 @@
 
 ## 能力边界
 
-Claude Code 的公开生命周期 Hook 提供了 AgentBeacon 需要的全部信息，因此适配方式与 Codex 一致：只用官方 Hook，不抓取 UI，不解析 transcript。
+Claude Code 的公开生命周期 Hook 提供了 Vibe Buddy 需要的全部信息，因此适配方式与 Codex 一致：只用官方 Hook，不抓取 UI，不解析 transcript。
 
-| Claude Code Hook | AgentBeacon 状态 |
+| Claude Code Hook | Vibe Buddy 状态 |
 | --- | --- |
 | `UserPromptSubmit` | 工作中 |
 | `PermissionRequest` | 需要确认 |
@@ -26,7 +26,7 @@ Claude Code 的 `prompt_id` 与 Codex 的 `turn_id` 语义对齐，都标识一�
 
 ## 与 Codex 并存
 
-两个 Adapter 写入同一个聚合器，因为设备只有一块屏幕和一只小灯灵。任务卡标题带 Agent 前缀：Codex 为 `CX:`，Claude Code 为 `CC:`。两个 Agent 常常在同一个目录下工作，没有前缀就无法区分该切回哪个窗口。
+两个 Adapter 写入同一个聚合器，因为设备只有一块屏幕和一只氛围小助手。任务卡标题带 Agent 前缀：Codex 为 `CX:`，Claude Code 为 `CC:`。两个 Agent 常常在同一个目录下工作，没有前缀就无法区分该切回哪个窗口。
 
 前缀只能使用固件字体支持的字符：`A-Z`、`0-9` 以及 `-.:/!?>` 等少数符号。固件按单字节渲染，非 ASCII 分隔符会被拆成两个未知字形。
 

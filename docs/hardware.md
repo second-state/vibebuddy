@@ -1,4 +1,4 @@
-# AgentBeacon 硬件记录
+# Vibe Buddy 硬件记录
 
 本文只记录带证据边界的硬件事实。相似名称或同系列开发板不能作为 GPIO、codec、LCD 或 USB 路径的依据。
 
@@ -10,7 +10,7 @@
 - 外设：LCD、Speaker、Microphone、Buzzer、K0/K1/K2、TF/microSD、USB-C、USB-A Host、UART。
 - 期望：一根 USB-C 线同时供电、烧录和运行时通信。
 
-同一根 USB-C 线完成供电、运行时串口、ROM 下载、AgentBeacon 固件写入和写入后的重新枚举已经实测成立。
+同一根 USB-C 线完成供电、运行时串口、ROM 下载、Vibe Buddy 固件写入和写入后的重新枚举已经实测成立。
 
 ## 当前主机确认
 
@@ -40,8 +40,8 @@
 - 2026-09-14 的背面照片显示 PCB `V1.1` 丝印、ATK-MWS3S `N16R8` 模组、`B0/K1/K2`、`USB-SLAVE`、`HOST`、`UART`、麦克风、扬声器、蜂鸣器和 TF 卡座。
 - 实物布局与当前固件自报标识共同确认板型为 **ATK-DNESP32S3-BOX V1.1**；不是 DNESP32S3 开发板、BOX0、BOX2 或 BOX3。
 - Stage 2 真实拔掉 `USB-SLAVE` 后，`beacond` 记录到 `Device not configured`；插回后自动重新发现同一串口节点并恢复通信。
-- 完整 USB 断电后，原小智固件遗留画面消失而屏幕保持黑色；这证明旧画面是 LCD 残留状态，不代表旧固件仍在运行，也不证明 AgentBeacon 已有 LCD 驱动。
-- LCD 已由 AgentBeacon 实机驱动并通过视觉验收：320×240 ST7789、8 位 i80，总线数据 GPIO40/39/38/12/11/10/9/46，CS/DC/RD/WR 为 GPIO1/2/41/42，背光由 XL9555 P0.7 控制。
+- 完整 USB 断电后，原小智固件遗留画面消失而屏幕保持黑色；这证明旧画面是 LCD 残留状态，不代表旧固件仍在运行，也不证明 Vibe Buddy 已有 LCD 驱动。
+- LCD 已由 Vibe Buddy 实机驱动并通过视觉验收：320×240 ST7789、8 位 i80，总线数据 GPIO40/39/38/12/11/10/9/46，CS/DC/RD/WR 为 GPIO1/2/41/42，背光由 XL9555 P0.7 控制。
 - I2C 在 7 位地址 `0x18` 探测到 ES8311；音频 I2S BCLK/WS/DOUT 为 GPIO21/13/14，采样率 24 kHz，扬声器使能由 XL9555 P0.5 控制。
 - 固件启动已回报 `AUDIO READY` 与 `AUDIO CODEC ES8311`；用户已实际听到“需要你确认”语音。
 - 2026-09-14 实机验证失联指示：停止 `beacond` 超过 15 秒后，设备转为闭眼、画面转灰并显示 `NO LINK`，任务卡保留但同样转灰；恢复 daemon 后自动退出该状态。用户已实机确认。

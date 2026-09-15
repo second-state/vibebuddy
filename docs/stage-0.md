@@ -10,7 +10,7 @@ Stage 0 **已通过**。开发主机、USB 插拔差异、运行时串口和 ROM
 
 厂家针对这款老 BOX V1.1 的原理图/BSP 仍未从当前官方站点或 GitHub 组织取得。这个缺口不阻塞仅使用芯片原生 USB Serial/JTAG、且不访问外设 GPIO 的 Stage 1；它继续阻塞 LCD、音频、蜂鸣器和按键实现。未取得厂家依据前，不冻结这些外设的 GPIO。
 
-Stage 1 所需的最小 USB 前置条件已经满足：同一根 USB-C 线可供电、读取运行时日志，并让 `esptool` 进入 ESP32-S3 ROM 下载链路。这里的“下载链路已确认”不等于“AgentBeacon 固件已烧录”；本阶段没有擦除或写入 Flash。
+Stage 1 所需的最小 USB 前置条件已经满足：同一根 USB-C 线可供电、读取运行时日志，并让 `esptool` 进入 ESP32-S3 ROM 下载链路。这里的“下载链路已确认”不等于“Vibe Buddy 固件已烧录”；本阶段没有擦除或写入 Flash。
 
 ## 主机身份
 
@@ -111,7 +111,7 @@ EIM 在仓库根目录生成了包含本机绝对路径的 `eim_config.toml`。�
 - AP 64 Mbit（8 MB）Octal PSRAM，80 MHz。
 - 当前应用项目 `xiaozhi`，版本 1.9.4，ESP-IDF v5.5。
 - 当前固件板型标识 `atk-dnesp32s3-box`。
-- 当前固件成功初始化 LCD/LVGL、ES8311 codec 和 Wi-Fi；这些日志只证明现有固件可驱动实机，不自动证明 AgentBeacon 可复用其全部板级参数。
+- 当前固件成功初始化 LCD/LVGL、ES8311 codec 和 Wi-Fi；这些日志只证明现有固件可驱动实机，不自动证明 Vibe Buddy 可复用其全部板级参数。
 
 随后执行只读 `esptool flash_id` 探测：
 
@@ -120,7 +120,7 @@ EIM 在仓库根目录生成了包含本机绝对路径的 `eim_config.toml`。�
 - Flash manufacturer/device 为 `68:4018`，探测容量 16 MB，3.3 V。
 - RAM stub 上传、460800 baud 切换和 hard reset 均成功。
 
-该探测证明 ROM 下载通路工作，但未执行 erase、write 或 AgentBeacon 固件烧录。实际写入后的重新枚举和运行时通信仍属于 Stage 1 实机验收。
+该探测证明 ROM 下载通路工作，但未执行 erase、write 或 Vibe Buddy 固件烧录。实际写入后的重新枚举和运行时通信仍属于 Stage 1 实机验收。
 
 ## 当前固件源码旁证
 
@@ -135,7 +135,7 @@ EIM 在仓库根目录生成了包含本机绝对路径的 `eim_config.toml`。�
 - [x] 连接后快照及拔插前后 USB 差异。
 - [x] VID/PID 与设备名称。
 - [x] native USB 或 USB-UART bridge 的证据。
-- [x] ROM 下载路径与当前固件运行时串口路径；实际 AgentBeacon 烧录后仍需复验。
+- [x] ROM 下载路径与当前固件运行时串口路径；实际 Vibe Buddy 烧录后仍需复验。
 - [x] PCB 完整型号/版本：ATK-DNESP32S3-BOX V1.1。
 - [x] 已整理 DNESP32S3 开发板和 BOX3 两套候选官方资料，并明确不可混用。
 - [x] 确定实机版本；厂家 schematic、BSP 和 examples 仍缺失并继续锁定外设阶段。
