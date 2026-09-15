@@ -11,3 +11,4 @@ sdkconfig
 sdkconfig.old
 /firmware/managed_components/
 build-*/
+__pycache__/
