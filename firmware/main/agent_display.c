@@ -1213,6 +1213,34 @@ esp_err_t agent_display_show_tasks(agent_display_state_t state,
   return render_current_state();
 }
 
+void agent_display_dump(void (*write_line)(const char *line)) {
+  char line[200];
+  snprintf(line, sizeof(line), "SHOT BEGIN %dx%d BACKLIGHT %s", DISPLAY_WIDTH,
+           DISPLAY_HEIGHT, backlight_on ? "ON" : "OFF");
+  write_line(line);
+  const size_t total = (size_t)DISPLAY_WIDTH * DISPLAY_HEIGHT;
+  size_t index = 0;
+  int used = snprintf(line, sizeof(line), "SHOT");
+  int runs = 0;
+  while (index < total) {
+    uint16_t color = framebuffer[index];
+    size_t run = 1;
+    while (index + run < total && framebuffer[index + run] == color &&
+           run < 60000) {
+      run++;
+    }
+    used += snprintf(line + used, sizeof(line) - (size_t)used, " %04x:%u",
+                     (unsigned)color, (unsigned)run);
+    index += run;
+    if (++runs == 16 || index == total) {
+      write_line(line);
+      used = snprintf(line, sizeof(line), "SHOT");
+      runs = 0;
+    }
+  }
+  write_line("SHOT END");
+}
+
 void agent_display_set_stats(const char *const *lines, size_t count) {
   current_stat_count =
       count > AGENT_DISPLAY_MAX_STATS ? AGENT_DISPLAY_MAX_STATS : count;

@@ -62,6 +62,11 @@ static uint32_t clock_ms(void) {
   return xTaskGetTickCount() * (uint32_t)portTICK_PERIOD_MS;
 }
 
+static void write_shot_line(const char *line) {
+  transport_write_literal(line);
+  transport_write_literal("\n");
+}
+
 static const char *mode_name(agent_mode_t mode) {
   switch (mode) {
     case AGENT_MODE_POMODORO:
@@ -439,6 +444,13 @@ static void handle_line(char *line, size_t length) {
       save_tally();
       agent_display_refresh();
     }
+    cJSON_Delete(message);
+    return;
+  }
+
+  // 截图是调试动作，不算 Agent 的动静，也不叫醒休闲。
+  if (strcmp(event->valuestring, "device.screenshot") == 0) {
+    agent_display_dump(write_shot_line);
     cJSON_Delete(message);
     return;
   }

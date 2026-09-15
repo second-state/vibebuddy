@@ -56,6 +56,11 @@ bool agent_display_agent_idle(void);
 /// 底层状态与任务卡保留，因为它们是最后已知的事实，只是不再可信。
 void agent_display_set_link_lost(bool lost);
 
+/// 截图：把当前帧缓冲按行程编码逐行交给 `write_line`（不含换行）。
+/// 第一行 `SHOT BEGIN 320x240 BACKLIGHT ON|OFF`，中间每行若干段
+/// `rgb565:长度`，最后 `SHOT END`。
+void agent_display_dump(void (*write_line)(const char *line));
+
 /// 记录当日战绩，空闲屏会轮播这几行。下一次绘制时生效。
 void agent_display_set_stats(const char *const *lines, size_t count);
 
