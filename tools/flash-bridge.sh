@@ -5,10 +5,12 @@
 # 先单独写分区表试路，再写 app；bootloader 只在明确要求时才写。
 #
 # 用法: tools/flash-bridge.sh /dev/cu.usbmodemXXXX partition|app|bootloader ...
+# 默认烧 firmware/build；设 BUILD_DIR 可以烧别的构建目录，例如验收用的
+# firmware/build-fast。
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-build_dir="${repo_root}/firmware/build"
+build_dir="${BUILD_DIR:-${repo_root}/firmware/build}"
 serial_port="${1:?用法: flash-bridge.sh <串口> partition|app|bootloader ...}"
 shift
 if [[ $# -eq 0 ]]; then

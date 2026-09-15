@@ -41,9 +41,37 @@ static void snapshot(const char *directory, const char *name) {
 
 static void set_ms(uint32_t ms) { stub_tick_count = ms / portTICK_PERIOD_MS; }
 
+/// 把每个剧目逐帧渲染出来，脚本再拼成 GIF。
+static void render_skits(const char *directory) {
+  static const struct {
+    agent_skit_t skit;
+    const char *name;
+    unsigned frames;
+  } SKITS[] = {
+      {AGENT_SKIT_PATROL, "patrol", 96},   {AGENT_SKIT_BALL, "ball", 96},
+      {AGENT_SKIT_READ, "read", 120},      {AGENT_SKIT_STARS, "stars", 120},
+      {AGENT_SKIT_HIDE, "hide", 80},       {AGENT_SKIT_STARTLE, "startle", 80},
+      {AGENT_SKIT_DREAM, "dream", 96},     {AGENT_SKIT_SLEEP, "sleep", 48},
+      {AGENT_SKIT_NONE, "rest", 48},
+  };
+  for (unsigned index = 0; index < sizeof(SKITS) / sizeof(SKITS[0]); index++) {
+    uint32_t start = 100000;
+    agent_leisure_init(1, start);
+    agent_leisure_start_skit(SKITS[index].skit, start);
+    agent_display_set_mode(AGENT_MODE_DUTY);
+    agent_display_set_mode(AGENT_MODE_LEISURE);
+    for (unsigned frame = 0; frame < SKITS[index].frames; frame++) {
+      set_ms(start + frame * AGENT_LEISURE_FRAME_MS);
+      char name[64];
+      snprintf(name, sizeof(name), "skit_%s_%03u", SKITS[index].name, frame);
+      snapshot(directory, name);
+    }
+  }
+}
+
 int main(int argc, char **argv) {
-  if (argc != 2) {
-    fprintf(stderr, "用法: %s <输出目录>\n", argv[0]);
+  if (argc < 2 || argc > 3) {
+    fprintf(stderr, "用法: %s <输出目录> [leisure]\n", argv[0]);
     return EXIT_FAILURE;
   }
   const char *directory = argv[1];
@@ -53,9 +81,14 @@ int main(int argc, char **argv) {
   const char *stats[] = {"7 DONE", "4 ASKS", "1H23 BUSY"};
   agent_display_set_stats(stats, 3);
   agent_pomodoro_init();
+  agent_leisure_init(1, 0);
+  if (argc == 3 && strcmp(argv[2], "leisure") == 0) {
+    render_skits(directory);
+    return EXIT_SUCCESS;
+  }
 
   set_ms(1000);
-  agent_display_set_scene(AGENT_SCENE_POMODORO);
+  agent_display_set_mode(AGENT_MODE_POMODORO);
   snapshot(directory, "pomodoro_idle");
 
   agent_display_task_t tasks[] = {
@@ -75,13 +108,13 @@ int main(int argc, char **argv) {
   snapshot(directory, "pomodoro_paused");
   agent_pomodoro_toggle(1000 + 6 * 60 * 1000 + 39 * 1000);
 
-  agent_display_set_scene(AGENT_SCENE_PET);
+  agent_display_set_mode(AGENT_MODE_DUTY);
   snapshot(directory, "pet_with_badge");
 
   uint32_t focus_end = 1000 + 25 * 60 * 1000 + 100;
   set_ms(focus_end);
   (void)agent_pomodoro_tick(focus_end);
-  agent_display_set_scene(AGENT_SCENE_POMODORO);
+  agent_display_set_mode(AGENT_MODE_POMODORO);
   agent_display_show(AGENT_DISPLAY_IDLE, NULL);
   snapshot(directory, "pomodoro_break_pending");
 

@@ -17,12 +17,14 @@ typedef enum {
   AGENT_DISPLAY_OFFLINE,
 } agent_display_state_t;
 
-/// 屏幕上同一时刻只有一个场景。小灯灵与任务卡是一个，番茄钟是另一个；
-/// Agent 状态在两个场景里都继续更新，番茄钟场景只给它留一行摘要。
+/// 小灯灵同一时刻只处于一个模式，每个模式拥有整块画面。值班盯着 Agent，
+/// 番茄钟给用户计时，休闲是值班空闲够久之后自己去玩。Agent 状态在三个
+/// 模式里都继续更新，只是番茄钟模式只给它留一行摘要。
 typedef enum {
-  AGENT_SCENE_PET,
-  AGENT_SCENE_POMODORO,
-} agent_scene_t;
+  AGENT_MODE_DUTY,
+  AGENT_MODE_POMODORO,
+  AGENT_MODE_LEISURE,
+} agent_mode_t;
 
 typedef struct {
   const char *title;
@@ -40,10 +42,13 @@ esp_err_t agent_display_show_tasks(agent_display_state_t state,
                                    size_t task_count);
 void agent_display_tick(void);
 
-void agent_display_set_scene(agent_scene_t scene);
-agent_scene_t agent_display_scene(void);
+void agent_display_set_mode(agent_mode_t mode);
+agent_mode_t agent_display_mode(void);
 /// 立即重绘。按键改变了番茄钟之后不该再等下一帧动画。
 void agent_display_refresh(void);
+/// Agent 那边是否无事可做：主状态空闲且没有任务卡。休闲模式的无聊度
+/// 按这个状态累计，而不是按多久没收到消息，因为长任务中途本来就没有消息。
+bool agent_display_agent_idle(void);
 
 /// 链路失联时覆盖显示：小灯灵闭眼，画面转灰。
 /// 底层状态与任务卡保留，因为它们是最后已知的事实，只是不再可信。

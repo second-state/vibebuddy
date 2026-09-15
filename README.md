@@ -8,7 +8,7 @@ AgentBeacon 是运行在 ESP32-S3 盒子里的实体 Agent 宠物。原创角色
 
 **Stage 4 — 小灯灵显示与语音已通过实机验收，Codex、Claude Code 与 GitHub Actions 均已接入。** 它们的事件都经 `beacond` 和 USB Serial/JTAG 到达盒子，并共享同一个任务卡栈。小灯灵支持空闲、工作中、需要确认、完成、失败和失联；最多显示 3 张任务卡，最新在最上，每张卡显示它在当前状态里待了多久；需要确认、完成和失败各播报一次短语音，工作中保持安静；空闲时轮播当日战绩并偶尔做个小动作。
 
-盒子还有第二个场景：番茄钟（专注 25 分钟、休息 5 分钟）。K0 开始、暂停、继续，长按放弃；K1 在两个场景之间切换；K2 照旧打开来源；阶段结束响铃并播报，下一阶段等你按 K0 再开始。番茄钟状态完全在固件里，不依赖 Mac 端。设计见 [`docs/pomodoro.md`](docs/pomodoro.md)；这部分尚待烧录与实机验收。
+小灯灵有三个模式。**值班**是默认：盯着 Agent，有事叫你。**番茄钟**给你计时（专注 25 分钟、休息 5 分钟）：K0 开始、暂停、继续，长按放弃；K1 在值班与番茄钟之间切换；K2 照旧打开来源；阶段结束响铃并播报，下一阶段等你按 K0 再开始。**休闲**是值班空闲够久之后它自己去玩：五分钟后开始演小剧目（巡逻、踢球、看书、数星星、躲猫猫、被自己吓醒、梦话），半小时后困了转暗睡觉，夜里睡够 90 分钟关背光；Agent 一有动静或按任何键立刻回来值班。番茄钟与休闲的状态都在固件里，不依赖 Mac 端。设计见 [`docs/pomodoro.md`](docs/pomodoro.md) 与 [`docs/leisure.md`](docs/leisure.md)。
 
 ## 目标架构
 
@@ -34,7 +34,7 @@ Local Programs / Agents / Codex / Scripts
 - `agent-beacon-fw`：ESP32-S3 固件，仅负责设备 I/O 和 Beacon Protocol 消息处理。
 - Beacon Protocol：与 transport 解耦的可扩展 NDJSON 协议。
 
-更完整的边界与决定见 [`docs/architecture.md`](docs/architecture.md)，领域词汇见 [`CONTEXT.md`](CONTEXT.md)，小灯灵设计见 [`docs/pet.md`](docs/pet.md)，番茄钟场景见 [`docs/pomodoro.md`](docs/pomodoro.md)，Codex 接入见 [`docs/codex-adapter.md`](docs/codex-adapter.md)，CI 接入见 [`docs/ci.md`](docs/ci.md)，协议决定见 [`docs/protocol.md`](docs/protocol.md)，阶段门禁见 [`docs/roadmap.md`](docs/roadmap.md)，外部项目的借鉴边界见 [`docs/references.md`](docs/references.md)。
+更完整的边界与决定见 [`docs/architecture.md`](docs/architecture.md)，领域词汇见 [`CONTEXT.md`](CONTEXT.md)，小灯灵设计见 [`docs/pet.md`](docs/pet.md)，番茄钟见 [`docs/pomodoro.md`](docs/pomodoro.md)，休闲模式见 [`docs/leisure.md`](docs/leisure.md)，Codex 接入见 [`docs/codex-adapter.md`](docs/codex-adapter.md)，CI 接入见 [`docs/ci.md`](docs/ci.md)，协议决定见 [`docs/protocol.md`](docs/protocol.md)，阶段门禁见 [`docs/roadmap.md`](docs/roadmap.md)，外部项目的借鉴边界见 [`docs/references.md`](docs/references.md)。
 
 ## Stage 0 USB 探测
 

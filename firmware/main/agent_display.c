@@ -9,6 +9,7 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "agent_leisure.h"
 #include "agent_pomodoro.h"
 #include "driver/gpio.h"
 #include "driver/i2c_master.h"
@@ -133,7 +134,7 @@ static SemaphoreHandle_t transfer_done;
 static bool display_ready;
 static agent_display_state_t current_state = AGENT_DISPLAY_IDLE;
 static bool link_lost = false;
-static agent_scene_t current_scene = AGENT_SCENE_PET;
+static agent_mode_t current_mode = AGENT_MODE_DUTY;
 static char current_title[TITLE_BYTES];
 static struct {
   char title[TITLE_BYTES];
@@ -150,6 +151,10 @@ static char firmware_build[BUILD_BYTES];
 static char daemon_build[BUILD_BYTES];
 static uint32_t animation_frame;
 static TickType_t next_animation_at;
+/// 背光当前是否点亮。休闲模式夜里睡久了会关掉它，任何事情一来就点亮。
+static bool backlight_on;
+/// 本帧提交前是否整体转暗：困倦期的画面。
+static bool render_dim;
 
 static bool on_color_transfer_done(esp_lcd_panel_io_handle_t panel_io,
                                    esp_lcd_panel_io_event_data_t *event_data,
@@ -360,6 +365,30 @@ static void draw_pet_face(agent_display_state_t state, uint32_t frame,
   }
 }
 
+/// 天线、身体、手臂和脸上的屏幕。x、y 是相对值班位置的偏移；手臂抬起用
+/// 正数。脸另外画，腿也另外画，因为它们各自还有别的姿势。
+static void draw_pet_body(int x, int y, int antenna, uint16_t knob_color,
+                          int left_arm, int right_arm) {
+  fill_rect(157 + x, 48 + y - antenna, 6, 13 + antenna, COLOR_PET_HIGHLIGHT);
+  fill_rect(153 + x, 44 + y - antenna, 14, 10, knob_color);
+
+  fill_rect(113 + x, 65 + y, 94, 52, COLOR_PET);
+  fill_rect(121 + x, 59 + y, 78, 64, COLOR_PET);
+  fill_rect(105 + x, 78 + y - left_arm, 12, 28, COLOR_PET_HIGHLIGHT);
+  fill_rect(203 + x, 78 + y - right_arm, 12, 28, COLOR_PET_HIGHLIGHT);
+  fill_rect(128 + x, 75 + y, 64, 40, COLOR_BACKGROUND);
+  fill_rect(132 + x, 79 + y, 56, 32, 0x10a4);
+}
+
+/// 下半身与两只脚；脚抬起用正数。
+static void draw_pet_legs(int x, int y, int left_foot, int right_foot) {
+  fill_rect(139 + x, 121 + y, 42, 25, COLOR_PET);
+  fill_rect(126 + x, 125 + y - left_foot, 13, 17, COLOR_PET_HIGHLIGHT);
+  fill_rect(181 + x, 125 + y - right_foot, 13, 17, COLOR_PET_HIGHLIGHT);
+  fill_rect(143 + x, 145 + y - left_foot, 13, 8, COLOR_PET_HIGHLIGHT);
+  fill_rect(164 + x, 145 + y - right_foot, 13, 8, COLOR_PET_HIGHLIGHT);
+}
+
 static void draw_beaconling(agent_display_state_t state, uint32_t frame,
                             int x_offset, uint16_t color) {
   int y_offset = 0;
@@ -378,23 +407,9 @@ static void draw_beaconling(agent_display_state_t state, uint32_t frame,
                         idle_mood(frame) == IDLE_MOOD_STRETCH
                     ? 5
                     : 0;
-  fill_rect(157 + x_offset, 48 + y_offset - antenna, 6, 13 + antenna,
-            COLOR_PET_HIGHLIGHT);
-  fill_rect(153 + x_offset, 44 + y_offset - antenna, 14, 10, color);
-
-  fill_rect(113 + x_offset, 65 + y_offset, 94, 52, COLOR_PET);
-  fill_rect(121 + x_offset, 59 + y_offset, 78, 64, COLOR_PET);
-  fill_rect(105 + x_offset, 78 + y_offset, 12, 28, COLOR_PET_HIGHLIGHT);
-  fill_rect(203 + x_offset, 78 + y_offset, 12, 28, COLOR_PET_HIGHLIGHT);
-  fill_rect(128 + x_offset, 75 + y_offset, 64, 40, COLOR_BACKGROUND);
-  fill_rect(132 + x_offset, 79 + y_offset, 56, 32, 0x10a4);
+  draw_pet_body(x_offset, y_offset, antenna, color, 0, 0);
   draw_pet_face(state, frame, x_offset, y_offset, color);
-
-  fill_rect(139 + x_offset, 121 + y_offset, 42, 25, COLOR_PET);
-  fill_rect(126 + x_offset, 125 + y_offset, 13, 17, COLOR_PET_HIGHLIGHT);
-  fill_rect(181 + x_offset, 125 + y_offset, 13, 17, COLOR_PET_HIGHLIGHT);
-  fill_rect(143 + x_offset, 145 + y_offset, 13, 8, COLOR_PET_HIGHLIGHT);
-  fill_rect(164 + x_offset, 145 + y_offset, 13, 8, COLOR_PET_HIGHLIGHT);
+  draw_pet_legs(x_offset, y_offset, 0, 0);
 }
 
 static uint16_t state_color(agent_display_state_t state) {
@@ -523,6 +538,12 @@ static void draw_idle_line(void) {
 }
 
 static esp_err_t present(void) {
+  if (render_dim) {
+    // 每个通道各减半：RGB565 整体右移一位再掩掉串到相邻通道的最低位。
+    for (size_t index = 0; index < DISPLAY_WIDTH * DISPLAY_HEIGHT; index++) {
+      framebuffer[index] = (uint16_t)((framebuffer[index] >> 1) & 0x7bef);
+    }
+  }
   while (xSemaphoreTake(transfer_done, 0) == pdTRUE) {
   }
   ESP_RETURN_ON_ERROR(esp_lcd_panel_draw_bitmap(panel_handle, 0, 0,
@@ -676,6 +697,360 @@ static void draw_pomodoro_badge(void) {
             phase_color(&view), sizeof(badge));
 }
 
+/// 休闲模式：小灯灵离开值班的位置，在整块屏幕中间演小剧目。状态条和
+/// 页脚照旧，睡着的精灵就等于“没有事等你”。
+typedef enum {
+  EYES_OPEN,
+  EYES_CLOSED,
+  EYES_WIDE,
+  EYES_HALF,
+} pet_eyes_t;
+
+typedef enum {
+  MOUTH_SMILE,
+  MOUTH_FLAT,
+  MOUTH_OPEN,
+} pet_mouth_t;
+
+typedef struct {
+  int x;
+  int y;
+  int gaze_x;
+  int gaze_y;
+  int antenna;
+  int left_arm;
+  int right_arm;
+  int left_foot;
+  int right_foot;
+  pet_eyes_t eyes;
+  pet_mouth_t mouth;
+} pet_pose_t;
+
+static void draw_pet_eyes(int x, int y, pet_eyes_t eyes, int gaze_x,
+                          int gaze_y, uint16_t color) {
+  int face_y = 79 + y;
+  int left = 143 + x + gaze_x;
+  int right = 169 + x + gaze_x;
+  if (eyes == EYES_CLOSED) {
+    fill_rect(left, face_y + 14, 8, 3, color);
+    fill_rect(right, face_y + 14, 8, 3, color);
+  } else if (eyes == EYES_HALF) {
+    fill_rect(left, face_y + 12 + gaze_y, 8, 5, color);
+    fill_rect(right, face_y + 12 + gaze_y, 8, 5, color);
+  } else if (eyes == EYES_WIDE) {
+    fill_rect(left - 1, face_y + 6 + gaze_y, 10, 13, color);
+    fill_rect(right - 1, face_y + 6 + gaze_y, 10, 13, color);
+  } else {
+    fill_rect(left, face_y + 8 + gaze_y, 8, 10, color);
+    fill_rect(right, face_y + 8 + gaze_y, 8, 10, color);
+  }
+}
+
+static void draw_pet_mouth(int x, int y, pet_mouth_t mouth, uint16_t color) {
+  int face_y = 79 + y;
+  if (mouth == MOUTH_SMILE) {
+    draw_line(154 + x, face_y + 24, 160 + x, face_y + 27, color);
+    draw_line(160 + x, face_y + 27, 166 + x, face_y + 24, color);
+  } else if (mouth == MOUTH_FLAT) {
+    draw_line(154 + x, face_y + 25, 166 + x, face_y + 25, color);
+  } else {
+    fill_rect(155 + x, face_y + 21, 10, 8, color);
+  }
+}
+
+static void draw_pet_pose(const pet_pose_t *pose) {
+  draw_pet_body(pose->x, pose->y, pose->antenna, COLOR_READY, pose->left_arm,
+                pose->right_arm);
+  draw_pet_eyes(pose->x, pose->y, pose->eyes, pose->gaze_x, pose->gaze_y,
+                COLOR_READY);
+  draw_pet_mouth(pose->x, pose->y, pose->mouth, COLOR_READY);
+  draw_pet_legs(pose->x, pose->y, pose->left_foot, pose->right_foot);
+}
+
+/// 睁眼微笑，每三秒眨一次。
+static pet_pose_t resting_pose(uint32_t frame) {
+  pet_pose_t pose = {0};
+  pose.eyes = frame % 24 == 23 ? EYES_CLOSED : EYES_OPEN;
+  pose.mouth = MOUTH_SMILE;
+  return pose;
+}
+
+static pet_pose_t sleeping_pose(uint32_t frame) {
+  pet_pose_t pose = {0};
+  pose.eyes = EYES_CLOSED;
+  pose.mouth = MOUTH_FLAT;
+  pose.y = (int)((frame / 8) % 2);
+  return pose;
+}
+
+static void draw_sleeping_z(int x, int y, uint32_t frame) {
+  draw_text(172 + x, 44 + y - (int)(frame % 16), "Z", 2, COLOR_READY, 1);
+}
+
+/// 剧目之间的普通空闲：站着，呼吸，眨眼。
+static void skit_rest(uint32_t frame) {
+  pet_pose_t pose = resting_pose(frame);
+  pose.y = (int)((frame / 8) % 2);
+  draw_pet_pose(&pose);
+}
+
+static void skit_sleep(uint32_t frame) {
+  pet_pose_t pose = sleeping_pose(frame);
+  draw_pet_pose(&pose);
+  draw_sleeping_z(0, pose.y, frame);
+}
+
+/// 巡逻：走到右边，停下看你一眼，走到左边，再回来。
+static void skit_patrol(uint32_t frame) {
+  pet_pose_t pose = resting_pose(frame);
+  bool walking = true;
+  if (frame < 24) {
+    pose.x = 3 * (int)frame;
+    pose.gaze_x = 3;
+  } else if (frame < 36) {
+    pose.x = 72;
+    walking = false;
+  } else if (frame < 72) {
+    pose.x = 72 - 3 * (int)(frame - 36);
+    pose.gaze_x = -3;
+  } else if (frame < 84) {
+    pose.x = -36;
+    walking = false;
+  } else {
+    pose.x = -36 + 3 * (int)(frame - 84);
+    pose.gaze_x = 3;
+  }
+  if (walking) {
+    bool left_step = frame % 4 < 2;
+    pose.left_foot = left_step ? 4 : 0;
+    pose.right_foot = left_step ? 0 : 4;
+    pose.y = left_step ? 0 : 1;
+  }
+  draw_pet_pose(&pose);
+}
+
+static void draw_ball(int cx, int cy, uint32_t frame) {
+  fill_rect(cx - 4, cy - 4, 8, 8, COLOR_INPUT);
+  fill_rect(cx - 3, cy - 5, 6, 10, COLOR_INPUT);
+  fill_rect(cx - 5, cy - 3, 10, 6, COLOR_INPUT);
+  // 一个绕着转的深色点，球才像在滚。
+  static const int8_t SPIN[4][2] = {{-2, -2}, {2, -2}, {2, 2}, {-2, 2}};
+  fill_rect(cx + SPIN[frame % 4][0] - 1, cy + SPIN[frame % 4][1] - 1, 2, 2,
+            COLOR_BACKGROUND);
+}
+
+/// 踢球：球从左边滚到脚边，一脚踢开，弹一下又滚回来，再一脚踢出画面。
+/// 球始终在身体左侧飞，不穿过身体。
+static void skit_ball(uint32_t frame) {
+  const int ground = 149;
+  const int at_foot = 116;
+  int ball_x;
+  int ball_y = ground;
+  bool kicking = false;
+  if (frame < 24) {
+    ball_x = 20 + (at_foot - 20) * (int)frame / 24;
+  } else if (frame < 52) {
+    float t = (float)(frame - 24) / 28.0f;
+    ball_x = at_foot - (int)(86.0f * t);
+    ball_y = ground - (int)(50.0f * sinf(3.14159f * t));
+  } else if (frame < 60) {
+    float t = (float)(frame - 52) / 8.0f;
+    ball_x = 30 - (int)(10.0f * t);
+    ball_y = ground - (int)(16.0f * sinf(3.14159f * t));
+  } else if (frame < 80) {
+    ball_x = 20 + (at_foot - 20) * (int)(frame - 60) / 20;
+  } else {
+    float t = (float)(frame - 80) / 16.0f;
+    ball_x = at_foot - (int)(150.0f * t);
+    ball_y = ground - (int)(40.0f * sinf(3.14159f * t));
+  }
+  if ((frame >= 21 && frame < 27) || (frame >= 77 && frame < 83)) {
+    kicking = true;
+  }
+  pet_pose_t pose = resting_pose(frame);
+  pose.gaze_x = -3;
+  pose.gaze_y = ball_y < ground - 20 ? -2 : 2;
+  if (kicking) {
+    pose.left_foot = 8;
+    pose.mouth = MOUTH_OPEN;
+  }
+  if (frame >= 88) {
+    pose.eyes = EYES_WIDE;
+  }
+  draw_pet_pose(&pose);
+  draw_ball(ball_x, ball_y, frame);
+}
+
+/// 看书：举着一本书一行行扫，隔几秒翻一页，中间被剧情吓一跳。
+static void skit_read(uint32_t frame) {
+  pet_pose_t pose = resting_pose(frame);
+  pose.left_arm = 10;
+  pose.right_arm = 10;
+  pose.gaze_y = 3;
+  pose.gaze_x = (int)((frame / 2) % 6) - 2;
+  bool surprised = frame >= 72 && frame < 80;
+  if (surprised) {
+    pose.eyes = EYES_WIDE;
+    pose.gaze_x = 0;
+    pose.gaze_y = 0;
+    pose.mouth = MOUTH_OPEN;
+  }
+  draw_pet_pose(&pose);
+
+  int book_x = 138;
+  int book_y = 114;
+  fill_rect(book_x, book_y, 44, 26, COLOR_TEXT);
+  fill_rect(book_x + 21, book_y, 2, 26, COLOR_MUTED);
+  for (int line = 0; line < 3; line++) {
+    fill_rect(book_x + 4, book_y + 5 + line * 6, 14, 2, COLOR_MUTED);
+    fill_rect(book_x + 26, book_y + 5 + line * 6, 14, 2, COLOR_MUTED);
+  }
+  if (frame % 40 >= 36) {
+    fill_rect(book_x + 14, book_y - 6, 10, 32, COLOR_TEXT);
+  }
+  if (surprised) {
+    draw_text(190, 44, "!", 3, COLOR_INPUT, 1);
+  }
+}
+
+/// 数星星：仰头数到七，越数越慢，数着数着睡着了。
+static void skit_stars(uint32_t frame) {
+  static const uint16_t STARS[][2] = {
+      {20, 36},  {48, 52},  {75, 40},  {100, 60}, {130, 34}, {200, 44},
+      {230, 62}, {262, 38}, {290, 54}, {306, 70}, {170, 66}, {60, 72},
+  };
+  for (unsigned index = 0; index < sizeof(STARS) / sizeof(STARS[0]); index++) {
+    if ((frame / 3 + index) % 4 != 0) {
+      fill_rect(STARS[index][0], STARS[index][1], 2, 2,
+                index % 3 == 0 ? COLOR_TEXT : COLOR_MUTED);
+    }
+  }
+  pet_pose_t pose = resting_pose(frame);
+  pose.gaze_y = -3;
+  pose.mouth = MOUTH_FLAT;
+  if (frame >= 56 && frame < 88) {
+    pose.eyes = EYES_HALF;
+  } else if (frame >= 88) {
+    pose = sleeping_pose(frame);
+  }
+  draw_pet_pose(&pose);
+  if (frame < 56) {
+    char count[4];
+    snprintf(count, sizeof(count), "%u", (unsigned)(frame / 8 + 1) % 10u);
+    draw_text(200, 52, count, 2, COLOR_MUTED, sizeof(count));
+  } else if (frame < 88) {
+    draw_text(200, 52, "...", 2, COLOR_MUTED, 3);
+  } else {
+    draw_sleeping_z(0, pose.y, frame);
+  }
+}
+
+/// 躲猫猫：溜到屏幕右边缘外只剩一只手在晃，探出半个身子看一眼，再缩回去，
+/// 最后走回来。
+static void skit_hide(uint32_t frame) {
+  pet_pose_t pose = resting_pose(frame);
+  if (frame < 12) {
+    pose.x = 16 * (int)frame;
+  } else if (frame < 28) {
+    pose.x = 192;
+    pose.left_arm = frame % 4 < 2 ? 0 : 6;
+  } else if (frame < 36) {
+    pose.x = 192 - 9 * (int)(frame - 28);
+    pose.eyes = EYES_WIDE;
+  } else if (frame < 52) {
+    pose.x = 120;
+    pose.eyes = frame == 44 ? EYES_CLOSED : EYES_WIDE;
+    pose.mouth = MOUTH_OPEN;
+  } else if (frame < 64) {
+    pose.x = 120 + 6 * (int)(frame - 52);
+  } else {
+    pose.x = 192 - 12 * (int)(frame - 64);
+  }
+  draw_pet_pose(&pose);
+}
+
+/// 被自己吓醒：睡着，突然一个感叹号跳起来，左右张望，打个哈欠，接着睡。
+static void skit_startle(uint32_t frame) {
+  bool sleeping = frame < 24 || frame >= 56;
+  pet_pose_t pose = sleeping ? sleeping_pose(frame) : resting_pose(frame);
+  if (!sleeping) {
+    if (frame < 28) {
+      pose.eyes = EYES_WIDE;
+      pose.mouth = MOUTH_OPEN;
+      pose.y = -6;
+      pose.antenna = 4;
+    } else if (frame < 44) {
+      pose.eyes = EYES_WIDE;
+      pose.gaze_x = frame < 36 ? -3 : 3;
+    } else {
+      pose.eyes = EYES_HALF;
+      pose.mouth = MOUTH_OPEN;
+      pose.left_arm = 6;
+    }
+  }
+  draw_pet_pose(&pose);
+  if (sleeping) {
+    draw_sleeping_z(0, pose.y, frame);
+  }
+  if (frame >= 24 && frame < 32) {
+    draw_text(190, 44, "!", 3, COLOR_INPUT, 1);
+  }
+}
+
+/// 梦话：睡着了，头顶冒出一串小泡泡，泡泡里是今天的战绩。
+static void skit_dream(uint32_t frame) {
+  pet_pose_t pose = sleeping_pose(frame);
+  draw_pet_pose(&pose);
+  static const uint8_t BUBBLES[3][3] = {{176, 58, 3}, {186, 50, 4}, {196, 42, 5}};
+  for (unsigned index = 0; index < 3; index++) {
+    if ((frame / 4) % 4 > index) {
+      fill_rect(BUBBLES[index][0], BUBBLES[index][1], BUBBLES[index][2],
+                BUBBLES[index][2], COLOR_MUTED);
+    }
+  }
+  fill_rect(204, 34, 100, 26, COLOR_MUTED);
+  fill_rect(206, 36, 96, 22, 0x10a4);
+  const char *line = "ZZZ";
+  if (current_stat_count > 0) {
+    line = current_stats[(frame / 32) % current_stat_count];
+  }
+  draw_text(212, 43, line, 1, COLOR_TEXT, 15);
+}
+
+static void draw_leisure_scene(const agent_leisure_view_t *view) {
+  uint32_t frame = view->skit_frame;
+  switch (view->skit) {
+    case AGENT_SKIT_PATROL:
+      skit_patrol(frame);
+      break;
+    case AGENT_SKIT_BALL:
+      skit_ball(frame);
+      break;
+    case AGENT_SKIT_READ:
+      skit_read(frame);
+      break;
+    case AGENT_SKIT_STARS:
+      skit_stars(frame);
+      break;
+    case AGENT_SKIT_HIDE:
+      skit_hide(frame);
+      break;
+    case AGENT_SKIT_STARTLE:
+      skit_startle(frame);
+      break;
+    case AGENT_SKIT_DREAM:
+      skit_dream(frame);
+      break;
+    case AGENT_SKIT_SLEEP:
+      skit_sleep(frame);
+      break;
+    default:
+      skit_rest(frame);
+      break;
+  }
+  draw_pomodoro_badge();
+}
+
 static void draw_pet_scene(const char *label, uint16_t status_color) {
   if (current_task_count > 0) {
     draw_task_cards();
@@ -697,15 +1072,39 @@ static void draw_pet_scene(const char *label, uint16_t status_color) {
   draw_pomodoro_badge();
 }
 
+static void ensure_backlight(bool wanted) {
+  if (backlight_on == wanted) {
+    return;
+  }
+  if (set_backlight(wanted) == ESP_OK) {
+    backlight_on = wanted;
+  }
+}
+
 static esp_err_t render_current_state(void) {
   const char *label = state_label(current_state);
   uint16_t status_color = state_color(current_state);
+  render_dim = false;
+
+  agent_leisure_view_t leisure;
+  if (current_mode == AGENT_MODE_LEISURE) {
+    agent_leisure_view(clock_ms(), &leisure);
+    if (leisure.lights_out) {
+      // 夜里睡久了就关背光；没人看的画面也不必再画。
+      ensure_backlight(false);
+      return ESP_OK;
+    }
+    render_dim = leisure.dim;
+  }
+  ensure_backlight(true);
 
   fill_rect(0, 0, DISPLAY_WIDTH, DISPLAY_HEIGHT, COLOR_BACKGROUND);
   fill_rect(0, 0, DISPLAY_WIDTH, 4, status_color);
   draw_text_centered(12, "AgentBeacon", 2, COLOR_TEXT);
-  if (current_scene == AGENT_SCENE_POMODORO) {
+  if (current_mode == AGENT_MODE_POMODORO) {
     draw_pomodoro_scene(label, status_color);
+  } else if (current_mode == AGENT_MODE_LEISURE) {
+    draw_leisure_scene(&leisure);
   } else {
     draw_pet_scene(label, status_color);
   }
@@ -714,7 +1113,10 @@ static esp_err_t render_current_state(void) {
 }
 
 static TickType_t animation_period(agent_display_state_t state) {
-  if (current_scene == AGENT_SCENE_POMODORO) {
+  if (current_mode == AGENT_MODE_LEISURE) {
+    return pdMS_TO_TICKS(AGENT_LEISURE_FRAME_MS);
+  }
+  if (current_mode == AGENT_MODE_POMODORO) {
     // 倒计时每秒变一次；暂停时的闪烁要每半秒一帧。
     return pdMS_TO_TICKS(500);
   }
@@ -809,11 +1211,11 @@ void agent_display_set_link_lost(bool lost) {
   (void)render_current_state();
 }
 
-void agent_display_set_scene(agent_scene_t scene) {
-  if (current_scene == scene) {
+void agent_display_set_mode(agent_mode_t mode) {
+  if (current_mode == mode) {
     return;
   }
-  current_scene = scene;
+  current_mode = mode;
   animation_frame = 0;
   next_animation_at = xTaskGetTickCount() + animation_period(current_state);
   if (display_ready) {
@@ -821,7 +1223,11 @@ void agent_display_set_scene(agent_scene_t scene) {
   }
 }
 
-agent_scene_t agent_display_scene(void) { return current_scene; }
+agent_mode_t agent_display_mode(void) { return current_mode; }
+
+bool agent_display_agent_idle(void) {
+  return current_state == AGENT_DISPLAY_IDLE && current_task_count == 0;
+}
 
 void agent_display_refresh(void) {
   if (display_ready) {
@@ -957,5 +1363,6 @@ esp_err_t agent_display_init(void) {
   ESP_RETURN_ON_ERROR(agent_display_show(AGENT_DISPLAY_IDLE, NULL), TAG,
                       "绘制初始页面失败");
   ESP_RETURN_ON_ERROR(set_backlight(true), TAG, "打开 LCD 背光失败");
+  backlight_on = true;
   return ESP_OK;
 }

@@ -8,12 +8,14 @@
 #include "agent_build_stamp.h"
 #include "agent_buttons.h"
 #include "agent_display.h"
+#include "agent_leisure.h"
 #include "agent_pomodoro.h"
 #include "cJSON.h"
 #include "driver/uart.h"
 #include "esp_app_desc.h"
 #include "driver/usb_serial_jtag.h"
 #include "esp_check.h"
+#include "esp_random.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 
@@ -26,6 +28,11 @@ static TickType_t ready_deadline;
 /// 超过这个时间没有收到任何消息，就认为与 Mac 端失联。
 #define LINK_TIMEOUT_MS 15000
 static TickType_t last_message_tick;
+static bool link_lost;
+/// 上一次报给 Mac 端的档位、关灯状态与小时数，只在变化时各报一行。
+static agent_leisure_tier_t reported_tier = AGENT_LEISURE_ALERT;
+static bool reported_lights_out;
+static int reported_hour = -1;
 
 // 两条输出都只是诊断通道，谁都不许拖住主循环。接 BOX 的 UART 桥时，USB
 // Serial/JTAG 那头没有主机取数据，tx ring buffer 填满后任何等待都是永久的：
@@ -54,8 +61,28 @@ static uint32_t clock_ms(void) {
   return xTaskGetTickCount() * (uint32_t)portTICK_PERIOD_MS;
 }
 
-static const char *scene_name(agent_scene_t scene) {
-  return scene == AGENT_SCENE_POMODORO ? "POMODORO" : "PET";
+static const char *mode_name(agent_mode_t mode) {
+  switch (mode) {
+    case AGENT_MODE_POMODORO:
+      return "POMODORO";
+    case AGENT_MODE_LEISURE:
+      return "LEISURE";
+    default:
+      return "DUTY";
+  }
+}
+
+static void set_mode(agent_mode_t mode) {
+  if (agent_display_mode() == mode) {
+    return;
+  }
+  agent_display_set_mode(mode);
+  transport_write_value_line("MODE ", mode_name(mode));
+}
+
+static void set_link_lost(bool lost) {
+  link_lost = lost;
+  agent_display_set_link_lost(lost);
 }
 
 static void report_pomodoro(const char *what) {
@@ -64,32 +91,44 @@ static void report_pomodoro(const char *what) {
 
 /// 把番茄钟推到前面来；已经在前面就只重绘。
 static void show_pomodoro(void) {
-  if (agent_display_scene() == AGENT_SCENE_POMODORO) {
+  if (agent_display_mode() == AGENT_MODE_POMODORO) {
     agent_display_refresh();
   } else {
-    agent_display_set_scene(AGENT_SCENE_POMODORO);
+    set_mode(AGENT_MODE_POMODORO);
   }
 }
 
-/// 三个键各管一件事，与场景无关：K0 是番茄钟的键，K1 换场景，K2 交给
-/// Mac 端去打开来源。
+/// 三个键各管一件事，与模式无关：K0 是番茄钟的键，K1 在值班与番茄钟之间
+/// 切换（长按去休闲），K2 交给 Mac 端去打开来源。休闲模式里任何键先把
+/// 小灯灵叫回值班，再执行本职：休闲没有遮住任何需要先看一眼的东西。
 static void on_button(agent_button_event_t event) {
+  uint32_t now = clock_ms();
+  agent_mode_t mode_before = agent_display_mode();
+  agent_leisure_note_activity(now);
+  if (mode_before == AGENT_MODE_LEISURE) {
+    (void)agent_leisure_tick(now);
+    set_mode(AGENT_MODE_DUTY);
+  }
+
   if (event == AGENT_BUTTON_K2_SHORT) {
     transport_write_literal(
         "{\"version\":1,\"event\":\"button\",\"button\":\"K2\",\"action\":\"press\"}\n");
     return;
   }
   if (event == AGENT_BUTTON_K1_SHORT) {
-    agent_scene_t next = agent_display_scene() == AGENT_SCENE_PET
-                             ? AGENT_SCENE_POMODORO
-                             : AGENT_SCENE_PET;
-    agent_display_set_scene(next);
-    transport_write_value_line("SCENE ", scene_name(next));
+    set_mode(mode_before == AGENT_MODE_POMODORO ? AGENT_MODE_DUTY
+                                                : AGENT_MODE_POMODORO);
+    return;
+  }
+  if (event == AGENT_BUTTON_K1_LONG) {
+    agent_leisure_force_bored(now);
+    (void)agent_leisure_tick(now);
+    set_mode(AGENT_MODE_LEISURE);
     return;
   }
 
   agent_pomodoro_view_t before;
-  agent_pomodoro_view(clock_ms(), &before);
+  agent_pomodoro_view(now, &before);
   bool break_phase = before.phase == AGENT_POMODORO_BREAK;
   if (event == AGENT_BUTTON_K0_LONG) {
     if (agent_pomodoro_is_idle(&before)) {
@@ -102,7 +141,7 @@ static void on_button(agent_button_event_t event) {
     agent_display_refresh();
     return;
   }
-  agent_pomodoro_toggle(clock_ms());
+  agent_pomodoro_toggle(now);
   if (before.run == AGENT_POMODORO_PENDING) {
     report_pomodoro(break_phase ? "BREAK START" : "FOCUS START");
     // 开始一个阶段时把番茄钟推到前面：圆环开始走就是反馈。
@@ -127,6 +166,48 @@ static void handle_pomodoro_transition(agent_pomodoro_transition_t transition) {
     transport_write_literal("AUDIO ERROR\n");
   }
   show_pomodoro();
+}
+
+/// 无聊度按状态累计，不按消息：Agent 有活、番茄钟在走、链路断了，都不算
+/// 空闲。值班空闲够久就去休闲；有事立刻回来；番茄钟待开始或暂停放了半小时
+/// 就当人走了，先回值班，接着自然会去休闲。
+static void tend_leisure(void) {
+  uint32_t now = clock_ms();
+  agent_pomodoro_view_t pomodoro;
+  agent_pomodoro_view(now, &pomodoro);
+  if (!agent_display_agent_idle() ||
+      pomodoro.run == AGENT_POMODORO_RUNNING || link_lost) {
+    agent_leisure_note_activity(now);
+  }
+
+  agent_mode_t mode = agent_display_mode();
+  bool changed = agent_leisure_tick(now);
+  agent_leisure_view_t leisure;
+  agent_leisure_view(now, &leisure);
+  // 档位按差异汇报，不按“本次有没有变化”：唤醒路径会先在别处推进导演。
+  if (leisure.tier != reported_tier) {
+    reported_tier = leisure.tier;
+    transport_write_value_line("LEISURE ",
+                               agent_leisure_tier_name(leisure.tier));
+  } else if (changed && mode == AGENT_MODE_LEISURE) {
+    transport_write_value_line("LEISURE SKIT ",
+                               agent_leisure_skit_name(leisure.skit));
+  }
+  if (leisure.lights_out != reported_lights_out) {
+    reported_lights_out = leisure.lights_out;
+    transport_write_literal(leisure.lights_out ? "LEISURE LIGHTS OUT\n"
+                                               : "LEISURE LIGHTS ON\n");
+  }
+
+  if (mode == AGENT_MODE_DUTY && leisure.tier != AGENT_LEISURE_ALERT) {
+    set_mode(AGENT_MODE_LEISURE);
+  } else if (mode == AGENT_MODE_LEISURE &&
+             leisure.tier == AGENT_LEISURE_ALERT) {
+    set_mode(AGENT_MODE_DUTY);
+  } else if (mode == AGENT_MODE_POMODORO &&
+             leisure.tier == AGENT_LEISURE_SLEEPY) {
+    set_mode(AGENT_MODE_DUTY);
+  }
 }
 
 static agent_display_state_t task_state(const char *status) {
@@ -191,6 +272,16 @@ static void parse_stats(const cJSON *message) {
     lines[count++] = item->valuestring;
   }
   agent_display_set_stats(lines, count);
+
+  // “7 DONE” 这一行的数字：休闲时它决定小灯灵是累了还是无聊。
+  unsigned done = 0;
+  for (size_t index = 0; index < count; index++) {
+    if (strstr(lines[index], "DONE") != NULL) {
+      done = (unsigned)strtoul(lines[index], NULL, 10);
+      break;
+    }
+  }
+  agent_leisure_set_done_count(done);
 }
 
 static void show_event(const cJSON *message, const char *event,
@@ -308,8 +399,24 @@ static void handle_line(char *line, size_t length) {
     if (cJSON_IsString(build)) {
       agent_display_set_daemon_build(build->valuestring);
     }
+    // 本地小时数也随心跳来：设备没有时钟，白天黑夜只能听 Mac 端的。
+    const cJSON *hour = cJSON_GetObjectItemCaseSensitive(message, "hour");
+    if (cJSON_IsNumber(hour) && (int)hour->valuedouble != reported_hour) {
+      reported_hour = (int)hour->valuedouble;
+      agent_leisure_set_hour(reported_hour);
+      char text[24];
+      snprintf(text, sizeof(text), "CLOCK HOUR %d\n", reported_hour % 100);
+      transport_write_literal(text);
+    }
     cJSON_Delete(message);
     return;
+  }
+
+  // Agent 一有动静，小灯灵立刻回来值班。
+  agent_leisure_note_activity(clock_ms());
+  if (agent_display_mode() == AGENT_MODE_LEISURE) {
+    (void)agent_leisure_tick(clock_ms());
+    set_mode(AGENT_MODE_DUTY);
   }
 
   parse_stats(message);
@@ -346,6 +453,7 @@ void app_main(void) {
   describe_firmware_build(firmware_build, sizeof(firmware_build));
 
   agent_pomodoro_init();
+  agent_leisure_init(esp_random(), clock_ms());
   if (agent_display_init() == ESP_OK) {
     agent_display_set_firmware_build(firmware_build);
     transport_write_value_line("DISPLAY READY BUILD ", firmware_build);
@@ -396,7 +504,7 @@ void app_main(void) {
           } else {
             line[line_length] = '\0';
             last_message_tick = xTaskGetTickCount();
-            agent_display_set_link_lost(false);
+            set_link_lost(false);
             handle_line(line, line_length);
           }
         }
@@ -416,7 +524,7 @@ void app_main(void) {
 
     if ((int32_t)(xTaskGetTickCount() - last_message_tick) >=
         (int32_t)pdMS_TO_TICKS(LINK_TIMEOUT_MS)) {
-      agent_display_set_link_lost(true);
+      set_link_lost(true);
     }
 
     if (ready_scheduled &&
@@ -428,6 +536,7 @@ void app_main(void) {
     }
     agent_buttons_tick();
     handle_pomodoro_transition(agent_pomodoro_tick(clock_ms()));
+    tend_leisure();
     agent_display_tick();
   }
 }
