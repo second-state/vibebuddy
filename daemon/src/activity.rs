@@ -173,11 +173,7 @@ impl ActivityTracker {
     /// 件事此刻已经不在屏幕上了。
     pub fn focus_source(&self) -> Option<ActivitySource> {
         // 有任务在等人回答，那件事最急，先去那里。
-        if let Some(waiting) = self
-            .activities
-            .values()
-            .filter(|activity| activity.status == ActivityStatus::InputRequired)
-            .max_by_key(|activity| activity.sequence)
+        if let Some(waiting) = self.waiting_activity()
             && let Some(source) = waiting.source.clone()
         {
             return Some(source);
@@ -228,20 +224,7 @@ impl ActivityTracker {
         self.remember_announced(finished);
         self.sync_busy();
         self.record(|stats| stats.done += 1);
-        if let Some(visible) = self.activity_snapshot() {
-            // 状态快照用于去重；announcement 是一次性边沿事件，不能被状态合并吞掉。
-            self.last_visible = Some(visible.clone());
-            let mut announced = visible;
-            announced
-                .extra
-                .insert("announcement".to_owned(), json!("done"));
-            announced
-                .extra
-                .insert("announcement_id".to_owned(), json!(id.key));
-            Some(announced)
-        } else {
-            self.deduplicate(event("task.done", &id.key, title))
-        }
+        self.announce_end("task.done", id, title, "done")
     }
 
     /// 活动以失败告终，产生一次失败播报。
@@ -254,19 +237,7 @@ impl ActivityTracker {
         };
         self.remember_announced(failed);
         self.sync_busy();
-        if let Some(visible) = self.activity_snapshot() {
-            self.last_visible = Some(visible.clone());
-            let mut announced = visible;
-            announced
-                .extra
-                .insert("announcement".to_owned(), json!("failed"));
-            announced
-                .extra
-                .insert("announcement_id".to_owned(), json!(id.key));
-            Some(announced)
-        } else {
-            self.deduplicate(event("task.error", &id.key, title))
-        }
+        self.announce_end("task.error", id, title, "failed")
     }
 
     /// 丢弃一个活动，不播报成功。
@@ -373,6 +344,13 @@ impl ActivityTracker {
             ActivityStatus::InputRequired => "agent.input_required",
         };
         let mut visible = event(event_name, &activity.session_id, &activity.title);
+        self.attach_tasks(&mut visible);
+        Some(visible)
+    }
+
+    /// 把当前卡片栈挂到事件上。结束播报也要带：用户在听到"完成"的同时，
+    /// 应该看得见还剩什么在跑。
+    fn attach_tasks(&self, visible: &mut Event) {
         let mut activities: Vec<&Activity> = self.activities.values().collect();
         activities.sort_by_key(|activity| std::cmp::Reverse(activity.sequence));
         visible.extra.insert(
@@ -393,7 +371,49 @@ impl ActivityTracker {
                     .collect::<Vec<_>>()
             ),
         );
-        Some(visible)
+    }
+
+    /// 结束播报必须说清是谁结束了。
+    ///
+    /// 并行跑的时候，屏幕主状态属于另一件还在跑的事，把 "done" 挂到那个快照
+    /// 上等于告诉用户那一件完成了——而它没有。之前单任务能用，只是因为栈空
+    /// 时走的是另一条分支，标题恰好就是完成者。
+    fn announce_end(
+        &mut self,
+        event_name: &str,
+        id: &ActivityId,
+        title: &str,
+        announcement: &str,
+    ) -> Option<Event> {
+        // 还有任务在等人回答时，屏幕留给它：那件事要用户动手，而"完成"只是
+        // 通知，播报一声就够了。与 K2 的落点规则同一套优先级。
+        let mut announced = match self.waiting_activity() {
+            Some(waiting) => event(
+                "agent.input_required",
+                &waiting.session_id,
+                &waiting.title.clone(),
+            ),
+            None => event(event_name, &id.session_id, title),
+        };
+        self.attach_tasks(&mut announced);
+        announced
+            .extra
+            .insert("announcement".to_owned(), json!(announcement));
+        announced
+            .extra
+            .insert("announcement_id".to_owned(), json!(id.key));
+        // 屏幕现在停在这条播报上。下一个事件必须能把它刷回当前任务，所以这
+        // 一帧不能当去重基准——否则状态没变的下一帧会被吞掉，屏幕卡在这里。
+        self.last_visible = None;
+        Some(announced)
+    }
+
+    /// 正在等人回答的活动里最新的那个。它 blocking 着用户，排在一切之前。
+    fn waiting_activity(&self) -> Option<&Activity> {
+        self.activities
+            .values()
+            .filter(|activity| activity.status == ActivityStatus::InputRequired)
+            .max_by_key(|activity| activity.sequence)
     }
 
     fn focused_activity(&self) -> Option<&Activity> {

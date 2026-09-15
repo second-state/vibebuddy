@@ -189,10 +189,51 @@ mod tests {
         assert_eq!(waiting.event, "agent.input_required");
         assert_eq!(waiting.title.as_deref(), Some("CX:BETA"));
 
-        let fallback = apply(&mut tracker, hook("waiting", "Stop", "/work/beta"))
-            .expect("高优先级任务结束后应恢复另一个工作任务");
-        assert_eq!(fallback.event, "task.start");
-        assert_eq!(fallback.title.as_deref(), Some("CX:ALPHA"));
+        // 结束播报说的是谁结束了，屏幕就显示谁；alpha 还在跑，由它后续的事件
+        // 把屏幕刷回去。
+        let done =
+            apply(&mut tracker, hook("waiting", "Stop", "/work/beta")).expect("结束应产生播报");
+        assert_eq!(done.event, "task.done");
+        assert_eq!(done.title.as_deref(), Some("CX:BETA"));
+
+        let back = apply(&mut tracker, hook("working", "PostToolUse", "/work/alpha"))
+            .expect("下一个事件应把屏幕交还给还在跑的任务");
+        assert_eq!(back.event, "task.start");
+        assert_eq!(back.title.as_deref(), Some("CX:ALPHA"));
+    }
+
+    /// 一个任务完成时，另一个正等着人回答：屏幕必须留给等回答的那个，它要用
+    /// 户动手；"完成"播报一声就够了。
+    #[test]
+    fn finishing_one_task_does_not_hide_another_waiting_for_a_reply() {
+        let mut tracker = ActivityTracker::default();
+        apply(
+            &mut tracker,
+            hook("finishing", "UserPromptSubmit", "/work/alpha"),
+        );
+        apply(
+            &mut tracker,
+            hook("waiting", "UserPromptSubmit", "/work/beta"),
+        );
+        apply(
+            &mut tracker,
+            hook("waiting", "PermissionRequest", "/work/beta"),
+        );
+
+        let done =
+            apply(&mut tracker, hook("finishing", "Stop", "/work/alpha")).expect("结束应产生播报");
+
+        assert_eq!(
+            done.extra.get("announcement").and_then(|v| v.as_str()),
+            Some("done"),
+            "完成仍然要播报"
+        );
+        assert_eq!(done.event, "agent.input_required");
+        assert_eq!(
+            done.title.as_deref(),
+            Some("CX:BETA"),
+            "屏幕该留给等人回答的那个"
+        );
     }
 
     #[test]
