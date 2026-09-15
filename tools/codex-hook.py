@@ -1,6 +1,10 @@
 #!/usr/bin/env python3
 """把 Codex 生命周期事件最小化后转发给本机 AgentBeacon。"""
 
+# Codex 用 /usr/bin/python3 调这个脚本，macOS 自带的是 3.9，没有 PEP 604 的
+# `X | None`。注解延迟求值，写法就不必迁就解释器版本。
+from __future__ import annotations
+
 import json
 import sys
 import urllib.request
