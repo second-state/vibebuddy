@@ -33,6 +33,10 @@ extern const uint8_t done_pcm_start[] asm("_binary_done_pcm_start");
 extern const uint8_t done_pcm_end[] asm("_binary_done_pcm_end");
 extern const uint8_t failed_pcm_start[] asm("_binary_failed_pcm_start");
 extern const uint8_t failed_pcm_end[] asm("_binary_failed_pcm_end");
+extern const uint8_t focus_done_pcm_start[] asm("_binary_focus_done_pcm_start");
+extern const uint8_t focus_done_pcm_end[] asm("_binary_focus_done_pcm_end");
+extern const uint8_t break_done_pcm_start[] asm("_binary_break_done_pcm_start");
+extern const uint8_t break_done_pcm_end[] asm("_binary_break_done_pcm_end");
 
 static const char *TAG = "agent_audio";
 static i2s_chan_handle_t tx_handle;
@@ -194,6 +198,12 @@ static void audio_task(void *argument) {
     } else if (prompt == AGENT_AUDIO_FAILED) {
       start = failed_pcm_start;
       end = failed_pcm_end;
+    } else if (prompt == AGENT_AUDIO_FOCUS_DONE) {
+      start = focus_done_pcm_start;
+      end = focus_done_pcm_end;
+    } else if (prompt == AGENT_AUDIO_BREAK_DONE) {
+      start = break_done_pcm_start;
+      end = break_done_pcm_end;
     }
 
     size_t bytes_written = 0;

@@ -1,0 +1,8 @@
+// 主机预览用的最小桩：只提供 agent_display.c 编译所需的声明。
+#pragma once
+typedef int esp_err_t;
+#define ESP_OK 0
+#define ESP_FAIL (-1)
+#define ESP_ERR_NO_MEM 0x101
+#define ESP_ERR_INVALID_STATE 0x103
+#define ESP_ERR_TIMEOUT 0x107

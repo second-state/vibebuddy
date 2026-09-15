@@ -1,6 +1,7 @@
 #include "agent_display.h"
 
 #include <ctype.h>
+#include <math.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
@@ -8,6 +9,7 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "agent_pomodoro.h"
 #include "driver/gpio.h"
 #include "driver/i2c_master.h"
 #include "esp_check.h"
@@ -52,6 +54,9 @@
 #define COLOR_FAILED 0xf800
 #define COLOR_PET 0x3c9f
 #define COLOR_PET_HIGHLIGHT 0x7e5f
+/// 番茄钟：专注是番茄红，休息是绿色。
+#define COLOR_FOCUS 0xfa8a
+#define COLOR_BREAK 0x4ecc
 
 #define TITLE_BYTES 64
 /// 构建标识：git 描述加上编译时刻。
@@ -62,6 +67,19 @@
 #define IDLE_MOOD_FRAMES 8
 /// 空闲时标题与战绩的轮播间隔（帧）。空闲动画每 500 ms 一帧。
 #define IDLE_ROTATE_FRAMES 6
+
+/// 番茄钟画面：左边是刻度圆环与倒计时，右边是阶段、按键提示与 Agent 摘要。
+/// 圆环仿 Focus To-Do：一圈刻度，走过的部分染成阶段色，一根更长的指针停在
+/// 当前位置；空闲时指针停在 12 点。
+#define RING_CENTER_X 118
+#define RING_CENTER_Y 122
+#define RING_TICKS 60
+#define RING_TICK_INNER 70
+#define RING_TICK_OUTER 79
+#define RING_HAND_INNER 64
+#define RING_HAND_OUTER 86
+#define PANEL_X 208
+#define TAU 6.2831853f
 
 static const char *TAG = "agent_display";
 
@@ -115,6 +133,7 @@ static SemaphoreHandle_t transfer_done;
 static bool display_ready;
 static agent_display_state_t current_state = AGENT_DISPLAY_IDLE;
 static bool link_lost = false;
+static agent_scene_t current_scene = AGENT_SCENE_PET;
 static char current_title[TITLE_BYTES];
 static struct {
   char title[TITLE_BYTES];
@@ -516,30 +535,148 @@ static esp_err_t present(void) {
   return ESP_OK;
 }
 
-static esp_err_t render_current_state(void) {
-  const char *label = "READY";
-  uint16_t status_color = COLOR_READY;
-  if (current_state == AGENT_DISPLAY_WORKING) {
-    label = "WORKING";
-    status_color = COLOR_WORKING;
-  } else if (current_state == AGENT_DISPLAY_INPUT_REQUIRED) {
-    label = "INPUT REQUIRED";
-    status_color = COLOR_INPUT;
-  } else if (current_state == AGENT_DISPLAY_DONE) {
-    label = "DONE";
-    status_color = COLOR_DONE;
-  } else if (current_state == AGENT_DISPLAY_FAILED) {
-    label = "FAILED";
-    status_color = COLOR_FAILED;
-  }
+static const char *state_label(agent_display_state_t state) {
   if (link_lost) {
-    label = "NO LINK";
-    status_color = COLOR_MUTED;
+    return "NO LINK";
+  }
+  if (state == AGENT_DISPLAY_WORKING) {
+    return "WORKING";
+  }
+  if (state == AGENT_DISPLAY_INPUT_REQUIRED) {
+    return "INPUT REQUIRED";
+  }
+  if (state == AGENT_DISPLAY_DONE) {
+    return "DONE";
+  }
+  if (state == AGENT_DISPLAY_FAILED) {
+    return "FAILED";
+  }
+  return "READY";
+}
+
+/// 与主循环用同一种毫秒计数，番茄钟的截止时刻才对得上。
+static uint32_t clock_ms(void) {
+  return xTaskGetTickCount() * (uint32_t)portTICK_PERIOD_MS;
+}
+
+static uint16_t phase_color(const agent_pomodoro_view_t *view) {
+  if (agent_pomodoro_is_idle(view)) {
+    return COLOR_READY;
+  }
+  return view->phase == AGENT_POMODORO_BREAK ? COLOR_BREAK : COLOR_FOCUS;
+}
+
+/// 从圆心向外画一段径向线。角度从 12 点起顺时针。
+static void draw_radial(float angle, int inner, int outer, int thickness,
+                        uint16_t color) {
+  float dx = sinf(angle);
+  float dy = -cosf(angle);
+  for (int radius = inner; radius <= outer; radius++) {
+    int x = RING_CENTER_X + (int)lroundf(dx * (float)radius);
+    int y = RING_CENTER_Y + (int)lroundf(dy * (float)radius);
+    fill_rect(x - thickness / 2, y - thickness / 2, thickness, thickness,
+              color);
+  }
+}
+
+static void draw_pomodoro_ring(const agent_pomodoro_view_t *view) {
+  uint16_t color = phase_color(view);
+  uint32_t elapsed = view->total_ms - view->remaining_ms;
+  float sweep = TAU * (float)elapsed / (float)view->total_ms;
+  for (int index = 0; index < RING_TICKS; index++) {
+    float angle = TAU * (float)index / RING_TICKS;
+    bool passed = view->run != AGENT_POMODORO_PENDING && angle <= sweep;
+    draw_radial(angle, RING_TICK_INNER, RING_TICK_OUTER, 2,
+                passed ? color : COLOR_MUTED);
+  }
+  draw_radial(sweep, RING_HAND_INNER, RING_HAND_OUTER, 3, color);
+}
+
+/// 向上取整到秒：刚开始显示 25:00，走到最后一毫秒仍是 00:01。
+static void format_countdown(char *out, size_t size, uint32_t remaining_ms) {
+  uint32_t seconds = (remaining_ms + 999u) / 1000u;
+  snprintf(out, size, "%02u:%02u", (unsigned)(seconds / 60u) % 100u,
+           (unsigned)(seconds % 60u));
+}
+
+/// 番茄钟场景里 Agent 只剩右下角几行：它仍然回答“现在最需要我注意什么”，
+/// 语音也照常播，只是画面让给了倒计时。
+static void draw_agent_summary(const char *label, uint16_t status_color) {
+  draw_text(PANEL_X, 176, "AGENT", 1, COLOR_MUTED, 18);
+  draw_text(PANEL_X, 188, label, 1, status_color, 18);
+  if (current_task_count > 0) {
+    draw_text(PANEL_X, 200, current_tasks[0].title, 1,
+              link_lost ? COLOR_MUTED : COLOR_TEXT, 18);
+  }
+}
+
+static void draw_pomodoro_scene(const char *label, uint16_t status_color) {
+  agent_pomodoro_view_t view;
+  agent_pomodoro_view(clock_ms(), &view);
+  uint16_t color = phase_color(&view);
+  bool paused = view.run == AGENT_POMODORO_PAUSED;
+  draw_pomodoro_ring(&view);
+
+  // 暂停时数字闪烁：停表的老规矩。
+  if (!paused || animation_frame % 2 == 0) {
+    char countdown[8];
+    format_countdown(countdown, sizeof(countdown), view.remaining_ms);
+    draw_text(RING_CENTER_X - 58, RING_CENTER_Y - 14, countdown, 4,
+              COLOR_TEXT, 5);
   }
 
-  fill_rect(0, 0, DISPLAY_WIDTH, DISPLAY_HEIGHT, COLOR_BACKGROUND);
-  fill_rect(0, 0, DISPLAY_WIDTH, 4, status_color);
-  draw_text_centered(12, "AgentBeacon", 2, COLOR_TEXT);
+  // 空闲写 READY；专注刚结束、休息还没开始时写 BREAK 配 05:00，
+  // 和空闲区分开：这一屏在等的是开始休息，不是开始专注。
+  const char *phase_label = agent_pomodoro_is_idle(&view)          ? "READY"
+                            : view.phase == AGENT_POMODORO_BREAK ? "BREAK"
+                                                                 : "FOCUS";
+  draw_text(PANEL_X, 44, phase_label, 2, color, 9);
+  if (view.run == AGENT_POMODORO_PENDING) {
+    draw_text(PANEL_X, 66, "K0 START", 1, COLOR_MUTED, 18);
+    if (!agent_pomodoro_is_idle(&view)) {
+      draw_text(PANEL_X, 78, "HOLD K0 SKIP", 1, COLOR_MUTED, 18);
+    }
+  } else {
+    draw_text(PANEL_X, 66, paused ? "K0 RESUME" : "K0 PAUSE", 1, COLOR_MUTED,
+              18);
+    draw_text(PANEL_X, 78, "HOLD K0 STOP", 1, COLOR_MUTED, 18);
+  }
+  if (paused) {
+    draw_text(PANEL_X, 98, "PAUSED", 2, color, 9);
+  }
+
+  // 完成一次专注记一格，开机后累计。
+  unsigned shown = view.completed > 8 ? 8 : view.completed;
+  for (unsigned index = 0; index < shown; index++) {
+    fill_rect(PANEL_X + (int)index * 12, 128, 8, 8, COLOR_FOCUS);
+  }
+  if (view.completed > 8) {
+    char more[8];
+    snprintf(more, sizeof(more), "+%u", (view.completed - 8) % 1000u);
+    draw_text(PANEL_X + 96, 128, more, 1, COLOR_FOCUS, sizeof(more));
+  }
+
+  draw_agent_summary(label, status_color);
+}
+
+/// 小灯灵场景右上角的番茄钟小徽章：切回来看 Agent 时，倒计时不该消失。
+static void draw_pomodoro_badge(void) {
+  agent_pomodoro_view_t view;
+  agent_pomodoro_view(clock_ms(), &view);
+  if (agent_pomodoro_is_idle(&view) ||
+      (view.run == AGENT_POMODORO_PAUSED && animation_frame % 2 == 1)) {
+    return;
+  }
+  char countdown[8];
+  format_countdown(countdown, sizeof(countdown), view.remaining_ms);
+  char badge[12];
+  snprintf(badge, sizeof(badge), "%c %s",
+           view.phase == AGENT_POMODORO_FOCUS ? 'F' : 'B', countdown);
+  draw_text(DISPLAY_WIDTH - 8 - (7 * 6 - 1), 15, badge, 1,
+            phase_color(&view), sizeof(badge));
+}
+
+static void draw_pet_scene(const char *label, uint16_t status_color) {
   if (current_task_count > 0) {
     draw_task_cards();
   }
@@ -557,11 +694,30 @@ static esp_err_t render_current_state(void) {
   } else if (current_title[0] != '\0') {
     draw_text_centered(195, current_title, 2, COLOR_TEXT);
   }
+  draw_pomodoro_badge();
+}
+
+static esp_err_t render_current_state(void) {
+  const char *label = state_label(current_state);
+  uint16_t status_color = state_color(current_state);
+
+  fill_rect(0, 0, DISPLAY_WIDTH, DISPLAY_HEIGHT, COLOR_BACKGROUND);
+  fill_rect(0, 0, DISPLAY_WIDTH, 4, status_color);
+  draw_text_centered(12, "AgentBeacon", 2, COLOR_TEXT);
+  if (current_scene == AGENT_SCENE_POMODORO) {
+    draw_pomodoro_scene(label, status_color);
+  } else {
+    draw_pet_scene(label, status_color);
+  }
   draw_build_footer();
   return present();
 }
 
 static TickType_t animation_period(agent_display_state_t state) {
+  if (current_scene == AGENT_SCENE_POMODORO) {
+    // 倒计时每秒变一次；暂停时的闪烁要每半秒一帧。
+    return pdMS_TO_TICKS(500);
+  }
   if (state == AGENT_DISPLAY_WORKING) {
     return pdMS_TO_TICKS(250);
   }
@@ -651,6 +807,26 @@ void agent_display_set_link_lost(bool lost) {
   }
   link_lost = lost;
   (void)render_current_state();
+}
+
+void agent_display_set_scene(agent_scene_t scene) {
+  if (current_scene == scene) {
+    return;
+  }
+  current_scene = scene;
+  animation_frame = 0;
+  next_animation_at = xTaskGetTickCount() + animation_period(current_state);
+  if (display_ready) {
+    (void)render_current_state();
+  }
+}
+
+agent_scene_t agent_display_scene(void) { return current_scene; }
+
+void agent_display_refresh(void) {
+  if (display_ready) {
+    (void)render_current_state();
+  }
 }
 
 void agent_display_tick(void) {

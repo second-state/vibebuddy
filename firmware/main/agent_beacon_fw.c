@@ -5,8 +5,10 @@
 #include <string.h>
 
 #include "agent_audio.h"
+#include "agent_build_stamp.h"
 #include "agent_buttons.h"
 #include "agent_display.h"
+#include "agent_pomodoro.h"
 #include "cJSON.h"
 #include "driver/uart.h"
 #include "esp_app_desc.h"
@@ -48,9 +50,83 @@ static void transport_write_value_line(const char *label, const char *value) {
   transport_write_literal("\n");
 }
 
-static void on_k2_pressed(void) {
-  transport_write_literal(
-      "{\"version\":1,\"event\":\"button\",\"button\":\"K2\",\"action\":\"press\"}\n");
+static uint32_t clock_ms(void) {
+  return xTaskGetTickCount() * (uint32_t)portTICK_PERIOD_MS;
+}
+
+static const char *scene_name(agent_scene_t scene) {
+  return scene == AGENT_SCENE_POMODORO ? "POMODORO" : "PET";
+}
+
+static void report_pomodoro(const char *what) {
+  transport_write_value_line("POMODORO ", what);
+}
+
+/// 把番茄钟推到前面来；已经在前面就只重绘。
+static void show_pomodoro(void) {
+  if (agent_display_scene() == AGENT_SCENE_POMODORO) {
+    agent_display_refresh();
+  } else {
+    agent_display_set_scene(AGENT_SCENE_POMODORO);
+  }
+}
+
+/// 三个键各管一件事，与场景无关：K0 是番茄钟的键，K1 换场景，K2 交给
+/// Mac 端去打开来源。
+static void on_button(agent_button_event_t event) {
+  if (event == AGENT_BUTTON_K2_SHORT) {
+    transport_write_literal(
+        "{\"version\":1,\"event\":\"button\",\"button\":\"K2\",\"action\":\"press\"}\n");
+    return;
+  }
+  if (event == AGENT_BUTTON_K1_SHORT) {
+    agent_scene_t next = agent_display_scene() == AGENT_SCENE_PET
+                             ? AGENT_SCENE_POMODORO
+                             : AGENT_SCENE_PET;
+    agent_display_set_scene(next);
+    transport_write_value_line("SCENE ", scene_name(next));
+    return;
+  }
+
+  agent_pomodoro_view_t before;
+  agent_pomodoro_view(clock_ms(), &before);
+  bool break_phase = before.phase == AGENT_POMODORO_BREAK;
+  if (event == AGENT_BUTTON_K0_LONG) {
+    if (agent_pomodoro_is_idle(&before)) {
+      return;
+    }
+    agent_pomodoro_stop();
+    report_pomodoro(break_phase && before.run == AGENT_POMODORO_PENDING
+                        ? "BREAK SKIPPED"
+                        : "STOPPED");
+    agent_display_refresh();
+    return;
+  }
+  agent_pomodoro_toggle(clock_ms());
+  if (before.run == AGENT_POMODORO_PENDING) {
+    report_pomodoro(break_phase ? "BREAK START" : "FOCUS START");
+    // 开始一个阶段时把番茄钟推到前面：圆环开始走就是反馈。
+    show_pomodoro();
+    return;
+  }
+  // 暂停与继续不换场景，小灯灵场景右上角的徽章会跟着闪。
+  report_pomodoro(before.run == AGENT_POMODORO_PAUSED ? "RESUMED" : "PAUSED");
+  agent_display_refresh();
+}
+
+/// 阶段结束是只消费一次的边沿：播一次语音，并把番茄钟推到前面来——
+/// 这正是用户该看一眼的时刻。下一阶段停在待开始，等用户按 K0。
+static void handle_pomodoro_transition(agent_pomodoro_transition_t transition) {
+  if (transition == AGENT_POMODORO_NOTHING) {
+    return;
+  }
+  bool focus_ended = transition == AGENT_POMODORO_FOCUS_ENDED;
+  report_pomodoro(focus_ended ? "FOCUS END" : "BREAK END");
+  if (agent_audio_play(focus_ended ? AGENT_AUDIO_FOCUS_DONE
+                                   : AGENT_AUDIO_BREAK_DONE) != ESP_OK) {
+    transport_write_literal("AUDIO ERROR\n");
+  }
+  show_pomodoro();
 }
 
 static agent_display_state_t task_state(const char *status) {
@@ -247,24 +323,13 @@ static void handle_line(char *line, size_t length) {
   cJSON_Delete(message);
 }
 
-/// esp_app_desc 给的是 "Sep 14 2026" 与 "17:35:12"，统一成与 Mac 端相同的
-/// 写法。两行要逐字比对，格式必须一致。
+/// 版本取 esp_app_desc 里的 git 描述；时刻不取它的 __TIME__，那只在
+/// esp_app_desc.c 被重编时才更新，增量构建后会停在上一次全量构建。
+/// AGENT_BUILD_STAMP 由 main/CMakeLists.txt 每次构建重新生成，
+/// 写法与 Mac 端一致，两行要逐字比对。
 static void describe_firmware_build(char *out, size_t size) {
-  static const char MONTHS[] = "JanFebMarAprMayJunJulAugSepOctNovDec";
   const esp_app_desc_t *desc = esp_app_get_description();
-  char month_name[4] = {0};
-  int day = 0;
-  int year = 0;
-  if (sscanf(desc->date, "%3s %d %d", month_name, &day, &year) != 3) {
-    snprintf(out, size, "%.24s", desc->version);
-    return;
-  }
-  const char *found = strstr(MONTHS, month_name);
-  unsigned month = found == NULL ? 0u : (unsigned)(found - MONTHS) / 3u + 1u;
-  // 各字段都取模收窄：页脚只有一行，也让编译器能确定不会截断。
-  snprintf(out, size, "%.24s %04u-%02u-%02u %.5s", desc->version,
-           (unsigned)year % 10000u, month % 100u, (unsigned)day % 100u,
-           desc->time);
+  snprintf(out, size, "%.24s %.16s", desc->version, AGENT_BUILD_STAMP);
 }
 
 void app_main(void) {
@@ -280,6 +345,7 @@ void app_main(void) {
   char firmware_build[48];
   describe_firmware_build(firmware_build, sizeof(firmware_build));
 
+  agent_pomodoro_init();
   if (agent_display_init() == ESP_OK) {
     agent_display_set_firmware_build(firmware_build);
     transport_write_value_line("DISPLAY READY BUILD ", firmware_build);
@@ -292,10 +358,10 @@ void app_main(void) {
   } else {
     transport_write_value_line("AUDIO ERROR ", agent_audio_status());
   }
-  if (agent_buttons_init(on_k2_pressed) == ESP_OK) {
-    transport_write_literal("BUTTON K2 READY\n");
+  if (agent_buttons_init(on_button) == ESP_OK) {
+    transport_write_literal("BUTTONS READY\n");
   } else {
-    transport_write_literal("BUTTON K2 ERROR\n");
+    transport_write_literal("BUTTONS ERROR\n");
   }
 
   last_message_tick = xTaskGetTickCount();
@@ -310,8 +376,9 @@ void app_main(void) {
   while (true) {
     int received = uart_read_bytes(UART_NUM_0, input, sizeof(input), 0);
     if (received == 0) {
+      // 这里的等待就是按键的采样周期：100 ms 会漏掉短促的轻点。
       received =
-          usb_serial_jtag_read_bytes(input, sizeof(input), pdMS_TO_TICKS(100));
+          usb_serial_jtag_read_bytes(input, sizeof(input), pdMS_TO_TICKS(20));
     }
 
     for (int index = 0; index < received; index++) {
@@ -360,6 +427,7 @@ void app_main(void) {
       }
     }
     agent_buttons_tick();
+    handle_pomodoro_transition(agent_pomodoro_tick(clock_ms()));
     agent_display_tick();
   }
 }

@@ -8,6 +8,8 @@ AgentBeacon 是运行在 ESP32-S3 盒子里的实体 Agent 宠物。原创角色
 
 **Stage 4 — 小灯灵显示与语音已通过实机验收，Codex、Claude Code 与 GitHub Actions 均已接入。** 它们的事件都经 `beacond` 和 USB Serial/JTAG 到达盒子，并共享同一个任务卡栈。小灯灵支持空闲、工作中、需要确认、完成、失败和失联；最多显示 3 张任务卡，最新在最上，每张卡显示它在当前状态里待了多久；需要确认、完成和失败各播报一次短语音，工作中保持安静；空闲时轮播当日战绩并偶尔做个小动作。
 
+盒子还有第二个场景：番茄钟（专注 25 分钟、休息 5 分钟）。K0 开始、暂停、继续，长按放弃；K1 在两个场景之间切换；K2 照旧打开来源；阶段结束响铃并播报，下一阶段等你按 K0 再开始。番茄钟状态完全在固件里，不依赖 Mac 端。设计见 [`docs/pomodoro.md`](docs/pomodoro.md)；这部分尚待烧录与实机验收。
+
 ## 目标架构
 
 ```text
@@ -32,7 +34,7 @@ Local Programs / Agents / Codex / Scripts
 - `agent-beacon-fw`：ESP32-S3 固件，仅负责设备 I/O 和 Beacon Protocol 消息处理。
 - Beacon Protocol：与 transport 解耦的可扩展 NDJSON 协议。
 
-更完整的边界与决定见 [`docs/architecture.md`](docs/architecture.md)，领域词汇见 [`CONTEXT.md`](CONTEXT.md)，小灯灵设计见 [`docs/pet.md`](docs/pet.md)，Codex 接入见 [`docs/codex-adapter.md`](docs/codex-adapter.md)，CI 接入见 [`docs/ci.md`](docs/ci.md)，协议决定见 [`docs/protocol.md`](docs/protocol.md)，阶段门禁见 [`docs/roadmap.md`](docs/roadmap.md)，外部项目的借鉴边界见 [`docs/references.md`](docs/references.md)。
+更完整的边界与决定见 [`docs/architecture.md`](docs/architecture.md)，领域词汇见 [`CONTEXT.md`](CONTEXT.md)，小灯灵设计见 [`docs/pet.md`](docs/pet.md)，番茄钟场景见 [`docs/pomodoro.md`](docs/pomodoro.md)，Codex 接入见 [`docs/codex-adapter.md`](docs/codex-adapter.md)，CI 接入见 [`docs/ci.md`](docs/ci.md)，协议决定见 [`docs/protocol.md`](docs/protocol.md)，阶段门禁见 [`docs/roadmap.md`](docs/roadmap.md)，外部项目的借鉴边界见 [`docs/references.md`](docs/references.md)。
 
 ## Stage 0 USB 探测
 
@@ -53,6 +55,19 @@ diff -ru .probe/baseline .probe/connected
 ```bash
 ./tools/flash.sh /dev/cu.usbmodem8401
 uv run --with pyserial python tools/serial-hello.py /dev/cu.usbmodem8401
+```
+
+烧录前可以在 Mac 上先验证固件里不依赖硬件的部分：`./tools/test-pomodoro.sh` 跑番茄钟状态机的测试，`./tools/preview-display.sh` 把固件的绘制代码渲染成 PNG 看版式。
+
+固件使用 [`firmware/partitions.csv`](firmware/partitions.csv) 的自定义分区表（app 分区 4 MB），因为语音资产已经装不进默认的 1 MB。这个选择写在 `sdkconfig.defaults` 里，但 ESP-IDF 只在生成 `sdkconfig` 时读取 defaults：2026-09-15 之前就存在 `firmware/sdkconfig` 的检出目录要先删掉它再构建，否则仍按旧分区表检查大小并失败。
+
+设备若只接着 BOX 的 `UART` 口（CH343 桥，`/dev/cu.usbmodem5909…`），不要用 `flash.sh`：那条路在 esptool 默认参数下会把 flash 擦掉后写不进去。用 [`tools/flash-bridge.sh`](tools/flash-bridge.sh)，它以 `--no-stub` 加 256 字节写块烧录，先单独写分区表试路，再写 app：
+
+```bash
+launchctl bootout gui/$(id -u)/com.agentbeacon.beacond
+./tools/flash-bridge.sh /dev/cu.usbmodem59090668961 partition
+./tools/flash-bridge.sh /dev/cu.usbmodem59090668961 app
+launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.agentbeacon.beacond.plist
 ```
 
 `flash.sh` 会覆盖当前固件。2026-09-14 的原厂 `xiaozhi` 1.9.4 整片备份保存在本机 `.probe/factory/`，权限为 `600`，不会提交到 Git。
