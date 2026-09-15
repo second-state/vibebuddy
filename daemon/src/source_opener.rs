@@ -25,13 +25,15 @@ struct CommandSpec {
     args: Vec<String>,
 }
 
-pub async fn open(source: ActivitySource) -> Result<(), String> {
+/// 成功时返回实际打开的链接，方便日志说明 K2 到底跳去了哪里。
+pub async fn open(source: ActivitySource) -> Result<String, String> {
     let desktop = match &source {
         ActivitySource::ClaudeCode { session_id, cwd } => desktop_sessions_dir()
             .and_then(|dir| desktop_session_id(&dir, session_id, cwd.as_deref())),
         _ => None,
     };
     let spec = command_for(&source, desktop.as_deref())?;
+    let link = spec.args.last().cloned().unwrap_or_default();
     let output = tokio::time::timeout(
         OPEN_TIMEOUT,
         Command::new(spec.program).args(&spec.args).output(),
@@ -40,7 +42,7 @@ pub async fn open(source: ActivitySource) -> Result<(), String> {
     .map_err(|_| "打开来源超时".to_owned())?
     .map_err(|error| format!("无法启动打开命令：{error}"))?;
     if output.status.success() {
-        return Ok(());
+        return Ok(link);
     }
     let stderr = String::from_utf8_lossy(&output.stderr);
     Err(format!("打开来源失败：{}", stderr.trim()))

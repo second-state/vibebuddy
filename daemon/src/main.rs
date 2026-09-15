@@ -98,10 +98,10 @@ async fn handle_device_events(state: AppState, mut events: tokio::sync::mpsc::Re
             info!("K2 已按下，但当前没有可打开的活动");
             continue;
         };
-        if let Err(error) = source_opener::open(source).await {
-            warn!(%error, "K2 打开来源失败");
-        } else {
-            info!("K2 已打开当前活动来源");
+        match source_opener::open(source).await {
+            // 记下链接本身：跳错地方时，日志要能直接说出跳去了哪儿。
+            Ok(link) => info!(%link, "K2 已打开当前活动来源"),
+            Err(error) => warn!(%error, "K2 打开来源失败"),
         }
     }
 }
