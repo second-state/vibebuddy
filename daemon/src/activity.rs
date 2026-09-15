@@ -106,6 +106,8 @@ pub struct ActivityTracker {
     recently_announced: Option<ActivitySource>,
     /// Agent 最近工作过的项目根及最后一次看到的时间。
     workspaces: HashMap<PathBuf, Instant>,
+    /// 每个活动所属的项目名。标题第一行让给了会话名，项目名挪到第二行。
+    projects: HashMap<String, String>,
 }
 
 impl ActivityTracker {
@@ -297,6 +299,14 @@ impl ActivityTracker {
         }
     }
 
+    /// 记下活动所属的项目。要在 `observe` 之前调用：快照在 `observe` 里生成。
+    pub fn note_project(&mut self, id: &ActivityId, project: &str) {
+        self.projects.insert(id.key.clone(), project.to_owned());
+        let activities = &self.activities;
+        self.projects
+            .retain(|key, _| key == &id.key || activities.contains_key(key));
+    }
+
     fn set_activity(&mut self, id: &ActivityId, title: &str, status: ActivityStatus) {
         self.sequence = self.sequence.wrapping_add(1);
         let now = Instant::now();
@@ -351,22 +361,26 @@ impl ActivityTracker {
     /// 把当前卡片栈挂到事件上。结束播报也要带：用户在听到"完成"的同时，
     /// 应该看得见还剩什么在跑。
     fn attach_tasks(&self, visible: &mut Event) {
-        let mut activities: Vec<&Activity> = self.activities.values().collect();
-        activities.sort_by_key(|activity| std::cmp::Reverse(activity.sequence));
+        let mut activities: Vec<(&String, &Activity)> = self.activities.iter().collect();
+        activities.sort_by_key(|(_, activity)| std::cmp::Reverse(activity.sequence));
         visible.extra.insert(
             "tasks".to_owned(),
             json!(
                 activities
                     .into_iter()
                     .take(MAX_VISIBLE_TASKS)
-                    .map(|activity| {
-                        json!({
+                    .map(|(key, activity)| {
+                        let mut task = json!({
                             "title": activity.title,
                             "status": match activity.status {
                                 ActivityStatus::Working => "working",
                                 ActivityStatus::InputRequired => "input_required",
                             },
-                        })
+                        });
+                        if let Some(project) = self.projects.get(key) {
+                            task["project"] = json!(project);
+                        }
+                        task
                     })
                     .collect::<Vec<_>>()
             ),
@@ -565,31 +579,61 @@ fn event(name: &str, session_id: &str, title: &str) -> Event {
 /// `prefix` 区分是哪个 Agent 在跑，`fallback` 用于工作目录不可用时。
 /// 两个 Agent 可能在同一个目录下工作，只有前缀能告诉用户该切到哪个窗口。
 pub fn project_title(prefix: &str, cwd: Option<&str>, fallback: &str) -> String {
+    display_title(prefix, project_name(cwd).as_deref().unwrap_or(fallback), fallback)
+}
+
+/// 工作目录所属项目的名字（项目根目录名）。
+pub fn project_name(cwd: Option<&str>) -> Option<String> {
     let root = cwd.map(Path::new).and_then(project_root);
-    let raw = root
-        .as_deref()
+    root.as_deref()
         .or_else(|| cwd.map(Path::new))
         .and_then(|path| path.file_name())
         .and_then(|name| name.to_str())
-        .unwrap_or(fallback);
-    display_title(prefix, raw, fallback)
+        .map(str::to_owned)
 }
 
-/// 把任意名字压成任务卡放得下的标题：只保留字母数字和连字符，全大写。
+/// 任务卡第一行：依次试 Agent 自己给会话起的名字，都不可用才写项目名。
+///
+/// “不可用”指滤掉设备字库画不出的字符之后剩不到三个字母数字——中文标题
+/// 在这块只有大写字母和数字的屏上会变成空白，退回项目名比留白好。
+pub fn card_title(
+    prefix: &str,
+    candidates: &[Option<String>],
+    project: Option<&str>,
+    fallback: &str,
+) -> String {
+    for candidate in candidates.iter().flatten() {
+        let shown = display_title(prefix, candidate, "");
+        let letters = shown[prefix.len()..]
+            .chars()
+            .filter(char::is_ascii_alphanumeric)
+            .count();
+        if letters >= 3 {
+            return shown;
+        }
+    }
+    display_title(prefix, project.unwrap_or(fallback), fallback)
+}
+
+/// 把任意名字压成任务卡放得下的标题：只保留字母数字、连字符和单个空格，
+/// 全大写。空格得留着：会话标题是几个词，粘在一起就读不出来了。
 pub fn display_title(prefix: &str, raw: &str, fallback: &str) -> String {
-    let title: String = raw
+    let mut title = String::new();
+    for character in raw.chars() {
+        if character.is_ascii_alphanumeric() {
+            title.push(character.to_ascii_uppercase());
+        } else if character == '-' || character == '_' {
+            title.push(character);
+        } else if character.is_whitespace() && !title.is_empty() && !title.ends_with(' ') {
+            title.push(' ');
+        }
+    }
+    let title: String = title
+        .trim_end()
         .chars()
-        .filter_map(|character| {
-            if character.is_ascii_alphanumeric() {
-                Some(character.to_ascii_uppercase())
-            } else if character == '-' || character == '_' {
-                Some(character)
-            } else {
-                None
-            }
-        })
         .take(MAX_TITLE_CHARS.saturating_sub(prefix.chars().count()))
         .collect();
+    let title = title.trim_end();
     if title.is_empty() {
         format!("{prefix}{fallback}")
     } else {
@@ -1018,6 +1062,46 @@ mod tests {
 
         let _ = std::fs::remove_dir_all(&base);
         assert_eq!(seen, vec![repo], "子目录应归到项目根，非仓库路径应忽略");
+    }
+
+    #[test]
+    fn card_title_prefers_a_readable_session_name() {
+        let candidates = [
+            None,
+            Some("Eros infra   morning triage".to_owned()),
+            Some("k2-source-navigation".to_owned()),
+        ];
+        assert_eq!(
+            card_title("CC:", &candidates, Some("agent-beacon"), "CLAUDE"),
+            "CC:EROS INFRA MORNING TRIA"
+        );
+        // 中文标题在设备字库上是空白，退回下一个候选，再退回项目名。
+        let chinese = [Some("制定两周交易计划".to_owned()), Some("PR 96".to_owned())];
+        assert_eq!(
+            card_title("CX:", &chinese, Some("eros-training-infra"), "CODEX"),
+            "CX:PR 96"
+        );
+        let only_chinese = [Some("制定两周交易计划".to_owned())];
+        assert_eq!(
+            card_title("CX:", &only_chinese, Some("eros-training-infra"), "CODEX"),
+            "CX:EROS-TRAINING-INFRA"
+        );
+        assert_eq!(card_title("CX:", &[], None, "CODEX"), "CX:CODEX");
+    }
+
+    #[test]
+    fn tasks_carry_the_project_next_to_the_session_title() {
+        let mut tracker = ActivityTracker::default();
+        let id = ActivityId {
+            session_id: "s".to_owned(),
+            key: "s:1".to_owned(),
+        };
+        tracker.note_project(&id, "AGENT-BEACON");
+        let event = tracker
+            .observe(&id, "CC:POMODORO TIMER", ActivityStatus::Working)
+            .expect("首个活动应可见");
+        assert_eq!(event.extra["tasks"][0]["title"], "CC:POMODORO TIMER");
+        assert_eq!(event.extra["tasks"][0]["project"], "AGENT-BEACON");
     }
 
     #[test]

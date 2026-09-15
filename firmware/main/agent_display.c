@@ -138,6 +138,7 @@ static agent_mode_t current_mode = AGENT_MODE_DUTY;
 static char current_title[TITLE_BYTES];
 static struct {
   char title[TITLE_BYTES];
+  char project[TITLE_BYTES];
   agent_display_state_t state;
   /// 收到这张卡时它已经持续了多久，以及收到的时刻。可见状态不变时 Mac
   /// 端不会再发消息，卡片上的数字却必须继续走，所以由设备自己接着算。
@@ -482,6 +483,11 @@ static void draw_task_cards(void) {
     draw_text(x + 12, y + 5, current_tasks[index].title, 1, COLOR_TEXT, 26);
     draw_text(x + 12, y + 17, short_state_label(current_tasks[index].state), 1,
               color, 4);
+    // 第一行是会话名时，项目名挪到第二行；标题本身就是项目名就不重复。
+    const char *project = current_tasks[index].project;
+    if (project[0] != '\0' && strstr(current_tasks[index].title, project) == NULL) {
+      draw_text(x + 42, y + 17, project, 1, COLOR_MUTED, 16);
+    }
 
     char elapsed[8];
     format_elapsed(elapsed, sizeof(elapsed), task_elapsed_seconds(index));
@@ -1195,6 +1201,10 @@ esp_err_t agent_display_show_tasks(agent_display_state_t state,
     strncpy(current_tasks[index].title, task_title,
             sizeof(current_tasks[index].title) - 1);
     current_tasks[index].title[sizeof(current_tasks[index].title) - 1] = '\0';
+    strncpy(current_tasks[index].project,
+            tasks[index].project == NULL ? "" : tasks[index].project,
+            sizeof(current_tasks[index].project) - 1);
+    current_tasks[index].project[sizeof(current_tasks[index].project) - 1] = '\0';
     current_tasks[index].state = tasks[index].state;
     current_tasks[index].elapsed_base = tasks[index].elapsed_s;
     current_tasks[index].received_tick = xTaskGetTickCount();

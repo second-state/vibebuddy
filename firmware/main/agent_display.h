@@ -32,6 +32,8 @@ typedef struct {
   /// 进入当前状态已经过去的秒数。设备收到后自行继续计时，因为可见状态
   /// 不变时 Mac 端不会再发消息，卡片上的数字却必须一直走。
   int elapsed_s;
+  /// 所属项目；标题是会话名时画在第二行，空或与标题重复则不画。
+  const char *project;
 } agent_display_task_t;
 
 esp_err_t agent_display_init(void);

@@ -259,9 +259,11 @@ static size_t parse_tasks(const cJSON *message, agent_display_task_t *tasks) {
       continue;
     }
     const cJSON *elapsed = cJSON_GetObjectItemCaseSensitive(item, "elapsed_s");
+    const cJSON *project = cJSON_GetObjectItemCaseSensitive(item, "project");
     tasks[count].title = title->valuestring;
     tasks[count].state = task_state(status->valuestring);
     tasks[count].elapsed_s = cJSON_IsNumber(elapsed) ? (int)elapsed->valuedouble : 0;
+    tasks[count].project = cJSON_IsString(project) ? project->valuestring : NULL;
     count++;
   }
   return count;

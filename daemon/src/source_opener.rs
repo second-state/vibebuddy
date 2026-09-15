@@ -112,6 +112,9 @@ struct DesktopSession {
     is_archived: bool,
     #[serde(default, rename = "lastActivityAt")]
     last_activity_at: i64,
+    /// App 自动起的会话标题，任务卡第一行用它。
+    #[serde(default)]
+    title: Option<String>,
 }
 
 fn desktop_sessions_dir() -> Option<PathBuf> {
@@ -124,20 +127,32 @@ fn desktop_sessions_dir() -> Option<PathBuf> {
 /// 一次 `claude://resume` 导入，都会让同一个 CLI 会话对应多条记录。工作目录
 /// 能把真身和影子分开——Hook 报的 cwd 就是那个进程实际待的地方。
 fn desktop_session_id(dir: &Path, cli_session_id: &str, cwd: Option<&str>) -> Option<String> {
+    desktop_session(dir, cli_session_id, cwd).map(|session| session.session_id)
+}
+
+/// 这个 CLI 会话在 Claude App 里的标题。选记录的规则与打开窗口时相同。
+pub(crate) fn desktop_session_title(cli_session_id: &str, cwd: Option<&str>) -> Option<String> {
+    let dir = desktop_sessions_dir()?;
+    desktop_session(&dir, cli_session_id, cwd)
+        .and_then(|session| session.title)
+        .filter(|title| !title.trim().is_empty())
+}
+
+fn desktop_session(dir: &Path, cli_session_id: &str, cwd: Option<&str>) -> Option<DesktopSession> {
     let mut candidates = Vec::new();
     collect_desktop_sessions(dir, 0, &mut candidates);
     candidates.retain(|session| {
         !session.is_archived && session.cli_session_id.as_deref() == Some(cli_session_id)
     });
     if let Some(cwd) = cwd
-        && let Some(exact) = candidates
+        && let Some(index) = candidates
             .iter()
-            .find(|session| session.cwd.as_deref() == Some(cwd))
+            .position(|session| session.cwd.as_deref() == Some(cwd))
     {
-        return Some(exact.session_id.clone());
+        return Some(candidates.swap_remove(index));
     }
     candidates.sort_by_key(|session| session.last_activity_at);
-    candidates.pop().map(|session| session.session_id)
+    candidates.pop()
 }
 
 /// 记录按 `<账号>/<组织>/local_*.json` 分层存放，层数不深，逐层读下去即可。

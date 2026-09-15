@@ -3,6 +3,7 @@ mod ci;
 mod claude_hooks;
 mod codex_hooks;
 mod serial_transport;
+mod session_titles;
 mod source_opener;
 
 use std::env;
@@ -23,6 +24,7 @@ use claude_hooks::ClaudeHook;
 use codex_hooks::CodexHook;
 use serde::Serialize;
 use serial_transport::{SerialConfig, SerialTransport, Transport, TransportError};
+use session_titles::SessionTitles;
 use tokio::sync::Mutex;
 use tracing::{info, warn};
 use tracing_subscriber::EnvFilter;
@@ -39,6 +41,8 @@ struct AppState {
     transport: Arc<dyn Transport>,
     /// 所有 Agent 共享一个聚合器：设备只有一块屏幕和一只小灯灵。
     activities: Arc<Mutex<ActivityTracker>>,
+    /// 会话标题的查询与缓存：Claude App 的会话标题、Codex 的线程名。
+    titles: Arc<Mutex<SessionTitles>>,
 }
 
 #[derive(Serialize)]
@@ -70,6 +74,7 @@ async fn main() {
     let state = AppState {
         transport,
         activities: Arc::new(Mutex::new(activities)),
+        titles: Arc::new(Mutex::new(SessionTitles::from_home())),
     };
     tokio::spawn(sweep_expired_activities(state.clone()));
     tokio::spawn(send_heartbeats(state.clone()));
@@ -302,7 +307,8 @@ async fn post_codex_hook(
 ) -> (StatusCode, Json<ApiResponse>) {
     let event = {
         let mut tracker = state.activities.lock().await;
-        codex_hooks::apply(&mut tracker, hook).map(|mut event| {
+        let mut titles = state.titles.lock().await;
+        codex_hooks::apply(&mut tracker, &mut titles, hook).map(|mut event| {
             tracker.stamp_live_fields(&mut event);
             event
         })
@@ -316,7 +322,8 @@ async fn post_claude_hook(
 ) -> (StatusCode, Json<ApiResponse>) {
     let event = {
         let mut tracker = state.activities.lock().await;
-        claude_hooks::apply(&mut tracker, hook).map(|mut event| {
+        let mut titles = state.titles.lock().await;
+        claude_hooks::apply(&mut tracker, &mut titles, hook).map(|mut event| {
             tracker.stamp_live_fields(&mut event);
             event
         })
@@ -366,6 +373,7 @@ mod tests {
             State(AppState {
                 transport: transport.clone(),
                 activities: Arc::new(tokio::sync::Mutex::new(ActivityTracker::default())),
+                titles: Arc::new(tokio::sync::Mutex::new(SessionTitles::disabled())),
             }),
             Json(event),
         )

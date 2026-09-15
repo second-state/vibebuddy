@@ -94,7 +94,7 @@ curl -H 'content-type: application/json' \
 
 ## Agent 接入
 
-Codex 与 Claude Code 都由本机 Hook 接入，各有一个隐私过滤脚本，两者写入同一个聚合器。任务卡标题带 Agent 前缀：Codex 为 `CX:`，Claude Code 为 `CC:`。标题取自 git 项目根，因此在子目录或 worktree 中工作时显示的仍是项目名。
+Codex 与 Claude Code 都由本机 Hook 接入，各有一个隐私过滤脚本，两者写入同一个聚合器。任务卡标题带 Agent 前缀：Codex 为 `CX:`，Claude Code 为 `CC:`。第一行写 Agent 自己给会话起的名字（Claude App 的会话标题、Codex 的线程名或分支），第二行写项目名；会话没有名字时第一行就是项目名。项目名取自 git 项目根，因此在子目录或 worktree 中工作时显示的仍是项目名。
 
 - Codex：`~/.codex/hooks.json` 为六个事件配置 [`tools/codex-hook.py`](tools/codex-hook.py)，并在 Codex 的 `/hooks` 页面审查、信任配置；详见 [`docs/codex-adapter.md`](docs/codex-adapter.md)。
 - Claude Code：`~/.claude/settings.json` 为八个事件配置 [`tools/claude-hook.py`](tools/claude-hook.py)；详见 [`docs/claude-adapter.md`](docs/claude-adapter.md)。

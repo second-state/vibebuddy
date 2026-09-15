@@ -6,7 +6,11 @@
 use beacon_protocol::Event;
 use serde::Deserialize;
 
-use crate::activity::{ActivityId, ActivitySource, ActivityStatus, ActivityTracker, project_title};
+use crate::activity::{
+    ActivityId, ActivitySource, ActivityStatus, ActivityTracker, card_title, display_title,
+    project_name,
+};
+use crate::session_titles::{SessionTitles, git_branch};
 
 /// 任务卡上区分 Agent 的前缀。
 const PREFIX: &str = "CX:";
@@ -27,10 +31,21 @@ pub struct CodexHook {
     pub response_kind: Option<String>,
 }
 
-pub fn apply(tracker: &mut ActivityTracker, hook: CodexHook) -> Option<Event> {
+pub fn apply(
+    tracker: &mut ActivityTracker,
+    titles: &mut SessionTitles,
+    hook: CodexHook,
+) -> Option<Event> {
     tracker.note_workspace(hook.cwd.as_deref());
     let id = activity_id(&hook);
-    let title = project_title(PREFIX, hook.cwd.as_deref(), FALLBACK_TITLE);
+    let cwd = hook.cwd.as_deref();
+    // 第一行写 Codex 线程的名字（用户起的名或线程记录的分支），没有就写
+    // 本地分支，再没有才是项目名。
+    let project = project_name(cwd);
+    let thread_id = hook.thread_id.clone().unwrap_or_else(|| hook.session_id.clone());
+    let candidates = [titles.codex(&thread_id), cwd.and_then(git_branch)];
+    let title = card_title(PREFIX, &candidates, project.as_deref(), FALLBACK_TITLE);
+    tracker.note_project(&id, &display_title("", project.as_deref().unwrap_or(FALLBACK_TITLE), FALLBACK_TITLE));
     let source = ActivitySource::Codex {
         thread_id: hook
             .thread_id
@@ -104,7 +119,7 @@ mod tests {
         }))
         .expect("带可导航线程的 Hook 应可解析");
 
-        apply(&mut tracker, hook);
+        apply(&mut tracker, &mut SessionTitles::disabled(), hook);
 
         assert_eq!(
             tracker.focus_source(),
@@ -120,6 +135,7 @@ mod tests {
 
         let working = apply(
             &mut tracker,
+            &mut SessionTitles::disabled(),
             hook("session-a", "UserPromptSubmit", "/work/agent-beacon"),
         )
         .expect("开始事件应可见");
@@ -128,6 +144,7 @@ mod tests {
 
         let waiting = apply(
             &mut tracker,
+            &mut SessionTitles::disabled(),
             hook("session-a", "PermissionRequest", "/work/agent-beacon"),
         )
         .expect("审批事件应可见");
@@ -135,6 +152,7 @@ mod tests {
 
         let resumed = apply(
             &mut tracker,
+            &mut SessionTitles::disabled(),
             hook("session-a", "PostToolUse", "/work/agent-beacon"),
         )
         .expect("工具完成后应恢复工作中");
@@ -142,6 +160,7 @@ mod tests {
 
         let done = apply(
             &mut tracker,
+            &mut SessionTitles::disabled(),
             hook("session-a", "Stop", "/work/agent-beacon"),
         )
         .expect("停止事件应可见");
@@ -153,6 +172,7 @@ mod tests {
         let mut tracker = ActivityTracker::default();
         apply(
             &mut tracker,
+            &mut SessionTitles::disabled(),
             hook("session-a", "UserPromptSubmit", "/work/agent-beacon"),
         );
         let stop: CodexHook = serde_json::from_value(json!({
@@ -164,7 +184,7 @@ mod tests {
         }))
         .expect("等待回答的 Stop 载荷应可解析");
 
-        let waiting = apply(&mut tracker, stop).expect("等待回答应产生可见事件");
+        let waiting = apply(&mut tracker, &mut SessionTitles::disabled(), stop).expect("等待回答应产生可见事件");
         assert_eq!(waiting.event, "agent.input_required");
         assert!(!waiting.extra.contains_key("announcement"));
     }
@@ -174,15 +194,18 @@ mod tests {
         let mut tracker = ActivityTracker::default();
         apply(
             &mut tracker,
+            &mut SessionTitles::disabled(),
             hook("working", "UserPromptSubmit", "/work/alpha"),
         );
         apply(
             &mut tracker,
+            &mut SessionTitles::disabled(),
             hook("waiting", "UserPromptSubmit", "/work/beta"),
         );
 
         let waiting = apply(
             &mut tracker,
+            &mut SessionTitles::disabled(),
             hook("waiting", "PermissionRequest", "/work/beta"),
         )
         .expect("需要输入应成为可见状态");
@@ -192,11 +215,11 @@ mod tests {
         // 结束播报说的是谁结束了，屏幕就显示谁；alpha 还在跑，由它后续的事件
         // 把屏幕刷回去。
         let done =
-            apply(&mut tracker, hook("waiting", "Stop", "/work/beta")).expect("结束应产生播报");
+            apply(&mut tracker, &mut SessionTitles::disabled(), hook("waiting", "Stop", "/work/beta")).expect("结束应产生播报");
         assert_eq!(done.event, "task.done");
         assert_eq!(done.title.as_deref(), Some("CX:BETA"));
 
-        let back = apply(&mut tracker, hook("working", "PostToolUse", "/work/alpha"))
+        let back = apply(&mut tracker, &mut SessionTitles::disabled(), hook("working", "PostToolUse", "/work/alpha"))
             .expect("下一个事件应把屏幕交还给还在跑的任务");
         assert_eq!(back.event, "task.start");
         assert_eq!(back.title.as_deref(), Some("CX:ALPHA"));
@@ -209,19 +232,22 @@ mod tests {
         let mut tracker = ActivityTracker::default();
         apply(
             &mut tracker,
+            &mut SessionTitles::disabled(),
             hook("finishing", "UserPromptSubmit", "/work/alpha"),
         );
         apply(
             &mut tracker,
+            &mut SessionTitles::disabled(),
             hook("waiting", "UserPromptSubmit", "/work/beta"),
         );
         apply(
             &mut tracker,
+            &mut SessionTitles::disabled(),
             hook("waiting", "PermissionRequest", "/work/beta"),
         );
 
         let done =
-            apply(&mut tracker, hook("finishing", "Stop", "/work/alpha")).expect("结束应产生播报");
+            apply(&mut tracker, &mut SessionTitles::disabled(), hook("finishing", "Stop", "/work/alpha")).expect("结束应产生播报");
 
         assert_eq!(
             done.extra.get("announcement").and_then(|v| v.as_str()),
@@ -241,10 +267,12 @@ mod tests {
         let mut tracker = ActivityTracker::default();
         apply(
             &mut tracker,
+            &mut SessionTitles::disabled(),
             hook("waiting", "UserPromptSubmit", "/work/waiting"),
         );
         let first = apply(
             &mut tracker,
+            &mut SessionTitles::disabled(),
             hook("waiting", "PermissionRequest", "/work/waiting"),
         )
         .expect("首次等待输入应可见");
@@ -252,6 +280,7 @@ mod tests {
 
         let refreshed = apply(
             &mut tracker,
+            &mut SessionTitles::disabled(),
             hook("working", "UserPromptSubmit", "/work/working"),
         )
         .expect("后台任务变化应刷新卡片");
@@ -262,13 +291,14 @@ mod tests {
     #[test]
     fn task_cards_are_newest_first_and_limited_to_three() {
         let mut tracker = ActivityTracker::default();
-        apply(&mut tracker, hook("one", "UserPromptSubmit", "/work/one"));
-        apply(&mut tracker, hook("two", "UserPromptSubmit", "/work/two"));
+        apply(&mut tracker, &mut SessionTitles::disabled(), hook("one", "UserPromptSubmit", "/work/one"));
+        apply(&mut tracker, &mut SessionTitles::disabled(), hook("two", "UserPromptSubmit", "/work/two"));
         apply(
             &mut tracker,
+            &mut SessionTitles::disabled(),
             hook("three", "UserPromptSubmit", "/work/three"),
         );
-        let latest = apply(&mut tracker, hook("four", "UserPromptSubmit", "/work/four"))
+        let latest = apply(&mut tracker, &mut SessionTitles::disabled(), hook("four", "UserPromptSubmit", "/work/four"))
             .expect("新任务应刷新卡片栈");
 
         let tasks = latest.extra["tasks"].as_array().expect("tasks 应为数组");
@@ -281,10 +311,10 @@ mod tests {
     #[test]
     fn background_task_removal_refreshes_the_stack() {
         let mut tracker = ActivityTracker::default();
-        apply(&mut tracker, hook("old", "UserPromptSubmit", "/work/old"));
-        apply(&mut tracker, hook("new", "UserPromptSubmit", "/work/new"));
+        apply(&mut tracker, &mut SessionTitles::disabled(), hook("old", "UserPromptSubmit", "/work/old"));
+        apply(&mut tracker, &mut SessionTitles::disabled(), hook("new", "UserPromptSubmit", "/work/new"));
 
-        let refreshed = apply(&mut tracker, hook("old", "Stop", "/work/old"))
+        let refreshed = apply(&mut tracker, &mut SessionTitles::disabled(), hook("old", "Stop", "/work/old"))
             .expect("后台任务结束也应刷新卡片栈");
         let tasks = refreshed.extra["tasks"].as_array().expect("tasks 应为数组");
         assert_eq!(tasks.len(), 1);
@@ -296,12 +326,14 @@ mod tests {
         let mut tracker = ActivityTracker::default();
         apply(
             &mut tracker,
+            &mut SessionTitles::disabled(),
             hook("session-a", "UserPromptSubmit", "/work/alpha"),
         );
 
         assert!(
             apply(
                 &mut tracker,
+                &mut SessionTitles::disabled(),
                 hook("session-a", "PostToolUse", "/work/alpha")
             )
             .is_none()
@@ -313,6 +345,7 @@ mod tests {
         let mut tracker = ActivityTracker::default();
         apply(
             &mut tracker,
+            &mut SessionTitles::disabled(),
             hook_with_turn("session-a", "turn-a", "UserPromptSubmit", "/work/alpha"),
         );
         let waiting: CodexHook = serde_json::from_value(json!({
@@ -324,12 +357,13 @@ mod tests {
         }))
         .expect("等待回答的 Stop 载荷应可解析");
         assert_eq!(
-            apply(&mut tracker, waiting).expect("提问应等待回答").event,
+            apply(&mut tracker, &mut SessionTitles::disabled(), waiting).expect("提问应等待回答").event,
             "agent.input_required"
         );
 
         let resumed = apply(
             &mut tracker,
+            &mut SessionTitles::disabled(),
             hook_with_turn("session-a", "turn-b", "UserPromptSubmit", "/work/beta"),
         )
         .expect("用户回答后应开始新 turn");
@@ -338,12 +372,14 @@ mod tests {
 
         let replay = apply(
             &mut tracker,
+            &mut SessionTitles::disabled(),
             hook_with_turn("session-a", "turn-a", "Stop", "/work/alpha"),
         );
         assert!(replay.is_none(), "旧 turn 的重复 Stop 不应改变新 turn");
 
         let second = apply(
             &mut tracker,
+            &mut SessionTitles::disabled(),
             hook_with_turn("session-a", "turn-b", "Stop", "/work/beta"),
         )
         .expect("第二个 turn 应产生完成通知");
@@ -355,10 +391,11 @@ mod tests {
         let mut tracker = ActivityTracker::default();
         apply(
             &mut tracker,
+            &mut SessionTitles::disabled(),
             hook("session-a", "UserPromptSubmit", "/work/alpha"),
         );
 
-        let interrupted = apply(&mut tracker, hook("session-a", "Interrupt", "/work/alpha"))
+        let interrupted = apply(&mut tracker, &mut SessionTitles::disabled(), hook("session-a", "Interrupt", "/work/alpha"))
             .expect("中断应回到空闲状态");
         assert_eq!(interrupted.event, "agent.idle");
         assert_eq!(interrupted.title.as_deref(), Some("INTERRUPTED"));
@@ -370,6 +407,7 @@ mod tests {
         for session in ["one", "two", "three"] {
             apply(
                 &mut tracker,
+                &mut SessionTitles::disabled(),
                 hook(session, "UserPromptSubmit", "/work/project"),
             );
         }
@@ -377,7 +415,7 @@ mod tests {
         let announcements = ["one", "two", "three"]
             .into_iter()
             .filter(|session| {
-                let event = apply(&mut tracker, hook(session, "Stop", "/work/project"))
+                let event = apply(&mut tracker, &mut SessionTitles::disabled(), hook(session, "Stop", "/work/project"))
                     .expect("每个活动会话结束都应产生事件");
                 event.event == "task.done"
                     || event

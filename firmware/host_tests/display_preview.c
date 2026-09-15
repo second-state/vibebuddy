@@ -94,8 +94,9 @@ int main(int argc, char **argv) {
   snapshot(directory, "pomodoro_idle");
 
   agent_display_task_t tasks[] = {
-      {"CC:AGENT-BEACON", AGENT_DISPLAY_WORKING, 75},
-      {"CX:EROS-TRAINING-INFRA", AGENT_DISPLAY_INPUT_REQUIRED, 900},
+      {"CC:POMODORO TIMER FEATURE", AGENT_DISPLAY_WORKING, 75, "AGENT-BEACON"},
+      {"CX:EROS-TRAINING-INFRA", AGENT_DISPLAY_INPUT_REQUIRED, 900,
+       "EROS-TRAINING-INFRA"},
   };
   agent_display_show_tasks(AGENT_DISPLAY_INPUT_REQUIRED, "CC:AGENT-BEACON",
                            tasks, 2);

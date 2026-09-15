@@ -48,7 +48,7 @@ Mac 到设备的首批事件：
 {"version":1,"event":"task.start","title":"GAMMA","tasks":[{"title":"GAMMA","status":"working","elapsed_s":75},{"title":"BETA","status":"input_required","elapsed_s":900}],"stats":["7 DONE","4 ASKS","1H23 BUSY"]}
 ```
 
-每项包含 `title`、`status` 和 `elapsed_s`；当前状态值为 `working`、`input_required`、`done`、`failed`。旧固件会按 v1 规则忽略 `tasks`。未来事件可以包括 `task.progress`、`task.cancelled`、`agent.waiting`、`message`、`system` 和 `device.status`。
+每项包含 `title`、`status` 和 `elapsed_s`，可选 `project`；当前状态值为 `working`、`input_required`、`done`、`failed`。`title` 是卡片第一行：Agent 自己给会话起的名字（Claude App 的会话标题、Codex 的线程名）或分支名，都没有才是项目名；`project` 是项目名，设备画在第二行，与标题重复时不画。旧固件会按 v1 规则忽略 `tasks` 与 `project`。未来事件可以包括 `task.progress`、`task.cancelled`、`agent.waiting`、`message`、`system` 和 `device.status`。
 
 `elapsed_s` 是该活动进入**当前状态**已经过去的秒数，不是距上一个事件的秒数：工作中的卡片回答「这个 turn 跑了多久」，等待确认的卡片回答「等了多久」。设备收到后自行继续计时，因为可见状态不变时 `beacond` 会去重、不再发消息，而屏幕上的数字必须一直走。也正因为要去重，`elapsed_s` 与 `stats` 都在去重之后才盖到事件上；放进快照会让每个工具事件都变成一次重绘，把工作中的动画不断打回第一帧。
 
