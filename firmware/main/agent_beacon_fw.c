@@ -187,8 +187,9 @@ static void handle_pomodoro_transition(agent_pomodoro_transition_t transition) {
 }
 
 /// 无聊度按状态累计，不按消息：Agent 有活、番茄钟在走、链路断了，都不算
-/// 空闲。值班空闲够久就去休闲；有事立刻回来；番茄钟待开始或暂停放了半小时
-/// 就当人走了，先回值班，接着自然会去休闲。
+/// 空闲。值班空闲够久就去休闲；有事立刻回来。番茄钟模式里，待开始的一屏
+/// 静止的 25:00 和值班空闲一样无聊，五分钟就走；暂停的是用户有意停在那里
+/// 的，放了半小时才当人走了。都是先回值班，接着自然会去休闲。
 static void tend_leisure(void) {
   uint32_t now = clock_ms();
   agent_pomodoro_view_t pomodoro;
@@ -222,9 +223,12 @@ static void tend_leisure(void) {
   } else if (mode == AGENT_MODE_LEISURE &&
              leisure.tier == AGENT_LEISURE_ALERT) {
     set_mode(AGENT_MODE_DUTY);
-  } else if (mode == AGENT_MODE_POMODORO &&
-             leisure.tier == AGENT_LEISURE_SLEEPY) {
-    set_mode(AGENT_MODE_DUTY);
+  } else if (mode == AGENT_MODE_POMODORO) {
+    bool pending = pomodoro.run == AGENT_POMODORO_PENDING;
+    if (leisure.tier == AGENT_LEISURE_SLEEPY ||
+        (pending && leisure.tier == AGENT_LEISURE_BORED)) {
+      set_mode(AGENT_MODE_DUTY);
+    }
   }
 }
 
