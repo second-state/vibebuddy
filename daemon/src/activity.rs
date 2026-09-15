@@ -21,10 +21,6 @@ const INPUT_REQUIRED_TTL: Duration = Duration::from_secs(4 * 60 * 60);
 /// Agent 工作过的项目根保留多久。超过这段时间没人在那儿干活，就不必再
 /// 关心它的 CI 了。
 const WORKSPACE_TTL: Duration = Duration::from_secs(60 * 60);
-/// 任务结束会播报。播报之后按 K2，用户要回的是刚播报的那件事，哪怕别的任务
-/// 还在跑——结束的活动已经离开卡片栈，不留这一手就永远选不中它。超过这个
-/// 窗口再按，找的就是当前任务了。
-const ANNOUNCED_FOCUS_WINDOW: Duration = Duration::from_secs(30);
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ActivityStatus {
@@ -104,9 +100,10 @@ pub struct ActivityTracker {
     /// 最近一次可定位的 Agent/CI 来源。当前活动结束或 daemon 重启后，K2
     /// 仍应能回到刚才那件事，而不是变成一个只在“工作中”才有效的按钮。
     last_source: Option<ActivitySource>,
-    /// 最近一次播报过结束的活动及其播报时刻。不持久化：daemon 重启后这个
-    /// 窗口早就过期了，留着只会把 K2 指向一件用户早已忘记的事。
-    recently_announced: Option<(ActivitySource, Instant)>,
+    /// 最近一次播报过结束的活动。它一直是 K2 的落点，直到下一次播报把它换
+    /// 掉——用墙上时钟让它过期是错的：这台设备的用处恰恰在于人不在电脑前，
+    /// 去接杯水回来再按，落点不该已经飘走。
+    recently_announced: Option<ActivitySource>,
     /// Agent 最近工作过的项目根及最后一次看到的时间。
     workspaces: HashMap<PathBuf, Instant>,
 }
@@ -167,12 +164,13 @@ impl ActivityTracker {
     /// 记下刚播报过结束的活动，让 K2 在播报之后的短时间内仍能回到它。
     fn remember_announced(&mut self, activity: Activity) {
         if let Some(source) = activity.source {
-            self.recently_announced = Some((source, Instant::now()));
+            self.recently_announced = Some(source);
         }
     }
 
-    /// K2 的落点。与屏幕主状态同源，但多一条：刚播报过结束的活动排在当前
-    /// 工作项之前——用户是听到播报才去按的键。
+    /// K2 的落点。与屏幕主状态同源，但多一条：最近播报过结束的活动排在当前
+    /// 工作项之前，并一直保持到下一次播报——用户是听到播报才去按的键，而那
+    /// 件事此刻已经不在屏幕上了。
     pub fn focus_source(&self) -> Option<ActivitySource> {
         // 有任务在等人回答，那件事最急，先去那里。
         if let Some(waiting) = self
@@ -184,9 +182,9 @@ impl ActivityTracker {
         {
             return Some(source);
         }
-        if let Some((source, announced_at)) = &self.recently_announced
-            && announced_at.elapsed() < ANNOUNCED_FOCUS_WINDOW
-        {
+        // 播报过结束的那件事已经离开卡片栈，屏幕上再也看不到它；而还在跑的
+        // 任务一直挂在屏幕上，本来就不需要 K2 帮忙定位。
+        if let Some(source) = &self.recently_announced {
             return Some(source.clone());
         }
         match self.focused_activity() {
@@ -701,37 +699,64 @@ mod tests {
         );
     }
 
+    /// 落点由播报接力，不由时钟决定：第二个任务完成后，K2 改指它。
     #[test]
-    fn the_running_task_takes_over_once_the_announcement_is_stale() {
+    fn the_next_announcement_takes_over_the_landing_spot() {
         let mut tracker = ActivityTracker::default();
-        let finished = id("session-a", "session-a:turn");
-        let running = id("session-b", "session-b:turn");
-        let running_source = ActivitySource::Codex {
-            thread_id: "thread-running".to_owned(),
+        let first = id("session-a", "session-a:turn");
+        let second = id("session-b", "session-b:turn");
+        let second_source = ActivitySource::Codex {
+            thread_id: "thread-second".to_owned(),
         };
-        tracker.observe(&finished, "CX:ALPHA", ActivityStatus::Working);
+        tracker.observe(&first, "CX:ALPHA", ActivityStatus::Working);
         tracker.associate_source(
-            &finished,
+            &first,
             ActivitySource::Codex {
-                thread_id: "thread-finished".to_owned(),
+                thread_id: "thread-first".to_owned(),
             },
         );
-        tracker.observe(&running, "CX:BETA", ActivityStatus::Working);
-        tracker.associate_source(&running, running_source.clone());
-        tracker.finish(&finished, "CX:ALPHA");
+        tracker.observe(&second, "CX:BETA", ActivityStatus::Working);
+        tracker.associate_source(&second, second_source.clone());
 
-        let stale = Instant::now()
-            .checked_sub(ANNOUNCED_FOCUS_WINDOW + Duration::from_secs(1))
-            .expect("测试时钟应可回退");
-        tracker.recently_announced = tracker
-            .recently_announced
-            .take()
-            .map(|(source, _)| (source, stale));
+        tracker.finish(&first, "CX:ALPHA");
+        tracker.finish(&second, "CX:BETA");
 
         assert_eq!(
             tracker.focus_source(),
-            Some(running_source),
-            "播报过去之后，K2 该回到当前还在跑的任务"
+            Some(second_source),
+            "K2 应跟随最后一次播报"
+        );
+    }
+
+    /// 人离开工位再回来按 K2，落点不该因为时间流逝而飘走。
+    #[test]
+    fn the_landing_spot_does_not_expire_on_its_own() {
+        let mut tracker = ActivityTracker::default();
+        let finished = id("session-a", "session-a:turn");
+        let running = id("session-b", "session-b:turn");
+        let finished_source = ActivitySource::Codex {
+            thread_id: "thread-finished".to_owned(),
+        };
+        tracker.observe(&finished, "CX:ALPHA", ActivityStatus::Working);
+        tracker.associate_source(&finished, finished_source.clone());
+        tracker.observe(&running, "CX:BETA", ActivityStatus::Working);
+        tracker.associate_source(
+            &running,
+            ActivitySource::Codex {
+                thread_id: "thread-running".to_owned(),
+            },
+        );
+        tracker.finish(&finished, "CX:ALPHA");
+
+        // 中间那个任务一直在跑，刷新多少次都不该把落点抢走。
+        for _ in 0..5 {
+            tracker.observe(&running, "CX:BETA", ActivityStatus::Working);
+        }
+
+        assert_eq!(
+            tracker.focus_source(),
+            Some(finished_source),
+            "只有下一次播报能换掉落点"
         );
     }
 
