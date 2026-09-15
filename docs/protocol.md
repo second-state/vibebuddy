@@ -76,7 +76,7 @@ Mac 到设备的首批事件：
 {"version":1,"event":"button","button":"K2","action":"press"}
 ```
 
-当前只实现 K2 单击。`beacond` 收到后选择与屏幕主状态相同的活动：需要输入的任务优先，否则选择最新工作项；Codex 顶层活动打开自身 thread，子 Agent 活动打开拥有它的父 thread；Claude Code 用 `claude://resume?session=<session_id>` 打开 Claude App 中的对应 Code 会话；GitHub Actions 打开对应 run。当前没有活动时回到最近一次可定位的来源；该定位会写入本机状态文件，daemon 重启后仍然有效。K0、K1 和长按/释放尚未绑定。
+当前只实现 K2 单击。`beacond` 收到后选择与屏幕主状态相同的活动：需要输入的任务优先，否则选择最新工作项；Codex 顶层活动打开自身 thread，子 Agent 活动打开拥有它的父 thread；Claude Code 先把 Hook 报的 CLI `session_id` 连同 `cwd` 在 Claude App 的会话索引里解析成桌面会话 id，再用 `claude://code/continue?session=<桌面会话 id>` 精确跳转；解析不到（会话只跑在终端里）才退回 `claude://resume?session=<session_id>` 导入；GitHub Actions 打开对应 run。当前没有活动时回到最近一次可定位的来源；该定位会写入本机状态文件，daemon 重启后仍然有效。K0、K1 和长按/释放尚未绑定。
 
 固件输出的 `READY`、`EVENT`、`TITLE` 和 `ERROR` 行是实机链路验收用的诊断文本，不是设备到 Mac 的正式 JSON 事件。
 

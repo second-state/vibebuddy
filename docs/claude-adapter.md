@@ -34,13 +34,26 @@ Claude Code 的 `prompt_id` 与 Codex 的 `turn_id` 语义对齐，都标识一�
 
 ## K2 导航
 
-Claude Code 虽然可以运行在终端里，但 K2 的用户目标是 Claude App 中拥有该 Activity 的 Code 会话，不是承载 CLI 的 terminal。`beacond` 使用 Hook 已提供的 `session_id` 打开：
+Claude Code 虽然可以运行在终端里，但 K2 的用户目标是 Claude App 中拥有该 Activity 的 Code 会话，不是承载 CLI 的 terminal。
+
+Hook 给的 `session_id` 是 **CLI 的**会话 id，它和桌面会话 id 是两个不同的 UUID，而且不是一对一：worktree 被删除后会话迁回主仓库、fork，以及每一次 `claude://resume` 导入，都会让同一个 CLI 会话多出一条桌面记录。所以 `beacond` 先查 Claude App 自己的会话索引，把 CLI 会话解析成桌面会话再打开：
 
 ```text
-claude://resume?session=<session_id>
+~/Library/Application Support/Claude/claude-code-sessions/<账号>/<组织>/local_*.json
+  { "sessionId": "local_…", "cliSessionId": "…", "cwd": "…", "isArchived": … }
 ```
 
-2026-09-14 已用本机 Claude 1.52386.6 验证：应用记录 `Resume deep link: importing CLI session …`，随后进入 `/epitaxy/local_<session_id>` 对应页面。Claude 的后台 agent 与父会话共享 `session_id`，因此也会回到正确的父 Code 会话。
+按 `cliSessionId` 取未归档的记录；有多条时用 Hook 报的 `cwd` 选中真身——那是 CLI 进程实际待的目录，影子记录的 `cwd` 停在别处。解析命中后用：
+
+```text
+claude://code/continue?session=<桌面会话 id>
+```
+
+这条链接按桌面会话 id 精确跳转，不读磁盘上的 transcript。只有解析不到（会话跑在终端里，Claude App 中没有对应窗口）时才退回 `claude://resume?session=<CLI session_id>`，此时导入正是想要的行为。
+
+2026-09-15 已用本机 Claude 1.52386.6 验证：`code/continue` 使目标会话的 `lastFocusedAt` 前移，且不产生任何导入日志。
+
+`claude://resume` 不能单独承担 K2：它按 CLI session id 去磁盘认领 transcript，同一个 id 在多个项目目录下各有一份时只能挑一个。2026-09-14 到 15 之间 K2 就一直打开一个内容停在前一天的影子会话，并且每按一次都把整份 5.4 MB transcript 重新导入一遍。
 
 ## 隐私边界
 

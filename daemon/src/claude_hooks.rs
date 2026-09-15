@@ -32,6 +32,7 @@ pub fn apply(tracker: &mut ActivityTracker, hook: ClaudeHook) -> Option<Event> {
     let title = project_title(PREFIX, hook.cwd.as_deref(), FALLBACK_TITLE);
     let source = ActivitySource::ClaudeCode {
         session_id: hook.session_id.clone(),
+        cwd: hook.cwd.clone(),
     };
     let event = match hook.hook_event_name.as_str() {
         "UserPromptSubmit" => {

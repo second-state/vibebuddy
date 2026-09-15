@@ -33,9 +33,20 @@ pub enum ActivityStatus {
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum ActivitySource {
-    Codex { thread_id: String },
-    ClaudeCode { session_id: String },
-    GitHubActions { repo: String, run_id: u64 },
+    Codex {
+        thread_id: String,
+    },
+    /// `session_id` 是 CLI 的会话 id，它不足以定位窗口：worktree 迁移、fork 或
+    /// 一次 resume 导入都会让同一个 id 对应多个桌面会话。`cwd` 是消歧的钥匙。
+    ClaudeCode {
+        session_id: String,
+        #[serde(default)]
+        cwd: Option<String>,
+    },
+    GitHubActions {
+        repo: String,
+        run_id: u64,
+    },
 }
 
 /// 活动的身份。`key` 在所有会话中唯一，`session_id` 用于会话级操作。
@@ -600,6 +611,7 @@ mod tests {
         tracker.observe(&turn, "CC:PROJECT", ActivityStatus::Working);
         let source = ActivitySource::ClaudeCode {
             session_id: "session-a".to_owned(),
+            cwd: Some("/work/agent-beacon".to_owned()),
         };
         tracker.associate_source(&turn, source.clone());
 
@@ -615,6 +627,7 @@ mod tests {
         tracker.observe(&turn, "CC:PROJECT", ActivityStatus::Working);
         let source = ActivitySource::ClaudeCode {
             session_id: "session-a".to_owned(),
+            cwd: Some("/work/agent-beacon".to_owned()),
         };
         tracker.associate_source(&turn, source.clone());
 

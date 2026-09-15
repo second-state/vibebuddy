@@ -38,7 +38,7 @@
 
 ### Stage 5 — Buttons（K2 已完成，2026-09-14）
 
-K2“打开当前来源”的按键与 Mac 激活链路已经通过实机验收：探针确认 K2 为 XL9555 P0.3、低电平有效（`P0: 0xFF → 0xF7 → 0xFF`）；设备通过 NDJSON 上报单击，用户短按后 `beacond` 能拉起目标应用。精确路由已修正两处：Codex 子 Agent 映射到父 thread；Claude Code 不再聚焦 Ghostty，而是用 `claude://resume` 打开 Claude App 的对应 Code 会话。两条 deeplink 均已单独验证，完整 K2 页面跳转仍需一次实机短按确认。
+K2“打开当前来源”的按键与 Mac 激活链路已经通过实机验收：探针确认 K2 为 XL9555 P0.3、低电平有效（`P0: 0xFF → 0xF7 → 0xFF`）；设备通过 NDJSON 上报单击，用户短按后 `beacond` 能拉起目标应用。精确路由已修正两处：Codex 子 Agent 映射到父 thread；Claude Code 不再聚焦 Ghostty，而是打开 Claude App 的对应 Code 会话。2026-09-15 修正了其中的定位错误：CLI `session_id` 到桌面会话不是一对一，原先的 `claude://resume` 会打开一个内容陈旧的影子会话，现改为先解析桌面会话 id 再用 `claude://code/continue` 跳转。两条 deeplink 均已单独验证，完整 K2 页面跳转仍需一次实机短按确认。
 
 Stage 5 整体尚未完成：K0 静音、K1 最近事件，以及 K2 在无活动/已完成状态下的扩展行为仍未实现。
 
