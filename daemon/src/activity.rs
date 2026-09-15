@@ -633,7 +633,8 @@ pub fn display_title(prefix: &str, raw: &str, fallback: &str) -> String {
         .chars()
         .take(MAX_TITLE_CHARS.saturating_sub(prefix.chars().count()))
         .collect();
-    let title = title.trim_end();
+    // 截断可能正好切在连字符或空格上，留着像少了半个词。
+    let title = title.trim_end_matches([' ', '-', '_']);
     if title.is_empty() {
         format!("{prefix}{fallback}")
     } else {
@@ -1074,6 +1075,11 @@ mod tests {
         assert_eq!(
             card_title("CC:", &candidates, Some("agent-beacon"), "CLAUDE"),
             "CC:EROS INFRA MORNING TRIA"
+        );
+        let branch = [Some("pomodoro-timer-feature-b509bd".to_owned())];
+        assert_eq!(
+            card_title("CC:", &branch, Some("agent-beacon"), "CLAUDE"),
+            "CC:POMODORO-TIMER-FEATURE"
         );
         // 中文标题在设备字库上是空白，退回下一个候选，再退回项目名。
         let chinese = [Some("制定两周交易计划".to_owned()), Some("PR 96".to_owned())];
