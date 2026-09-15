@@ -17,6 +17,7 @@ use axum::http::StatusCode;
 use axum::routing::post;
 use axum::{Json, Router};
 use beacon_protocol::{Event, VERSION};
+use chrono::Timelike;
 use ci::CiWatcher;
 use claude_hooks::ClaudeHook;
 use codex_hooks::CodexHook;
@@ -158,22 +159,31 @@ async fn send_heartbeats(state: AppState) {
     let mut ticker = tokio::time::interval(HEARTBEAT_INTERVAL);
     loop {
         ticker.tick().await;
-        let heartbeat = Event {
-            version: VERSION,
-            event: "device.heartbeat".to_owned(),
-            id: None,
-            title: None,
-            message: None,
-            // 随心跳一起发：设备可能随时重启，一次性的握手会丢。
-            extra: [("build".to_owned(), serde_json::json!(build))]
-                .into_iter()
-                .collect(),
-        };
+        let heartbeat = heartbeat_event(&build, chrono::Local::now().hour());
         match heartbeat.to_ndjson() {
             // 队列满意味着设备已经收不到东西，这时心跳没有意义，丢弃即可。
             Ok(frame) => drop(state.transport.send(frame)),
             Err(error) => warn!(%error, "心跳编码失败"),
         }
+    }
+}
+
+/// 心跳捎带两样东西：构建标识，以及本地小时数。两者都随每次心跳重复发，
+/// 因为设备可能随时重启，一次性的握手会丢。小时数让小灯灵知道现在是白天
+/// 还是夜里：设备没有时钟，也不该为了这个去连 Wi-Fi。
+fn heartbeat_event(build: &str, hour: u32) -> Event {
+    Event {
+        version: VERSION,
+        event: "device.heartbeat".to_owned(),
+        id: None,
+        title: None,
+        message: None,
+        extra: [
+            ("build".to_owned(), serde_json::json!(build)),
+            ("hour".to_owned(), serde_json::json!(hour)),
+        ]
+        .into_iter()
+        .collect(),
     }
 }
 
@@ -358,6 +368,17 @@ mod tests {
             transport.frames.lock().expect("mutex 不应中毒").as_slice(),
             [b"{\"version\":1,\"event\":\"task.done\",\"title\":\"Hello\"}\n"]
         );
+    }
+
+    #[test]
+    fn heartbeat_carries_build_and_local_hour() {
+        let frame = heartbeat_event("abc1234 2026-09-15 12:00", 23)
+            .to_ndjson()
+            .expect("心跳应可编码");
+        let text = String::from_utf8(frame).expect("心跳必须是 UTF-8");
+        assert!(text.contains(r#""event":"device.heartbeat""#));
+        assert!(text.contains(r#""build":"abc1234 2026-09-15 12:00""#));
+        assert!(text.contains(r#""hour":23"#));
     }
 
     #[test]
