@@ -10,6 +10,7 @@
 #include "agent_display.h"
 #include "agent_leisure.h"
 #include "agent_pomodoro.h"
+#include "agent_tally.h"
 #include "cJSON.h"
 #include "driver/uart.h"
 #include "esp_app_desc.h"
@@ -89,6 +90,20 @@ static void report_pomodoro(const char *what) {
   transport_write_value_line("POMODORO ", what);
 }
 
+/// 当日记录变了就存一次，并报一行给 Mac 端。一天只有几次，NVS 不在乎。
+static void save_tally(void) {
+  agent_pomodoro_tally_t tally;
+  agent_pomodoro_tally(&tally);
+  char text[48];
+  snprintf(text, sizeof(text), "POMODORO TODAY %u %uS DAY %u\n",
+           tally.completed % 10000u, (unsigned)(tally.focus_s % 1000000u),
+           (unsigned)(tally.day % 100000000u));
+  transport_write_literal(text);
+  if (agent_tally_save(&tally) != ESP_OK) {
+    transport_write_literal("TALLY SAVE ERROR\n");
+  }
+}
+
 /// 把番茄钟推到前面来；已经在前面就只重绘。
 static void show_pomodoro(void) {
   if (agent_display_mode() == AGENT_MODE_POMODORO) {
@@ -161,6 +176,9 @@ static void handle_pomodoro_transition(agent_pomodoro_transition_t transition) {
   }
   bool focus_ended = transition == AGENT_POMODORO_FOCUS_ENDED;
   report_pomodoro(focus_ended ? "FOCUS END" : "BREAK END");
+  if (focus_ended) {
+    save_tally();
+  }
   if (agent_audio_play(focus_ended ? AGENT_AUDIO_FOCUS_DONE
                                    : AGENT_AUDIO_BREAK_DONE) != ESP_OK) {
     transport_write_literal("AUDIO ERROR\n");
@@ -408,6 +426,13 @@ static void handle_line(char *line, size_t length) {
       snprintf(text, sizeof(text), "CLOCK HOUR %d\n", reported_hour % 100);
       transport_write_literal(text);
     }
+    // 本地日期也随心跳来：番茄钟的当日记录按它清零。
+    const cJSON *day = cJSON_GetObjectItemCaseSensitive(message, "day");
+    if (cJSON_IsNumber(day) && day->valuedouble > 0 &&
+        agent_pomodoro_set_day((uint32_t)day->valuedouble)) {
+      save_tally();
+      agent_display_refresh();
+    }
     cJSON_Delete(message);
     return;
   }
@@ -454,6 +479,18 @@ void app_main(void) {
 
   agent_pomodoro_init();
   agent_leisure_init(esp_random(), clock_ms());
+  // 昨天的记录也先恢复：换不换日要等心跳带来日期才知道。
+  agent_pomodoro_tally_t tally;
+  if (agent_tally_init() == ESP_OK && agent_tally_load(&tally) == ESP_OK) {
+    agent_pomodoro_restore_tally(&tally);
+    char text[48];
+    snprintf(text, sizeof(text), "TALLY LOADED %u %uS DAY %u\n",
+             tally.completed % 10000u, (unsigned)(tally.focus_s % 1000000u),
+             (unsigned)(tally.day % 100000000u));
+    transport_write_literal(text);
+  } else {
+    transport_write_literal("TALLY LOAD ERROR\n");
+  }
   if (agent_display_init() == ESP_OK) {
     agent_display_set_firmware_build(firmware_build);
     transport_write_value_line("DISPLAY READY BUILD ", firmware_build);

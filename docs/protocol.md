@@ -58,13 +58,13 @@ Mac 到设备的首批事件：
 
 当聚合任务变化仅需重绘既有的输入等待状态时，`beacond` 会附加 `"suppress_audio":true`。设备继续显示 `agent.input_required`，但不重复播放已经播过的提醒。`announcement` 的一次性通知优先于此字段。
 
-`beacond` 每 5 秒发送一次心跳，并捎上自己的构建标识与本地小时数：
+`beacond` 每 5 秒发送一次心跳，并捎上自己的构建标识、本地小时数与本地日期：
 
 ```json
-{"version":1,"event":"device.heartbeat","build":"9b642af 2026-09-14 17:41","hour":14}
+{"version":1,"event":"device.heartbeat","build":"9b642af 2026-09-14 17:41","hour":14,"day":20260915}
 ```
 
-`build` 是 `git describe --always --tags --dirty` 加上二进制的时间戳。它随心跳重复发送而不是握手一次，因为设备可能随时重启，一次性的握手会丢。设备只在取值变化时才重绘，否则每 5 秒就要刷一次屏。`hour` 是 Mac 端的本地小时，休闲模式用它区分白天黑夜；设备没有时钟，也不该为了这个去连 Wi-Fi。旧 daemon 不发它时设备当白天处理。
+`build` 是 `git describe --always --tags --dirty` 加上二进制的时间戳。它随心跳重复发送而不是握手一次，因为设备可能随时重启，一次性的握手会丢。设备只在取值变化时才重绘，否则每 5 秒就要刷一次屏。`hour` 是 Mac 端的本地小时，休闲模式用它区分白天黑夜；`day` 是本地日期 YYYYMMDD，番茄钟的当日记录按它清零。设备没有时钟，也不该为了这个去连 Wi-Fi。旧 daemon 不发它们时设备当白天处理、不换日。
 
 设备只显示它，不拿它和自己的固件标识比对：两边的发布节奏本来就不同步，把不一致当告警只会制造持续的假警报。字段缺失时设备显示 `?`，这说明对面是个还不发这个字段的旧 daemon。
 
@@ -78,7 +78,7 @@ Mac 到设备的首批事件：
 
 当前只上报 K2 短按，在任何模式里都上报。K0（番茄钟）与 K1（切换模式、长按去休闲）由固件自己消费，不上报。短按在松开时才算数，因为只有等到松开才知道它不是长按的开头；上报时机因此从按下推迟到松开。模式与番茄钟见 [`pomodoro.md`](pomodoro.md)，休闲见 [`leisure.md`](leisure.md)。`beacond` 收到后按这个顺序选落点：等人回答的任务优先（屏幕主状态显示的就是它，而且它 blocking 着人）；其次是最近一次播报过结束的任务——它已经离开卡片栈，屏幕上再也看不到，而还在跑的任务一直挂在屏幕上、本来就不需要 K2 定位；再次才是最新工作项。落点由下一次播报接力替换，不设时间窗：这台设备的用处正是人不在电脑前，用墙上时钟让落点过期，等于假设用户一直守在旁边。选定活动后，Codex 顶层活动打开自身 thread，子 Agent 活动打开拥有它的父 thread；Claude Code 先把 Hook 报的 CLI `session_id` 连同 `cwd` 在 Claude App 的会话索引里解析成桌面会话 id，再用 `claude://code/continue?session=<桌面会话 id>` 精确跳转；解析不到（会话只跑在终端里）才退回 `claude://resume?session=<session_id>` 导入；GitHub Actions 打开对应 run。当前没有活动时回到最近一次可定位的来源；该定位会写入本机状态文件，daemon 重启后仍然有效。K0、K1 和长按/释放尚未绑定。
 
-固件输出的 `READY`、`EVENT`、`TITLE` 和 `ERROR` 行是实机链路验收用的诊断文本，不是设备到 Mac 的正式 JSON 事件。同类的还有 `MODE DUTY` / `POMODORO` / `LEISURE`（模式切换），`POMODORO FOCUS START` / `FOCUS END` / `BREAK START` / `BREAK END` / `PAUSED` / `RESUMED` / `STOPPED` / `BREAK SKIPPED`（番茄钟转换），`LEISURE ALERT` / `BORED` / `SLEEPY`、`LEISURE SKIT <名>`、`LEISURE LIGHTS OUT` / `ON`（休闲），以及 `CLOCK HOUR <n>`（收到的小时数变化）。番茄钟与休闲的状态都只在固件里，Mac 端只记日志。
+固件输出的 `READY`、`EVENT`、`TITLE` 和 `ERROR` 行是实机链路验收用的诊断文本，不是设备到 Mac 的正式 JSON 事件。同类的还有 `MODE DUTY` / `POMODORO` / `LEISURE`（模式切换），`POMODORO FOCUS START` / `FOCUS END` / `BREAK START` / `BREAK END` / `PAUSED` / `RESUMED` / `STOPPED` / `BREAK SKIPPED`（番茄钟转换），`LEISURE ALERT` / `BORED` / `SLEEPY`、`LEISURE SKIT <名>`、`LEISURE LIGHTS OUT` / `ON`（休闲），以及 `CLOCK HOUR <n>`（收到的小时数变化）、`TALLY LOADED <次> <秒>S DAY <日期>`（开机恢复的当日记录）。番茄钟与休闲的状态都只在固件里，Mac 端只记日志。
 
 ## Stage 1 错误输出
 

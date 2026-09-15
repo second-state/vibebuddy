@@ -123,6 +123,53 @@ static void stop_skips_a_pending_break(void) {
   CHECK(view.completed == 1);
 }
 
+static void tally_counts_completed_focus_and_resets_by_day(void) {
+  agent_pomodoro_init();
+  CHECK(agent_pomodoro_set_day(20260915));
+  CHECK(!agent_pomodoro_set_day(20260915));
+  CHECK(!agent_pomodoro_set_day(0));
+
+  agent_pomodoro_toggle(0);
+  (void)agent_pomodoro_tick(AGENT_POMODORO_FOCUS_MS);
+  agent_pomodoro_toggle(AGENT_POMODORO_FOCUS_MS);  // 开始休息
+  (void)agent_pomodoro_tick(AGENT_POMODORO_FOCUS_MS + AGENT_POMODORO_BREAK_MS);
+  agent_pomodoro_toggle(AGENT_POMODORO_FOCUS_MS + AGENT_POMODORO_BREAK_MS);
+  (void)agent_pomodoro_tick(2 * AGENT_POMODORO_FOCUS_MS +
+                            AGENT_POMODORO_BREAK_MS);
+  agent_pomodoro_view_t view = view_at(2 * AGENT_POMODORO_FOCUS_MS +
+                                       AGENT_POMODORO_BREAK_MS);
+  CHECK(view.completed == 2);
+  CHECK(view.focus_s == 2 * AGENT_POMODORO_FOCUS_MS / 1000u);
+
+  // 放弃的不算。
+  agent_pomodoro_stop();
+  agent_pomodoro_toggle(0);
+  agent_pomodoro_stop();
+  agent_pomodoro_tally_t tally;
+  agent_pomodoro_tally(&tally);
+  CHECK(tally.completed == 2);
+  CHECK(tally.day == 20260915);
+
+  // 换日清零，日期同样时不清。
+  CHECK(agent_pomodoro_set_day(20260916));
+  agent_pomodoro_tally(&tally);
+  CHECK(tally.completed == 0);
+  CHECK(tally.focus_s == 0);
+  CHECK(tally.day == 20260916);
+
+  // 重启后恢复昨天的记录，心跳带来今天的日期才归零。
+  agent_pomodoro_init();
+  agent_pomodoro_tally_t restored = {20260916, 3, 4500};
+  agent_pomodoro_restore_tally(&restored);
+  view = view_at(0);
+  CHECK(view.completed == 3);
+  CHECK(view.focus_s == 4500);
+  CHECK(!agent_pomodoro_set_day(20260916));
+  CHECK(view_at(0).completed == 3);
+  CHECK(agent_pomodoro_set_day(20260917));
+  CHECK(view_at(0).completed == 0);
+}
+
 static void millisecond_counter_may_wrap(void) {
   agent_pomodoro_init();
   uint32_t start = UINT32_MAX - 1000;
@@ -142,6 +189,7 @@ int main(void) {
   focus_end_waits_for_the_user_to_start_the_break();
   stop_abandons_without_counting();
   stop_skips_a_pending_break();
+  tally_counts_completed_focus_and_resets_by_day();
   millisecond_counter_may_wrap();
   if (failures != 0) {
     fprintf(stderr, "%d 处失败\n", failures);

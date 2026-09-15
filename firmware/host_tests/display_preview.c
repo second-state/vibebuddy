@@ -81,6 +81,8 @@ int main(int argc, char **argv) {
   const char *stats[] = {"7 DONE", "4 ASKS", "1H23 BUSY"};
   agent_display_set_stats(stats, 3);
   agent_pomodoro_init();
+  agent_pomodoro_tally_t tally = {20260915, 3, 4500};
+  agent_pomodoro_restore_tally(&tally);
   agent_leisure_init(1, 0);
   if (argc == 3 && strcmp(argv[2], "leisure") == 0) {
     render_skits(directory);

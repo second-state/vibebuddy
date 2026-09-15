@@ -159,7 +159,8 @@ async fn send_heartbeats(state: AppState) {
     let mut ticker = tokio::time::interval(HEARTBEAT_INTERVAL);
     loop {
         ticker.tick().await;
-        let heartbeat = heartbeat_event(&build, chrono::Local::now().hour());
+        let now = chrono::Local::now();
+        let heartbeat = heartbeat_event(&build, now.hour(), local_day(&now));
         match heartbeat.to_ndjson() {
             // 队列满意味着设备已经收不到东西，这时心跳没有意义，丢弃即可。
             Ok(frame) => drop(state.transport.send(frame)),
@@ -168,10 +169,11 @@ async fn send_heartbeats(state: AppState) {
     }
 }
 
-/// 心跳捎带两样东西：构建标识，以及本地小时数。两者都随每次心跳重复发，
+/// 心跳捎带三样东西：构建标识、本地小时数、本地日期。都随每次心跳重复发，
 /// 因为设备可能随时重启，一次性的握手会丢。小时数让小灯灵知道现在是白天
-/// 还是夜里：设备没有时钟，也不该为了这个去连 Wi-Fi。
-fn heartbeat_event(build: &str, hour: u32) -> Event {
+/// 还是夜里，日期让番茄钟知道什么时候算新的一天：设备没有时钟，也不该
+/// 为了这个去连 Wi-Fi。
+fn heartbeat_event(build: &str, hour: u32, day: u32) -> Event {
     Event {
         version: VERSION,
         event: "device.heartbeat".to_owned(),
@@ -181,10 +183,17 @@ fn heartbeat_event(build: &str, hour: u32) -> Event {
         extra: [
             ("build".to_owned(), serde_json::json!(build)),
             ("hour".to_owned(), serde_json::json!(hour)),
+            ("day".to_owned(), serde_json::json!(day)),
         ]
         .into_iter()
         .collect(),
     }
+}
+
+/// 本地日期压成一个整数 YYYYMMDD：设备只需要比较它变没变。
+fn local_day(now: &chrono::DateTime<chrono::Local>) -> u32 {
+    use chrono::Datelike;
+    now.year() as u32 * 10_000 + now.month() * 100 + now.day()
 }
 
 /// 轮询 GitHub Actions。没有配置仓库时它什么也不做。
@@ -371,14 +380,22 @@ mod tests {
     }
 
     #[test]
-    fn heartbeat_carries_build_and_local_hour() {
-        let frame = heartbeat_event("abc1234 2026-09-15 12:00", 23)
+    fn heartbeat_carries_build_local_hour_and_day() {
+        let frame = heartbeat_event("abc1234 2026-09-15 12:00", 23, 20260915)
             .to_ndjson()
             .expect("心跳应可编码");
         let text = String::from_utf8(frame).expect("心跳必须是 UTF-8");
         assert!(text.contains(r#""event":"device.heartbeat""#));
         assert!(text.contains(r#""build":"abc1234 2026-09-15 12:00""#));
         assert!(text.contains(r#""hour":23"#));
+        assert!(text.contains(r#""day":20260915"#));
+    }
+
+    #[test]
+    fn local_day_packs_year_month_and_day() {
+        use chrono::TimeZone;
+        let now = chrono::Local.with_ymd_and_hms(2026, 9, 15, 23, 59, 0).unwrap();
+        assert_eq!(local_day(&now), 20260915);
     }
 
     #[test]

@@ -53,5 +53,5 @@
 
 - 导演在 [`agent_leisure.c`](../firmware/main/agent_leisure.c)：无聊度、档位、剧目抽取、昼夜、战绩权重、熄灯判定，纯 C，不碰硬件。主机测试 `./tools/test-leisure.sh` 覆盖档位切换、活动清零、不连演、困倦只睡觉、熄灯只在夜里且有事即亮、计数回绕。
 - 剧目绘制在 `agent_display.c`，小灯灵参数化成可以指定位置、视线、眼睛、嘴、手臂、脚的姿势。`./tools/preview-display.sh` 把每个剧目渲染成 GIF，烧录前先看。
-- 实机验收用时间压缩固件：`idf.py -B firmware/build-fast -DLEISURE_TIME_SCALE=60 build` 把五分钟压成五秒，几分钟内走完无聊、困倦、熄灯、被唤醒；`BUILD_DIR=firmware/build-fast tools/flash-bridge.sh <串口> partition app` 烧它。验收完再烧正式固件。
+- 实机验收用时间压缩固件：`idf.py -B firmware/build-fast -DTIME_SCALE=60 build` 把五分钟压成五秒（番茄钟也同比压缩），几分钟内走完无聊、困倦、熄灯、被唤醒；`BUILD_DIR=firmware/build-fast tools/flash-bridge.sh <串口> partition app` 烧它。验收完再烧正式固件。
 - 设备回报的诊断行：`MODE DUTY` / `POMODORO` / `LEISURE`，`LEISURE ALERT` / `BORED` / `SLEEPY`，`LEISURE SKIT <名>`，`LEISURE LIGHTS OUT` / `ON`，`CLOCK HOUR <n>`。

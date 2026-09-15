@@ -156,6 +156,10 @@ static bool backlight_on;
 /// 本帧提交前是否整体转暗：困倦期的画面。
 static bool render_dim;
 
+static uint32_t clock_ms(void);
+static void format_tally(char *out, size_t size, unsigned completed,
+                         uint32_t focus_s);
+
 static bool on_color_transfer_done(esp_lcd_panel_io_handle_t panel_io,
                                    esp_lcd_panel_io_event_data_t *event_data,
                                    void *user_context) {
@@ -518,8 +522,9 @@ static void draw_build_footer(void) {
 }
 
 /// 空闲时在标题与战绩之间轮播。空闲屏出现得最频繁，只写一句固定的话太浪费。
+/// 番茄钟的当日记录是设备自己记的，也排进来。
 static void draw_idle_line(void) {
-  const char *lines[1 + AGENT_DISPLAY_MAX_STATS];
+  const char *lines[2 + AGENT_DISPLAY_MAX_STATS];
   size_t count = 0;
   bool has_title = current_title[0] != '\0';
   if (has_title) {
@@ -527,6 +532,14 @@ static void draw_idle_line(void) {
   }
   for (size_t index = 0; index < current_stat_count; index++) {
     lines[count++] = current_stats[index];
+  }
+  agent_pomodoro_view_t pomodoro;
+  agent_pomodoro_view(clock_ms(), &pomodoro);
+  static char tally_line[24];
+  if (pomodoro.completed > 0) {
+    format_tally(tally_line, sizeof(tally_line), pomodoro.completed,
+                 pomodoro.focus_s);
+    lines[count++] = tally_line;
   }
   if (count == 0) {
     draw_text_centered(195, "YOUR AGENT PET", 2, COLOR_MUTED);
@@ -613,6 +626,18 @@ static void draw_pomodoro_ring(const agent_pomodoro_view_t *view) {
   draw_radial(sweep, RING_HAND_INNER, RING_HAND_OUTER, 3, color);
 }
 
+/// 当日记录的一行："3 FOCUS 1H15"。不到一小时只写分钟。
+static void format_tally(char *out, size_t size, unsigned completed,
+                         uint32_t focus_s) {
+  unsigned minutes = (unsigned)(focus_s / 60u);
+  if (minutes < 60u) {
+    snprintf(out, size, "%u FOCUS %uM", completed % 10000u, minutes % 60u);
+  } else {
+    snprintf(out, size, "%u FOCUS %uH%02u", completed % 10000u,
+             (minutes / 60u) % 1000u, minutes % 60u);
+  }
+}
+
 /// 向上取整到秒：刚开始显示 25:00，走到最后一毫秒仍是 00:01。
 static void format_countdown(char *out, size_t size, uint32_t remaining_ms) {
   uint32_t seconds = (remaining_ms + 999u) / 1000u;
@@ -666,16 +691,22 @@ static void draw_pomodoro_scene(const char *label, uint16_t status_color) {
     draw_text(PANEL_X, 98, "PAUSED", 2, color, 9);
   }
 
-  // 完成一次专注记一格，开机后累计。
+  // 当日记录：完成几次记几格，再一行写清次数与累计专注时长。按 Mac 端
+  // 的本地日期清零，重启不丢。
+  draw_text(PANEL_X, 118, "TODAY", 1, COLOR_MUTED, 18);
   unsigned shown = view.completed > 8 ? 8 : view.completed;
   for (unsigned index = 0; index < shown; index++) {
-    fill_rect(PANEL_X + (int)index * 12, 128, 8, 8, COLOR_FOCUS);
+    fill_rect(PANEL_X + (int)index * 12, 130, 8, 8, COLOR_FOCUS);
   }
   if (view.completed > 8) {
     char more[8];
     snprintf(more, sizeof(more), "+%u", (view.completed - 8) % 1000u);
-    draw_text(PANEL_X + 96, 128, more, 1, COLOR_FOCUS, sizeof(more));
+    draw_text(PANEL_X + 96, 130, more, 1, COLOR_FOCUS, sizeof(more));
   }
+  char tally_line[24];
+  format_tally(tally_line, sizeof(tally_line), view.completed, view.focus_s);
+  draw_text(PANEL_X, 144, tally_line, 1,
+            view.completed > 0 ? COLOR_FOCUS : COLOR_MUTED, 18);
 
   draw_agent_summary(label, status_color);
 }

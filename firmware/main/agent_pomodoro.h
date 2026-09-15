@@ -20,13 +20,22 @@ typedef enum {
   AGENT_POMODORO_PAUSED,
 } agent_pomodoro_run_t;
 
-/// 阶段结束是只消费一次的边沿：语音与场景切换都挂在它上面，
+/// 阶段结束是只消费一次的边沿：语音与模式切换都挂在它上面，
 /// 同一次结束不得触发第二遍。
 typedef enum {
   AGENT_POMODORO_NOTHING,
   AGENT_POMODORO_FOCUS_ENDED,
   AGENT_POMODORO_BREAK_ENDED,
 } agent_pomodoro_transition_t;
+
+/// 当日记录：完成的专注次数与累计专注秒数。日期来自 Mac 端心跳，
+/// 变了就清零；重启后由存储恢复。只记完成的专注，放弃的不算。
+typedef struct {
+  /// 本地日期 YYYYMMDD；0 表示还没从 Mac 端听说过今天是哪天。
+  uint32_t day;
+  unsigned completed;
+  uint32_t focus_s;
+} agent_pomodoro_tally_t;
 
 typedef struct {
   agent_pomodoro_phase_t phase;
@@ -35,8 +44,9 @@ typedef struct {
   uint32_t remaining_ms;
   /// 当前阶段的全长，画圆环时作分母。
   uint32_t total_ms;
-  /// 开机以来完成的专注次数。
+  /// 今天完成的专注次数与累计专注秒数。
   unsigned completed;
+  uint32_t focus_s;
 } agent_pomodoro_view_t;
 
 /// 空闲：还没开始的专注。
@@ -55,3 +65,10 @@ void agent_pomodoro_stop(void);
 /// 推进时钟。阶段刚结束时返回对应的转换，之后返回 NOTHING。
 agent_pomodoro_transition_t agent_pomodoro_tick(uint32_t now_ms);
 void agent_pomodoro_view(uint32_t now_ms, agent_pomodoro_view_t *view);
+
+/// 重启后从存储恢复当日记录。
+void agent_pomodoro_restore_tally(const agent_pomodoro_tally_t *tally);
+/// 心跳里的本地日期。与记录的日期不同就清零并记下新日期；返回 true 表示
+/// 记录变了、该存一次。0 表示不知道，忽略。
+bool agent_pomodoro_set_day(uint32_t day);
+void agent_pomodoro_tally(agent_pomodoro_tally_t *tally);

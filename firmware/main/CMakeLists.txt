@@ -1,6 +1,6 @@
 idf_component_register(
-    SRCS "agent_beacon_fw.c" "agent_audio.c" "agent_buttons.c" "agent_display.c" "agent_leisure.c" "agent_pomodoro.c"
-    PRIV_REQUIRES json esp_app_format esp_driver_gpio esp_driver_i2c esp_driver_i2s esp_driver_uart esp_driver_usb_serial_jtag esp_codec_dev esp_hw_support esp_lcd
+    SRCS "agent_beacon_fw.c" "agent_audio.c" "agent_buttons.c" "agent_display.c" "agent_leisure.c" "agent_pomodoro.c" "agent_tally.c"
+    PRIV_REQUIRES json esp_app_format esp_driver_gpio esp_driver_i2c esp_driver_i2s esp_driver_uart esp_driver_usb_serial_jtag esp_codec_dev esp_hw_support esp_lcd nvs_flash
     INCLUDE_DIRS "."
     EMBED_FILES "assets/input_required.pcm" "assets/done.pcm" "assets/failed.pcm" "assets/focus_done.pcm" "assets/break_done.pcm"
 )
@@ -16,11 +16,12 @@ add_custom_command(
     COMMENT "记录本次构建时刻"
     VERBATIM
 )
-# 实机验收休闲模式用：idf.py -B build-fast -DLEISURE_TIME_SCALE=60 build，
-# 把五分钟压成五秒，几分钟内走完无聊、困倦、关背光。正式固件不带它。
-if(DEFINED LEISURE_TIME_SCALE)
+# 实机验收用：idf.py -B firmware/build-fast -DTIME_SCALE=60 build，把休闲的
+# 五分钟压成五秒、番茄钟的 25 分钟压成 25 秒，几分钟内走完整条链。
+# 正式固件不带它。
+if(DEFINED TIME_SCALE)
     target_compile_definitions(${COMPONENT_LIB} PRIVATE
-        AGENT_LEISURE_TIME_SCALE=${LEISURE_TIME_SCALE}u)
+        AGENT_TIME_SCALE=${TIME_SCALE}u)
 endif()
 
 add_custom_target(agent_build_stamp DEPENDS "${build_stamp_header}")
