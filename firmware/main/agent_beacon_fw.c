@@ -25,17 +25,13 @@ static TickType_t ready_deadline;
 #define LINK_TIMEOUT_MS 15000
 static TickType_t last_message_tick;
 
+// 两条输出都只是诊断通道，谁都不许拖住主循环。接 BOX 的 UART 桥时，USB
+// Serial/JTAG 那头没有主机取数据，tx ring buffer 填满后任何等待都是永久的：
+// 主任务停摆，画面定格，失联检测也一起死掉，而 Mac 端的心跳照样写得进串口，
+// 两边都看不出设备已经没了。写不进去就丢掉这一段。
 static void transport_write_all(const char *data, size_t length) {
   uart_write_bytes(UART_NUM_0, data, length);
-
-  while (length > 0) {
-    int written = usb_serial_jtag_write_bytes(data, length, portMAX_DELAY);
-    if (written <= 0) {
-      continue;
-    }
-    data += written;
-    length -= (size_t)written;
-  }
+  usb_serial_jtag_write_bytes(data, length, 0);
 }
 
 static void transport_write_literal(const char *text) {
