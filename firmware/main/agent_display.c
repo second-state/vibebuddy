@@ -79,6 +79,11 @@
 #define RING_TICK_OUTER 79
 #define RING_HAND_INNER 64
 #define RING_HAND_OUTER 86
+/// 阶段结束的闹铃：头两秒圆环左右抖，每帧换一边；之后整圈按帧脉动，
+/// 到用户按键为止。静音时这是唯一的提醒。
+#define RING_ALARM_SHAKE_FRAMES 20
+#define RING_ALARM_SHAKE_FRAME_MS 100
+#define RING_ALARM_SHAKE_PX 3
 #define PANEL_X 208
 #define TAU 6.2831853f
 
@@ -160,6 +165,12 @@ static TickType_t identify_next_toggle;
 /// 本帧提交前是否整体转暗：困倦期的画面。
 static bool render_dim;
 static bool muted;
+/// 闹铃在响：阶段结束了、用户还没动手。记下结束时的阶段，视图一变
+/// （开始、放弃、跳过）就停；切走画面也停。
+static bool ring_alarm;
+static agent_pomodoro_phase_t ring_alarm_phase;
+/// 还要抖几帧；抖完转为脉动。
+static unsigned ring_alarm_shake_frames;
 
 static uint32_t clock_ms(void);
 static void format_tally(char *out, size_t size, unsigned completed,
@@ -610,30 +621,64 @@ static uint16_t phase_color(const agent_pomodoro_view_t *view) {
   return view->phase == AGENT_POMODORO_BREAK ? COLOR_BREAK : COLOR_FOCUS;
 }
 
-/// 从圆心向外画一段径向线。角度从 12 点起顺时针。
+/// 从圆心向外画一段径向线。角度从 12 点起顺时针；shift 是整圈的横向偏移，
+/// 只有闹铃抖动时不为零。
 static void draw_radial(float angle, int inner, int outer, int thickness,
-                        uint16_t color) {
+                        uint16_t color, int shift) {
   float dx = sinf(angle);
   float dy = -cosf(angle);
   for (int radius = inner; radius <= outer; radius++) {
-    int x = RING_CENTER_X + (int)lroundf(dx * (float)radius);
+    int x = RING_CENTER_X + shift + (int)lroundf(dx * (float)radius);
     int y = RING_CENTER_Y + (int)lroundf(dy * (float)radius);
     fill_rect(x - thickness / 2, y - thickness / 2, thickness, thickness,
               color);
   }
 }
 
-static void draw_pomodoro_ring(const agent_pomodoro_view_t *view) {
+/// RGB565 各分量减半：脉动的暗拍。
+static uint16_t half_bright(uint16_t color) { return (color >> 1) & 0x7bef; }
+
+/// 闹铃是否还在响。结束后视图一变就是用户动过手了：开始下一阶段
+/// 变成运行中，放弃或跳过换了阶段。
+static bool ring_alarm_active(const agent_pomodoro_view_t *view) {
+  if (ring_alarm && (view->run != AGENT_POMODORO_PENDING ||
+                     view->phase != ring_alarm_phase)) {
+    ring_alarm = false;
+    ring_alarm_shake_frames = 0;
+  }
+  return ring_alarm;
+}
+
+static bool ring_alarm_shaking(void) {
+  return ring_alarm && ring_alarm_shake_frames > 0;
+}
+
+/// 抖动时整圈的横向偏移：每帧换一边。
+static int ring_alarm_shift(void) {
+  if (!ring_alarm_shaking()) {
+    return 0;
+  }
+  return animation_frame % 2 == 0 ? RING_ALARM_SHAKE_PX : -RING_ALARM_SHAKE_PX;
+}
+
+static void draw_pomodoro_ring(const agent_pomodoro_view_t *view, bool alarm) {
   uint16_t color = phase_color(view);
   uint32_t elapsed = view->total_ms - view->remaining_ms;
   float sweep = TAU * (float)elapsed / (float)view->total_ms;
+  int shift = ring_alarm_shift();
+  // 闹铃：整圈亮成下一阶段的颜色。抖完之后一帧亮一帧暗，像心跳，
+  // 不是灰与亮的硬闪。
+  if (alarm && !ring_alarm_shaking() && animation_frame % 2 == 1) {
+    color = half_bright(color);
+  }
   for (int index = 0; index < RING_TICKS; index++) {
     float angle = TAU * (float)index / RING_TICKS;
-    bool passed = view->run != AGENT_POMODORO_PENDING && angle <= sweep;
+    bool passed =
+        alarm || (view->run != AGENT_POMODORO_PENDING && angle <= sweep);
     draw_radial(angle, RING_TICK_INNER, RING_TICK_OUTER, 2,
-                passed ? color : COLOR_MUTED);
+                passed ? color : COLOR_MUTED, shift);
   }
-  draw_radial(sweep, RING_HAND_INNER, RING_HAND_OUTER, 3, color);
+  draw_radial(sweep, RING_HAND_INNER, RING_HAND_OUTER, 3, color, shift);
 }
 
 /// 当日记录的一行："3 FOCUS 1H15"。不到一小时只写分钟。
@@ -671,14 +716,15 @@ static void draw_pomodoro_scene(const char *label, uint16_t status_color) {
   agent_pomodoro_view(clock_ms(), &view);
   uint16_t color = phase_color(&view);
   bool paused = view.run == AGENT_POMODORO_PAUSED;
-  draw_pomodoro_ring(&view);
+  bool alarm = ring_alarm_active(&view);
+  draw_pomodoro_ring(&view, alarm);
 
-  // 暂停时数字闪烁：停表的老规矩。
+  // 暂停时数字闪烁：停表的老规矩。闹铃抖动时数字跟着圆环一起抖。
   if (!paused || animation_frame % 2 == 0) {
     char countdown[8];
     format_countdown(countdown, sizeof(countdown), view.remaining_ms);
-    draw_text(RING_CENTER_X - 58, RING_CENTER_Y - 14, countdown, 4,
-              COLOR_TEXT, 5);
+    draw_text(RING_CENTER_X - 58 + ring_alarm_shift(), RING_CENTER_Y - 14,
+              countdown, 4, COLOR_TEXT, 5);
   }
 
   // 空闲写 READY；专注刚结束、休息还没开始时写 BREAK 配 05:00，
@@ -1161,7 +1207,10 @@ static TickType_t animation_period(agent_display_state_t state) {
     return pdMS_TO_TICKS(AGENT_LEISURE_FRAME_MS);
   }
   if (current_mode == AGENT_MODE_POMODORO) {
-    // 倒计时每秒变一次；暂停时的闪烁要每半秒一帧。
+    // 倒计时每秒变一次；暂停时的闪烁要每半秒一帧；闹铃抖动更快。
+    if (ring_alarm_shaking()) {
+      return pdMS_TO_TICKS(RING_ALARM_SHAKE_FRAME_MS);
+    }
     return pdMS_TO_TICKS(500);
   }
   if (state == AGENT_DISPLAY_WORKING) {
@@ -1279,6 +1328,18 @@ void agent_display_identify(void) {
   identify_next_toggle = xTaskGetTickCount();
 }
 
+void agent_display_pomodoro_ended(void) {
+  agent_pomodoro_view_t view;
+  agent_pomodoro_view(clock_ms(), &view);
+  ring_alarm = true;
+  ring_alarm_phase = view.phase;
+  ring_alarm_shake_frames = RING_ALARM_SHAKE_FRAMES;
+  // 调用方紧接着会重绘第一帧；这里只把后面的帧排到抖动的节奏上。
+  animation_frame = 0;
+  next_animation_at =
+      xTaskGetTickCount() + pdMS_TO_TICKS(RING_ALARM_SHAKE_FRAME_MS);
+}
+
 void agent_display_set_firmware_build(const char *build) {
   set_build(firmware_build, build);
 }
@@ -1301,6 +1362,11 @@ void agent_display_set_mode(agent_mode_t mode) {
   }
   current_mode = mode;
   animation_frame = 0;
+  // 把番茄钟画面切走就是看见了：闹铃不必再响。
+  if (mode != AGENT_MODE_POMODORO) {
+    ring_alarm = false;
+    ring_alarm_shake_frames = 0;
+  }
   next_animation_at = xTaskGetTickCount() + animation_period(current_state);
   if (display_ready) {
     (void)render_current_state();
@@ -1351,6 +1417,9 @@ void agent_display_tick(void) {
   }
 
   animation_frame++;
+  if (ring_alarm_shake_frames > 0) {
+    ring_alarm_shake_frames--;
+  }
   next_animation_at = xTaskGetTickCount() + animation_period(current_state);
   if (render_current_state() != ESP_OK) {
     next_animation_at = xTaskGetTickCount() + pdMS_TO_TICKS(1000);

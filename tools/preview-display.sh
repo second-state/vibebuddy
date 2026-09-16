@@ -18,6 +18,10 @@ cc -std=gnu11 -Wall -Wextra -Wno-unused-function -Wno-unused-parameter \
     -lm -o "${binary}"
 
 "${binary}" "${output_dir}"
+ffmpeg -loglevel error -y -framerate 10 -i "${output_dir}/pomodoro_alarm_%03d.ppm" \
+    -vf "scale=640:480:flags=neighbor,split[a][b];[a]palettegen[p];[b][p]paletteuse" \
+    "${output_dir}/pomodoro_alarm.gif"
+rm -f "${output_dir}"/pomodoro_alarm_[0-9]*.ppm
 for ppm in "${output_dir}"/*.ppm; do
     ffmpeg -loglevel error -y -i "${ppm}" -vf scale=640:480:flags=neighbor "${ppm%.ppm}.png"
     rm -f "${ppm}"

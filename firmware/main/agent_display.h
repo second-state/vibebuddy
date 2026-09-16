@@ -59,6 +59,10 @@ void agent_display_set_link_lost(bool lost);
 /// 眨眼确认：背光快闪约一秒，任何模式下都看得见。引导里用它认盒子。
 void agent_display_identify(void);
 
+/// 番茄钟阶段结束的闹铃：圆环先抖两秒，再整圈脉动，到用户按键或切走
+/// 画面为止。静音时这是唯一的提醒。调用方随后要把番茄钟画面推到前面。
+void agent_display_pomodoro_ended(void);
+
 /// 静音时左上角常驻一个 MUTE 标记：静音是会被忘掉的状态，得一直看得见。
 void agent_display_set_muted(bool muted);
 

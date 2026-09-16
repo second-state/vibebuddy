@@ -218,6 +218,7 @@ static void handle_pomodoro_transition(agent_pomodoro_transition_t transition) {
   }
   play_prompt(focus_ended ? AGENT_AUDIO_FOCUS_DONE : AGENT_AUDIO_BREAK_DONE,
               focus_ended ? "FOCUS_DONE" : "BREAK_DONE");
+  agent_display_pomodoro_ended();
   show_pomodoro();
 }
 

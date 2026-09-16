@@ -117,8 +117,33 @@ int main(int argc, char **argv) {
   uint32_t focus_end = 1000 + 25 * 60 * 1000 + 100;
   set_ms(focus_end);
   (void)agent_pomodoro_tick(focus_end);
+  agent_display_pomodoro_ended();
   agent_display_set_mode(AGENT_MODE_POMODORO);
   agent_display_show(AGENT_DISPLAY_IDLE, NULL);
+
+  // 闹铃头三秒逐帧：抖动 20 帧各 100 ms，之后脉动每拍 500 ms；按 10 帧
+  // 每秒拼成 GIF，脉动一拍占 5 帧。
+  for (unsigned frame = 0; frame < 30; frame++) {
+    if (frame < RING_ALARM_SHAKE_FRAMES) {
+      animation_frame = frame;
+      ring_alarm_shake_frames = RING_ALARM_SHAKE_FRAMES - frame;
+    } else {
+      animation_frame = (frame - RING_ALARM_SHAKE_FRAMES) / 5;
+      ring_alarm_shake_frames = 0;
+    }
+    char name[64];
+    snprintf(name, sizeof(name), "pomodoro_alarm_%03u", frame);
+    snapshot(directory, name);
+  }
+  animation_frame = 1;
+  ring_alarm_shake_frames = RING_ALARM_SHAKE_FRAMES;
+  snapshot(directory, "pomodoro_alarm_shake");
+  ring_alarm_shake_frames = 0;
+  snapshot(directory, "pomodoro_alarm_pulse_dim");
+  animation_frame = 0;
+  snapshot(directory, "pomodoro_alarm_pulse");
+  // 待开始的样子本身也要看，先把闹铃按掉。
+  ring_alarm = false;
   snapshot(directory, "pomodoro_break_pending");
 
   agent_pomodoro_toggle(focus_end + 30000);
