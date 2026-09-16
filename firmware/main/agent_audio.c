@@ -1,5 +1,7 @@
 #include "agent_audio.h"
 
+#include "agent_voices.h"
+
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
@@ -25,23 +27,11 @@
 #define XL9555_CONFIG_PORT0 0x06
 #define XL9555_SPEAKER_MASK 0x20
 
-extern const uint8_t
-    input_required_pcm_start[] asm("_binary_input_required_pcm_start");
-extern const uint8_t
-    input_required_pcm_end[] asm("_binary_input_required_pcm_end");
-extern const uint8_t done_pcm_start[] asm("_binary_done_pcm_start");
-extern const uint8_t done_pcm_end[] asm("_binary_done_pcm_end");
-extern const uint8_t failed_pcm_start[] asm("_binary_failed_pcm_start");
-extern const uint8_t failed_pcm_end[] asm("_binary_failed_pcm_end");
-extern const uint8_t focus_done_pcm_start[] asm("_binary_focus_done_pcm_start");
-extern const uint8_t focus_done_pcm_end[] asm("_binary_focus_done_pcm_end");
-extern const uint8_t break_done_pcm_start[] asm("_binary_break_done_pcm_start");
-extern const uint8_t break_done_pcm_end[] asm("_binary_break_done_pcm_end");
-
 static const char *TAG = "agent_audio";
 static i2s_chan_handle_t tx_handle;
 static QueueHandle_t prompt_queue;
 static bool audio_ready;
+static volatile bool playing;
 static const char *audio_status = "NOT INITIALIZED";
 
 static esp_err_t xl9555_read(i2c_master_dev_handle_t handle, uint8_t reg,
@@ -190,25 +180,16 @@ static void audio_task(void *argument) {
       continue;
     }
 
-    const uint8_t *start = input_required_pcm_start;
-    const uint8_t *end = input_required_pcm_end;
-    if (prompt == AGENT_AUDIO_DONE) {
-      start = done_pcm_start;
-      end = done_pcm_end;
-    } else if (prompt == AGENT_AUDIO_FAILED) {
-      start = failed_pcm_start;
-      end = failed_pcm_end;
-    } else if (prompt == AGENT_AUDIO_FOCUS_DONE) {
-      start = focus_done_pcm_start;
-      end = focus_done_pcm_end;
-    } else if (prompt == AGENT_AUDIO_BREAK_DONE) {
-      start = break_done_pcm_start;
-      end = break_done_pcm_end;
-    }
+    const uint8_t *start;
+    size_t length;
+    agent_voices_clip(prompt, &start, &length);
+    const uint8_t *end = start + length;
+    playing = true;
 
     size_t bytes_written = 0;
     esp_err_t result = i2s_channel_write(tx_handle, start, end - start,
                                          &bytes_written, portMAX_DELAY);
+    playing = false;
     if (result != ESP_OK || bytes_written != (size_t)(end - start)) {
       ESP_LOGE(TAG, "语音播放失败: %s, %u/%u bytes", esp_err_to_name(result),
                (unsigned)bytes_written, (unsigned)(end - start));
@@ -273,3 +254,5 @@ esp_err_t agent_audio_play(agent_audio_prompt_t prompt) {
 }
 
 const char *agent_audio_status(void) { return audio_status; }
+
+bool agent_audio_playing(void) { return playing; }

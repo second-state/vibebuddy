@@ -1,5 +1,7 @@
 #pragma once
 
+#include <stdbool.h>
+
 #include "esp_err.h"
 
 typedef enum {
@@ -14,3 +16,5 @@ typedef enum {
 esp_err_t agent_audio_init(void);
 esp_err_t agent_audio_play(agent_audio_prompt_t prompt);
 const char *agent_audio_status(void);
+/// 正在往 I2S 写一句：语音包写入前要等它放完。
+bool agent_audio_playing(void);

@@ -22,6 +22,16 @@ VOLC_API_KEY=... OUT_DIR=voices/xiaohe2 VOLC_VOICE=zh_female_xiaohe_uranus_bigtt
 OUT_DIR=voices/hsiaochen VOICE=zh-TW-HsiaoChenNeural tools/make-voices.sh
 ```
 
+## 打成语音包
+
+写进设备 `voices` 分区的是语音包（ADR-0003），由脚本从一个音色目录打出：
+
+```bash
+tools/make_voice_pack.py voices/wanwanxiaohe wanwanxiaohe build/wanwanxiaohe.bin
+```
+
+包不入库，App 构建时现打。格式见 `firmware/main/agent_voice_pack.h`，两边各有测试：`tools/test-voice-pack.sh`（固件解析）与 `python3 tools/test_make_voice_pack.py`（打包布局）。
+
 豆包语音 2.0 的合成结果每次略有差异，1.0 和 edge-tts 基本稳定。想试听就转成 WAV：
 
 ```bash

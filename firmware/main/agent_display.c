@@ -154,6 +154,9 @@ static uint32_t animation_frame;
 static TickType_t next_animation_at;
 /// 背光当前是否点亮。休闲模式夜里睡久了会关掉它，任何事情一来就点亮。
 static bool backlight_on;
+/// 眨眼确认：背光快闪到这个时刻为止；0 表示没在闪。
+static TickType_t identify_until;
+static TickType_t identify_next_toggle;
 /// 本帧提交前是否整体转暗：困倦期的画面。
 static bool render_dim;
 static bool muted;
@@ -514,7 +517,7 @@ static void draw_build_footer(void) {
   char daemon_line[BUILD_BYTES + 8];
   snprintf(firmware_line, sizeof(firmware_line), "FW     %s",
            firmware_build[0] == '\0' ? "?" : firmware_build);
-  snprintf(daemon_line, sizeof(daemon_line), "DAEMON %s",
+  snprintf(daemon_line, sizeof(daemon_line), "APP    %s",
            daemon_build[0] == '\0' ? "?" : daemon_build);
 
   size_t firmware_length = strlen(firmware_line);
@@ -1268,6 +1271,14 @@ static void set_build(char *slot, const char *build) {
   }
 }
 
+void agent_display_identify(void) {
+  if (!display_ready) {
+    return;
+  }
+  identify_until = xTaskGetTickCount() + pdMS_TO_TICKS(1200);
+  identify_next_toggle = xTaskGetTickCount();
+}
+
 void agent_display_set_firmware_build(const char *build) {
   set_build(firmware_build, build);
 }
@@ -1319,8 +1330,23 @@ void agent_display_refresh(void) {
 }
 
 void agent_display_tick(void) {
-  if (!display_ready ||
-      (int32_t)(xTaskGetTickCount() - next_animation_at) < 0) {
+  if (!display_ready) {
+    return;
+  }
+  if (identify_until != 0) {
+    TickType_t now = xTaskGetTickCount();
+    if ((int32_t)(now - identify_until) >= 0) {
+      identify_until = 0;
+      ensure_backlight(true);
+      next_animation_at = now;
+    } else if ((int32_t)(now - identify_next_toggle) >= 0) {
+      if (set_backlight(!backlight_on) == ESP_OK) {
+        backlight_on = !backlight_on;
+      }
+      identify_next_toggle = now + pdMS_TO_TICKS(150);
+    }
+  }
+  if ((int32_t)(xTaskGetTickCount() - next_animation_at) < 0) {
     return;
   }
 

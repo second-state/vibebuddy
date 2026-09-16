@@ -56,6 +56,9 @@ bool agent_display_agent_idle(void);
 /// 底层状态与任务卡保留，因为它们是最后已知的事实，只是不再可信。
 void agent_display_set_link_lost(bool lost);
 
+/// 眨眼确认：背光快闪约一秒，任何模式下都看得见。引导里用它认盒子。
+void agent_display_identify(void);
+
 /// 静音时左上角常驻一个 MUTE 标记：静音是会被忘掉的状态，得一直看得见。
 void agent_display_set_muted(bool muted);
 

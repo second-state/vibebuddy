@@ -11,6 +11,8 @@
 #include "agent_leisure.h"
 #include "agent_pomodoro.h"
 #include "agent_tally.h"
+#include "agent_voice_pack.h"
+#include "agent_voices.h"
 #include "cJSON.h"
 #include "driver/uart.h"
 #include "esp_app_desc.h"
@@ -23,6 +25,10 @@
 #define MAX_LINE_BYTES 1024
 #define LINE_BUFFER_BYTES (MAX_LINE_BYTES + 2)
 #define IO_BUFFER_BYTES 256
+/// 串口驱动的接收环形缓冲：语音包的一行接近 1 KB，给它留出几行的余量。
+/// 连续长行在 UART 桥上会被冲坏，那是 Mac 端按线速分段发送来解决的，
+/// 设备侧的驱动与中断路径已经用直接轮询 FIFO 的对照实验证明无辜。
+#define UART_RX_BUFFER_BYTES 4096
 
 static bool ready_scheduled;
 static TickType_t ready_deadline;
@@ -57,6 +63,8 @@ static void transport_write_value_line(const char *label, const char *value) {
   }
   transport_write_literal("\n");
 }
+
+static void handle_voice_event(const cJSON *message, const char *event);
 
 static uint32_t clock_ms(void) {
   return xTaskGetTickCount() * (uint32_t)portTICK_PERIOD_MS;
@@ -472,6 +480,37 @@ static void handle_line(char *line, size_t length) {
     return;
   }
 
+  // 眨眼确认与语音包写入都是 App 在操作设备本身，同样不算 Agent 的动静。
+  if (strcmp(event->valuestring, "device.identify") == 0) {
+    agent_display_identify();
+    transport_write_literal("IDENTIFY\n");
+    cJSON_Delete(message);
+    return;
+  }
+  if (strncmp(event->valuestring, "voice.", 6) == 0) {
+    handle_voice_event(message, event->valuestring);
+    cJSON_Delete(message);
+    return;
+  }
+  // 链路自检：把收到的字符串的长度与 CRC 回给 Mac，查串口是否收错字节。
+  if (strcmp(event->valuestring, "device.echo") == 0) {
+    const cJSON *data = cJSON_GetObjectItemCaseSensitive(message, "data");
+    if (cJSON_IsString(data)) {
+      size_t length = strlen(data->valuestring);
+      uint32_t crc = agent_voice_pack_crc32(
+          0, (const uint8_t *)data->valuestring, length);
+      char reply[96];
+      snprintf(reply, sizeof(reply),
+               "{\"version\":1,\"event\":\"echo\",\"length\":%u,\"crc\":%lu}\n",
+               (unsigned)length, (unsigned long)crc);
+      transport_write_literal(reply);
+      // 原样回显一行，Mac 端逐字节比对，看串口到底收成了什么。
+      transport_write_value_line("ECHO ", data->valuestring);
+    }
+    cJSON_Delete(message);
+    return;
+  }
+
   // Agent 一有动静，小灯灵立刻回来值班。
   agent_leisure_note_activity(clock_ms());
   if (agent_display_mode() == AGENT_MODE_LEISURE) {
@@ -490,6 +529,73 @@ static void handle_line(char *line, size_t length) {
   cJSON_Delete(message);
 }
 
+/// 语音包写入的回执都是 JSON 行：Mac 端要按序号做停等流控，诊断行不够用。
+static void voice_reply(const char *event, int32_t seq, const char *detail) {
+  char line[160];
+  if (strcmp(event, "voice.written") == 0) {
+    snprintf(line, sizeof(line),
+             "{\"version\":1,\"event\":\"voice.written\",\"voice\":\"%s\"}\n",
+             detail);
+  } else if (strcmp(event, "voice.error") == 0) {
+    snprintf(line, sizeof(line),
+             "{\"version\":1,\"event\":\"voice.error\",\"seq\":%ld,"
+             "\"message\":\"%s\"}\n",
+             (long)seq, detail);
+  } else {
+    snprintf(line, sizeof(line), "{\"version\":1,\"event\":\"%s\",\"seq\":%ld}\n",
+             event, (long)seq);
+  }
+  transport_write_literal(line);
+}
+
+static void handle_voice_event(const cJSON *message, const char *event) {
+  if (strcmp(event, "voice.begin") == 0) {
+    const cJSON *size = cJSON_GetObjectItemCaseSensitive(message, "size");
+    esp_err_t result = cJSON_IsNumber(size)
+                           ? agent_voices_begin((uint32_t)size->valuedouble)
+                           : ESP_ERR_INVALID_ARG;
+    if (result != ESP_OK) {
+      voice_reply("voice.error", -1, esp_err_to_name(result));
+      return;
+    }
+    voice_reply("voice.ready", -1, NULL);
+    return;
+  }
+  if (strcmp(event, "voice.chunk") == 0) {
+    const cJSON *seq = cJSON_GetObjectItemCaseSensitive(message, "seq");
+    const cJSON *data = cJSON_GetObjectItemCaseSensitive(message, "data");
+    const cJSON *crc = cJSON_GetObjectItemCaseSensitive(message, "crc");
+    if (!cJSON_IsNumber(seq) || !cJSON_IsString(data) || !cJSON_IsNumber(crc)) {
+      voice_reply("voice.error", -1, "invalid chunk");
+      agent_voices_abort();
+      return;
+    }
+    esp_err_t result = agent_voices_chunk(
+        (uint32_t)seq->valuedouble, data->valuestring,
+        strlen(data->valuestring), (uint32_t)crc->valuedouble);
+    if (result != ESP_OK) {
+      voice_reply("voice.error", (int32_t)seq->valuedouble,
+                  esp_err_to_name(result));
+      agent_voices_abort();
+      return;
+    }
+    voice_reply("voice.ack", (int32_t)seq->valuedouble, NULL);
+    return;
+  }
+  if (strcmp(event, "voice.end") == 0) {
+    esp_err_t result = agent_voices_end();
+    if (result != ESP_OK) {
+      voice_reply("voice.error", -1, esp_err_to_name(result));
+      agent_voices_abort();
+      return;
+    }
+    voice_reply("voice.written", -1, agent_voices_current_id());
+    transport_write_value_line("VOICES ", agent_voices_current_id());
+    return;
+  }
+  voice_reply("voice.error", -1, "unknown voice event");
+}
+
 /// 版本取 esp_app_desc 里的 git 描述；时刻不取它的 __TIME__，那只在
 /// esp_app_desc.c 被重编时才更新，增量构建后会停在上一次全量构建。
 /// AGENT_BUILD_STAMP 由 main/CMakeLists.txt 每次构建重新生成，
@@ -501,7 +607,7 @@ static void describe_firmware_build(char *out, size_t size) {
 
 void app_main(void) {
   ESP_ERROR_CHECK(
-      uart_driver_install(UART_NUM_0, LINE_BUFFER_BYTES, 0, 0, NULL, 0));
+      uart_driver_install(UART_NUM_0, UART_RX_BUFFER_BYTES, 0, 0, NULL, 0));
 
   usb_serial_jtag_driver_config_t usb_config = {
       .rx_buffer_size = LINE_BUFFER_BYTES,
@@ -531,6 +637,11 @@ void app_main(void) {
     transport_write_value_line("DISPLAY READY BUILD ", firmware_build);
   } else {
     transport_write_literal("DISPLAY ERROR\n");
+  }
+  if (agent_voices_init() == ESP_OK) {
+    transport_write_value_line("VOICES ", agent_voices_current_id());
+  } else {
+    transport_write_literal("VOICES NO PARTITION\n");
   }
   if (agent_audio_init() == ESP_OK) {
     transport_write_literal("AUDIO READY\n");

@@ -80,6 +80,31 @@ Mac 到设备的首批事件：
 
 固件输出的 `READY`、`EVENT`、`TITLE` 和 `ERROR` 行是实机链路验收用的诊断文本，不是设备到 Mac 的正式 JSON 事件。同类的还有 `MODE DUTY` / `POMODORO` / `LEISURE`（模式切换），`POMODORO FOCUS START` / `FOCUS END` / `BREAK START` / `BREAK END` / `PAUSED` / `RESUMED` / `STOPPED` / `BREAK SKIPPED`（番茄钟转换），`LEISURE ALERT` / `BORED` / `SLEEPY`、`LEISURE SKIT <名>`、`LEISURE LIGHTS OUT` / `ON`（休闲），以及 `CLOCK HOUR <n>`（收到的小时数变化）、`TALLY LOADED <次> <秒>S DAY <日期>`（开机恢复的当日记录）、`MUTE ON` / `OFF`（长按 K2）与 `AUDIO MUTED <哪句>`（静音期间被吞掉的语音）。番茄钟与休闲的状态都只在固件里，Mac 端只记日志。
 
+## 设备维护：眨眼确认与语音包写入
+
+这些消息是 App 在操作设备本身，不算 Agent 的动静，不叫醒休闲，也不产生 `EVENT` 诊断行。
+
+`device.identify` 让设备背光快闪约一秒，任何模式下都看得见；引导里用它确认连的是哪一台。设备回一行诊断 `IDENTIFY`。
+
+语音包（格式见 `firmware/main/agent_voice_pack.h`）经同一条串口写进 `voices` 分区，不复位、不用 esptool，两种接法行为一样。停等流控：Mac 每发一块就等设备回执，没有回执不发下一块。
+
+```json
+{"version":1,"event":"voice.begin","size":1523456}
+{"version":1,"event":"voice.chunk","seq":0,"crc":305419896,"data":"<base64，最多 672 字节原始数据>"}
+{"version":1,"event":"voice.end"}
+```
+
+设备的回执：
+
+```json
+{"version":1,"event":"voice.ready","seq":-1}
+{"version":1,"event":"voice.ack","seq":0}
+{"version":1,"event":"voice.written","voice":"wanwanxiaohe"}
+{"version":1,"event":"voice.error","seq":12,"message":"ESP_ERR_INVALID_CRC"}
+```
+
+`begin` 会先等正在播的一句放完，再擦掉所需范围；`size` 是整包字节数，含 256 字节包头。块必须按 `seq` 从 0 连续到达，每块原始数据不超过 672 字节，base64 后整行仍在 1024 字节上限内；`crc` 是这一块原始字节的 CRC32（zlib 同款），设备解码后当场核对，不符就回 `voice.error` 放弃，不等到最后。包头那 256 字节留在设备内存里，`end` 时设备回读 flash 校验载荷 CRC，通过才写包头，然后重新映射并切换到新音色；任一步失败都回 `voice.error`、放弃会话，分区在固件看来是空的，播报回落到内置音色。写入期间的播报用内置音色。
+
 ## Stage 1 错误输出
 
 | 输出 | 含义 |
