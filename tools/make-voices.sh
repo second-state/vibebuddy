@@ -1,16 +1,25 @@
 #!/usr/bin/env bash
 # 用神经网络语音重新生成固件里的五句话，写进 firmware/main/assets/。
 #
-# 语音来自 edge-tts（微软 Edge 的朗读接口，免费、不用密钥；不是正式公开的
-# API，只用来一次性生成这几句）。默认音色是台湾女声 HsiaoYu；换音色改 VOICE。
+# 两个引擎二选一：
+# - 设了 VOLC_API_KEY 就用火山引擎豆包语音（tools/volc-tts.py），默认音色
+#   湾湾小何（1.0 模型），换音色改 VOLC_VOICE；2.0 音色还要把 VOLC_RESOURCE_ID
+#   设成 seed-tts-2.0；
+# - 否则用 edge-tts（微软 Edge 的朗读接口，免费、不用密钥；不是正式公开的
+#   API，只用来一次性生成这几句），默认音色台湾女声 HsiaoYu，换音色改 VOICE。
 # 每一句各自归一化到 -1 dBFS 峰值；番茄钟的两句前面拼上钟声。
 #
-# 用法: VOICE=zh-TW-HsiaoYuNeural tools/make-voices.sh
+# 用法: tools/make-voices.sh
+#       VOLC_API_KEY=... tools/make-voices.sh
+#       OUT_DIR=voices/hsiaochen VOICE=zh-TW-HsiaoChenNeural tools/make-voices.sh
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-assets="${repo_root}/firmware/main/assets"
+# 默认直接覆盖固件资产；归档到音色库时用 OUT_DIR 指到 voices/<音色>/。
+assets="${OUT_DIR:-${repo_root}/firmware/main/assets}"
+mkdir -p "${assets}"
 voice="${VOICE:-zh-TW-HsiaoYuNeural}"
+volc_voice="${VOLC_VOICE:-zh_female_wanwanxiaohe_moon_bigtts}"
 work="$(mktemp -d -t voices)"
 trap 'rm -rf "${work}"' EXIT
 
@@ -24,11 +33,17 @@ lines=(
 )
 
 synth() {
-    local name="$1" text="$2"
-    uvx --from edge-tts edge-tts --voice "${voice}" --text "${text}" \
-        --write-media "${work}/${name}.mp3" >/dev/null
+    local name="$1" text="$2" source
+    if [[ -n "${VOLC_API_KEY:-}" ]]; then
+        source="${work}/${name}.wav"
+        "${repo_root}/tools/volc-tts.py" "${volc_voice}" "${text}" "${source}"
+    else
+        source="${work}/${name}.mp3"
+        uvx --from edge-tts edge-tts --voice "${voice}" --text "${text}" \
+            --write-media "${source}" >/dev/null
+    fi
     # 先量峰值再补增益到 -1 dBFS；单声道转双声道会掉 3 dB，量的是转换后的结果。
-    ffmpeg -loglevel error -y -i "${work}/${name}.mp3" -ar 24000 -ac 2 \
+    ffmpeg -loglevel error -y -i "${source}" -ar 24000 -ac 2 \
         -f s16le -acodec pcm_s16le "${work}/${name}.raw"
     local peak
     peak="$(ffmpeg -f s16le -ar 24000 -ac 2 -i "${work}/${name}.raw" -af volumedetect -f null - 2>&1 \
