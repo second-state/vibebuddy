@@ -1,0 +1,15 @@
+[package]
+name = "beacon-hook"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "把 Codex 与 Claude Code 的 Hook 事件最小化后转发给本机 Vibe Buddy"
+
+[[bin]]
+name = "beacon-hook"
+path = "src/main.rs"
+
+[dependencies]
+chrono.workspace = true
+regex.workspace = true
+serde_json.workspace = true
