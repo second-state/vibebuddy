@@ -27,6 +27,12 @@ Vibe Buddy 把本地程序的状态事件变成实体宠物的画面与声音。
 - 驱动 LCD 和扬声器；氛围小助手动画完全在盒子上运行，不依赖 Mac 端逐帧传图。
 - 不解释任务生命周期之外的本机业务语义。
 
+### `app`（设计已定，待实现）
+
+- 菜单栏 App，看管 `beacond`（作为 helper 随 App 分发、启动、重启、退出），取代 LaunchAgent。
+- 首次引导、接入 Agent（写 Hook 配置）、挑选播报音色并写入设备、更新固件、看设备画面。
+- 只在链路异常时自己出声（macOS 通知）；Agent 的事仍由设备讲。设计见 [`app.md`](app.md)。
+
 ### `protocol`
 
 - 定义 Beacon Protocol 的消息模型、编解码、版本和限制。
@@ -58,3 +64,4 @@ Codex / Claude / Browser <---------- open source <------------+<- beacond <- K2
 11. CI 与 Agent 共用同一套任务卡和播报，只是来源不同：GitHub Actions 由 `beacond` 主动轮询，不靠 Hook。只有亲眼见过某次 run 在跑，它结束时才播报；否则每次重启 daemon 都会把仓库里最近一次历史结果重新宣告一遍。关注哪些仓库不需要用户配置：Hook 已经带来了 `cwd`，Agent 最近工作过的项目就是该关心 CI 的那些，仓库名从本地 `.git/config` 推导。
 12. K2 打开的来源必须与屏幕主状态使用同一套优先级，不能另做一个“最近窗口”列表。聚合器只保存定位所需的 thread id、session id 或 repo/run id，不保存 prompt 与回复；外部参数不经过 shell。Codex 子 Agent 的生命周期 session 不是桌面可导航 thread，Hook 必须把它映射到父 thread 后再关联来源；Claude Code 的 CLI `session_id` 不足以定位窗口——同一个 id 会对应多个桌面会话——必须连同 `cwd` 在 Claude App 的会话索引里解析成桌面会话 id 后再跳转。
 13. 番茄钟、休闲与模式切换都在固件里，`beacond` 只收诊断行。它是设备 I/O 与确定性渲染，本来就是固件的职责；更要紧的是用户拿它计时时 Mac 端可能没在跑，一个要靠心跳才走的计时器没有用。固件里凡是不碰硬件的逻辑——番茄钟状态机、休闲导演、绘制代码——都要能在 Mac 上直接编译：状态机与导演有主机测试，画面与剧目有主机预览，烧录之前就能看见版式和动画。
+14. Mac 端的图形界面是原生 SwiftUI 菜单栏 App，`beacond` 作为 helper 由它看管；语音包放独立分区、走串口协议写入；Hook 改为 Rust 单二进制复制到 Application Support。三条取舍分别见 ADR-0004、0003、0005，整体设计见 [`app.md`](app.md)。

@@ -50,6 +50,10 @@ Stage 5 整体尚未完成：K2 在无活动/已完成状态下的扩展行为�
 
 实现 `start`、`done`、`error` 和 `run`；CLI 只调用 `beacond`。
 
+### Stage 7 — App（设计已定，2026-09-16）
+
+原生 SwiftUI 菜单栏 App 看管 `beacond`、首次引导、接入 Agent、挑选播报音色并写入设备的 `voices` 分区、更新固件、看设备画面。完成条件是实机走完 [`app.md`](app.md) 的验收清单。前置改动：固件加 `voices` 分区与语音包读写、协议加 `device.identify` 与 `voice.*` 事件、daemon 加 `/v1/status` 与 SSE、Hook 合成 Rust 二进制 `beacon-hook`。
+
 ## Later
 
 可选任务标题、microphone、voice interaction、长期任务历史、Wi-Fi、WebSocket transport、progress、多设备。多 Agent 的三任务实时卡片已提前进入 Stage 4。
