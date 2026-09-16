@@ -88,6 +88,8 @@ Mac 端发往 BOX 的 CH343 UART 桥时按线速分段写（每 128 字节等它
 
 `device.hello` 是 Mac 端刚连上时的一声招呼：模式、固件构建号、音色只在开机或变化时才报，daemon 比设备重启得勤，不问就一直不知道。设备回三行诊断：`DISPLAY READY BUILD …`、`MODE …`、`VOICES …`。
 
+`device.echo` 是链路自检：设备把 `data` 字符串的长度与 CRC32 回成 `{"event":"echo","length":…,"crc":…}`，再原样回显一行 `ECHO …`，用来查串口有没有收错字节；排查 UART 桥那次就是靠它。
+
 `device.identify` 让设备背光快闪约一秒，任何模式下都看得见；引导里用它确认连的是哪一台。设备回一行诊断 `IDENTIFY`。
 
 语音包（格式见 `firmware/main/agent_voice_pack.h`）经同一条串口写进 `voices` 分区，不复位、不用 esptool，两种接法行为一样。停等流控：Mac 每发一块就等设备回执，没有回执不发下一块。

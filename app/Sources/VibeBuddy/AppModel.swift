@@ -33,9 +33,13 @@ final class AppModel: ObservableObject {
             if state != .running { self.daemonAlive = false; self.status = nil; self.refreshMenu() }
         }
         supervisor.onGiveUp = { [weak self] in
-            self?.daemonAlive = false
-            self?.refreshMenu()
-            Notifier.notify(title: "Vibe Buddy", body: "daemon 连续三次启动失败，点菜单栏图标重启。")
+            guard let self else { return }
+            self.daemonAlive = false
+            self.refreshMenu()
+            // 「通知我」关掉时连这条也不弹；daemon 没起来时拿不到配置，按默认开。
+            if self.status?.config.notifyLink ?? true {
+                Notifier.notify(title: "Vibe Buddy", body: "daemon 连续三次启动失败，点菜单栏图标重启。")
+            }
         }
         refreshHookStates()
     }

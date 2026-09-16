@@ -27,7 +27,7 @@ do {
     check(status.operation?.kind == .voicePack && status.operation?.progress == 0.42, "操作解码")
     let menu = MenuState.derive(status: status, daemonAlive: true)
     check(menu.icon == .online, "在线图标")
-    check(menu.deviceLine == "已连接 · 固件 abc1234-dirty", "设备行：\(menu.deviceLine)")
+    check(menu.deviceLine == "盒子在线 · 固件 abc1234-dirty", "设备行：\(menu.deviceLine)")
     check(menu.modeLine == "模式：番茄钟", "模式行：\(menu.modeLine)")
     check(menu.todayLine == "今天：完成 3 · 确认 1 · 忙碌 1 小时 23 分", "战绩行：\(menu.todayLine)")
     var offline = status

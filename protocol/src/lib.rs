@@ -22,6 +22,18 @@ pub struct Event {
 }
 
 impl Event {
+    /// 只有事件名的信封；设备维护类的命令（hello、identify、screenshot）都长这样。
+    pub fn named(event: &str) -> Self {
+        Self {
+            version: VERSION,
+            event: event.to_owned(),
+            id: None,
+            title: None,
+            message: None,
+            extra: BTreeMap::new(),
+        }
+    }
+
     pub fn to_ndjson(&self) -> Result<Vec<u8>, ProtocolError> {
         self.validate()?;
 

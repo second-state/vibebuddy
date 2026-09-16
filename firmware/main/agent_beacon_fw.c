@@ -538,9 +538,9 @@ static void handle_line(char *line, size_t length) {
   cJSON_Delete(message);
 }
 
-/// 把设备的静态状态整个报一遍：固件构建号、模式、音色。开机时也走这里。
 static char announced_build[48];
 
+/// 把设备的静态状态整个报一遍：固件构建号、模式、音色。开机与 hello 都走这里。
 static void announce_state(void) {
   transport_write_value_line("DISPLAY READY BUILD ", announced_build);
   transport_write_value_line("MODE ", mode_name(agent_display_mode()));

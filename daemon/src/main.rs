@@ -378,14 +378,43 @@ async fn put_config(State(state): State<AppState>, Json(config): Json<Config>) -
 }
 
 fn device_command(name: &str) -> Event {
-    Event {
-        version: VERSION,
-        event: name.to_owned(),
-        id: None,
-        title: None,
-        message: None,
-        extra: Default::default(),
+    Event::named(name)
+}
+
+/// 设备上同一时刻只能有一个操作：占上位就返回 None，否则回给调用方 409。
+async fn begin_operation(
+    state: &AppState,
+    kind: OperationKind,
+    message: String,
+) -> Option<(StatusCode, Json<ApiResponse>)> {
+    let mut operation = state.operation.lock().await;
+    if matches!(&*operation, Some(current) if current.state == OperationState::Running) {
+        return Some((
+            StatusCode::CONFLICT,
+            Json(ApiResponse { accepted: false, message: "设备上已有操作在进行".to_owned() }),
+        ));
     }
+    *operation = Some(Operation { kind, state: OperationState::Running, progress: 0.0, message });
+    drop(operation);
+    state.notify_status();
+    None
+}
+
+/// 从阻塞线程或写入循环里报进度。只在操作还在跑时写：完成后迟到的回调
+/// 不能把 100% 改回去。
+fn report_progress(state: &AppState, fraction: f32, message: Option<String>) {
+    let state = state.clone();
+    tokio::spawn(async move {
+        if let Some(operation) = state.operation.lock().await.as_mut()
+            && operation.state == OperationState::Running
+        {
+            operation.progress = fraction;
+            if let Some(message) = message {
+                operation.message = message;
+            }
+        }
+        state.notify_status();
+    });
 }
 
 async fn post_identify(State(state): State<AppState>) -> (StatusCode, Json<ApiResponse>) {
@@ -403,35 +432,16 @@ async fn post_voice_pack(
             Json(ApiResponse { accepted: false, message: "请求体不是语音包".to_owned() }),
         );
     };
-    {
-        let mut operation = state.operation.lock().await;
-        if matches!(&*operation, Some(current) if current.state == OperationState::Running) {
-            return (
-                StatusCode::CONFLICT,
-                Json(ApiResponse { accepted: false, message: "设备上已有操作在进行".to_owned() }),
-            );
-        }
-        *operation = Some(Operation {
-            kind: OperationKind::VoicePack,
-            state: OperationState::Running,
-            progress: 0.0,
-            message: format!("正在写入 {voice}"),
-        });
+    if let Some(refused) = begin_operation(&state, OperationKind::VoicePack, format!("正在写入 {voice}")).await {
+        return refused;
     }
-    state.notify_status();
     let bus = state.device_bus.subscribe();
     let pack = body.to_vec();
     let task_state = state.clone();
     tokio::spawn(async move {
         let progress_state = task_state.clone();
         let result = voice_writer::write_pack(task_state.transport.clone(), bus, pack, move |fraction| {
-            let state = progress_state.clone();
-            tokio::spawn(async move {
-                if let Some(operation) = state.operation.lock().await.as_mut() {
-                    operation.progress = fraction;
-                }
-                state.notify_status();
-            });
+            report_progress(&progress_state, fraction, None);
         })
         .await;
         match result {
@@ -509,22 +519,9 @@ async fn post_firmware(
             Json(ApiResponse { accepted: false, message: "没有串口 worker".to_owned() }),
         );
     };
-    {
-        let mut operation = state.operation.lock().await;
-        if matches!(&*operation, Some(current) if current.state == OperationState::Running) {
-            return (
-                StatusCode::CONFLICT,
-                Json(ApiResponse { accepted: false, message: "设备上已有操作在进行".to_owned() }),
-            );
-        }
-        *operation = Some(Operation {
-            kind: OperationKind::Firmware,
-            state: OperationState::Running,
-            progress: 0.0,
-            message: "让出串口".to_owned(),
-        });
+    if let Some(refused) = begin_operation(&state, OperationKind::Firmware, "让出串口".to_owned()).await {
+        return refused;
     }
-    state.notify_status();
     let task_state = state.clone();
     tokio::spawn(async move {
         serial.set_suspended(true);
@@ -533,15 +530,7 @@ async fn post_firmware(
         let progress_state = task_state.clone();
         let result = tokio::task::spawn_blocking(move || {
             let mut report = |fraction: f32, message: &str| {
-                let state = progress_state.clone();
-                let message = message.to_owned();
-                tokio::spawn(async move {
-                    if let Some(operation) = state.operation.lock().await.as_mut() {
-                        operation.progress = fraction;
-                        operation.message = message;
-                    }
-                    state.notify_status();
-                });
+                report_progress(&progress_state, fraction, Some(message.to_owned()));
             };
             rom_flasher::flash(&port, bridge, &segments, &mut report)
         })
@@ -846,6 +835,28 @@ mod tests {
         assert!(status.hooks.claude.is_none());
         assert_eq!(status.config, Config::default());
         assert!(status.operation.is_none());
+    }
+
+    #[tokio::test]
+    async fn the_status_stream_pushes_a_snapshot_first_and_again_on_change() {
+        use axum::body::to_bytes;
+        use axum::response::IntoResponse;
+        use http_body_util::BodyExt;
+
+        let transport = Arc::new(RecordingTransport::default());
+        let state = test_state(transport);
+        let response = status_stream(State(state.clone())).await.into_response();
+        let mut body = response.into_body();
+        let first = body.frame().await.expect("先推一份").expect("帧可读");
+        let first = String::from_utf8_lossy(first.data_ref().expect("数据帧")).into_owned();
+        assert!(first.starts_with("event: status\n"), "{first}");
+        assert!(first.contains("\"connected\":false"), "{first}");
+
+        publish_device_message(&state, DeviceMessage::Connected { port: "/dev/cu.s".to_owned(), bridge: false }).await;
+        let second = body.frame().await.expect("状态变了再推一份").expect("帧可读");
+        let second = String::from_utf8_lossy(second.data_ref().expect("数据帧")).into_owned();
+        assert!(second.contains("\"connected\":true"), "{second}");
+        let _ = to_bytes; // 只用到帧接口
     }
 
     #[tokio::test]

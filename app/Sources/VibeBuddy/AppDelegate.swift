@@ -33,8 +33,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             alert.runModal()
         }.store(in: &subscriptions)
 
-        LegacyLaunchAgent.migrateIfNeeded(model: model)
-        model.start()
+        Task { @MainActor in
+            await LegacyLaunchAgent.migrateIfNeeded(model: model)
+            model.start()
+        }
         if !UserDefaults.standard.bool(forKey: "onboardingDone") {
             showOnboarding()
         }
@@ -46,7 +48,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func render(_ state: MenuState) {
         statusItem.button?.image = PixelFace.image(eyesClosed: state.icon != .online)
-        statusItem.button?.appearsDisabled = state.icon == .daemonDown
+        // 链路断开或 daemon 没起来都灰掉：闭眼加变灰才是"它不在"。
+        statusItem.button?.appearsDisabled = state.icon != .online
         let menu = NSMenu()
         let device = NSMenuItem(title: state.deviceLine, action: state.deviceLineIsAction ? #selector(restartDaemon) : nil, keyEquivalent: "")
         device.target = self
@@ -110,12 +113,22 @@ enum LegacyLaunchAgent {
         FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Library/LaunchAgents/\(label).plist")
     }
 
+    /// 7331 上已经有 daemon 在应答：不管是谁起的，都不能再拉一个。
+    static func portOccupied() async -> Bool {
+        var request = URLRequest(url: URL(string: "http://127.0.0.1:7331/v1/status")!)
+        request.timeoutInterval = 1
+        guard let (_, response) = try? await URLSession.shared.data(for: request) else { return false }
+        return (response as? HTTPURLResponse)?.statusCode == 200
+    }
+
     @MainActor
-    static func migrateIfNeeded(model: AppModel) {
-        guard FileManager.default.fileExists(atPath: plist.path) else { return }
+    static func migrateIfNeeded(model: AppModel) async {
+        let hasPlist = FileManager.default.fileExists(atPath: plist.path)
+        let occupied = await portOccupied()
+        guard hasPlist || occupied else { return }
         let alert = NSAlert()
-        alert.messageText = "发现旧的 beacond 后台服务"
-        alert.informativeText = "Vibe Buddy 现在自己看管 daemon，旧的 LaunchAgent 会和它抢串口。卸掉旧的并接管吗？"
+        alert.messageText = hasPlist ? "发现旧的 beacond 后台服务" : "7331 端口已经有 daemon 在跑"
+        alert.informativeText = "Vibe Buddy 现在自己看管 daemon，两个 daemon 会抢串口。卸掉旧的并接管吗？"
         alert.addButton(withTitle: "卸载并接管")
         alert.addButton(withTitle: "稍后")
         NSApp.activate(ignoringOtherApps: true)
@@ -125,7 +138,9 @@ enum LegacyLaunchAgent {
             bootout.arguments = ["bootout", "gui/\(getuid())/\(label)"]
             try? bootout.run()
             bootout.waitUntilExit()
-            try? FileManager.default.trashItem(at: plist, resultingItemURL: nil)
+            if hasPlist { try? FileManager.default.trashItem(at: plist, resultingItemURL: nil) }
+            // 不是 LaunchAgent 起的（比如手工 cargo run），请它自己退出。
+            if occupied { try? await DaemonClient().restart() }
             model.managesDaemon = true
         } else {
             // 用户留着旧服务：本次不拉自己的 daemon，只跟旧的说话。

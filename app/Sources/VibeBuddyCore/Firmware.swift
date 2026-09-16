@@ -1,7 +1,7 @@
 import Foundation
 
 /// 固件只比哈希：盒子报的构建标识是"哈希 日期 时间"，App 附带的也是。
-/// 哈希不同就该显示「更新到 App 附带版本」，不判断新旧（设计文档 Q24）。
+/// 哈希不同就该显示「更新到 App 附带版本」，不判断新旧（docs/app.md「固件升级」）。
 public enum Firmware {
     public static func hash(of build: String?) -> String? {
         guard let build else { return nil }

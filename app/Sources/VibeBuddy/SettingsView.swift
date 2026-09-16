@@ -51,6 +51,9 @@ struct VoicesView: View {
             }
             if let operation = model.operation, operation.kind == .voicePack {
                 OperationRow(operation: operation)
+                if operation.state == .failed {
+                    Text("没写完，盒子先用内置音色；插好线后重新点「使用」。").font(.caption).foregroundStyle(.secondary)
+                }
             }
         }
     }
@@ -74,7 +77,7 @@ struct VoiceCard: View {
             Button { model.togglePreview(entry.id) } label: {
                 Image(systemName: model.previewingVoice == entry.id ? "stop.fill" : "play.fill")
             }
-            .disabled(!bundled)
+            .disabled(!bundled || model.operationRunning)
             VStack(alignment: .leading) {
                 Text(entry.name).font(.body.weight(.semibold))
                 Text(entry.tag).font(.caption).foregroundStyle(.secondary)
@@ -152,7 +155,7 @@ struct HookRow: View {
                 Button("修复") { pendingPlan = model.hookInstallPlan(agent) }
                 Button("移除") { pendingPlan = model.hookRemovePlan(agent) }
             } else {
-                Button("安装") { pendingPlan = model.hookInstallPlan(agent) }.disabled(!present)
+                Button("接入") { pendingPlan = model.hookInstallPlan(agent) }.disabled(!present)
             }
         }
         .padding(10)
@@ -208,7 +211,7 @@ struct DeviceView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             Form {
-                LabeledContent("连接", value: connectionText)
+                LabeledContent("链路", value: connectionText)
                 LabeledContent("盒子固件", value: model.status?.device.firmwareBuild ?? "—")
                 LabeledContent("App 附带", value: model.bundledFirmwareBuild ?? "这个构建没有附带固件")
                 if model.firmwareUpdateAvailable {
@@ -219,9 +222,10 @@ struct DeviceView: View {
                     OperationRow(operation: operation)
                     if operation.state == .failed {
                         Text("重试前可以按住盒子的 K0 再插一次线，让它进入下载模式。").font(.caption).foregroundStyle(.secondary)
+                        Button("重试") { model.updateFirmware() }.disabled(!(model.status?.device.connected ?? false))
                     }
                 }
-                Button("让盒子眨眼") { model.identify() }.disabled(!(model.status?.device.connected ?? false))
+                Button("让盒子眨眼") { model.identify() }.disabled(model.operationRunning || !(model.status?.device.connected ?? false))
             }
             .formStyle(.grouped)
             HStack {
@@ -245,7 +249,7 @@ struct DeviceView: View {
     }
 
     private var connectionText: String {
-        guard let device = model.status?.device else { return "daemon 未连接" }
+        guard let device = model.status?.device else { return "daemon 没起来" }
         guard device.connected else { return "未找到盒子" }
         return "\(device.port ?? "") · \(device.bridge ? "UART 桥" : "原生 USB")"
     }
@@ -287,8 +291,10 @@ struct AdvancedView: View {
             let source = Resources.logsDirectory.appendingPathComponent(name)
             if manager.fileExists(atPath: source.path) { try? manager.copyItem(at: source, to: target.appendingPathComponent(name)) }
         }
-        let config = Resources.applicationSupport.appendingPathComponent("config.json")
-        if manager.fileExists(atPath: config.path) { try? manager.copyItem(at: config, to: target.appendingPathComponent("config.json")) }
+        // 配置从 daemon 拿，不直接碰它的文件。
+        if let config = model.status?.config, let data = try? StatusCoding.encoder().encode(config) {
+            try? data.write(to: target.appendingPathComponent("config.json"))
+        }
         let summary = """
         App \(Resources.displayVersion)
         daemon \(model.status?.daemon.build ?? "未连接")

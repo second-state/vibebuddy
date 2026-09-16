@@ -23,7 +23,8 @@ extern const uint8_t break_done_pcm_start[] asm("_binary_break_done_pcm_start");
 extern const uint8_t break_done_pcm_end[] asm("_binary_break_done_pcm_end");
 
 #define FLASH_SECTOR_BYTES 4096u
-#define VERIFY_BLOCK_BYTES 1024u
+/// 解码一块与回读校验共用的缓冲；一块最多 672 字节，校验按 1 KB 读。
+#define CHUNK_BUFFER_BYTES 1024u
 /// begin 之前最多等这么久让正在播的一句放完；最长的一句不到 7 秒。
 #define AUDIO_DRAIN_MS 10000u
 
@@ -35,12 +36,16 @@ static agent_voice_pack_t pack;
 static bool pack_loaded;
 static char current_id[AGENT_VOICE_PACK_ID_BYTES] = "builtin";
 
+/// 写入会话开始后就不再把映射区交给播放：播放任务先标记「在播」再取
+/// 指针，写入这边先立这个标记再等「在播」落下，两边各自看到对方的标记就
+/// 不会有人拿着已解除映射的地址去喂 I2S。
+static volatile bool pack_locked;
 static bool writing;
 static uint32_t expected_total;
 static uint32_t received;
 static uint32_t next_seq;
 static uint8_t header_buffer[AGENT_VOICE_PACK_HEADER_BYTES];
-static uint8_t chunk_buffer[VERIFY_BLOCK_BYTES];
+static uint8_t chunk_buffer[CHUNK_BUFFER_BYTES];
 
 static void unmap(void) {
   pack_loaded = false;
@@ -94,7 +99,8 @@ const char *agent_voices_current_id(void) { return current_id; }
 
 void agent_voices_clip(agent_audio_prompt_t prompt, const uint8_t **data,
                        size_t *length) {
-  if (pack_loaded && prompt < AGENT_VOICE_PACK_CLIPS) {
+  __sync_synchronize();
+  if (pack_loaded && !pack_locked && prompt < AGENT_VOICE_PACK_CLIPS) {
     *data = mapped + pack.clip_offset[prompt];
     *length = pack.clip_length[prompt];
     return;
@@ -126,7 +132,9 @@ esp_err_t agent_voices_begin(uint32_t total_bytes) {
       total_bytes > partition->size) {
     return ESP_ERR_INVALID_SIZE;
   }
-  // 正在播的那一句可能就读着映射区，等它放完再解除映射。
+  // 正在播的那一句可能就读着映射区：先锁住不再发新指针，再等它放完。
+  pack_locked = true;
+  __sync_synchronize();
   uint32_t waited = 0;
   while (agent_audio_playing() && waited < AUDIO_DRAIN_MS) {
     vTaskDelay(pdMS_TO_TICKS(50));
@@ -138,6 +146,7 @@ esp_err_t agent_voices_begin(uint32_t total_bytes) {
       FLASH_SECTOR_BYTES;
   esp_err_t result = esp_partition_erase_range(partition, 0, erase_bytes);
   if (result != ESP_OK) {
+    pack_locked = false;
     return result;
   }
   writing = true;
@@ -220,8 +229,8 @@ esp_err_t agent_voices_end(void) {
   uint32_t crc = 0;
   for (uint32_t offset = 0; offset < parsed.payload_length;) {
     uint32_t block = parsed.payload_length - offset;
-    if (block > VERIFY_BLOCK_BYTES) {
-      block = VERIFY_BLOCK_BYTES;
+    if (block > CHUNK_BUFFER_BYTES) {
+      block = CHUNK_BUFFER_BYTES;
     }
     esp_err_t result = esp_partition_read(
         partition, AGENT_VOICE_PACK_HEADER_BYTES + offset, chunk_buffer, block);
@@ -241,7 +250,9 @@ esp_err_t agent_voices_end(void) {
   if (result != ESP_OK) {
     return result;
   }
-  return map_and_validate() ? ESP_OK : ESP_FAIL;
+  bool ok = map_and_validate();
+  pack_locked = false;
+  return ok ? ESP_OK : ESP_FAIL;
 }
 
 void agent_voices_abort(void) {
@@ -249,4 +260,5 @@ void agent_voices_abort(void) {
   if (partition != NULL) {
     map_and_validate();
   }
+  pack_locked = false;
 }

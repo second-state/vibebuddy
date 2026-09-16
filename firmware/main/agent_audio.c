@@ -180,11 +180,13 @@ static void audio_task(void *argument) {
       continue;
     }
 
+    // 先标记在播再取指针：语音包写入那边靠这个顺序判断映射区还有没有人用。
+    playing = true;
+    __sync_synchronize();
     const uint8_t *start;
     size_t length;
     agent_voices_clip(prompt, &start, &length);
     const uint8_t *end = start + length;
-    playing = true;
 
     size_t bytes_written = 0;
     esp_err_t result = i2s_channel_write(tx_handle, start, end - start,

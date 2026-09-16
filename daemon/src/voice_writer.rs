@@ -5,7 +5,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use base64::Engine;
-use beacon_protocol::{Event, VERSION};
+use beacon_protocol::Event;
 use tokio::sync::broadcast;
 
 use crate::serial_transport::{DeviceMessage, Transport, TransportError};
@@ -28,17 +28,12 @@ pub fn voice_id_of(pack: &[u8]) -> Option<String> {
 }
 
 fn event(name: &str, fields: Vec<(&str, serde_json::Value)>) -> Event {
-    Event {
-        version: VERSION,
-        event: name.to_owned(),
-        id: None,
-        title: None,
-        message: None,
-        extra: fields
-            .into_iter()
-            .map(|(key, value)| (key.to_owned(), value))
-            .collect(),
-    }
+    let mut event = Event::named(name);
+    event.extra = fields
+        .into_iter()
+        .map(|(key, value)| (key.to_owned(), value))
+        .collect();
+    event
 }
 
 pub fn begin_event(size: usize) -> Event {

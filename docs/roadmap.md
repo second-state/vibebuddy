@@ -50,9 +50,13 @@ Stage 5 整体尚未完成：K2 在无活动/已完成状态下的扩展行为�
 
 实现 `start`、`done`、`error` 和 `run`；CLI 只调用 `beacond`。
 
-### Stage 7 — App（设计已定，2026-09-16）
+### Stage 7 — App（已实现，2026-09-16；待人工过一遍界面）
 
-原生 SwiftUI 菜单栏 App 看管 `beacond`、首次引导、接入 Agent、挑选播报音色并写入设备的 `voices` 分区、更新固件、看设备画面。完成条件是实机走完 [`app.md`](app.md) 的验收清单。前置改动：固件加 `voices` 分区与语音包读写、协议加 `device.identify` 与 `voice.*` 事件、daemon 加 `/v1/status` 与 SSE、Hook 合成 Rust 二进制 `beacon-hook`。
+原生 SwiftUI 菜单栏 App 看管 `beacond`、首次引导、接入 Agent、挑选播报音色并写入设备的 `voices` 分区、更新固件、看设备画面。设计见 [`app.md`](app.md)。
+
+实机结论：固件加了 2 MB `voices` 分区，语音包经串口协议分块写入并回读校验，换音色不刷固件；`device.hello`、`device.identify`、`device.echo` 事件到位。daemon 有状态接口与 SSE、配置文件、截图、语音包写入、ROM 协议烧录（块 256 字节、桥接分段，MD5 校验后硬复位，在 App 看管下约 38 ms 一块，1.5 MB 四分钟）。`beacon-hook` 取代两个 Python 脚本。App 在 dragon 的 Mac 上取代了 LaunchAgent：拉起 daemon、SSE 驱动菜单、SIGTERM 与 SIGKILL 下 daemon 都跟着退出。经 App 走通：写语音包、烧固件、Hook 转发。尚未由人过目的是界面本身（引导六步、设置五页、通知）。
+
+途中查明 CH343 UART 桥吞不下超过两百字节的连续数据（见 `LESSONS.md`），daemon 改为按线速分段发送，顺带修掉了长事件行偶发 `invalid_json` 的老毛病。
 
 ## Later
 

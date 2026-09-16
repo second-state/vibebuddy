@@ -22,7 +22,7 @@ public struct MenuState: Equatable {
         let deviceLine: String
         if device.connected {
             let build = device.firmwareBuild.map { String($0.split(separator: " ").first ?? "") } ?? "?"
-            deviceLine = "已连接 · 固件 \(build)"
+            deviceLine = "盒子在线 · 固件 \(build)"
         } else {
             deviceLine = "未找到盒子"
         }

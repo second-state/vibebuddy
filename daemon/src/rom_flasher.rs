@@ -13,7 +13,6 @@ use serialport::SerialPort;
 
 const BAUD: u32 = 115_200;
 const BLOCK_BYTES: usize = 256;
-const PACE_PIECE_BYTES: usize = 128;
 const SLIP_END: u8 = 0xC0;
 const SLIP_ESC: u8 = 0xDB;
 const SLIP_ESC_END: u8 = 0xDC;
@@ -161,12 +160,10 @@ impl RomFlasher {
             self.port.write_all(bytes).map_err(|error| error.to_string())?;
             return self.port.flush().map_err(|error| error.to_string());
         }
-        for piece in bytes.chunks(PACE_PIECE_BYTES) {
+        for piece in bytes.chunks(crate::serial_transport::PACE_PIECE_BYTES) {
             self.port.write_all(piece).map_err(|error| error.to_string())?;
             self.port.flush().map_err(|error| error.to_string())?;
-            std::thread::sleep(Duration::from_micros(
-                piece.len() as u64 * 10 * 1_000_000 / u64::from(BAUD) + 1_000,
-            ));
+            std::thread::sleep(crate::serial_transport::piece_delay(piece.len()));
         }
         Ok(())
     }

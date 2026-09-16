@@ -4,7 +4,7 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use beacon_protocol::{Event, VERSION};
+use beacon_protocol::Event;
 use tokio::sync::broadcast;
 
 use crate::serial_transport::{DeviceMessage, Transport};
@@ -73,15 +73,9 @@ pub async fn capture(
     transport: Arc<dyn Transport>,
     mut bus: broadcast::Receiver<DeviceMessage>,
 ) -> Result<Frame, String> {
-    let request = Event {
-        version: VERSION,
-        event: "device.screenshot".to_owned(),
-        id: None,
-        title: None,
-        message: None,
-        extra: Default::default(),
-    };
-    let frame = request.to_ndjson().map_err(|error| error.to_string())?;
+    let frame = Event::named("device.screenshot")
+        .to_ndjson()
+        .map_err(|error| error.to_string())?;
     transport.send(frame).map_err(|error| format!("{error:?}"))?;
 
     let deadline = tokio::time::Instant::now() + TIMEOUT;

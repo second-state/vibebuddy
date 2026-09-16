@@ -22,7 +22,6 @@ const CONNECT_SETTLE_DELAY: Duration = Duration::from_millis(1_500);
 /// 就被冲掉——每 384 字节丢 32 字节再把后面 32 字节重复一遍，长度不变、
 /// 内容错位。设备侧用直接轮询 FIFO 的对照实验证明无辜。桥接时按线速分段，
 /// 每段写完等它在线上走完再写下一段。
-const PACE_PIECE_BYTES: usize = 128;
 const PACE_MARGIN: Duration = Duration::from_millis(1);
 
 /// 设备到 Mac 的一切：JSON 事件、诊断行，以及链路本身的连与断。
@@ -99,10 +98,19 @@ async fn serial_worker(
 
     loop {
         if *suspend.borrow() {
-            // 烧录期间不碰串口；也不攒队列里的旧帧，设备重启后它们已经过时。
+            // 烧录期间不碰串口，也不攒帧：心跳照旧在发，设备重启后它们都过时了。
             pending.clear();
-            if suspend.changed().await.is_err() {
-                return;
+            tokio::select! {
+                changed = suspend.changed() => {
+                    if changed.is_err() {
+                        return;
+                    }
+                }
+                frame = receiver.recv() => {
+                    if frame.is_none() {
+                        return;
+                    }
+                }
             }
             continue;
         }
@@ -202,29 +210,42 @@ async fn write_frame(port: &mut SerialStream, frame: &[u8], paced: bool) -> std:
     Ok(())
 }
 
-/// 这么多字节在 115200 波特下需要多久走完，外加一点余量。
-fn piece_delay(bytes: usize) -> Duration {
+/// 这么多字节在 115200 波特下需要多久走完，外加一点余量。烧录走的是另一条
+/// 同步的串口路径，用同一个算法。
+pub fn piece_delay(bytes: usize) -> Duration {
     Duration::from_micros(bytes as u64 * 10 * 1_000_000 / u64::from(BAUD_RATE)) + PACE_MARGIN
 }
+
+/// 桥接时每次最多写这么多字节再等它走完。
+pub const PACE_PIECE_BYTES: usize = 128;
 
 /// 只有 BOX 的 UART 桥需要分段；乐鑫原生 USB 口自己有流控。
 fn needs_pacing(vid: u16, pid: u16) -> bool {
     (vid, pid) == (QINHENG_VID, USB_SINGLE_SERIAL_PID)
 }
 
+#[derive(Clone)]
 struct PortChoice {
     name: String,
     paced: bool,
 }
 
 fn find_port(config: &SerialConfig) -> Result<Option<PortChoice>, String> {
+    let ports = tokio_serial::available_ports().map_err(|error| error.to_string())?;
     if let Some(port) = &config.explicit_port {
-        // 指定端口时不知道它背后是什么，按最保守的桥接节奏发。
-        return Ok(Some(PortChoice { name: port.clone(), paced: true }));
+        // 指定端口时照样查它的 VID/PID 决定节奏；系统里查不到就按最保守的桥接算。
+        let paced = ports
+            .iter()
+            .find(|candidate| &candidate.port_name == port)
+            .and_then(|candidate| match &candidate.port_type {
+                SerialPortType::UsbPort(info) => Some(needs_pacing(info.vid, info.pid)),
+                _ => None,
+            })
+            .unwrap_or(true);
+        return Ok(Some(PortChoice { name: port.clone(), paced }));
     }
 
-    let ports = tokio_serial::available_ports().map_err(|error| error.to_string())?;
-    let mut matches: Vec<(String, bool)> = ports
+    let mut matches: Vec<PortChoice> = ports
         .into_iter()
         .filter_map(|port| match port.port_type {
             SerialPortType::UsbPort(info)
@@ -235,29 +256,29 @@ fn find_port(config: &SerialConfig) -> Result<Option<PortChoice>, String> {
                             .is_some_and(|actual| serials_equal(actual, expected))
                     }) =>
             {
-                Some((port.port_name, needs_pacing(info.vid, info.pid)))
+                Some(PortChoice { name: port.port_name, paced: needs_pacing(info.vid, info.pid) })
             }
             _ => None,
         })
         .collect();
 
-    let callout_matches: Vec<(String, bool)> = matches
+    let callout_matches: Vec<PortChoice> = matches
         .iter()
-        .filter(|(port, _)| port.starts_with("/dev/cu."))
+        .filter(|choice| choice.name.starts_with("/dev/cu."))
         .cloned()
         .collect();
     if !callout_matches.is_empty() {
         matches = callout_matches;
     }
-    matches.sort();
-    matches.dedup();
+    matches.sort_by(|left, right| left.name.cmp(&right.name));
+    matches.dedup_by(|left, right| left.name == right.name);
 
     match matches.as_slice() {
         [] => Ok(None),
-        [(port, paced)] => Ok(Some(PortChoice { name: port.clone(), paced: *paced })),
-        ports => Err(format!(
+        [choice] => Ok(Some(choice.clone())),
+        choices => Err(format!(
             "找到多个匹配设备：{}",
-            ports.iter().map(|(port, _)| port.as_str()).collect::<Vec<_>>().join(", ")
+            choices.iter().map(|choice| choice.name.as_str()).collect::<Vec<_>>().join(", ")
         )),
     }
 }

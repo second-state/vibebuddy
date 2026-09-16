@@ -12,4 +12,4 @@ Mac 端此前只有 LaunchAgent 常驻的 `beacond`，配置靠环境变量，�
 
 ## 后果
 
-仓库多一门 Swift，Xcode 工程入库。退出 App 盒子就离线，是有意为之。仓库名、bundle id `com.agentbeacon.app`、Application Support 路径沿用旧名。
+仓库多一门 Swift。原定 Xcode 工程入库，2026-09-16 实施时改为 SwiftPM 包（`app/Package.swift`）加装包脚本：本机只有命令行工具，`xcodebuild` 不可用，而 `swift build` 能编 SwiftUI 与 AppKit；装了 Xcode 可直接打开 Package.swift，决定本身（原生 SwiftUI 加 Rust helper）不变。退出 App 盒子就离线，是有意为之。仓库名、bundle id `com.agentbeacon.app`、Application Support 路径沿用旧名。
