@@ -72,7 +72,8 @@ struct HookInstaller {
             if manager.fileExists(atPath: backup.path) { try manager.removeItem(at: backup) }
             try manager.copyItem(at: plan.configURL, to: backup)
         }
-        let data = try JSONSerialization.data(withJSONObject: plan.after, options: [.prettyPrinted, .sortedKeys])
+        // 不转义斜杠：JSONSerialization 默认把 / 写成 \/，路径会难看得像被咬过。
+        let data = try JSONSerialization.data(withJSONObject: plan.after, options: [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes])
         try data.write(to: plan.configURL, options: .atomic)
     }
 }
