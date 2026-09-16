@@ -52,6 +52,12 @@ Codex 的子 Agent 有自己的生命周期 `session_id`，但这个内部线程
 
 ## 后台运行
 
+## 后台会话
+
+Codex 会为自己的后台会话触发同一套 Hook，典型的是每个回合结束后生成 ambient suggestions 的那次运行：它没有工作目录，`~/.codex/state_5.sqlite` 的 `threads` 表里也没有它的 id。2026-09-16 实测它紧跟在一个真回合之后结束，于是设备连播两次"任务完成"，K2 又把它当作最近播报的那件事，打开 `codex://threads/<id>` 得到一个空白会话。
+
+`beacond` 因此在入口处过滤：没有可用工作目录、且线程表里查不到的 Codex 会话一律忽略（记一行 info），不出卡片、不播报、不做 K2 落点。两个条件缺一不可——刚建立的真会话可能还没来得及写进线程表，但它有工作目录。K2 打开前还会再核对一次线程存在，不存在就跳到下一个候选。`tools/codex-hook.py` 另在 `~/Library/Logs/AgentBeacon/codex-hooks.log` 留一行不含 prompt 的诊断记录（事件名、会话与线程 id、目录、transcript 有无），下次再冒出来路不明的会话时用它看 Hook 到底收到了什么。
+
 `beacond` 的 release binary 由 `~/Library/LaunchAgents/com.agentbeacon.beacond.plist` 在登录后自动启动，并在异常退出后重启。日志写入 `~/Library/Logs/AgentBeacon/beacond.log`。USB 设备暂时不存在时进程保持运行并定期重新发现，Hook 不需要感知拔插。
 
 更新 daemon 后执行 `cargo build --release -p beacond`，再用 `launchctl kickstart -k gui/502/com.agentbeacon.beacond` 重启服务。烧录固件前先停止该服务，避免它占用串口。

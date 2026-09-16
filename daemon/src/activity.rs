@@ -174,21 +174,28 @@ impl ActivityTracker {
     /// 工作项之前，并一直保持到下一次播报——用户是听到播报才去按的键，而那
     /// 件事此刻已经不在屏幕上了。
     pub fn focus_source(&self) -> Option<ActivitySource> {
+        self.focus_sources().into_iter().next()
+    }
+
+    /// K2 的候选落点，按优先级排列、去重。第一个打不开（例如线程已不存在）
+    /// 就试下一个，而不是打开一个空白窗口。
+    pub fn focus_sources(&self) -> Vec<ActivitySource> {
+        let mut sources: Vec<ActivitySource> = Vec::new();
+        let mut push = |source: Option<ActivitySource>| {
+            if let Some(source) = source
+                && !sources.contains(&source)
+            {
+                sources.push(source);
+            }
+        };
         // 有任务在等人回答，那件事最急，先去那里。
-        if let Some(waiting) = self.waiting_activity()
-            && let Some(source) = waiting.source.clone()
-        {
-            return Some(source);
-        }
+        push(self.waiting_activity().and_then(|waiting| waiting.source.clone()));
         // 播报过结束的那件事已经离开卡片栈，屏幕上再也看不到它；而还在跑的
         // 任务一直挂在屏幕上，本来就不需要 K2 帮忙定位。
-        if let Some(source) = &self.recently_announced {
-            return Some(source.clone());
-        }
-        match self.focused_activity() {
-            Some(activity) => activity.source.clone(),
-            None => self.last_source.clone(),
-        }
+        push(self.recently_announced.clone());
+        push(self.focused_activity().and_then(|activity| activity.source.clone()));
+        push(self.last_source.clone());
+        sources
     }
 
     /// 记录活动的当前状态，返回需要下发的可见状态。

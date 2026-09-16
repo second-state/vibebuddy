@@ -43,6 +43,17 @@ pub fn apply(
     // 本地分支，再没有才是项目名。
     let project = project_name(cwd);
     let thread_id = hook.thread_id.clone().unwrap_or_else(|| hook.session_id.clone());
+    // Codex 的后台会话（回合结束后生成 ambient suggestions 的那种）也触发
+    // 同一套 Hook：没有工作目录，线程表里也没有它。它不是用户的活动，
+    // 不该有卡片、不该播报，更不该成为 K2 的落点——打开它是一个空白会话。
+    if project.is_none() && titles.codex_thread_known(&thread_id) == Some(false) {
+        tracing::info!(
+            session = %hook.session_id,
+            event = %hook.hook_event_name,
+            "忽略没有线程的 Codex 后台会话"
+        );
+        return None;
+    }
     let candidates = [titles.codex(&thread_id), cwd.and_then(git_branch)];
     let title = card_title(PREFIX, &candidates, project.as_deref(), FALLBACK_TITLE);
     tracker.note_project(&id, &display_title("", project.as_deref().unwrap_or(FALLBACK_TITLE), FALLBACK_TITLE));
@@ -91,6 +102,57 @@ mod tests {
     use serde_json::json;
 
     use super::*;
+
+    #[test]
+    fn background_sessions_without_a_thread_are_ignored() {
+        let dir = std::env::temp_dir().join(format!("codex-ghost-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let db = dir.join("state.sqlite");
+        rusqlite::Connection::open(&db)
+            .unwrap()
+            .execute_batch(
+                "CREATE TABLE threads (id TEXT PRIMARY KEY, name TEXT, git_branch TEXT);
+                 INSERT INTO threads VALUES ('real-thread', 'Review', NULL);",
+            )
+            .unwrap();
+        let mut titles = SessionTitles::with_codex_db(db);
+        let mut tracker = ActivityTracker::default();
+
+        let ghost = CodexHook {
+            session_id: "ghost".to_owned(),
+            turn_id: Some("t1".to_owned()),
+            thread_id: Some("ghost".to_owned()),
+            hook_event_name: "UserPromptSubmit".to_owned(),
+            cwd: None,
+            response_kind: None,
+        };
+        assert!(apply(&mut tracker, &mut titles, ghost).is_none());
+        assert!(tracker.focus_source().is_none());
+
+        // 有工作目录的会话照常，即便线程表暂时还没有它。
+        let fresh = CodexHook {
+            session_id: "fresh".to_owned(),
+            turn_id: Some("t1".to_owned()),
+            thread_id: Some("fresh".to_owned()),
+            hook_event_name: "UserPromptSubmit".to_owned(),
+            cwd: Some("/work/agent-beacon".to_owned()),
+            response_kind: None,
+        };
+        assert!(apply(&mut tracker, &mut titles, fresh).is_some());
+
+        // 线程表里有的会话，没有工作目录也算数。
+        let known = CodexHook {
+            session_id: "real-thread".to_owned(),
+            turn_id: Some("t1".to_owned()),
+            thread_id: Some("real-thread".to_owned()),
+            hook_event_name: "UserPromptSubmit".to_owned(),
+            cwd: None,
+            response_kind: None,
+        };
+        let event = apply(&mut tracker, &mut titles, known).expect("已知线程应可见");
+        assert_eq!(event.title.as_deref(), Some("CX:REVIEW"));
+    }
 
     fn hook(session: &str, name: &str, cwd: &str) -> CodexHook {
         hook_with_turn(session, &format!("{session}-turn"), name, cwd)

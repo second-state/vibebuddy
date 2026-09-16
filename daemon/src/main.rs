@@ -12,7 +12,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 
-use activity::ActivityTracker;
+use activity::{ActivitySource, ActivityTracker};
 use axum::extract::State;
 use axum::http::StatusCode;
 use axum::routing::post;
@@ -99,15 +99,27 @@ async fn handle_device_events(state: AppState, mut events: tokio::sync::mpsc::Re
             info!(event = %event.event, "忽略未绑定的设备事件");
             continue;
         }
-        let source = state.activities.lock().await.focus_source();
-        let Some(source) = source else {
+        let sources = state.activities.lock().await.focus_sources();
+        if sources.is_empty() {
             info!("K2 已按下，但当前没有可打开的活动");
             continue;
-        };
-        match source_opener::open(source).await {
-            // 记下链接本身：跳错地方时，日志要能直接说出跳去了哪儿。
-            Ok(link) => info!(%link, "K2 已打开当前活动来源"),
-            Err(error) => warn!(%error, "K2 打开来源失败"),
+        }
+        for source in sources {
+            // Codex 线程要先确认还在：打开一个不存在的线程得到的是空白会话。
+            if let ActivitySource::Codex { thread_id } = &source
+                && state.titles.lock().await.codex_thread_known(thread_id) == Some(false)
+            {
+                warn!(%thread_id, "K2 跳过不存在的 Codex 线程");
+                continue;
+            }
+            match source_opener::open(source).await {
+                // 记下链接本身：跳错地方时，日志要能直接说出跳去了哪儿。
+                Ok(link) => {
+                    info!(%link, "K2 已打开当前活动来源");
+                    break;
+                }
+                Err(error) => warn!(%error, "K2 打开来源失败，试下一个候选"),
+            }
         }
     }
 }

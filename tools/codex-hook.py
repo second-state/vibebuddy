@@ -75,12 +75,52 @@ def sanitized_payload(source: object) -> dict[str, str]:
     return payload
 
 
+def trace(source: object, payload: dict[str, str]) -> None:
+    """一行诊断记到本机日志：只有身份、事件名和目录，没有 prompt。
+
+    Codex 会为后台会话（例如 ambient suggestions）也触发 Hook，这些会话
+    没有可打开的线程；出了问题得能看到 Hook 到底收到了什么。"""
+    try:
+        source = source if isinstance(source, dict) else {}
+        transcript = source.get("transcript_path")
+        thread_source = "-"
+        if isinstance(transcript, str):
+            try:
+                with Path(transcript).open(encoding="utf-8") as handle:
+                    metadata = json.loads(handle.readline())
+                thread_source = str(
+                    (metadata.get("payload") or {}).get("thread_source")
+                    if isinstance(metadata, dict)
+                    else "-"
+                )
+            except (OSError, ValueError):
+                thread_source = "unreadable"
+        log_dir = Path.home() / "Library" / "Logs" / "AgentBeacon"
+        log_dir.mkdir(parents=True, exist_ok=True)
+        with (log_dir / "codex-hooks.log").open("a", encoding="utf-8") as log:
+            log.write(
+                "{} {} session={} thread={} cwd={} transcript={} thread_source={} keys={}\n".format(
+                    __import__("datetime").datetime.now().strftime("%m-%d %H:%M:%S"),
+                    payload.get("hook_event_name", "?"),
+                    payload.get("session_id", "?")[:13],
+                    payload.get("thread_id", "-")[:13],
+                    payload.get("cwd", "-"),
+                    "yes" if isinstance(transcript, str) else "no",
+                    thread_source,
+                    ",".join(sorted(k for k in source if k not in ("last_assistant_message",))),
+                )
+            )
+    except Exception:  # 诊断不能影响主流程
+        pass
+
+
 def main() -> int:
     try:
         source = json.load(sys.stdin)
         payload = sanitized_payload(source)
         if not payload:
             return 0
+        trace(source, payload)
         request = urllib.request.Request(
             ENDPOINT,
             data=json.dumps(payload, separators=(",", ":")).encode("utf-8"),

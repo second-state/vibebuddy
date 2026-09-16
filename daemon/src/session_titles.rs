@@ -25,6 +25,9 @@ pub struct SessionTitles {
     enabled: bool,
     codex_db: Option<PathBuf>,
     cache: HashMap<String, Cached>,
+    /// 线程是否存在于 Codex 的线程表；没查到的也缓存，免得后台会话每个
+    /// Hook 都开一次数据库。
+    known: HashMap<String, (Option<bool>, Instant)>,
 }
 
 struct Cached {
@@ -39,16 +42,52 @@ impl SessionTitles {
             enabled: true,
             codex_db: home.map(|home| home.join(CODEX_STATE_DB)),
             cache: HashMap::new(),
+            known: HashMap::new(),
         }
     }
 
-    /// 测试用：什么都查不到，标题退回分支或项目名。
+    /// 测试用：什么都查不到，标题退回分支或项目名，线程一律当作存在。
     pub fn disabled() -> Self {
         Self {
             enabled: false,
             codex_db: None,
             cache: HashMap::new(),
+            known: HashMap::new(),
         }
+    }
+
+    /// 测试用：指定 Codex 状态库的位置。
+    #[cfg(test)]
+    pub fn with_codex_db(db: PathBuf) -> Self {
+        Self {
+            enabled: true,
+            codex_db: Some(db),
+            cache: HashMap::new(),
+            known: HashMap::new(),
+        }
+    }
+
+    /// 这个线程是否存在于 Codex 的线程表。查不了（库不在、打不开）返回 None，
+    /// 调用方按“存在”处理：宁可多显示一个后台会话，也不能把真会话滤掉。
+    pub fn codex_thread_known(&mut self, thread_id: &str) -> Option<bool> {
+        if !self.enabled {
+            return None;
+        }
+        let db = self.codex_db.clone()?;
+        let now = Instant::now();
+        if let Some((known, checked_at)) = self.known.get(thread_id) {
+            let ttl = if *known == Some(true) {
+                REFRESH_RESOLVED
+            } else {
+                RETRY_UNRESOLVED
+            };
+            if now.duration_since(*checked_at) < ttl {
+                return *known;
+            }
+        }
+        let known = codex_thread_exists(&db, thread_id);
+        self.known.insert(thread_id.to_owned(), (known, now));
+        known
     }
 
     /// Claude App 给这个会话起的标题。终端里直接跑的会话没有记录。
@@ -114,6 +153,23 @@ pub fn codex_thread_title(db: &Path, thread_id: &str) -> Option<String> {
     name.filter(|name| !name.trim().is_empty())
         .or_else(|| branch.filter(|branch| is_feature_branch(branch)))
         .map(|value| branch_tail(&value))
+}
+
+/// 线程表里有没有这个 id。库打不开时返回 None。
+pub fn codex_thread_exists(db: &Path, thread_id: &str) -> Option<bool> {
+    let connection = rusqlite::Connection::open_with_flags(
+        db,
+        OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NO_MUTEX,
+    )
+    .ok()?;
+    connection
+        .query_row(
+            "SELECT COUNT(*) FROM threads WHERE id = ?1",
+            [thread_id],
+            |row| row.get::<_, i64>(0),
+        )
+        .ok()
+        .map(|count| count > 0)
 }
 
 /// 工作目录所在的分支；主分支说明不了任务，不算。
@@ -228,6 +284,28 @@ mod tests {
         assert_eq!(codex_thread_title(&db, "bare"), None);
         assert_eq!(codex_thread_title(&db, "missing"), None);
         assert_eq!(codex_thread_title(&dir.join("absent.sqlite"), "named"), None);
+    }
+
+    #[test]
+    fn thread_existence_is_checked_against_the_thread_table() {
+        let dir = temp_dir("known");
+        let db = dir.join("state.sqlite");
+        let connection = rusqlite::Connection::open(&db).unwrap();
+        connection
+            .execute_batch(
+                "CREATE TABLE threads (id TEXT PRIMARY KEY, name TEXT, git_branch TEXT);
+                 INSERT INTO threads VALUES ('real', NULL, NULL);",
+            )
+            .unwrap();
+        drop(connection);
+        assert_eq!(codex_thread_exists(&db, "real"), Some(true));
+        assert_eq!(codex_thread_exists(&db, "ghost"), Some(false));
+        assert_eq!(codex_thread_exists(&dir.join("absent.sqlite"), "real"), None);
+
+        let mut titles = SessionTitles::with_codex_db(db);
+        assert_eq!(titles.codex_thread_known("real"), Some(true));
+        assert_eq!(titles.codex_thread_known("ghost"), Some(false));
+        assert_eq!(SessionTitles::disabled().codex_thread_known("ghost"), None);
     }
 
     #[test]
