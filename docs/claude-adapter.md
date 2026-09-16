@@ -93,3 +93,7 @@ Hook 的原始载荷含 `prompt`、`tool_input`、`tool_response`、`transcript_
 ```
 
 Hook 保持同步执行，不使用 `async`。异步会让事件乱序到达，而活动模型依赖顺序：迟到的 `PostToolUse` 会让已经结束的 Turn 复活。脚本本身 0.5 秒超时且失败静默，正常情况下往返不足 10 毫秒。`SessionEnd` 的所有 Hook 共享 1.5 秒预算，0.5 秒的上限在其中是安全的。
+
+## beacon-hook
+
+2026-09-16 起 Hook 由 Rust 二进制 `beacon-hook claude` 处理（源码在 `hook/`），行为与 `tools/claude-hook.py` 一致，测试用例逐条搬了过去。App 把它复制到 `~/Library/Application Support/AgentBeacon/bin/beacon-hook`，配置里的命令写作 `"<那个路径>" claude`；手工配置时也用这个路径，别指向 App 包内，App 挪位置会断（ADR-0005）。

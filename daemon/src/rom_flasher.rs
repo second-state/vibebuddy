@@ -241,8 +241,17 @@ impl RomFlasher {
     }
 
     fn call(&mut self, op: u8, data: &[u8], checksum: u32, timeout: Duration) -> Result<Response, String> {
+        let started = Instant::now();
         self.write_paced(&slip_encode(&command(op, data, checksum)))?;
-        self.read_response(op, timeout)
+        let written = started.elapsed();
+        let response = self.read_response(op, timeout);
+        tracing::debug!(
+            op,
+            write_ms = written.as_millis() as u64,
+            wait_ms = (started.elapsed() - written).as_millis() as u64,
+            "ROM 命令"
+        );
+        response
     }
 
     fn sync(&mut self) -> Result<(), String> {
@@ -289,6 +298,14 @@ impl RomFlasher {
             }
             data.extend_from_slice(&padded);
             self.call(OP_FLASH_DATA, &data, checksum(&padded), Duration::from_secs(5))?;
+            if (index + 1) % 256 == 0 {
+                tracing::info!(
+                    address = format_args!("{:#x}", segment.address),
+                    blocks = index + 1,
+                    ms_per_block = started.elapsed().as_millis() as u64 / (index as u64 + 1),
+                    "烧录进度"
+                );
+            }
             (progress.on_progress)(
                 (index + 1) as f32 / blocks as f32,
                 &format!(

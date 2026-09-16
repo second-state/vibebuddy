@@ -69,3 +69,7 @@ Codex 会为自己的后台会话触发同一套 Hook，典型的是每个回合
 - Hook 直接给出语义事件，数据更少，延迟更低，也更容易测试。
 
 未来若 Codex App Server 提供可附着的稳定桌面会话流，可增加第二种适配器以区分 `systemError`、等待审批和等待输入；当前桌面进程使用 stdio 子进程，不能假定外部 daemon 可以附着。
+
+## beacon-hook
+
+2026-09-16 起 Hook 由 Rust 二进制 `beacon-hook codex` 处理（源码在 `hook/`），行为与 `tools/codex-hook.py` 一致，测试用例逐条搬了过去。App 把它复制到 `~/Library/Application Support/AgentBeacon/bin/beacon-hook`，配置里的命令写作 `"<那个路径>" codex`；手工配置时也用这个路径，别指向 App 包内，App 挪位置会断（ADR-0005）。

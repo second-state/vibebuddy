@@ -93,6 +93,13 @@ App 附带与之配套的固件三件套（bootloader、分区表、app）。Rel
 
 页脚第二行标签从 `DAEMON` 改为 `APP`，值是 App 版本加构建号。链路断开时不清掉，跟着整屏变灰：断开时最有价值的信息恰恰是"上次连的是哪个版本"。
 
+## 实现记录（2026-09-16）
+
+- 构建用 SwiftPM 加装包脚本，不是 Xcode 工程：本机只有命令行工具，`xcodebuild` 不可用，而 `swift build` 能编 SwiftUI 与 AppKit；装了 Xcode 可直接打开 `app/Package.swift`。命令行工具也没有 XCTest 和 swift-testing，视图模型的缝用 `swift run --package-path app SelfTest` 的断言自检守着。
+- 固件烧录不用 espflash：它的 ROM 写块固定 1 KB、串口对象是具体类型没法包装，过不了 UART 桥；daemon 自己实现 ROM 下载协议，块 256 字节、桥接时按线速分段，MD5 校验后硬复位。
+- 语音包分块写入在桥上约 5 KB/s（1.2 MB 四分钟），比设计里估的慢一些；瓶颈是停等回执加 115200 波特，原生 USB 口快得多。
+- 设备连上先收 `device.hello`，把模式、固件构建号、音色重报一遍；否则 daemon 重启后什么都不知道。
+
 ## 明确不做
 
 - **静音**：只在设备上长按 K2，Mac 不记、不显示、不代切。

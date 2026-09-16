@@ -72,6 +72,20 @@ launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.agentbeacon.beacond.
 
 `flash.sh` 会覆盖当前固件。2026-09-14 的原厂 `xiaozhi` 1.9.4 整片备份保存在本机 `.probe/factory/`，权限为 `600`，不会提交到 Git。
 
+## Vibe Buddy App
+
+Mac 端的图形界面是一个菜单栏 App，它把 `beacond` 与 `beacon-hook` 带在身上并看管 daemon，取代了 LaunchAgent。装包：
+
+```bash
+idf.py -C firmware build          # Release 装包要附带固件三件套；--debug 可以不带
+app/scripts/build-app.sh          # 出 app/build/Vibe Buddy.app
+open "app/build/Vibe Buddy.app"
+```
+
+首次启动走引导：找盒子（眨眼确认）、接入 Codex 与 Claude Code（写 Hook 配置前展示差异）、挑播报音色写进盒子、登录时启动。之后菜单栏图标回答"盒子在线吗、什么模式、今天干了多少"，设置窗五页管通用、声音、接入、设备（固件更新、截图）、高级。发现旧的 LaunchAgent 会提议卸掉并接管。设计见 [`docs/app.md`](docs/app.md)。
+
+App 用 SwiftPM 构建，只需要命令行工具；`swift run --package-path app SelfTest` 跑视图模型的自检。
+
 ## Stage 2 daemon
 
 启动 `beacond`：
@@ -90,16 +104,20 @@ curl -H 'content-type: application/json' \
 
 可用 `BEACON_BIND` 修改监听地址、`BEACON_SERIAL_PORT` 显式指定串口，或用 `BEACON_USB_SERIAL` 在多块相同设备中选择目标。HTTP `202 Accepted` 表示事件进入有界发送队列；设备实际接收结果以 daemon 记录的设备响应为准。
 
-当前 Mac Studio 已安装 `com.agentbeacon.beacond` LaunchAgent，登录后会自动运行 release binary；配置模板在 [`packaging/com.agentbeacon.beacond.plist`](packaging/com.agentbeacon.beacond.plist)。
+daemon 由 Vibe Buddy App 看管（见上）。没有 App 的开发机可以用 [`packaging/com.agentbeacon.beacond.plist`](packaging/com.agentbeacon.beacond.plist) 装成 LaunchAgent，但两者不能同时跑，会抢串口。App 还提供 `GET /v1/status`、SSE `/v1/status/stream`、`/v1/config`、`/v1/device/{identify,screenshot,voice-pack,firmware}` 与 `/v1/daemon/restart`。
+
+经 BOX 的 CH343 UART 桥发送时 daemon 按线速分段写：这条桥一次吞不下超过两百字节的连续数据，会把内容错位而长度不变；原生 USB 口不受影响。教训见 [`LESSONS.md`](LESSONS.md)。
 
 ## Agent 接入
 
 Codex 与 Claude Code 都由本机 Hook 接入，各有一个隐私过滤脚本，两者写入同一个聚合器。任务卡标题带 Agent 前缀：Codex 为 `CX:`，Claude Code 为 `CC:`。第一行写 Agent 自己给会话起的名字（Claude App 的会话标题、Codex 的线程名或分支），第二行写项目名；会话没有名字时第一行就是项目名。项目名取自 git 项目根，因此在子目录或 worktree 中工作时显示的仍是项目名。
 
-- Codex：`~/.codex/hooks.json` 为六个事件配置 [`tools/codex-hook.py`](tools/codex-hook.py)，并在 Codex 的 `/hooks` 页面审查、信任配置；详见 [`docs/codex-adapter.md`](docs/codex-adapter.md)。
-- Claude Code：`~/.claude/settings.json` 为八个事件配置 [`tools/claude-hook.py`](tools/claude-hook.py)；详见 [`docs/claude-adapter.md`](docs/claude-adapter.md)。
+Hook 是一个 Rust 二进制 [`hook/`](hook/)（`beacon-hook codex` / `beacon-hook claude`），App 把它复制到 `~/Library/Application Support/AgentBeacon/bin/` 并写进用户级配置；不依赖 python3，App 挪位置也不断（ADR-0005）。
 
-两个脚本都只抽取会话与回合标识、事件名和工作目录，不转发 prompt、助手回复、transcript 或工具结果。判断助手是否在等待回答的规则由 [`tools/hook_filter.py`](tools/hook_filter.py) 共用。
+- Codex：`~/.codex/hooks.json` 的六个事件，写入后要在 Codex 的 `/hooks` 页面审查、信任；详见 [`docs/codex-adapter.md`](docs/codex-adapter.md)。
+- Claude Code：`~/.claude/settings.json` 的八个事件；详见 [`docs/claude-adapter.md`](docs/claude-adapter.md)。
+
+它只抽取会话与回合标识、事件名和工作目录，不转发 prompt、助手回复、transcript 或工具结果；判断助手是否在等待回答的规则两个 Agent 共用。`tools/codex-hook.py`、`tools/claude-hook.py` 是它的前身，配置还指着它们的机器在 App 的接入页点「修复」即可换过来，换完这两个脚本就可以删了。
 
 ## CI 接入
 
