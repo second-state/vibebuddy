@@ -127,5 +127,9 @@ int main(int argc, char **argv) {
 
   agent_display_set_link_lost(true);
   snapshot(directory, "pomodoro_no_link");
+  agent_display_set_link_lost(false);
+  agent_display_set_muted(true);
+  agent_display_set_mode(AGENT_MODE_DUTY);
+  snapshot(directory, "pet_muted");
   return EXIT_SUCCESS;
 }

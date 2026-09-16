@@ -172,5 +172,5 @@ void agent_buttons_tick(void) {
   emit(button_update(&k1, (port0 & XL9555_K1_MASK) == 0, now),
        AGENT_BUTTON_K1_SHORT, AGENT_BUTTON_K1_LONG, true);
   emit(button_update(&k2, (port0 & XL9555_K2_MASK) == 0, now),
-       AGENT_BUTTON_K2_SHORT, AGENT_BUTTON_K2_SHORT, false);
+       AGENT_BUTTON_K2_SHORT, AGENT_BUTTON_K2_LONG, true);
 }

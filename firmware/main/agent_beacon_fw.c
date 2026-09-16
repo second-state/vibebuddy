@@ -95,6 +95,23 @@ static void report_pomodoro(const char *what) {
   transport_write_value_line("POMODORO ", what);
 }
 
+/// 静音：长按 K2 翻转，不持久化。开会静了音忘记开回来，设备就哑好几天；
+/// 重启恢复有声比记住更安全，屏幕上的 MUTE 标记负责提醒。
+static bool muted;
+
+/// 所有语音都从这里出去，静音时只记一行日志。
+static void play_prompt(agent_audio_prompt_t prompt, const char *label) {
+  if (muted) {
+    transport_write_value_line("AUDIO MUTED ", label);
+    return;
+  }
+  if (agent_audio_play(prompt) != ESP_OK) {
+    transport_write_literal("AUDIO ERROR\n");
+  } else {
+    transport_write_value_line("AUDIO QUEUED ", label);
+  }
+}
+
 /// 当日记录变了就存一次，并报一行给 Mac 端。一天只有几次，NVS 不在乎。
 static void save_tally(void) {
   agent_pomodoro_tally_t tally;
@@ -133,6 +150,12 @@ static void on_button(agent_button_event_t event) {
   if (event == AGENT_BUTTON_K2_SHORT) {
     transport_write_literal(
         "{\"version\":1,\"event\":\"button\",\"button\":\"K2\",\"action\":\"press\"}\n");
+    return;
+  }
+  if (event == AGENT_BUTTON_K2_LONG) {
+    muted = !muted;
+    agent_display_set_muted(muted);
+    transport_write_literal(muted ? "MUTE ON\n" : "MUTE OFF\n");
     return;
   }
   if (event == AGENT_BUTTON_K1_SHORT) {
@@ -184,10 +207,8 @@ static void handle_pomodoro_transition(agent_pomodoro_transition_t transition) {
   if (focus_ended) {
     save_tally();
   }
-  if (agent_audio_play(focus_ended ? AGENT_AUDIO_FOCUS_DONE
-                                   : AGENT_AUDIO_BREAK_DONE) != ESP_OK) {
-    transport_write_literal("AUDIO ERROR\n");
-  }
+  play_prompt(focus_ended ? AGENT_AUDIO_FOCUS_DONE : AGENT_AUDIO_BREAK_DONE,
+              focus_ended ? "FOCUS_DONE" : "BREAK_DONE");
   show_pomodoro();
 }
 
@@ -319,7 +340,7 @@ static void show_event(const cJSON *message, const char *event,
   agent_display_task_t tasks[AGENT_DISPLAY_MAX_TASKS];
   size_t task_count = parse_tasks(message, tasks);
   agent_audio_prompt_t prompt = AGENT_AUDIO_INPUT_REQUIRED;
-  bool play_prompt = false;
+  bool should_play = false;
   const char *prompt_label = NULL;
   const char *state_label;
   if (strcmp(event, "task.start") == 0) {
@@ -334,14 +355,14 @@ static void show_event(const cJSON *message, const char *event,
     state = AGENT_DISPLAY_INPUT_REQUIRED;
     prompt = AGENT_AUDIO_INPUT_REQUIRED;
     prompt_label = "INPUT_REQUIRED";
-    play_prompt = true;
+    should_play = true;
     state_label = "INPUT REQUIRED";
     ready_scheduled = false;
   } else if (strcmp(event, "task.done") == 0) {
     state = AGENT_DISPLAY_DONE;
     prompt = AGENT_AUDIO_DONE;
     prompt_label = "DONE";
-    play_prompt = true;
+    should_play = true;
     state_label = "DONE";
     ready_scheduled = true;
     ready_deadline = xTaskGetTickCount() + pdMS_TO_TICKS(5000);
@@ -350,7 +371,7 @@ static void show_event(const cJSON *message, const char *event,
     state = AGENT_DISPLAY_FAILED;
     prompt = AGENT_AUDIO_FAILED;
     prompt_label = "FAILED";
-    play_prompt = true;
+    should_play = true;
     state_label = "FAILED";
     ready_scheduled = false;
   } else {
@@ -360,7 +381,7 @@ static void show_event(const cJSON *message, const char *event,
   const cJSON *suppress_audio =
       cJSON_GetObjectItemCaseSensitive(message, "suppress_audio");
   if (cJSON_IsTrue(suppress_audio)) {
-    play_prompt = false;
+    should_play = false;
     prompt_label = NULL;
   }
 
@@ -370,11 +391,11 @@ static void show_event(const cJSON *message, const char *event,
     if (strcmp(announcement->valuestring, "done") == 0) {
       prompt = AGENT_AUDIO_DONE;
       prompt_label = "DONE";
-      play_prompt = true;
+      should_play = true;
     } else if (strcmp(announcement->valuestring, "failed") == 0) {
       prompt = AGENT_AUDIO_FAILED;
       prompt_label = "FAILED";
-      play_prompt = true;
+      should_play = true;
     }
   }
 
@@ -383,12 +404,8 @@ static void show_event(const cJSON *message, const char *event,
   } else {
     transport_write_value_line("DISPLAY STATE ", state_label);
   }
-  if (play_prompt) {
-    if (agent_audio_play(prompt) != ESP_OK) {
-      transport_write_literal("AUDIO ERROR\n");
-    } else {
-      transport_write_value_line("AUDIO QUEUED ", prompt_label);
-    }
+  if (should_play) {
+    play_prompt(prompt, prompt_label);
   }
 }
 

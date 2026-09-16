@@ -156,6 +156,7 @@ static TickType_t next_animation_at;
 static bool backlight_on;
 /// 本帧提交前是否整体转暗：困倦期的画面。
 static bool render_dim;
+static bool muted;
 
 static uint32_t clock_ms(void);
 static void format_tally(char *out, size_t size, unsigned completed,
@@ -1138,6 +1139,9 @@ static esp_err_t render_current_state(void) {
   fill_rect(0, 0, DISPLAY_WIDTH, DISPLAY_HEIGHT, COLOR_BACKGROUND);
   fill_rect(0, 0, DISPLAY_WIDTH, 4, status_color);
   draw_text_centered(12, "Vibe Buddy", 2, COLOR_TEXT);
+  if (muted) {
+    draw_text(8, 15, "MUTE", 1, COLOR_INPUT, 4);
+  }
   if (current_mode == AGENT_MODE_POMODORO) {
     draw_pomodoro_scene(label, status_color);
   } else if (current_mode == AGENT_MODE_LEISURE) {
@@ -1293,6 +1297,16 @@ void agent_display_set_mode(agent_mode_t mode) {
 }
 
 agent_mode_t agent_display_mode(void) { return current_mode; }
+
+void agent_display_set_muted(bool value) {
+  if (muted == value) {
+    return;
+  }
+  muted = value;
+  if (display_ready) {
+    (void)render_current_state();
+  }
+}
 
 bool agent_display_agent_idle(void) {
   return current_state == AGENT_DISPLAY_IDLE && current_task_count == 0;

@@ -2,8 +2,8 @@
 
 #include "esp_err.h"
 
-/// 三个键各管一件事，与模式无关。短按都在松开时触发；K0 与 K1 按住超过
-/// 阈值会触发长按，且松开时不再算一次短按。
+/// 三个键各管一件事，与模式无关。短按都在松开时触发；按住超过阈值会
+/// 触发长按，且松开时不再算一次短按。
 typedef enum {
   /// K0（BOOT 键，GPIO0）：番茄钟的开始 / 暂停 / 继续。
   AGENT_BUTTON_K0_SHORT,
@@ -15,6 +15,8 @@ typedef enum {
   AGENT_BUTTON_K1_LONG,
   /// K2：打开当前来源，上报 Mac。
   AGENT_BUTTON_K2_SHORT,
+  /// K2 长按：静音开关。
+  AGENT_BUTTON_K2_LONG,
 } agent_button_event_t;
 
 typedef void (*agent_button_callback_t)(agent_button_event_t event);

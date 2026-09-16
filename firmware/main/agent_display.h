@@ -56,6 +56,9 @@ bool agent_display_agent_idle(void);
 /// 底层状态与任务卡保留，因为它们是最后已知的事实，只是不再可信。
 void agent_display_set_link_lost(bool lost);
 
+/// 静音时左上角常驻一个 MUTE 标记：静音是会被忘掉的状态，得一直看得见。
+void agent_display_set_muted(bool muted);
+
 /// 截图：把当前帧缓冲按行程编码逐行交给 `write_line`（不含换行）。
 /// 第一行 `SHOT BEGIN 320x240 BACKLIGHT ON|OFF`，中间每行若干段
 /// `rgb565:长度`，最后 `SHOT END`。
