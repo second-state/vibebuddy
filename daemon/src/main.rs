@@ -2,10 +2,14 @@ mod activity;
 mod ci;
 mod claude_hooks;
 mod codex_hooks;
+mod config;
 mod serial_transport;
 mod session_titles;
 mod source_opener;
+mod status;
+mod voice_writer;
 
+use std::convert::Infallible;
 use std::env;
 use std::net::SocketAddr;
 use std::path::PathBuf;
@@ -13,19 +17,25 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use activity::{ActivitySource, ActivityTracker};
-use axum::extract::State;
+use axum::body::Bytes;
+use axum::extract::{DefaultBodyLimit, State};
 use axum::http::StatusCode;
-use axum::routing::post;
+use axum::response::sse::{Event as SseEvent, KeepAlive, Sse};
+use axum::routing::{get, post};
 use axum::{Json, Router};
 use beacon_protocol::{Event, VERSION};
 use chrono::Timelike;
 use ci::CiWatcher;
 use claude_hooks::ClaudeHook;
 use codex_hooks::CodexHook;
+use config::Config;
 use serde::Serialize;
 use serial_transport::{DeviceMessage, SerialConfig, SerialTransport, Transport, TransportError};
 use session_titles::SessionTitles;
-use tokio::sync::Mutex;
+use status::{DaemonInfo, DeviceState, HooksSeen, Operation, OperationKind, OperationState, Status};
+use tokio::sync::{Mutex, broadcast};
+use tokio_stream::StreamExt;
+use tokio_stream::wrappers::BroadcastStream;
 use tracing::{info, warn};
 use tracing_subscriber::EnvFilter;
 
@@ -43,6 +53,85 @@ struct AppState {
     activities: Arc<Mutex<ActivityTracker>>,
     /// 会话标题的查询与缓存：Claude App 的会话标题、Codex 的线程名。
     titles: Arc<Mutex<SessionTitles>>,
+    /// 设备此刻的样子，从诊断行里拼出来。
+    device: Arc<Mutex<DeviceState>>,
+    hooks_seen: Arc<Mutex<HooksSeen>>,
+    config: Arc<Mutex<Config>>,
+    config_path: Option<PathBuf>,
+    /// 正在写语音包或烧固件；同一时刻只有一个。
+    operation: Arc<Mutex<Option<Operation>>>,
+    /// 设备消息的广播：写语音包、截图这些要等回执的操作各自订阅。
+    device_bus: broadcast::Sender<DeviceMessage>,
+    /// 状态变了就叫一声，状态流据此推一份新快照。
+    status_changed: broadcast::Sender<()>,
+    /// App 的版本，随心跳报给设备；没有 App 时为 None。
+    app_version: Option<String>,
+}
+
+impl AppState {
+    fn new(
+        transport: Arc<dyn Transport>,
+        activities: ActivityTracker,
+        titles: SessionTitles,
+        config_path: Option<PathBuf>,
+    ) -> Self {
+        let config = config_path
+            .as_deref()
+            .map(Config::load)
+            .unwrap_or_default();
+        let (device_bus, _) = broadcast::channel(1024);
+        let (status_changed, _) = broadcast::channel(64);
+        Self {
+            transport,
+            activities: Arc::new(Mutex::new(activities)),
+            titles: Arc::new(Mutex::new(titles)),
+            device: Arc::new(Mutex::new(DeviceState::default())),
+            hooks_seen: Arc::new(Mutex::new(HooksSeen::default())),
+            config: Arc::new(Mutex::new(config)),
+            config_path,
+            operation: Arc::new(Mutex::new(None)),
+            device_bus,
+            status_changed,
+            app_version: env::var("BEACON_APP_VERSION").ok().filter(|value| !value.is_empty()),
+        }
+    }
+
+    fn notify_status(&self) {
+        let _ = self.status_changed.send(());
+    }
+
+    async fn snapshot(&self) -> Status {
+        Status {
+            daemon: DaemonInfo {
+                build: build_identity(self.app_version.as_deref()),
+                app_version: self.app_version.clone(),
+            },
+            device: self.device.lock().await.clone(),
+            today: self.activities.lock().await.today(),
+            hooks: self.hooks_seen.lock().await.clone(),
+            operation: self.operation.lock().await.clone(),
+            config: self.config.lock().await.clone(),
+        }
+    }
+
+    async fn set_operation(&self, operation: Option<Operation>) {
+        *self.operation.lock().await = operation;
+        self.notify_status();
+    }
+
+    async fn save_config(&self, change: impl FnOnce(&mut Config)) {
+        let snapshot = {
+            let mut config = self.config.lock().await;
+            change(&mut config);
+            config.clone()
+        };
+        if let Some(path) = &self.config_path
+            && let Err(error) = snapshot.save(path)
+        {
+            warn!(%error, path = %path.display(), "配置保存失败");
+        }
+        self.notify_status();
+    }
 }
 
 #[derive(Serialize)]
@@ -71,11 +160,12 @@ async fn main() {
         Some(path) => ActivityTracker::with_stats_file(path),
         None => ActivityTracker::default(),
     };
-    let state = AppState {
+    let state = AppState::new(
         transport,
-        activities: Arc::new(Mutex::new(activities)),
-        titles: Arc::new(Mutex::new(SessionTitles::from_home())),
-    };
+        activities,
+        SessionTitles::from_home(),
+        config::config_file(),
+    );
     tokio::spawn(sweep_expired_activities(state.clone()));
     tokio::spawn(send_heartbeats(state.clone()));
     tokio::spawn(poll_ci(state.clone()));
@@ -98,17 +188,33 @@ async fn handle_device_events(
     mut events: tokio::sync::mpsc::Receiver<DeviceMessage>,
 ) {
     while let Some(message) = events.recv().await {
-        let DeviceMessage::Event(event) = message else {
-            continue;
-        };
-        if !is_k2_press(&event) {
-            info!(event = %event.event, "忽略未绑定的设备事件");
-            continue;
-        }
+        publish_device_message(&state, message).await;
+    }
+}
+
+/// 每条设备消息都走这里：更新设备状态、广播给等回执的操作，K2 则去开来源。
+/// 测试也从这里注入设备消息，所以它不能依赖串口。
+async fn publish_device_message(state: &AppState, message: DeviceMessage) {
+    if state.device.lock().await.apply(&message) {
+        state.notify_status();
+    }
+    let _ = state.device_bus.send(message.clone());
+    let DeviceMessage::Event(event) = message else {
+        return;
+    };
+    if is_k2_press(&event) {
+        open_k2_source(state).await;
+    } else if !event.event.starts_with("voice.") && event.event != "echo" {
+        info!(event = %event.event, "忽略未绑定的设备事件");
+    }
+}
+
+async fn open_k2_source(state: &AppState) {
+    {
         let sources = state.activities.lock().await.focus_sources();
         if sources.is_empty() {
             info!("K2 已按下，但当前没有可打开的活动");
-            continue;
+            return;
         }
         for source in sources {
             // Codex 线程要先确认还在：打开一个不存在的线程得到的是空白会话。
@@ -141,7 +247,7 @@ fn is_k2_press(event: &Event) -> bool {
 /// 时间戳取可执行文件的 mtime，不用编译期常量。`build.rs` 只在它声明的依赖
 /// 变化时才重跑；改一行源码重新链接时，编译期写下的时刻不会更新，正好在你
 /// 最需要它准的时候骗你。
-fn build_identity() -> String {
+fn build_identity(app_version: Option<&str>) -> String {
     let built = std::env::current_exe()
         .and_then(|path| path.metadata())
         .and_then(|metadata| metadata.modified())
@@ -152,7 +258,18 @@ fn build_identity() -> String {
                 .to_string()
         })
         .unwrap_or_default();
-    format!("{BUILD_REVISION} {built}").trim_end().to_owned()
+    build_identity_from(app_version, BUILD_REVISION, &built)
+}
+
+/// App 在时它的版本号排最前：设备页脚那一行就是 App 版本加构建号。
+fn build_identity_from(app_version: Option<&str>, revision: &str, built: &str) -> String {
+    let mut parts = Vec::new();
+    if let Some(version) = app_version {
+        parts.push(version);
+    }
+    parts.push(revision);
+    parts.push(built);
+    parts.join(" ").trim_end().to_owned()
 }
 
 /// 当日战绩的存放位置。缺少 `HOME` 时退回内存计数，不让 daemon 起不来。
@@ -169,7 +286,144 @@ fn app(state: AppState) -> Router {
         .route("/v1/events", post(post_event))
         .route("/v1/codex-hooks", post(post_codex_hook))
         .route("/v1/claude-hooks", post(post_claude_hook))
+        .route("/v1/status", get(get_status))
+        .route("/v1/status/stream", get(status_stream))
+        .route("/v1/config", get(get_config).put(put_config))
+        .route("/v1/device/identify", post(post_identify))
+        .route(
+            "/v1/device/voice-pack",
+            post(post_voice_pack).layer(DefaultBodyLimit::max(4 * 1024 * 1024)),
+        )
+        .route("/v1/daemon/restart", post(post_restart))
         .with_state(state)
+}
+
+async fn get_status(State(state): State<AppState>) -> Json<Status> {
+    Json(state.snapshot().await)
+}
+
+/// SSE：连上先推一份，之后状态一变再推一份完整快照。
+async fn status_stream(
+    State(state): State<AppState>,
+) -> Sse<impl tokio_stream::Stream<Item = Result<SseEvent, Infallible>>> {
+    let changes = BroadcastStream::new(state.status_changed.subscribe()).map(|_| ());
+    let stream = tokio_stream::once(()).chain(changes).then(move |()| {
+        let state = state.clone();
+        async move {
+            let status = state.snapshot().await;
+            let data = serde_json::to_string(&status).unwrap_or_default();
+            Ok(SseEvent::default().event("status").data(data))
+        }
+    });
+    Sse::new(stream).keep_alive(KeepAlive::default())
+}
+
+async fn get_config(State(state): State<AppState>) -> Json<Config> {
+    Json(state.config.lock().await.clone())
+}
+
+async fn put_config(State(state): State<AppState>, Json(config): Json<Config>) -> Json<Config> {
+    state.save_config(|current| *current = config).await;
+    Json(state.config.lock().await.clone())
+}
+
+fn device_command(name: &str) -> Event {
+    Event {
+        version: VERSION,
+        event: name.to_owned(),
+        id: None,
+        title: None,
+        message: None,
+        extra: Default::default(),
+    }
+}
+
+async fn post_identify(State(state): State<AppState>) -> (StatusCode, Json<ApiResponse>) {
+    post_event(State(state), Json(device_command("device.identify"))).await
+}
+
+/// 写语音包：请求体就是包本身。写入在后台跑，进度在状态流里。
+async fn post_voice_pack(
+    State(state): State<AppState>,
+    body: Bytes,
+) -> (StatusCode, Json<ApiResponse>) {
+    let Some(voice) = voice_writer::voice_id_of(&body) else {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(ApiResponse { accepted: false, message: "请求体不是语音包".to_owned() }),
+        );
+    };
+    {
+        let mut operation = state.operation.lock().await;
+        if matches!(&*operation, Some(current) if current.state == OperationState::Running) {
+            return (
+                StatusCode::CONFLICT,
+                Json(ApiResponse { accepted: false, message: "设备上已有操作在进行".to_owned() }),
+            );
+        }
+        *operation = Some(Operation {
+            kind: OperationKind::VoicePack,
+            state: OperationState::Running,
+            progress: 0.0,
+            message: format!("正在写入 {voice}"),
+        });
+    }
+    state.notify_status();
+    let bus = state.device_bus.subscribe();
+    let pack = body.to_vec();
+    let task_state = state.clone();
+    tokio::spawn(async move {
+        let progress_state = task_state.clone();
+        let result = voice_writer::write_pack(task_state.transport.clone(), bus, pack, move |fraction| {
+            let state = progress_state.clone();
+            tokio::spawn(async move {
+                if let Some(operation) = state.operation.lock().await.as_mut() {
+                    operation.progress = fraction;
+                }
+                state.notify_status();
+            });
+        })
+        .await;
+        match result {
+            Ok(written) => {
+                info!(voice = %written, "语音包已写入设备");
+                task_state.save_config(|config| config.voice = Some(written.clone())).await;
+                task_state
+                    .set_operation(Some(Operation {
+                        kind: OperationKind::VoicePack,
+                        state: OperationState::Done,
+                        progress: 1.0,
+                        message: format!("已写入 {written}"),
+                    }))
+                    .await;
+            }
+            Err(error) => {
+                warn!(%error, "语音包写入失败");
+                task_state
+                    .set_operation(Some(Operation {
+                        kind: OperationKind::VoicePack,
+                        state: OperationState::Failed,
+                        progress: 0.0,
+                        message: error,
+                    }))
+                    .await;
+            }
+        }
+    });
+    (
+        StatusCode::ACCEPTED,
+        Json(ApiResponse { accepted: true, message: format!("开始写入 {voice}") }),
+    )
+}
+
+/// App 看管 daemon：退出即重启。先把响应发出去再退。
+async fn post_restart() -> (StatusCode, Json<ApiResponse>) {
+    tokio::spawn(async {
+        tokio::time::sleep(Duration::from_millis(200)).await;
+        info!("按 App 的要求退出，等它重新拉起");
+        std::process::exit(0);
+    });
+    (StatusCode::ACCEPTED, Json(ApiResponse { accepted: true, message: "daemon 即将重启".to_owned() }))
 }
 
 /// 定期告诉设备链路还活着。
@@ -177,7 +431,7 @@ fn app(state: AppState) -> Router {
 /// 没有心跳时，daemon 崩溃或串口断开后设备会一直显示最后一个状态，
 /// 看上去任务仍在进行。状态设备最严重的失败是显示过时状态而不自知。
 async fn send_heartbeats(state: AppState) {
-    let build = build_identity();
+    let build = build_identity(state.app_version.as_deref());
     info!(build = %build, "Mac 端构建标识");
     let mut ticker = tokio::time::interval(HEARTBEAT_INTERVAL);
     loop {
@@ -323,6 +577,8 @@ async fn post_codex_hook(
     State(state): State<AppState>,
     Json(hook): Json<CodexHook>,
 ) -> (StatusCode, Json<ApiResponse>) {
+    state.hooks_seen.lock().await.codex = Some(chrono::Local::now());
+    state.notify_status();
     let event = {
         let mut tracker = state.activities.lock().await;
         let mut titles = state.titles.lock().await;
@@ -338,6 +594,8 @@ async fn post_claude_hook(
     State(state): State<AppState>,
     Json(hook): Json<ClaudeHook>,
 ) -> (StatusCode, Json<ApiResponse>) {
+    state.hooks_seen.lock().await.claude = Some(chrono::Local::now());
+    state.notify_status();
     let event = {
         let mut tracker = state.activities.lock().await;
         let mut titles = state.titles.lock().await;
@@ -380,6 +638,183 @@ mod tests {
         }
     }
 
+    impl RecordingTransport {
+        fn events(&self) -> Vec<Event> {
+            self.frames
+                .lock()
+                .expect("mutex 不应中毒")
+                .iter()
+                .map(|frame| serde_json::from_slice(frame).expect("帧应是合法事件"))
+                .collect()
+        }
+    }
+
+    fn test_state(transport: Arc<RecordingTransport>) -> AppState {
+        AppState::new(
+            transport,
+            ActivityTracker::default(),
+            SessionTitles::disabled(),
+            None,
+        )
+    }
+
+    fn device_event(json: &str) -> DeviceMessage {
+        DeviceMessage::Event(serde_json::from_str(json).expect("测试事件应可解析"))
+    }
+
+    /// 等记录型 Transport 里出现第 `index` 条事件。
+    async fn nth_event(transport: &RecordingTransport, index: usize) -> Event {
+        for _ in 0..200 {
+            if let Some(event) = transport.events().get(index) {
+                return event.clone();
+            }
+            tokio::time::sleep(Duration::from_millis(5)).await;
+        }
+        panic!("第 {index} 条事件迟迟没有出现");
+    }
+
+    #[test]
+    fn the_app_version_leads_the_build_identity() {
+        assert_eq!(
+            build_identity_from(Some("0.3.0"), "abc1234", "2026-09-16 10:50"),
+            "0.3.0 abc1234 2026-09-16 10:50"
+        );
+        assert_eq!(build_identity_from(None, "abc1234", ""), "abc1234");
+    }
+
+    #[tokio::test]
+    async fn status_reflects_device_lines_hooks_and_config() {
+        let transport = Arc::new(RecordingTransport::default());
+        let state = test_state(transport);
+        publish_device_message(&state, DeviceMessage::Connected { port: "/dev/cu.test".to_owned() }).await;
+        publish_device_message(&state, DeviceMessage::Line("MODE LEISURE".to_owned())).await;
+        publish_device_message(&state, DeviceMessage::Line("VOICES hsiaoyu".to_owned())).await;
+        state.hooks_seen.lock().await.codex = Some(chrono::Local::now());
+
+        let Json(status) = get_status(State(state.clone())).await;
+        assert!(status.device.connected);
+        assert_eq!(status.device.mode.as_deref(), Some("leisure"));
+        assert_eq!(status.device.voice.as_deref(), Some("hsiaoyu"));
+        assert!(status.hooks.codex.is_some());
+        assert!(status.hooks.claude.is_none());
+        assert_eq!(status.config, Config::default());
+        assert!(status.operation.is_none());
+    }
+
+    #[tokio::test]
+    async fn config_put_is_persisted_to_the_file() {
+        let dir = std::env::temp_dir().join(format!("beacond-config-{}", std::process::id()));
+        let path = dir.join("config.json");
+        let transport = Arc::new(RecordingTransport::default());
+        let state = AppState::new(
+            transport,
+            ActivityTracker::default(),
+            SessionTitles::disabled(),
+            Some(path.clone()),
+        );
+        let wanted = Config { voice: Some("hsiaochen".to_owned()), notify_link: false };
+        let Json(returned) = put_config(State(state.clone()), Json(wanted.clone())).await;
+        assert_eq!(returned, wanted);
+        assert_eq!(Config::load(&path), wanted);
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[tokio::test]
+    async fn identify_sends_the_device_command() {
+        let transport = Arc::new(RecordingTransport::default());
+        let (status, _) = post_identify(State(test_state(transport.clone()))).await;
+        assert_eq!(status, StatusCode::ACCEPTED);
+        assert_eq!(transport.events()[0].event, "device.identify");
+    }
+
+    fn sample_pack(voice: &str, payload_len: usize) -> Vec<u8> {
+        let mut pack = vec![0_u8; 256 + payload_len];
+        pack[0..4].copy_from_slice(b"VBVP");
+        pack[16..16 + voice.len()].copy_from_slice(voice.as_bytes());
+        for (index, byte) in pack[256..].iter_mut().enumerate() {
+            *byte = index as u8;
+        }
+        pack
+    }
+
+    #[tokio::test]
+    async fn writing_a_voice_pack_waits_for_each_acknowledgement() {
+        let transport = Arc::new(RecordingTransport::default());
+        let state = test_state(transport.clone());
+        let pack = sample_pack("hsiaoyu", 1000); // 1256 字节 → 两块
+
+        let (status, _) = post_voice_pack(State(state.clone()), Bytes::from(pack.clone())).await;
+        assert_eq!(status, StatusCode::ACCEPTED);
+
+        let begin = nth_event(&transport, 0).await;
+        assert_eq!(begin.event, "voice.begin");
+        assert_eq!(begin.extra["size"], 1256);
+        tokio::time::sleep(Duration::from_millis(20)).await;
+        assert_eq!(transport.events().len(), 1, "没收到 ready 之前不能发块");
+
+        publish_device_message(&state, device_event(r#"{"version":1,"event":"voice.ready","seq":-1}"#)).await;
+        let first = nth_event(&transport, 1).await;
+        assert_eq!(first.event, "voice.chunk");
+        assert_eq!(first.extra["seq"], 0);
+        assert_eq!(first.extra["crc"], crc32fast::hash(&pack[..672]));
+        tokio::time::sleep(Duration::from_millis(20)).await;
+        assert_eq!(transport.events().len(), 2, "没收到 ack 之前不能发下一块");
+
+        publish_device_message(&state, device_event(r#"{"version":1,"event":"voice.ack","seq":0}"#)).await;
+        let second = nth_event(&transport, 2).await;
+        assert_eq!(second.extra["seq"], 1);
+        assert_eq!(second.extra["crc"], crc32fast::hash(&pack[672..]));
+        publish_device_message(&state, device_event(r#"{"version":1,"event":"voice.ack","seq":1}"#)).await;
+        let end = nth_event(&transport, 3).await;
+        assert_eq!(end.event, "voice.end");
+
+        publish_device_message(&state, device_event(r#"{"version":1,"event":"voice.written","voice":"hsiaoyu"}"#)).await;
+        for _ in 0..200 {
+            if state.operation.lock().await.as_ref().map(|op| op.state) == Some(OperationState::Done) {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(5)).await;
+        }
+        let operation = state.operation.lock().await.clone().expect("应有操作记录");
+        assert_eq!(operation.state, OperationState::Done);
+        assert_eq!(state.config.lock().await.voice.as_deref(), Some("hsiaoyu"));
+    }
+
+    #[tokio::test]
+    async fn a_device_error_fails_the_voice_pack_operation() {
+        let transport = Arc::new(RecordingTransport::default());
+        let state = test_state(transport.clone());
+        let pack = sample_pack("hsiaoyu", 100);
+        let _ = post_voice_pack(State(state.clone()), Bytes::from(pack)).await;
+        nth_event(&transport, 0).await;
+        publish_device_message(
+            &state,
+            device_event(r#"{"version":1,"event":"voice.error","seq":-1,"message":"ESP_ERR_INVALID_SIZE"}"#),
+        )
+        .await;
+        for _ in 0..200 {
+            if state.operation.lock().await.as_ref().map(|op| op.state) == Some(OperationState::Failed) {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(5)).await;
+        }
+        let operation = state.operation.lock().await.clone().expect("应有操作记录");
+        assert_eq!(operation.state, OperationState::Failed);
+        assert!(operation.message.contains("ESP_ERR_INVALID_SIZE"), "{}", operation.message);
+        assert_eq!(state.config.lock().await.voice, None);
+    }
+
+    #[tokio::test]
+    async fn a_second_write_is_refused_while_one_is_running_and_garbage_is_rejected() {
+        let transport = Arc::new(RecordingTransport::default());
+        let state = test_state(transport.clone());
+        let (status, _) = post_voice_pack(State(state.clone()), Bytes::from_static(b"not a pack")).await;
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+        let _ = post_voice_pack(State(state.clone()), Bytes::from(sample_pack("a", 10))).await;
+        let (status, _) = post_voice_pack(State(state.clone()), Bytes::from(sample_pack("b", 10))).await;
+        assert_eq!(status, StatusCode::CONFLICT);
+    }
+
     #[tokio::test]
     async fn post_event_accepts_and_frames_valid_event() {
         let transport = Arc::new(RecordingTransport::default());
@@ -387,15 +822,8 @@ mod tests {
             serde_json::from_str(r#"{"version":1,"event":"task.done","title":"Hello"}"#)
                 .expect("测试消息应可解析");
 
-        let (status, Json(response)) = post_event(
-            State(AppState {
-                transport: transport.clone(),
-                activities: Arc::new(tokio::sync::Mutex::new(ActivityTracker::default())),
-                titles: Arc::new(tokio::sync::Mutex::new(SessionTitles::disabled())),
-            }),
-            Json(event),
-        )
-        .await;
+        let (status, Json(response)) =
+            post_event(State(test_state(transport.clone())), Json(event)).await;
 
         assert_eq!(status, StatusCode::ACCEPTED);
         assert!(response.accepted);

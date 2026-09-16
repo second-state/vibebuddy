@@ -69,6 +69,14 @@ struct Activity {
     source: Option<ActivitySource>,
 }
 
+/// 当日战绩的快照：完成数、需要确认次数、忙碌秒数。
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize)]
+pub struct TodaySummary {
+    pub done: u32,
+    pub asks: u32,
+    pub busy_seconds: u64,
+}
+
 /// 空闲屏轮播的当日战绩。
 #[derive(Debug, Default)]
 struct DailyStats {
@@ -479,6 +487,19 @@ impl ActivityTracker {
                         .as_secs()
                 ),
             );
+        }
+    }
+
+    /// 当日战绩的数字形式，给 App 的状态接口用；空闲屏用的是 `stats_lines`。
+    pub fn today(&self) -> TodaySummary {
+        TodaySummary {
+            done: self.stats.done,
+            asks: self.stats.asks,
+            busy_seconds: self.stats.busy_seconds
+                + self
+                    .stats
+                    .busy_since
+                    .map_or(0, |since| since.elapsed().as_secs()),
         }
     }
 
