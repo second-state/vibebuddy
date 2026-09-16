@@ -23,7 +23,7 @@ use ci::CiWatcher;
 use claude_hooks::ClaudeHook;
 use codex_hooks::CodexHook;
 use serde::Serialize;
-use serial_transport::{SerialConfig, SerialTransport, Transport, TransportError};
+use serial_transport::{DeviceMessage, SerialConfig, SerialTransport, Transport, TransportError};
 use session_titles::SessionTitles;
 use tokio::sync::Mutex;
 use tracing::{info, warn};
@@ -93,8 +93,14 @@ async fn main() {
 
 /// 设备到 Mac 的事件目前只开放 K2 单击。优先打开当前活动；空闲时返回最近
 /// 一次可定位的 Agent/CI 来源。
-async fn handle_device_events(state: AppState, mut events: tokio::sync::mpsc::Receiver<Event>) {
-    while let Some(event) = events.recv().await {
+async fn handle_device_events(
+    state: AppState,
+    mut events: tokio::sync::mpsc::Receiver<DeviceMessage>,
+) {
+    while let Some(message) = events.recv().await {
+        let DeviceMessage::Event(event) = message else {
+            continue;
+        };
         if !is_k2_press(&event) {
             info!(event = %event.event, "忽略未绑定的设备事件");
             continue;
