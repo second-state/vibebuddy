@@ -65,6 +65,7 @@ static void transport_write_value_line(const char *label, const char *value) {
 }
 
 static void handle_voice_event(const cJSON *message, const char *event);
+static void announce_state(void);
 
 static uint32_t clock_ms(void) {
   return xTaskGetTickCount() * (uint32_t)portTICK_PERIOD_MS;
@@ -480,6 +481,14 @@ static void handle_line(char *line, size_t length) {
     return;
   }
 
+  // Mac 端刚连上时问一声：模式、固件构建号、音色只在开机或变化时才报，
+  // daemon 比设备重启得勤，不问就一直不知道。
+  if (strcmp(event->valuestring, "device.hello") == 0) {
+    announce_state();
+    cJSON_Delete(message);
+    return;
+  }
+
   // 眨眼确认与语音包写入都是 App 在操作设备本身，同样不算 Agent 的动静。
   if (strcmp(event->valuestring, "device.identify") == 0) {
     agent_display_identify();
@@ -527,6 +536,15 @@ static void handle_line(char *line, size_t length) {
              title == NULL ? NULL : title->valuestring);
 
   cJSON_Delete(message);
+}
+
+/// 把设备的静态状态整个报一遍：固件构建号、模式、音色。开机时也走这里。
+static char announced_build[48];
+
+static void announce_state(void) {
+  transport_write_value_line("DISPLAY READY BUILD ", announced_build);
+  transport_write_value_line("MODE ", mode_name(agent_display_mode()));
+  transport_write_value_line("VOICES ", agent_voices_current_id());
 }
 
 /// 语音包写入的回执都是 JSON 行：Mac 端要按序号做停等流控，诊断行不够用。
@@ -615,8 +633,7 @@ void app_main(void) {
   };
   ESP_ERROR_CHECK(usb_serial_jtag_driver_install(&usb_config));
 
-  char firmware_build[48];
-  describe_firmware_build(firmware_build, sizeof(firmware_build));
+  describe_firmware_build(announced_build, sizeof(announced_build));
 
   agent_pomodoro_init();
   agent_leisure_init(esp_random(), clock_ms());
@@ -633,8 +650,8 @@ void app_main(void) {
     transport_write_literal("TALLY LOAD ERROR\n");
   }
   if (agent_display_init() == ESP_OK) {
-    agent_display_set_firmware_build(firmware_build);
-    transport_write_value_line("DISPLAY READY BUILD ", firmware_build);
+    agent_display_set_firmware_build(announced_build);
+    transport_write_value_line("DISPLAY READY BUILD ", announced_build);
   } else {
     transport_write_literal("DISPLAY ERROR\n");
   }

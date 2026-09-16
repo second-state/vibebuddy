@@ -13,6 +13,8 @@ use crate::serial_transport::DeviceMessage;
 pub struct DeviceState {
     pub connected: bool,
     pub port: Option<String>,
+    /// 接在 UART 桥上（而非乐鑫原生 USB 口）。
+    pub bridge: bool,
     /// duty / pomodoro / leisure
     pub mode: Option<String>,
     pub firmware_build: Option<String>,
@@ -25,9 +27,10 @@ impl DeviceState {
     pub fn apply(&mut self, message: &DeviceMessage) -> bool {
         let before = self.clone();
         match message {
-            DeviceMessage::Connected { port } => {
+            DeviceMessage::Connected { port, bridge } => {
                 self.connected = true;
                 self.port = Some(port.clone());
+                self.bridge = *bridge;
             }
             DeviceMessage::Disconnected => {
                 self.connected = false;
@@ -111,7 +114,7 @@ mod tests {
     #[test]
     fn device_state_is_read_off_the_diagnostic_lines() {
         let mut state = DeviceState::default();
-        assert!(state.apply(&DeviceMessage::Connected { port: "/dev/cu.x".to_owned() }));
+        assert!(state.apply(&DeviceMessage::Connected { port: "/dev/cu.x".to_owned(), bridge: true }));
         assert!(state.apply(&line("DISPLAY READY BUILD 21a8360-dirty 2026-09-16 10:23")));
         assert!(state.apply(&line("VOICES builtin")));
         assert!(state.apply(&line("MODE POMODORO")));
@@ -121,6 +124,7 @@ mod tests {
             DeviceState {
                 connected: true,
                 port: Some("/dev/cu.x".to_owned()),
+                bridge: true,
                 mode: Some("pomodoro".to_owned()),
                 firmware_build: Some("21a8360-dirty 2026-09-16 10:23".to_owned()),
                 voice: Some("builtin".to_owned()),
@@ -131,7 +135,7 @@ mod tests {
     #[test]
     fn disconnecting_keeps_the_last_known_firmware_and_voice() {
         let mut state = DeviceState::default();
-        state.apply(&DeviceMessage::Connected { port: "/dev/cu.x".to_owned() });
+        state.apply(&DeviceMessage::Connected { port: "/dev/cu.x".to_owned(), bridge: true });
         state.apply(&line("DISPLAY READY BUILD abc 2026-09-16 10:23"));
         state.apply(&line("VOICES wanwanxiaohe"));
         assert!(state.apply(&DeviceMessage::Disconnected));

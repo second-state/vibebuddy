@@ -3,6 +3,8 @@ mod ci;
 mod claude_hooks;
 mod codex_hooks;
 mod config;
+mod rom_flasher;
+mod screenshot;
 mod serial_transport;
 mod session_titles;
 mod source_opener;
@@ -66,6 +68,8 @@ struct AppState {
     status_changed: broadcast::Sender<()>,
     /// App 的版本，随心跳报给设备；没有 App 时为 None。
     app_version: Option<String>,
+    /// 真正的串口 worker，烧固件时要让它让出端口；测试里没有。
+    serial: Option<Arc<SerialTransport>>,
 }
 
 impl AppState {
@@ -93,6 +97,7 @@ impl AppState {
             device_bus,
             status_changed,
             app_version: env::var("BEACON_APP_VERSION").ok().filter(|value| !value.is_empty()),
+            serial: None,
         }
     }
 
@@ -155,17 +160,19 @@ async fn main() {
         .unwrap_or_else(|error| panic!("BEACON_BIND 无效：{error}"));
     let serial_config = SerialConfig::from_env();
     let (serial_transport, device_events) = SerialTransport::spawn(serial_config);
-    let transport: Arc<dyn Transport> = Arc::new(serial_transport);
+    let serial_transport = Arc::new(serial_transport);
+    let transport: Arc<dyn Transport> = serial_transport.clone();
     let activities = match stats_file() {
         Some(path) => ActivityTracker::with_stats_file(path),
         None => ActivityTracker::default(),
     };
-    let state = AppState::new(
+    let mut state = AppState::new(
         transport,
         activities,
         SessionTitles::from_home(),
         config::config_file(),
     );
+    state.serial = Some(serial_transport);
     tokio::spawn(sweep_expired_activities(state.clone()));
     tokio::spawn(send_heartbeats(state.clone()));
     tokio::spawn(poll_ci(state.clone()));
@@ -199,6 +206,10 @@ async fn publish_device_message(state: &AppState, message: DeviceMessage) {
         state.notify_status();
     }
     let _ = state.device_bus.send(message.clone());
+    // 刚连上先问一声，设备会把模式、固件构建号、音色重报一遍。
+    if matches!(message, DeviceMessage::Connected { .. }) {
+        send_event(state, device_command("device.hello"));
+    }
     let DeviceMessage::Event(event) = message else {
         return;
     };
@@ -294,8 +305,26 @@ fn app(state: AppState) -> Router {
             "/v1/device/voice-pack",
             post(post_voice_pack).layer(DefaultBodyLimit::max(4 * 1024 * 1024)),
         )
+        .route("/v1/device/screenshot", post(post_screenshot))
+        .route("/v1/device/firmware", post(post_firmware))
         .route("/v1/daemon/restart", post(post_restart))
         .with_state(state)
+}
+
+/// 截一张盒子当前画面，回 PNG。写语音包或烧固件时不截：截图行会挤掉回执。
+async fn post_screenshot(State(state): State<AppState>) -> axum::response::Response {
+    use axum::response::IntoResponse;
+    if matches!(&*state.operation.lock().await, Some(current) if current.state == OperationState::Running) {
+        return (StatusCode::CONFLICT, "设备上有操作在进行").into_response();
+    }
+    let bus = state.device_bus.subscribe();
+    match screenshot::capture(state.transport.clone(), bus).await {
+        Ok(frame) => match screenshot::encode_png(&frame) {
+            Ok(png) => ([(axum::http::header::CONTENT_TYPE, "image/png")], png).into_response(),
+            Err(error) => (StatusCode::INTERNAL_SERVER_ERROR, error).into_response(),
+        },
+        Err(error) => (StatusCode::BAD_GATEWAY, error).into_response(),
+    }
 }
 
 async fn get_status(State(state): State<AppState>) -> Json<Status> {
@@ -414,6 +443,103 @@ async fn post_voice_pack(
         StatusCode::ACCEPTED,
         Json(ApiResponse { accepted: true, message: format!("开始写入 {voice}") }),
     )
+}
+
+#[derive(serde::Deserialize)]
+struct FirmwareRequest {
+    bootloader: PathBuf,
+    partition_table: PathBuf,
+    app: PathBuf,
+}
+
+/// 烧固件：三件套的路径由 App 给出（都在它的包里）。串口 worker 让出端口，
+/// ROM 协议逐段写并校验，完了硬复位、worker 重连。进度走状态流。
+async fn post_firmware(
+    State(state): State<AppState>,
+    Json(request): Json<FirmwareRequest>,
+) -> (StatusCode, Json<ApiResponse>) {
+    let mut segments = Vec::new();
+    for (address, path) in [(0x0_u32, &request.bootloader), (0x8000, &request.partition_table), (0x10000, &request.app)] {
+        match std::fs::read(path) {
+            Ok(data) if !data.is_empty() => segments.push(rom_flasher::Segment { address, data }),
+            _ => {
+                return (
+                    StatusCode::BAD_REQUEST,
+                    Json(ApiResponse { accepted: false, message: format!("读不到固件文件 {}", path.display()) }),
+                );
+            }
+        }
+    }
+    let (port, bridge) = {
+        let device = state.device.lock().await;
+        match &device.port {
+            Some(port) if device.connected => (port.clone(), device.bridge),
+            _ => {
+                return (
+                    StatusCode::CONFLICT,
+                    Json(ApiResponse { accepted: false, message: "没有连着的盒子".to_owned() }),
+                );
+            }
+        }
+    };
+    let Some(serial) = state.serial.clone() else {
+        return (
+            StatusCode::NOT_IMPLEMENTED,
+            Json(ApiResponse { accepted: false, message: "没有串口 worker".to_owned() }),
+        );
+    };
+    {
+        let mut operation = state.operation.lock().await;
+        if matches!(&*operation, Some(current) if current.state == OperationState::Running) {
+            return (
+                StatusCode::CONFLICT,
+                Json(ApiResponse { accepted: false, message: "设备上已有操作在进行".to_owned() }),
+            );
+        }
+        *operation = Some(Operation {
+            kind: OperationKind::Firmware,
+            state: OperationState::Running,
+            progress: 0.0,
+            message: "让出串口".to_owned(),
+        });
+    }
+    state.notify_status();
+    let task_state = state.clone();
+    tokio::spawn(async move {
+        serial.set_suspended(true);
+        // 等 worker 真把端口放掉。
+        tokio::time::sleep(Duration::from_millis(800)).await;
+        let progress_state = task_state.clone();
+        let result = tokio::task::spawn_blocking(move || {
+            let mut report = |fraction: f32, message: &str| {
+                let state = progress_state.clone();
+                let message = message.to_owned();
+                tokio::spawn(async move {
+                    if let Some(operation) = state.operation.lock().await.as_mut() {
+                        operation.progress = fraction;
+                        operation.message = message;
+                    }
+                    state.notify_status();
+                });
+            };
+            rom_flasher::flash(&port, bridge, &segments, &mut report)
+        })
+        .await
+        .unwrap_or_else(|error| Err(format!("烧录任务崩溃：{error}")));
+        serial.set_suspended(false);
+        let operation = match result {
+            Ok(()) => {
+                info!("固件已烧录，等设备重启");
+                Operation { kind: OperationKind::Firmware, state: OperationState::Done, progress: 1.0, message: "烧录完成，设备重启中".to_owned() }
+            }
+            Err(error) => {
+                warn!(%error, "固件烧录失败");
+                Operation { kind: OperationKind::Firmware, state: OperationState::Failed, progress: 0.0, message: error }
+            }
+        };
+        task_state.set_operation(Some(operation)).await;
+    });
+    (StatusCode::ACCEPTED, Json(ApiResponse { accepted: true, message: "开始烧录".to_owned() }))
 }
 
 /// App 看管 daemon：退出即重启。先把响应发出去再退。
@@ -686,7 +812,7 @@ mod tests {
     async fn status_reflects_device_lines_hooks_and_config() {
         let transport = Arc::new(RecordingTransport::default());
         let state = test_state(transport);
-        publish_device_message(&state, DeviceMessage::Connected { port: "/dev/cu.test".to_owned() }).await;
+        publish_device_message(&state, DeviceMessage::Connected { port: "/dev/cu.test".to_owned(), bridge: true }).await;
         publish_device_message(&state, DeviceMessage::Line("MODE LEISURE".to_owned())).await;
         publish_device_message(&state, DeviceMessage::Line("VOICES hsiaoyu".to_owned())).await;
         state.hooks_seen.lock().await.codex = Some(chrono::Local::now());
@@ -717,6 +843,26 @@ mod tests {
         assert_eq!(returned, wanted);
         assert_eq!(Config::load(&path), wanted);
         let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[tokio::test]
+    async fn a_screenshot_is_assembled_from_shot_lines_into_a_png() {
+        let transport = Arc::new(RecordingTransport::default());
+        let state = test_state(transport.clone());
+        let handle = tokio::spawn({
+            let state = state.clone();
+            async move { post_screenshot(State(state)).await }
+        });
+        nth_event(&transport, 0).await;
+        assert_eq!(transport.events()[0].event, "device.screenshot");
+        publish_device_message(&state, DeviceMessage::Line("SHOT BEGIN 320x240 BACKLIGHT ON".to_owned())).await;
+        for _ in 0..240 {
+            publish_device_message(&state, DeviceMessage::Line("SHOT 0000:320".to_owned())).await;
+        }
+        publish_device_message(&state, DeviceMessage::Line("SHOT END".to_owned())).await;
+        let response = handle.await.expect("截图任务不该崩");
+        assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(response.headers()["content-type"], "image/png");
     }
 
     #[tokio::test]

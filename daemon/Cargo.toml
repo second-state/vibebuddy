@@ -16,5 +16,8 @@ tokio-serial.workspace = true
 tokio-stream = { version = "0.1", features = ["sync"] }
 base64 = "0.22"
 crc32fast = "1"
+png = "0.17"
+serialport = "4"
+md-5 = "0.10"
 tracing.workspace = true
 tracing-subscriber.workspace = true

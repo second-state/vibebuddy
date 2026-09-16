@@ -30,7 +30,8 @@ const PACE_MARGIN: Duration = Duration::from_millis(1);
 pub enum DeviceMessage {
     Event(Event),
     Line(String),
-    Connected { port: String },
+    /// `bridge` 为真表示接在 BOX 的 CH343 UART 桥上：写要分段，烧录要小块。
+    Connected { port: String, bridge: bool },
     Disconnected,
 }
 
@@ -129,7 +130,7 @@ async fn serial_worker(
         info!(port = %port_name, paced, "串口已连接");
         tokio::time::sleep(CONNECT_SETTLE_DELAY).await;
         let _ = device_event_sender
-            .send(DeviceMessage::Connected { port: port_name.clone() })
+            .send(DeviceMessage::Connected { port: port_name.clone(), bridge: paced })
             .await;
 
         let mut read_buffer = [0_u8; 256];
