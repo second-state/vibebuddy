@@ -11,6 +11,7 @@
 #include "esp_check.h"
 #include "esp_codec_dev.h"
 #include "esp_codec_dev_defaults.h"
+#include "nvs.h"
 #include "esp_log.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/queue.h"
@@ -27,8 +28,14 @@
 #define XL9555_CONFIG_PORT0 0x06
 #define XL9555_SPEAKER_MASK 0x20
 
+#define VOLUME_NAMESPACE "audio"
+#define VOLUME_KEY "volume"
+
 static const char *TAG = "agent_audio";
 static i2s_chan_handle_t tx_handle;
+/// 只有 ES8311 版本才有；NS4168 版本没有音量可调。
+static esp_codec_dev_handle_t codec_device;
+static unsigned volume = AGENT_AUDIO_VOLUME_DEFAULT;
 static QueueHandle_t prompt_queue;
 static bool audio_ready;
 static volatile bool playing;
@@ -70,6 +77,41 @@ static esp_err_t enable_speaker(i2c_master_bus_handle_t i2c_bus) {
                       "读取 XL9555 output 失败");
   output |= XL9555_SPEAKER_MASK;
   return xl9555_write(handle, XL9555_OUTPUT_PORT0, output);
+}
+
+static unsigned clamp_volume(unsigned level) {
+  if (level < AGENT_AUDIO_VOLUME_MIN) {
+    return AGENT_AUDIO_VOLUME_MIN;
+  }
+  if (level > AGENT_AUDIO_VOLUME_MAX) {
+    return AGENT_AUDIO_VOLUME_MAX;
+  }
+  return level;
+}
+
+/// 开机读回上次的音量；没存过就是默认值。NVS 由 agent_tally_init 先初始化。
+static void load_volume(void) {
+  nvs_handle_t handle;
+  if (nvs_open(VOLUME_NAMESPACE, NVS_READONLY, &handle) != ESP_OK) {
+    return;
+  }
+  uint32_t stored;
+  if (nvs_get_u32(handle, VOLUME_KEY, &stored) == ESP_OK) {
+    volume = clamp_volume((unsigned)stored);
+  }
+  nvs_close(handle);
+}
+
+static esp_err_t save_volume(void) {
+  nvs_handle_t handle;
+  ESP_RETURN_ON_ERROR(nvs_open(VOLUME_NAMESPACE, NVS_READWRITE, &handle), TAG,
+                      "打开 NVS 失败");
+  esp_err_t result = nvs_set_u32(handle, VOLUME_KEY, volume);
+  if (result == ESP_OK) {
+    result = nvs_commit(handle);
+  }
+  nvs_close(handle);
+  return result;
 }
 
 static esp_err_t init_i2s(void) {
@@ -165,10 +207,11 @@ static esp_err_t init_es8311(i2c_master_bus_handle_t i2c_bus) {
     audio_status = "ES8311 OPEN";
     return ESP_FAIL;
   }
-  if (esp_codec_dev_set_out_vol(device, 65) != ESP_CODEC_DEV_OK) {
+  if (esp_codec_dev_set_out_vol(device, (int)volume) != ESP_CODEC_DEV_OK) {
     audio_status = "ES8311 VOLUME";
     return ESP_FAIL;
   }
+  codec_device = device;
   return ESP_OK;
 }
 
@@ -200,6 +243,7 @@ static void audio_task(void *argument) {
 }
 
 esp_err_t agent_audio_init(void) {
+  load_volume();
   i2c_master_bus_handle_t i2c_bus;
   esp_err_t result = i2c_master_get_bus_handle(I2C_NUM_0, &i2c_bus);
   if (result != ESP_OK) {
@@ -256,5 +300,20 @@ esp_err_t agent_audio_play(agent_audio_prompt_t prompt) {
 }
 
 const char *agent_audio_status(void) { return audio_status; }
+
+esp_err_t agent_audio_set_volume(unsigned level) {
+  if (codec_device == NULL) {
+    return ESP_ERR_NOT_SUPPORTED;
+  }
+  level = clamp_volume(level);
+  if (esp_codec_dev_set_out_vol(codec_device, (int)level) !=
+      ESP_CODEC_DEV_OK) {
+    return ESP_FAIL;
+  }
+  volume = level;
+  return save_volume();
+}
+
+unsigned agent_audio_volume(void) { return volume; }
 
 bool agent_audio_playing(void) { return playing; }

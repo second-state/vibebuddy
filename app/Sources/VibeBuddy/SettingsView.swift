@@ -34,11 +34,50 @@ struct GeneralView: View {
     }
 }
 
+/// 音量滑块：值来自盒子的状态，松手才发；拖动中不让状态流把滑块拽回去。
+/// 下限 20：能存下来的零音量就是持久静音，而静音有意只在盒子上、不持久化。
+struct VolumeRow: View {
+    @ObservedObject var model: AppModel
+    @State private var level: Double = 65
+    @State private var editing = false
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack {
+                Text("音量").font(.headline)
+                Spacer()
+                Text("\(Int(level))").monospacedDigit().foregroundStyle(.secondary)
+            }
+            HStack(spacing: 12) {
+                Slider(value: $level, in: 20...100, step: 5) { isEditing in
+                    editing = isEditing
+                    if !isEditing { model.setVolume(Int(level)) }
+                }
+                Button("在盒子上试一句") { model.setVolume(Int(level), preview: true) }
+            }
+            .disabled(!connected || model.operationRunning)
+            Text("存在盒子里，重启不丢。Mac 上的试听不受它影响；静音只在盒子上长按 K2。")
+                .font(.caption).foregroundStyle(.secondary)
+        }
+        .onAppear(perform: sync)
+        .onChange(of: model.status?.device.volume) { sync() }
+    }
+
+    private var connected: Bool { model.status?.device.connected ?? false }
+
+    private func sync() {
+        guard !editing, let volume = model.status?.device.volume else { return }
+        level = Double(volume)
+    }
+}
+
 struct VoicesView: View {
     @ObservedObject var model: AppModel
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
+            VolumeRow(model: model)
+            Divider()
             Text("播报音色").font(.headline)
             Text("盒子现在用的是「\(currentVoiceName)」。挑一个试听，点「使用」写进盒子；不用刷固件。")
                 .font(.callout).foregroundStyle(.secondary)

@@ -50,6 +50,13 @@ struct DaemonClient {
 
     func identify() async throws { try await post("/v1/device/identify") }
 
+    /// 盒子应用后回报 VOLUME 行，状态流里的音量才更新；preview 让它用新音量播一句。
+    func setVolume(_ level: Int, preview: Bool) async throws {
+        let body = try JSONSerialization.data(withJSONObject: ["level": level, "preview": preview])
+        let (code, data) = try await post("/v1/device/volume", body: body, contentType: "application/json")
+        guard code == 202 else { throw DaemonError(message: DaemonClient.message(in: data) ?? "音量未被接受（\(code)）") }
+    }
+
     func writeVoicePack(_ pack: Data) async throws {
         let (code, data) = try await post("/v1/device/voice-pack", body: pack, contentType: "application/octet-stream")
         guard code == 202 else { throw DaemonError(message: DaemonClient.message(in: data) ?? "写入未被接受（\(code)）") }

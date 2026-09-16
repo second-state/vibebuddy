@@ -14,7 +14,7 @@ func check(_ condition: Bool, _ message: String, file: String = #file, line: Int
 // 1. 状态 JSON 解码，时间带微秒与时区。
 let sample = """
 {"daemon":{"build":"0.3.0 abc1234 2026-09-16 10:50","app_version":"0.3.0"},
- "device":{"connected":true,"port":"/dev/cu.usbmodem1","bridge":true,"mode":"pomodoro","firmware_build":"abc1234-dirty 2026-09-16 13:11","voice":"xiaohe2"},
+ "device":{"connected":true,"port":"/dev/cu.usbmodem1","bridge":true,"mode":"pomodoro","firmware_build":"abc1234-dirty 2026-09-16 13:11","voice":"xiaohe2","volume":65},
  "today":{"done":3,"asks":1,"busy_seconds":4980},
  "hooks":{"codex":"2026-09-16T13:31:30.060465+08:00","claude":null},
  "operation":{"kind":"voice_pack","state":"running","progress":0.42,"message":"正在写入 hsiaoyu"},
@@ -23,6 +23,7 @@ let sample = """
 do {
     let status = try StatusCoding.decoder().decode(Status.self, from: Data(sample.utf8))
     check(status.device.mode == "pomodoro", "模式解码")
+    check(status.device.volume == 65, "音量解码")
     check(status.hooks.codex != nil && status.hooks.claude == nil, "Hook 时间解码")
     check(status.operation?.kind == .voicePack && status.operation?.progress == 0.42, "操作解码")
     let menu = MenuState.derive(status: status, daemonAlive: true)

@@ -121,6 +121,13 @@ static void play_prompt(agent_audio_prompt_t prompt, const char *label) {
   }
 }
 
+/// 音量是设备自己的事实，App 的滑块只是遥控：改完报一行，hello 也报。
+static void announce_volume(void) {
+  char text[24];
+  snprintf(text, sizeof(text), "VOLUME %u\n", agent_audio_volume() % 1000u);
+  transport_write_literal(text);
+}
+
 /// 当日记录变了就存一次，并报一行给 Mac 端。一天只有几次，NVS 不在乎。
 static void save_tally(void) {
   agent_pomodoro_tally_t tally;
@@ -497,6 +504,23 @@ static void handle_line(char *line, size_t length) {
     cJSON_Delete(message);
     return;
   }
+  // 音量：App 的滑块从这里落到 codec 并存进 NVS；不带 level 只是问一声。
+  // 试听走 play_prompt，静音时同样不出声，和别的播报一个规矩。
+  if (strcmp(event->valuestring, "device.volume") == 0) {
+    const cJSON *level = cJSON_GetObjectItemCaseSensitive(message, "level");
+    if (cJSON_IsNumber(level)) {
+      unsigned wanted = level->valuedouble < 0 ? 0u : (unsigned)level->valuedouble;
+      if (agent_audio_set_volume(wanted) != ESP_OK) {
+        transport_write_literal("VOLUME ERROR\n");
+      }
+    }
+    announce_volume();
+    if (cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(message, "preview"))) {
+      play_prompt(AGENT_AUDIO_DONE, "DONE");
+    }
+    cJSON_Delete(message);
+    return;
+  }
   if (strncmp(event->valuestring, "voice.", 6) == 0) {
     handle_voice_event(message, event->valuestring);
     cJSON_Delete(message);
@@ -541,11 +565,13 @@ static void handle_line(char *line, size_t length) {
 
 static char announced_build[48];
 
-/// 把设备的静态状态整个报一遍：固件构建号、模式、音色。开机与 hello 都走这里。
+/// 把设备的静态状态整个报一遍：固件构建号、模式、音色、音量。开机与 hello
+/// 都走这里。
 static void announce_state(void) {
   transport_write_value_line("DISPLAY READY BUILD ", announced_build);
   transport_write_value_line("MODE ", mode_name(agent_display_mode()));
   transport_write_value_line("VOICES ", agent_voices_current_id());
+  announce_volume();
 }
 
 /// 语音包写入的回执都是 JSON 行：Mac 端要按序号做停等流控，诊断行不够用。
@@ -664,6 +690,7 @@ void app_main(void) {
   if (agent_audio_init() == ESP_OK) {
     transport_write_literal("AUDIO READY\n");
     transport_write_value_line("AUDIO CODEC ", agent_audio_status());
+    announce_volume();
   } else {
     transport_write_value_line("AUDIO ERROR ", agent_audio_status());
   }

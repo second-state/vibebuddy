@@ -20,6 +20,8 @@ pub struct DeviceState {
     pub firmware_build: Option<String>,
     /// 设备正在用的播报音色 id；`builtin` 表示内置音色。
     pub voice: Option<String>,
+    /// 扬声器音量（codec 的 20 到 100），存在设备上，App 只是遥控。
+    pub volume: Option<u8>,
 }
 
 impl DeviceState {
@@ -45,6 +47,11 @@ impl DeviceState {
                     let voice = voice.trim();
                     if voice != "NO PARTITION" {
                         self.voice = Some(voice.to_owned());
+                    }
+                } else if let Some(volume) = line.strip_prefix("VOLUME ") {
+                    // `VOLUME ERROR` 解析不出数字，音量保持原样。
+                    if let Ok(level) = volume.trim().parse::<u8>() {
+                        self.volume = Some(level);
                     }
                 }
             }
@@ -119,6 +126,8 @@ mod tests {
         assert!(state.apply(&line("VOICES builtin")));
         assert!(state.apply(&line("MODE POMODORO")));
         assert!(!state.apply(&line("MODE POMODORO")), "没变就不算变");
+        assert!(state.apply(&line("VOLUME 65")));
+        assert!(!state.apply(&line("VOLUME ERROR")), "报错不改音量");
         assert_eq!(
             state,
             DeviceState {
@@ -128,6 +137,7 @@ mod tests {
                 mode: Some("pomodoro".to_owned()),
                 firmware_build: Some("21a8360-dirty 2026-09-16 10:23".to_owned()),
                 voice: Some("builtin".to_owned()),
+                volume: Some(65),
             }
         );
     }

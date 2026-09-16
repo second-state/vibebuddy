@@ -322,6 +322,7 @@ fn app(state: AppState) -> Router {
         .route("/v1/status/stream", get(status_stream))
         .route("/v1/config", get(get_config).put(put_config))
         .route("/v1/device/identify", post(post_identify))
+        .route("/v1/device/volume", post(post_volume))
         .route(
             "/v1/device/voice-pack",
             post(post_voice_pack).layer(DefaultBodyLimit::max(4 * 1024 * 1024)),
@@ -419,6 +420,40 @@ fn report_progress(state: &AppState, fraction: f32, message: Option<String>) {
 
 async fn post_identify(State(state): State<AppState>) -> (StatusCode, Json<ApiResponse>) {
     post_event(State(state), Json(device_command("device.identify"))).await
+}
+
+/// 与固件 `AGENT_AUDIO_VOLUME_MIN/MAX` 一致：下限不到零，静音另有按键且不持久化。
+const VOLUME_RANGE: std::ops::RangeInclusive<u8> = 20..=100;
+
+#[derive(serde::Deserialize)]
+struct VolumeRequest {
+    level: u8,
+    /// 让盒子用新音量播一句"任务完成"，滑块才不是盲调。
+    #[serde(default)]
+    preview: bool,
+}
+
+/// 调音量：越界直接拒绝而不是替用户改数。设备应用后回 `VOLUME` 行，
+/// 状态里的音量随之更新，App 显示的始终是盒子上的值。
+async fn post_volume(
+    State(state): State<AppState>,
+    Json(request): Json<VolumeRequest>,
+) -> (StatusCode, Json<ApiResponse>) {
+    if !VOLUME_RANGE.contains(&request.level) {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(ApiResponse {
+                accepted: false,
+                message: format!("音量要在 {} 到 {} 之间", VOLUME_RANGE.start(), VOLUME_RANGE.end()),
+            }),
+        );
+    }
+    let mut event = device_command("device.volume");
+    event.extra.insert("level".to_owned(), request.level.into());
+    if request.preview {
+        event.extra.insert("preview".to_owned(), true.into());
+    }
+    post_event(State(state), Json(event)).await
 }
 
 /// 写语音包：请求体就是包本身。写入在后台跑，进度在状态流里。
@@ -903,6 +938,28 @@ mod tests {
         let (status, _) = post_identify(State(test_state(transport.clone()))).await;
         assert_eq!(status, StatusCode::ACCEPTED);
         assert_eq!(transport.events()[0].event, "device.identify");
+    }
+
+    #[tokio::test]
+    async fn setting_the_volume_sends_the_level_to_the_device() {
+        let transport = Arc::new(RecordingTransport::default());
+        let request = VolumeRequest { level: 40, preview: true };
+        let (status, _) = post_volume(State(test_state(transport.clone())), Json(request)).await;
+        assert_eq!(status, StatusCode::ACCEPTED);
+        let event = &transport.events()[0];
+        assert_eq!(event.event, "device.volume");
+        assert_eq!(event.extra["level"], 40);
+        assert_eq!(event.extra["preview"], true);
+    }
+
+    #[tokio::test]
+    async fn a_volume_outside_the_range_is_refused_before_reaching_the_device() {
+        let transport = Arc::new(RecordingTransport::default());
+        let request = VolumeRequest { level: 10, preview: false };
+        let (status, Json(response)) = post_volume(State(test_state(transport.clone())), Json(request)).await;
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+        assert!(!response.accepted);
+        assert!(transport.events().is_empty());
     }
 
     fn sample_pack(voice: &str, payload_len: usize) -> Vec<u8> {

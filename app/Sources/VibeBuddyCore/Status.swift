@@ -33,9 +33,11 @@ public struct DeviceState: Codable, Equatable {
     public var mode: String?
     public var firmwareBuild: String?
     public var voice: String?
-    enum CodingKeys: String, CodingKey { case connected, port, bridge, mode, firmwareBuild = "firmware_build", voice }
-    public init(connected: Bool, port: String? = nil, bridge: Bool = false, mode: String? = nil, firmwareBuild: String? = nil, voice: String? = nil) {
-        self.connected = connected; self.port = port; self.bridge = bridge; self.mode = mode; self.firmwareBuild = firmwareBuild; self.voice = voice
+    /// 扬声器音量（20 到 100），盒子报回来的值；App 只是遥控。
+    public var volume: Int?
+    enum CodingKeys: String, CodingKey { case connected, port, bridge, mode, firmwareBuild = "firmware_build", voice, volume }
+    public init(connected: Bool, port: String? = nil, bridge: Bool = false, mode: String? = nil, firmwareBuild: String? = nil, voice: String? = nil, volume: Int? = nil) {
+        self.connected = connected; self.port = port; self.bridge = bridge; self.mode = mode; self.firmwareBuild = firmwareBuild; self.voice = voice; self.volume = volume
     }
 }
 
