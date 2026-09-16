@@ -47,7 +47,13 @@ final class AppModel: ObservableObject {
     func start() {
         Resources.migrateLegacyDirectories()
         try? HookInstaller.deployBinary()
-        HookInstaller.migrateLegacyCommands()
+        if HookInstaller.migrateLegacyCommands().contains(.codex) {
+            // 2026-09-16 改名迁移静默改写了 hooks.json，Codex 把六条 hook 当作
+            // 改过的静默停用，盒子四个小时没播过 Codex 的事。这条不受「链路异常
+            // 通知」开关管：它就是 App 自己动了手才需要人补一步。
+            Notifier.notify(title: "Codex 的 Hook 配置更新了",
+                            body: "Vibe Buddy 改写了 ~/.codex/hooks.json。Codex 会静默停用改过的 hook，请在 Codex 里输入 /hooks 重新信任，盒子才收得到 Codex 的事。")
+        }
         refreshHookStates()
         if managesDaemon { supervisor.start() }
         streamTask = Task { [weak self] in await self?.followStatus() }
@@ -183,6 +189,7 @@ final class AppModel: ObservableObject {
     }
 
     func hookPresent(_ agent: HookAgent) -> Bool { HookInstaller.isPresent(agent) }
+    func hookConfigModifiedAt(_ agent: HookAgent) -> Date? { HookInstaller.configModifiedAt(agent) }
 
     /// 返回要确认的差异；调用方确认后再 apply。
     func hookInstallPlan(_ agent: HookAgent) -> HookInstaller.Plan { HookInstaller.installPlan(for: agent) }

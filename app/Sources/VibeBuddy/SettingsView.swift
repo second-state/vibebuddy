@@ -181,10 +181,20 @@ struct HookRow: View {
     private var present: Bool { model.hookPresent(agent) }
     private var installed: Bool { model.hookInstalled[agent] ?? false }
     private var lastEvent: Date? { agent == .codex ? model.status?.hooks.codex : model.status?.hooks.claude }
+    /// 只有 Codex 有信任这一关；Claude Code 改完配置下个会话就生效。
+    private var codexHint: CodexTrustHint? {
+        guard agent == .codex, installed else { return nil }
+        return HookConfig.codexTrustHint(configModifiedAt: model.hookConfigModifiedAt(agent), lastEvent: lastEvent)
+    }
+    private var dotColor: Color {
+        if !installed { return .gray }
+        if case .changedSinceLastEvent = codexHint { return .red }
+        return lastEvent == nil ? .orange : .green
+    }
 
     var body: some View {
         HStack(spacing: 12) {
-            Circle().fill(installed ? (lastEvent == nil ? Color.orange : Color.green) : Color.gray).frame(width: 10, height: 10)
+            Circle().fill(dotColor).frame(width: 10, height: 10)
             VStack(alignment: .leading) {
                 Text(agent.displayName).font(.body.weight(.semibold))
                 Text(statusText).font(.caption).foregroundStyle(.secondary)
@@ -204,8 +214,11 @@ struct HookRow: View {
     private var statusText: String {
         if !present { return "这台 Mac 上没找到 \(agent.displayName)" }
         if !installed { return "未接入" }
+        if case .changedSinceLastEvent(let changed)? = codexHint {
+            return "配置在 \(changed.formatted(date: .abbreviated, time: .shortened)) 改过，之后没收到过 Codex 事件。Codex 会静默停用改过的 hook：在 Codex 里输入 /hooks，把 Vibe Buddy 的六条重新信任。"
+        }
         if let lastEvent { return "最近一次事件 \(lastEvent.formatted(date: .abbreviated, time: .shortened))" }
-        return agent == .codex ? "等待第一次事件…（记得在 Codex 的 /hooks 页面信任这份配置）" : "等待第一次事件…"
+        return agent == .codex ? "等待第一次事件…（Codex 要先在 /hooks 里信任这份配置才会运行它）" : "等待第一次事件…"
     }
 }
 

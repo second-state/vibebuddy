@@ -27,6 +27,12 @@ struct HookInstaller {
         return FileManager.default.fileExists(atPath: home.appendingPathComponent(directory).path)
     }
 
+    /// 配置文件最近一次被写的时间，和 daemon 报的最近一次事件时间比，就知道
+    /// Codex 有没有在跑这份配置（VibeBuddyCore.HookConfig.codexTrustHint）。
+    static func configModifiedAt(_ agent: HookAgent) -> Date? {
+        (try? FileManager.default.attributesOfItem(atPath: configURL(for: agent).path))?[.modificationDate] as? Date
+    }
+
     static func readConfig(_ url: URL) -> [String: Any] {
         guard let data = try? Data(contentsOf: url),
               let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return [:] }
@@ -54,7 +60,11 @@ struct HookInstaller {
     }
 
     /// 改名后旧路径的条目没法再跑：是我们自己写的，就直接换成新路径，不用再问。
-    static func migrateLegacyCommands() {
+    /// 但要告诉调用方改写了谁：Codex 对改过的 hook 一律停用到人重新信任为止，
+    /// 这一步 App 替不了，不说一声用户只会发现盒子对 Codex 没了反应。
+    @discardableResult
+    static func migrateLegacyCommands() -> [HookAgent] {
+        var rewritten: [HookAgent] = []
         for agent in HookAgent.allCases {
             let url = configURL(for: agent)
             let before = readConfig(url)
@@ -67,8 +77,9 @@ struct HookInstaller {
             let wanted = HookConfig.command(binary: Resources.installedHookBinary.path, agent: agent)
             let stale = commands.contains { HookConfig.isOurs($0) && $0 != wanted }
             guard stale else { continue }
-            try? apply(installPlan(for: agent))
+            if (try? apply(installPlan(for: agent))) != nil { rewritten.append(agent) }
         }
+        return rewritten
     }
 
     static func installPlan(for agent: HookAgent) -> Plan {

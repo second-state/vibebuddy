@@ -21,7 +21,26 @@ public enum HookAgent: String, CaseIterable {
     }
 }
 
+/// Codex 对 hooks.json 里每条 hook 在 config.toml 的 `[hooks.state]` 记着一份
+/// trusted_hash；文件一改，改过的条目就被判为"待审核"，静默不再运行，直到人在
+/// Codex 里用 /hooks 重新信任。App 不去重算那个哈希（那是 Codex 的内部格式，
+/// 跟着它的版本变），只看一件可观测的事实：配置写入之后，还收到过 Codex 事件没有。
+public enum CodexTrustHint: Equatable {
+    /// 还没收到过任何事件：可能是没信任，也可能只是今天还没用 Codex，不下结论。
+    case waitingFirstEvent
+    /// 配置在最近一次事件之后改过，之后 Codex 一次都没调用过：几乎可以肯定是没信任。
+    case changedSinceLastEvent(Date)
+    /// 配置写入之后收到过事件，说明 Codex 已经在跑它。
+    case trusted
+}
+
 public enum HookConfig {
+    public static func codexTrustHint(configModifiedAt: Date?, lastEvent: Date?) -> CodexTrustHint {
+        guard let lastEvent else { return .waitingFirstEvent }
+        if let configModifiedAt, configModifiedAt > lastEvent { return .changedSinceLastEvent(configModifiedAt) }
+        return .trusted
+    }
+
     /// 判断一条 command 是不是我们的：旧的 Python 脚本也算，升级时一并替换。
     public static func isOurs(_ command: String) -> Bool {
         // 旧名 beacon-hook 与更早的两个 Python 脚本也算，升级时一并替换。

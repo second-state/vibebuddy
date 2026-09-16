@@ -70,6 +70,13 @@ check(removedHooks.keys.sorted() == ["PreToolUse"], "移除后只剩别人的：
 let diff = HookConfig.describeChange(from: existing, to: installed, agent: .codex)
 check(diff.contains("- Stop: /usr/bin/python3 /old/codex-hook.py") && diff.contains("+ Stop: \"\(binary)\" codex"), "差异说明：\(diff)")
 check(HookAgent.claude.events.count == 8, "Claude 八个事件")
+// Codex 信任提示：配置比最近一次事件新才报警；没收到过事件不下结论；读不到文件时间不报警。
+let earlier = Date(timeIntervalSince1970: 1_000)
+let later = Date(timeIntervalSince1970: 2_000)
+check(HookConfig.codexTrustHint(configModifiedAt: later, lastEvent: nil) == .waitingFirstEvent, "没收到过事件：等待")
+check(HookConfig.codexTrustHint(configModifiedAt: later, lastEvent: earlier) == .changedSinceLastEvent(later), "配置比最近事件新：要重新信任")
+check(HookConfig.codexTrustHint(configModifiedAt: earlier, lastEvent: later) == .trusted, "改完之后收到过事件：已在运行")
+check(HookConfig.codexTrustHint(configModifiedAt: nil, lastEvent: later) == .trusted, "读不到文件时间不报警")
 
 // 3. 语音包解析。
 var pack = Data(count: 256)
