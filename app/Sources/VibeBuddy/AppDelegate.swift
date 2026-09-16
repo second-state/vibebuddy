@@ -11,7 +11,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var onboardingWindow: NSWindow?
     private var subscriptions: Set<AnyCancellable> = []
 
+    private var terminationSignal: DispatchSourceSignal?
+
     func applicationDidFinishLaunching(_ notification: Notification) {
+        // `kill`/`pkill` 发来的 SIGTERM 默认直接结束进程，daemon 会变成孤儿；
+        // 接住它走正常退出，applicationWillTerminate 才有机会停掉 daemon。
+        signal(SIGTERM, SIG_IGN)
+        let source = DispatchSource.makeSignalSource(signal: SIGTERM, queue: .main)
+        source.setEventHandler { NSApp.terminate(nil) }
+        source.resume()
+        terminationSignal = source
+
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
         statusItem.button?.image = PixelFace.image(eyesClosed: true)
         statusItem.menu = NSMenu()

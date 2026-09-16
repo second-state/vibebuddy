@@ -173,6 +173,7 @@ async fn main() {
         config::config_file(),
     );
     state.serial = Some(serial_transport);
+    tokio::spawn(watch_parent());
     tokio::spawn(sweep_expired_activities(state.clone()));
     tokio::spawn(send_heartbeats(state.clone()));
     tokio::spawn(poll_ci(state.clone()));
@@ -251,6 +252,26 @@ fn is_k2_press(event: &Event) -> bool {
     event.event == "button"
         && event.extra.get("button").and_then(|value| value.as_str()) == Some("K2")
         && event.extra.get("action").and_then(|value| value.as_str()) == Some("press")
+}
+
+/// App 看管时它把自己的 pid 放在 BEACON_PARENT_PID 里。App 被强杀后 daemon
+/// 会被 launchd 收养，父 pid 变成 1；那就跟着退出，别占着串口和端口等下一个
+/// App 起不来。macOS 没有 prctl(PR_SET_PDEATHSIG)，只能轮询。
+async fn watch_parent() {
+    let Some(expected) = env::var("BEACON_PARENT_PID")
+        .ok()
+        .and_then(|value| value.parse::<u32>().ok())
+    else {
+        return;
+    };
+    let mut ticker = tokio::time::interval(Duration::from_secs(2));
+    loop {
+        ticker.tick().await;
+        if std::os::unix::process::parent_id() != expected {
+            info!(expected, "看管我的 App 已经不在，跟着退出");
+            std::process::exit(0);
+        }
+    }
 }
 
 /// daemon 的构建标识：git 描述加上二进制自己的时间戳。

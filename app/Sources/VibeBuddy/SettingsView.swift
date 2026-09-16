@@ -26,7 +26,7 @@ struct GeneralView: View {
             Toggle("盒子断开或 daemon 异常时通知我", isOn: Binding(get: { model.status?.config.notifyLink ?? true }, set: { model.setNotifyLink($0) }))
                 .disabled(model.status == nil)
             Section {
-                LabeledContent("App", value: Resources.bundleVersion)
+                LabeledContent("App", value: Resources.displayVersion)
                 LabeledContent("daemon", value: model.status?.daemon.build ?? "未连接")
             }
         }
@@ -290,7 +290,7 @@ struct AdvancedView: View {
         let config = Resources.applicationSupport.appendingPathComponent("config.json")
         if manager.fileExists(atPath: config.path) { try? manager.copyItem(at: config, to: target.appendingPathComponent("config.json")) }
         let summary = """
-        App \(Resources.bundleVersion)
+        App \(Resources.displayVersion)
         daemon \(model.status?.daemon.build ?? "未连接")
         firmware \(model.status?.device.firmwareBuild ?? "—")
         bundled firmware \(model.bundledFirmwareBuild ?? "—")

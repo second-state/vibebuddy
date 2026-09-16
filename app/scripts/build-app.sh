@@ -13,9 +13,11 @@ if [[ "${1:-}" == "--debug" ]]; then
     debug=1
 fi
 
-version="$(git -C "${repo_root}" describe --tags --always --dirty 2>/dev/null || echo dev)"
-version="${version#v}"
-build_number="$(date +%Y%m%d%H%M)"
+# 语义版本取 Cargo 工作区的 version（仓库还没有 tag，git describe 只是哈希）；
+# 构建号是 git 描述，App「关于」里两者都显示，心跳里只带语义版本。
+version="$(sed -n 's/^version = "\(.*\)"/\1/p' "${repo_root}/Cargo.toml" | head -n 1)"
+version="${version:-0.0.0}"
+build_number="$(git -C "${repo_root}" describe --tags --always --dirty 2>/dev/null || echo dev)"
 
 echo "== Rust helper"
 cargo build --release --manifest-path "${repo_root}/Cargo.toml" -p beacond -p beacon-hook
@@ -78,4 +80,4 @@ done
 
 # ad-hoc 签名：登录项与通知都认包身份，未签名的包每次改动都像换了个 App。
 codesign --force --deep --sign - "${bundle}" 2>/dev/null || echo "codesign 不可用，跳过签名"
-echo "== 完成: ${bundle} (${version})"
+echo "== 完成: ${bundle} (${version}, ${build_number})"

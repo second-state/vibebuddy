@@ -3,9 +3,17 @@ import VibeBuddyCore
 
 /// App 包里的东西在哪：两个 helper、固件三件套、语音包。
 enum Resources {
+    /// 语义版本，随心跳报给设备。
     static var bundleVersion: String {
         Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "dev"
     }
+
+    /// 构建号（git 描述），只在界面上显示。
+    static var bundleBuild: String {
+        Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "dev"
+    }
+
+    static var displayVersion: String { "\(bundleVersion) (\(bundleBuild))" }
 
     static var macOSDirectory: URL {
         Bundle.main.executableURL!.deletingLastPathComponent()
