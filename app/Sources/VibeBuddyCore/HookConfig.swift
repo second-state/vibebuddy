@@ -24,7 +24,9 @@ public enum HookAgent: String, CaseIterable {
 public enum HookConfig {
     /// 判断一条 command 是不是我们的：旧的 Python 脚本也算，升级时一并替换。
     public static func isOurs(_ command: String) -> Bool {
-        command.contains("beacon-hook") || command.contains("codex-hook.py") || command.contains("claude-hook.py")
+        // 旧名 beacon-hook 与更早的两个 Python 脚本也算，升级时一并替换。
+        command.contains("vibebuddy-hook") || command.contains("beacon-hook")
+            || command.contains("codex-hook.py") || command.contains("claude-hook.py")
     }
 
     /// 我们要写进去的那条命令。

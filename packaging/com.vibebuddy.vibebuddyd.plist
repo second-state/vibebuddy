@@ -3,13 +3,13 @@
 <plist version="1.0">
 <dict>
   <key>Label</key>
-  <string>com.agentbeacon.beacond</string>
+  <string>com.vibebuddy.vibebuddyd</string>
   <key>ProgramArguments</key>
   <array>
-    <string>/Users/dragon/workspace/agent-beacon/target/release/beacond</string>
+    <string>/Users/dragon/workspace/vibe-buddy/target/release/vibebuddyd</string>
   </array>
   <key>WorkingDirectory</key>
-  <string>/Users/dragon/workspace/agent-beacon</string>
+  <string>/Users/dragon/workspace/vibe-buddy</string>
   <key>RunAtLoad</key>
   <true/>
   <key>KeepAlive</key>
@@ -17,8 +17,8 @@
   <key>ThrottleInterval</key>
   <integer>2</integer>
   <key>StandardOutPath</key>
-  <string>/Users/dragon/Library/Logs/AgentBeacon/beacond.log</string>
+  <string>/Users/dragon/Library/Logs/VibeBuddy/vibebuddyd.log</string>
   <key>StandardErrorPath</key>
-  <string>/Users/dragon/Library/Logs/AgentBeacon/beacond.log</string>
+  <string>/Users/dragon/Library/Logs/VibeBuddy/vibebuddyd.log</string>
 </dict>
 </plist>

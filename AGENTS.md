@@ -6,7 +6,7 @@
 
 ### Issue tracker
 
-Issue 与规格都建在 GitHub Issues（longzhi/agent-beacon），用 `gh` 操作。见 `docs/agents/issue-tracker.md`。
+Issue 与规格都建在 GitHub Issues（longzhi/vibe-buddy），用 `gh` 操作。见 `docs/agents/issue-tracker.md`。
 
 ### Triage labels
 

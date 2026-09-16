@@ -45,7 +45,10 @@ final class AppModel: ObservableObject {
     }
 
     func start() {
+        Resources.migrateLegacyDirectories()
         try? HookInstaller.deployBinary()
+        HookInstaller.migrateLegacyCommands()
+        refreshHookStates()
         if managesDaemon { supervisor.start() }
         streamTask = Task { [weak self] in await self?.followStatus() }
         Timer.scheduledTimer(withTimeInterval: 5, repeats: true) { [weak self] _ in

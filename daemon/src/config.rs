@@ -40,14 +40,14 @@ impl Config {
     }
 }
 
-/// 配置文件位置：环境变量 `BEACON_CONFIG_FILE` 优先，否则放在 Application
+/// 配置文件位置：环境变量 `VIBEBUDDY_CONFIG_FILE` 优先，否则放在 Application
 /// Support 里 `stats.json` 旁边。没有 `HOME` 时不落盘，配置只在内存里。
 pub fn config_file() -> Option<PathBuf> {
-    if let Ok(path) = std::env::var("BEACON_CONFIG_FILE") {
+    if let Ok(path) = std::env::var("VIBEBUDDY_CONFIG_FILE") {
         return Some(PathBuf::from(path));
     }
     let home = std::env::var("HOME").ok()?;
-    Some(PathBuf::from(home).join("Library/Application Support/AgentBeacon/config.json"))
+    Some(PathBuf::from(home).join("Library/Application Support/VibeBuddy/config.json"))
 }
 
 #[cfg(test)]

@@ -679,7 +679,7 @@ void app_main(void) {
   size_t line_length = 0;
   bool discarding = false;
 
-  transport_write_literal("READY agent-beacon-fw 0.1.0\n");
+  transport_write_literal("READY vibebuddy-fw 0.1.0\n");
 
   while (true) {
     int received = uart_read_bytes(UART_NUM_0, input, sizeof(input), 0);

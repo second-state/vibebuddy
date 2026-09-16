@@ -3,7 +3,7 @@
 //! 这里只做翻译：任务卡聚合、去重、播报和过期都在 [`crate::activity`]。
 //! Adapter 不持有状态，因为设备只有一块屏幕，所有 Agent 共享同一个聚合器。
 
-use beacon_protocol::Event;
+use vibebuddy_protocol::Event;
 use serde::Deserialize;
 
 use crate::activity::{
@@ -136,7 +136,7 @@ mod tests {
             turn_id: Some("t1".to_owned()),
             thread_id: Some("fresh".to_owned()),
             hook_event_name: "UserPromptSubmit".to_owned(),
-            cwd: Some("/work/agent-beacon".to_owned()),
+            cwd: Some("/work/vibe-buddy".to_owned()),
             response_kind: None,
         };
         assert!(apply(&mut tracker, &mut titles, fresh).is_some());
@@ -198,16 +198,16 @@ mod tests {
         let working = apply(
             &mut tracker,
             &mut SessionTitles::disabled(),
-            hook("session-a", "UserPromptSubmit", "/work/agent-beacon"),
+            hook("session-a", "UserPromptSubmit", "/work/vibe-buddy"),
         )
         .expect("开始事件应可见");
         assert_eq!(working.event, "task.start");
-        assert_eq!(working.title.as_deref(), Some("CX:AGENT-BEACON"));
+        assert_eq!(working.title.as_deref(), Some("CX:VIBE-BUDDY"));
 
         let waiting = apply(
             &mut tracker,
             &mut SessionTitles::disabled(),
-            hook("session-a", "PermissionRequest", "/work/agent-beacon"),
+            hook("session-a", "PermissionRequest", "/work/vibe-buddy"),
         )
         .expect("审批事件应可见");
         assert_eq!(waiting.event, "agent.input_required");
@@ -215,7 +215,7 @@ mod tests {
         let resumed = apply(
             &mut tracker,
             &mut SessionTitles::disabled(),
-            hook("session-a", "PostToolUse", "/work/agent-beacon"),
+            hook("session-a", "PostToolUse", "/work/vibe-buddy"),
         )
         .expect("工具完成后应恢复工作中");
         assert_eq!(resumed.event, "task.start");
@@ -223,7 +223,7 @@ mod tests {
         let done = apply(
             &mut tracker,
             &mut SessionTitles::disabled(),
-            hook("session-a", "Stop", "/work/agent-beacon"),
+            hook("session-a", "Stop", "/work/vibe-buddy"),
         )
         .expect("停止事件应可见");
         assert_eq!(done.event, "task.done");
@@ -235,13 +235,13 @@ mod tests {
         apply(
             &mut tracker,
             &mut SessionTitles::disabled(),
-            hook("session-a", "UserPromptSubmit", "/work/agent-beacon"),
+            hook("session-a", "UserPromptSubmit", "/work/vibe-buddy"),
         );
         let stop: CodexHook = serde_json::from_value(json!({
             "session_id": "session-a",
             "turn_id": "session-a-turn",
             "hook_event_name": "Stop",
-            "cwd": "/work/agent-beacon",
+            "cwd": "/work/vibe-buddy",
             "response_kind": "input_required"
         }))
         .expect("等待回答的 Stop 载荷应可解析");

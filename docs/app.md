@@ -5,17 +5,17 @@ App 是 Vibe Buddy 在 Mac 上的图形界面：一个菜单栏图标加一扇�
 ## 角色与生命周期
 
 - **菜单栏常驻，不上 Dock。** `LSUIElement` 为真，设置窗从菜单打开。
-- **看管 daemon。** `beacond` 作为 helper 打包在 App 内，App 启动时拉起它，崩溃后按 1、2、5 秒退避重启，连续三次失败就停手、弹通知，菜单第一行变成「daemon 异常 · 点击重启」。
+- **看管 daemon。** `vibebuddyd` 作为 helper 打包在 App 内，App 启动时拉起它，崩溃后按 1、2、5 秒退避重启，连续三次失败就停手、弹通知，菜单第一行变成「daemon 异常 · 点击重启」。
 - **退出即离线。** 退出 App 就退出 daemon，菜单项写明「退出 Vibe Buddy（盒子将离线）」。不再有独立于 App 的 daemon 生命周期。
-- **取代 LaunchAgent。** 首次启动发现旧的 `com.agentbeacon.beacond` LaunchAgent，或 7331 端口已被占用，就提议卸掉旧的并接管。
+- **取代 LaunchAgent。** 首次启动发现旧的 `com.vibebuddy.vibebuddyd` LaunchAgent，或 7331 端口已被占用，就提议卸掉旧的并接管。
 - **登录时启动**用 SMAppService 注册，引导的最后一步询问，之后在「通用」页可改；系统会提示"已添加后台项目"，这是唯一会遇到的系统权限交互。
 
 ## 技术栈与仓库布局
 
 - SwiftUI 界面，菜单栏用 AppKit 的 `NSStatusItem` 加标准 `NSMenu`；daemon 与 Hook 仍是 Rust。
-- `app/` 目录放 Xcode 工程，`.xcodeproj` 直接入库，不用生成器。一个 Build Phase 跑 `cargo build --release -p beacond -p beacon-hook`，把两个二进制拷进 App 包。
+- `app/` 目录放 Xcode 工程，`.xcodeproj` 直接入库，不用生成器。一个 Build Phase 跑 `cargo build --release -p vibebuddyd -p vibebuddy-hook`，把两个二进制拷进 App 包。
 - 最低 macOS 14。界面第一版只做中文，字符串集中存放以便日后加英文。
-- 显示名 `Vibe Buddy`，包名 `Vibe Buddy.app`，bundle id `com.agentbeacon.app`，helper 叫 `beacond`。与"显示名改、内部名不改"的约定一致。
+- 显示名 `Vibe Buddy`，包名 `Vibe Buddy.app`，bundle id `com.vibebuddy.app`，helper 叫 `vibebuddyd`。与"显示名改、内部名不改"的约定一致。
 - App 自身不做更新检查（没有 Sparkle），关于页只显示版本号。
 
 ## App 与 daemon 怎么说话
@@ -26,7 +26,7 @@ App 是 Vibe Buddy 在 Mac 上的图形界面：一个菜单栏图标加一扇�
 - `GET /v1/status/stream`：SSE，状态一变就推。
 - 写操作：写语音包、更新固件、截图、重启 daemon 自身。
 
-配置由 daemon 持有，存在 `~/Library/Application Support/AgentBeacon/config.json`（当前音色、通知开关等），App 通过接口读写，不直接碰文件；现有环境变量保留为开发时的覆盖手段。App 自己只用 UserDefaults 存窗口位置一类的界面状态。
+配置由 daemon 持有，存在 `~/Library/Application Support/VibeBuddy/config.json`（当前音色、通知开关等），App 通过接口读写，不直接碰文件；现有环境变量保留为开发时的覆盖手段。App 自己只用 UserDefaults 存窗口位置一类的界面状态。
 
 ## 菜单栏
 
@@ -99,7 +99,7 @@ App 附带与之配套的固件三件套（bootloader、分区表、app）。Rel
 - 固件烧录不用 espflash：它的 ROM 写块固定 1 KB、串口对象是具体类型没法包装，过不了 UART 桥；daemon 自己实现 ROM 下载协议，块 256 字节、桥接时按线速分段，MD5 校验后硬复位。
 - 语音包分块写入在桥上约 5 KB/s（1.2 MB 四分钟），比设计里估的慢一些；瓶颈是停等回执加 115200 波特，原生 USB 口快得多。
 - 设备连上先收 `device.hello`，把模式、固件构建号、音色重报一遍；否则 daemon 重启后什么都不知道。
-- App 把自己的 pid 放在 `BEACON_PARENT_PID` 里传给 daemon；App 被强杀（SIGKILL）时 daemon 两秒内自己退出，不会变成孤儿占着串口和端口。SIGTERM 则由 App 接住走正常退出。
+- App 把自己的 pid 放在 `VIBEBUDDY_PARENT_PID` 里传给 daemon；App 被强杀（SIGKILL）时 daemon 两秒内自己退出，不会变成孤儿占着串口和端口。SIGTERM 则由 App 接住走正常退出。
 - 装包脚本做的是 ad-hoc 签名，只为让登录项与通知认得这个包的身份，不是分发用的 Developer ID 签名与公证——那仍在「明确不做」里。
 - 固件三件套的偏移（0x0、0x8000、0x10000）由分区布局决定，daemon 写死，App 只传文件路径。
 

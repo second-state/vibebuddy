@@ -7,11 +7,11 @@ Vibe Buddy 把本地 AI Agent 的状态变成实体宠物的画面与声音。�
 ### 角色与组件
 
 **Vibe Buddy**：
-产品的显示名，2026-09-15 起用，此前叫 AgentBeacon。仓库 `agent-beacon`、daemon `beacond`、CLI `beacon`、Beacon Protocol、LaunchAgent 标签与本机路径沿用旧名，不随之改。
-_Avoid_: AgentBeacon（旧名，只在讲历史时出现）、氛围助手（那是解释，不是名字）
+产品名，2026-09-15 起用，此前叫 AgentBeacon。2026-09-16 起内部名也全部跟着改：仓库 `vibe-buddy`、daemon `vibebuddyd`、Hook `vibebuddy-hook`、CLI `vibebuddy`、Vibe Buddy Protocol、bundle id `com.vibebuddy.app`、本机目录 `VibeBuddy`。
+_Avoid_: AgentBeacon、beacond、beacon-hook（旧名，只在讲历史时出现）、氛围助手（那是解释，不是名字）
 
 **氛围小助手**：
-Vibe Buddy 的原创像素角色，设备上唯一的拟人化主体，英文也叫 Vibe Buddy。2026-09-15 前叫小灯灵，代码里的 `beaconling` 标识符沿用旧名。
+Vibe Buddy 的原创像素角色，设备上唯一的拟人化主体，英文也叫 Vibe Buddy。2026-09-15 前叫小灯灵，代码里叫 `buddy`。
 _Avoid_: 小灯灵（旧名）、宠物（泛指时可用，指代本角色时不可）、Pet、Codex 宠物、助手（单独用时指 Agent，见下）
 
 **Agent**：
@@ -93,7 +93,7 @@ Vibe Buddy 正在追踪的一次工作及其当前状态，是值得单独播报
 _Avoid_: 任务、Job、Task（Task 专指设备上的呈现，见下）
 
 **任务卡**：
-Activity 在设备屏幕上的呈现形式，最多同时显示 3 张，最近活动的在最上。Beacon Protocol 中承载它的字段名为 `tasks`，属于 v1 的历史命名，不改变 Activity 才是领域对象这一事实。
+Activity 在设备屏幕上的呈现形式，最多同时显示 3 张，最近活动的在最上。Vibe Buddy Protocol 中承载它的字段名为 `tasks`，属于 v1 的历史命名，不改变 Activity 才是领域对象这一事实。
 _Avoid_: 卡片、条目、Task item
 
 ### 状态与通知

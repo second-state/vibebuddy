@@ -25,13 +25,13 @@
 
 可借鉴：
 
-- 服务端采用 Rust、Tokio、Axum、Serde 和 tracing/logging 相关生态，与 `beacond` 的候选技术栈方向一致。[Cargo.toml](https://github.com/second-state/echokit_server/blob/d1d976596f122976095b7da4df3e946baf152b96/Cargo.toml)
+- 服务端采用 Rust、Tokio、Axum、Serde 和 tracing/logging 相关生态，与 `vibebuddyd` 的候选技术栈方向一致。[Cargo.toml](https://github.com/second-state/echokit_server/blob/d1d976596f122976095b7da4df3e946baf152b96/Cargo.toml)
 - WebSocket I/O 使用独立消息处理循环和 channel 把 transport 与业务流水线分隔；Stage 2 设计串口收发/重连任务时可参考这个职责边界。[`src/services/ws.rs`](https://github.com/second-state/echokit_server/blob/d1d976596f122976095b7da4df3e946baf152b96/src/services/ws.rs)
 
 不直接采用：
 
 - EchoKit Server 是 ASR → LLM → TTS 语音平台，范围显著大于本地状态守护进程。Vibe Buddy 不引入其 AI provider、VAD、音频流、MCP 或配置系统。
-- 它的网络协议、重试和音频分块策略不能替代 Beacon Protocol 的版本、逐行 framing、输入上限与未知事件规则。
+- 它的网络协议、重试和音频分块策略不能替代 Vibe Buddy Protocol 的版本、逐行 framing、输入上限与未知事件规则。
 - 该仓库同样使用 GPL-3.0；当前阶段不复制代码。
 
 ## 对 Vibe Buddy 的实际影响

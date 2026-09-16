@@ -1,6 +1,6 @@
 import Foundation
 
-/// 看管包内的 beacond：拉起、崩了按 1、2、5 秒退避重启，连续三次失败停手。
+/// 看管包内的 vibebuddyd：拉起、崩了按 1、2、5 秒退避重启，连续三次失败停手。
 @MainActor
 final class DaemonSupervisor {
     enum State: Equatable { case stopped, running, givenUp }
@@ -46,14 +46,14 @@ final class DaemonSupervisor {
         let process = Process()
         process.executableURL = Resources.daemonBinary
         var environment = ProcessInfo.processInfo.environment
-        environment["BEACON_APP_VERSION"] = Resources.bundleVersion
+        environment["VIBEBUDDY_APP_VERSION"] = Resources.bundleVersion
         // daemon 看着这个 pid：App 被强杀（SIGKILL）时它也能在两秒内退出，
         // 不会变成孤儿占着端口。
-        environment["BEACON_PARENT_PID"] = String(ProcessInfo.processInfo.processIdentifier)
+        environment["VIBEBUDDY_PARENT_PID"] = String(ProcessInfo.processInfo.processIdentifier)
         process.environment = environment
         // 日志与 LaunchAgent 时代同一个位置，「打开日志」就能找到。
         try? FileManager.default.createDirectory(at: Resources.logsDirectory, withIntermediateDirectories: true)
-        let logURL = Resources.logsDirectory.appendingPathComponent("beacond.log")
+        let logURL = Resources.logsDirectory.appendingPathComponent("vibebuddyd.log")
         if !FileManager.default.fileExists(atPath: logURL.path) {
             FileManager.default.createFile(atPath: logURL.path, contents: nil)
         }

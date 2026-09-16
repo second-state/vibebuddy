@@ -2,7 +2,7 @@ use std::collections::VecDeque;
 use std::env;
 use std::time::Duration;
 
-use beacon_protocol::Event;
+use vibebuddy_protocol::Event;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::sync::{mpsc, watch};
 use tokio_serial::{SerialPortBuilderExt, SerialPortType, SerialStream};
@@ -47,8 +47,8 @@ pub struct SerialConfig {
 impl SerialConfig {
     pub fn from_env() -> Self {
         Self {
-            explicit_port: env::var("BEACON_SERIAL_PORT").ok(),
-            usb_serial: env::var("BEACON_USB_SERIAL").ok(),
+            explicit_port: env::var("VIBEBUDDY_SERIAL_PORT").ok(),
+            usb_serial: env::var("VIBEBUDDY_USB_SERIAL").ok(),
         }
     }
 }

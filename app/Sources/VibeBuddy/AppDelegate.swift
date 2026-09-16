@@ -108,6 +108,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
 /// 旧的 LaunchAgent 时代：发现它就提议卸掉并接管，两套 daemon 不能同时抢串口。
 enum LegacyLaunchAgent {
+    /// 改名前的标签：要认的是旧机器上留下的那个，不能跟着改。
     static let label = "com.agentbeacon.beacond"
     static var plist: URL {
         FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Library/LaunchAgents/\(label).plist")
@@ -127,7 +128,7 @@ enum LegacyLaunchAgent {
         let occupied = await portOccupied()
         guard hasPlist || occupied else { return }
         let alert = NSAlert()
-        alert.messageText = hasPlist ? "发现旧的 beacond 后台服务" : "7331 端口已经有 daemon 在跑"
+        alert.messageText = hasPlist ? "发现旧的 vibebuddyd 后台服务" : "7331 端口已经有 daemon 在跑"
         alert.informativeText = "Vibe Buddy 现在自己看管 daemon，两个 daemon 会抢串口。卸掉旧的并接管吗？"
         alert.addButton(withTitle: "卸载并接管")
         alert.addButton(withTitle: "稍后")

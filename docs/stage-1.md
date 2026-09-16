@@ -4,7 +4,7 @@
 
 ## 结论
 
-Stage 1 **已通过实机验收**。证据链是 Mac Studio → `/dev/cu.usbmodem8401` → ESP32-S3 原生 USB Serial/JTAG → `agent-beacon-fw` → cJSON parse → USB 返回结果，不是本机模拟或仅编译通过。
+Stage 1 **已通过实机验收**。证据链是 Mac Studio → `/dev/cu.usbmodem8401` → ESP32-S3 原生 USB Serial/JTAG → `vibebuddy-fw` → cJSON parse → USB 返回结果，不是本机模拟或仅编译通过。
 
 本阶段没有初始化 LCD、audio、microphone、buzzer 或 buttons。实机烧录后，LCD 继续显示原小智固件最后留下的配网页面；这不是旧固件仍在运行，而是 LCD 控制器显存和背光在 ESP32 软件复位后保持，且 Stage 1 固件没有覆盖画面。随后重复执行 Serial Hello 仍通过，直接证明当前运行的是 Vibe Buddy 固件。LCD 清屏和新 UI 必须等待 Stage 3 及厂家硬件依据。
 
@@ -12,7 +12,7 @@ Stage 1 **已通过实机验收**。证据链是 Mac Studio → `/dev/cu.usbmode
 
 - ESP-IDF：v5.5.3。
 - Target：`esp32s3`。
-- 固件项目名：`agent-beacon-fw`。
+- 固件项目名：`vibebuddy-fw`。
 - 应用镜像：183,616 bytes（`0x2cd40`）。
 - 默认应用分区：1 MiB，剩余 82%。
 - 首次构建发现并移除了一个无效 Kconfig symbol 和一个 C qualifier warning；重新构建无编译警告。
@@ -43,7 +43,7 @@ Stage 1 **已通过实机验收**。证据链是 Mac Studio → `/dev/cu.usbmode
 | --- | --- | --- |
 | `0x0000` | bootloader | 20,832 bytes |
 | `0x8000` | partition table | 3,072 bytes |
-| `0x10000` | `agent-beacon-fw` | 183,616 bytes |
+| `0x10000` | `vibebuddy-fw` | 183,616 bytes |
 
 三段写入均由 esptool 报告 hash verified，随后完成 hard reset；设备仍以 `/dev/cu.usbmodem8401` 重新枚举。
 
@@ -84,5 +84,5 @@ PASS protocol error, version, extension, CRLF, and size handling
 ## 未证明的事项
 
 - 这次验收没有证明 LCD、audio、buzzer、buttons 或 TF 卡可由 Vibe Buddy 驱动。
-- 这次验收没有实现 `beacond`、HTTP API 或 serial reconnect；这些属于 Stage 2。
+- 这次验收没有实现 `vibebuddyd`、HTTP API 或 serial reconnect；这些属于 Stage 2。
 - 当前串口节点编号可能随 macOS 枚举变化，后续 daemon 不能写死 `usbmodem8401`，应使用 VID/PID 与 USB serial 发现设备。

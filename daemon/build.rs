@@ -9,7 +9,7 @@ fn main() {
     for path in watched_paths() {
         println!("cargo:rerun-if-changed={}", path.display());
     }
-    println!("cargo:rustc-env=BEACON_BUILD={}", describe());
+    println!("cargo:rustc-env=VIBEBUDDY_BUILD={}", describe());
 }
 
 fn describe() -> String {

@@ -7,7 +7,7 @@ use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
-use beacon_protocol::Event;
+use vibebuddy_protocol::Event;
 use serde::Deserialize;
 use tracing::{info, warn};
 
@@ -125,9 +125,9 @@ impl CiWatcher {
 /// 关注哪些仓库：Agent 最近工作过的那些 GitHub 仓库。
 ///
 /// 不需要用户维护清单——daemon 已经知道你在哪儿干活，这个事实在解析任务卡
-/// 标题时就算出来了。`BEACON_CI_REPOS` 可以覆盖，用于观察本机没有检出的仓库。
+/// 标题时就算出来了。`VIBEBUDDY_CI_REPOS` 可以覆盖，用于观察本机没有检出的仓库。
 fn watched_repos(workspaces: &[PathBuf]) -> Vec<String> {
-    if let Ok(value) = std::env::var("BEACON_CI_REPOS") {
+    if let Ok(value) = std::env::var("VIBEBUDDY_CI_REPOS") {
         return value
             .split(',')
             .map(str::trim)
@@ -181,7 +181,7 @@ fn parse_slug(url: &str) -> Option<String> {
 /// 找到 `gh`。launchd 只给四个系统目录的 `PATH`，`gh` 通常不在里面；
 /// 而让用户去改 plist 正是这个功能想省掉的那一步。
 fn gh_program() -> String {
-    if let Ok(path) = std::env::var("BEACON_GH") {
+    if let Ok(path) = std::env::var("VIBEBUDDY_GH") {
         return path;
     }
     let home = std::env::var("HOME").unwrap_or_default();
@@ -238,13 +238,13 @@ mod tests {
     #[test]
     fn every_common_remote_spelling_resolves_to_the_same_repository() {
         for url in [
-            "https://github.com/longzhi/agent-beacon.git",
-            "git@github.com:longzhi/agent-beacon.git",
-            "ssh://git@github.com/longzhi/agent-beacon",
+            "https://github.com/longzhi/vibe-buddy.git",
+            "git@github.com:longzhi/vibe-buddy.git",
+            "ssh://git@github.com/longzhi/vibe-buddy",
         ] {
             assert_eq!(
                 parse_slug(url).as_deref(),
-                Some("longzhi/agent-beacon"),
+                Some("longzhi/vibe-buddy"),
                 "{url}"
             );
         }
@@ -262,13 +262,13 @@ mod tests {
             "[remote \"upstream\"]\n",
             "\turl = https://github.com/someone/fork.git\n",
             "[remote \"origin\"]\n",
-            "\turl = https://github.com/longzhi/agent-beacon.git\n",
+            "\turl = https://github.com/longzhi/vibe-buddy.git\n",
             "[branch \"main\"]\n",
             "\tremote = origin\n",
         );
         assert_eq!(
             origin_url(config).as_deref(),
-            Some("https://github.com/longzhi/agent-beacon.git")
+            Some("https://github.com/longzhi/vibe-buddy.git")
         );
     }
 
@@ -279,12 +279,12 @@ mod tests {
 
         let events = watcher.apply(
             &mut tracker,
-            vec![("longzhi/agent-beacon".to_owned(), run(1, "in_progress", ""))],
+            vec![("longzhi/vibe-buddy".to_owned(), run(1, "in_progress", ""))],
         );
 
         assert_eq!(events.len(), 1);
         assert_eq!(events[0].event, "task.start");
-        assert_eq!(events[0].title.as_deref(), Some("CI:AGENT-BEACON"));
+        assert_eq!(events[0].title.as_deref(), Some("CI:VIBE-BUDDY"));
     }
 
     #[test]
@@ -295,7 +295,7 @@ mod tests {
         let events = watcher.apply(
             &mut tracker,
             vec![(
-                "longzhi/agent-beacon".to_owned(),
+                "longzhi/vibe-buddy".to_owned(),
                 run(1, "completed", "success"),
             )],
         );
@@ -310,7 +310,7 @@ mod tests {
     fn a_failing_run_reports_an_error() {
         let mut watcher = CiWatcher::default();
         let mut tracker = ActivityTracker::default();
-        let repo = "longzhi/agent-beacon".to_owned();
+        let repo = "longzhi/vibe-buddy".to_owned();
 
         watcher.apply(
             &mut tracker,
@@ -320,14 +320,14 @@ mod tests {
 
         assert_eq!(events.len(), 1);
         assert_eq!(events[0].event, "task.error");
-        assert_eq!(events[0].title.as_deref(), Some("CI:AGENT-BEACON"));
+        assert_eq!(events[0].title.as_deref(), Some("CI:VIBE-BUDDY"));
     }
 
     #[test]
     fn a_cancelled_run_does_not_claim_failure() {
         let mut watcher = CiWatcher::default();
         let mut tracker = ActivityTracker::default();
-        let repo = "longzhi/agent-beacon".to_owned();
+        let repo = "longzhi/vibe-buddy".to_owned();
 
         watcher.apply(
             &mut tracker,

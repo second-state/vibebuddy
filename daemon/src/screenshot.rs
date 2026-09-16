@@ -4,7 +4,7 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use beacon_protocol::Event;
+use vibebuddy_protocol::Event;
 use tokio::sync::broadcast;
 
 use crate::serial_transport::{DeviceMessage, Transport};

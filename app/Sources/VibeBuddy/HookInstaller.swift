@@ -1,7 +1,7 @@
 import Foundation
 import VibeBuddyCore
 
-/// 接入：把 beacon-hook 复制到 Application Support，再把 Hook 条目合并进
+/// 接入：把 vibebuddy-hook 复制到 Application Support，再把 Hook 条目合并进
 /// 用户级配置。只增删自己的条目（VibeBuddyCore.HookConfig）。
 struct HookInstaller {
     struct Plan {
@@ -48,6 +48,24 @@ struct HookInstaller {
         }
         try FileManager.default.copyItem(at: source, to: destination)
         try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: destination.path)
+    }
+
+    /// 改名后旧路径的条目没法再跑：是我们自己写的，就直接换成新路径，不用再问。
+    static func migrateLegacyCommands() {
+        for agent in HookAgent.allCases {
+            let url = configURL(for: agent)
+            let before = readConfig(url)
+            guard let hooks = before["hooks"] as? [String: Any] else { continue }
+            let commands = hooks.values.flatMap { value in
+                (value as? [[String: Any]] ?? []).flatMap { group in
+                    (group["hooks"] as? [[String: Any]] ?? []).compactMap { $0["command"] as? String }
+                }
+            }
+            let wanted = HookConfig.command(binary: Resources.installedHookBinary.path, agent: agent)
+            let stale = commands.contains { HookConfig.isOurs($0) && $0 != wanted }
+            guard stale else { continue }
+            try? apply(installPlan(for: agent))
+        }
     }
 
     static func installPlan(for agent: HookAgent) -> Plan {

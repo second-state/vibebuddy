@@ -51,7 +51,7 @@ let existing: [String: Any] = [
     ],
     "model": "gpt-5",
 ]
-let binary = "/Users/x/Library/Application Support/AgentBeacon/bin/beacon-hook"
+let binary = "/Users/x/Library/Application Support/VibeBuddy/bin/vibebuddy-hook"
 let installed = HookConfig.install(into: existing, agent: .codex, binary: binary)
 check(HookConfig.isInstalled(in: installed, agent: .codex, binary: binary), "装好后检测为已装")
 check(!HookConfig.isInstalled(in: existing, agent: .codex, binary: binary), "装前检测为未装")

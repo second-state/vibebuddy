@@ -38,7 +38,7 @@ mod tests {
             "session_id": "s1",
             "prompt_id": "p1",
             "hook_event_name": "UserPromptSubmit",
-            "cwd": "/work/agent-beacon",
+            "cwd": "/work/vibe-buddy",
             "prompt": "请把我的密钥改成 sk-secret",
             "transcript_path": "/Users/someone/.claude/projects/x.jsonl",
             "session_title": "内部项目代号",
@@ -46,7 +46,7 @@ mod tests {
         .expect("应有载荷");
         assert_eq!(
             Value::Object(payload),
-            serde_json::json!({"session_id": "s1", "prompt_id": "p1", "hook_event_name": "UserPromptSubmit", "cwd": "/work/agent-beacon"})
+            serde_json::json!({"session_id": "s1", "prompt_id": "p1", "hook_event_name": "UserPromptSubmit", "cwd": "/work/vibe-buddy"})
         );
     }
 

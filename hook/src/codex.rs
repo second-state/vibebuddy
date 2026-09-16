@@ -119,7 +119,7 @@ mod tests {
     use super::*;
 
     fn temp_transcript(name: &str, meta: Value) -> std::path::PathBuf {
-        let dir = std::env::temp_dir().join(format!("beacon-hook-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("vibebuddy-hook-{}", std::process::id()));
         std::fs::create_dir_all(&dir).expect("临时目录");
         let path = dir.join(name);
         std::fs::write(&path, format!("{}\n", serde_json::json!({"type": "session_meta", "payload": meta})))
@@ -159,7 +159,7 @@ mod tests {
             "session_id": "user-session",
             "turn_id": "user-turn",
             "hook_event_name": "PostToolUse",
-            "cwd": "/work/agent-beacon",
+            "cwd": "/work/vibe-buddy",
             "transcript_path": transcript.to_string_lossy(),
         });
         let payload = sanitized_payload(&source).expect("应有载荷");
@@ -173,7 +173,7 @@ mod tests {
             "session_id": "session-a",
             "turn_id": "turn-a",
             "hook_event_name": "Stop",
-            "cwd": "/work/agent-beacon",
+            "cwd": "/work/vibe-buddy",
             "last_assistant_message": "第一项推荐使用 GitHub Issues。\n\n是否采用 GitHub Issues？直接回复“是”即可。",
         });
         let payload = sanitized_payload(&source).expect("应有载荷");
@@ -187,7 +187,7 @@ mod tests {
             "session_id": "session-a",
             "turn_id": "turn-a",
             "hook_event_name": "Stop",
-            "cwd": "/work/agent-beacon",
+            "cwd": "/work/vibe-buddy",
             "last_assistant_message": "修复已完成，全量测试通过。",
         });
         let payload = sanitized_payload(&source).expect("应有载荷");
@@ -201,7 +201,7 @@ mod tests {
                 "session_id": "session-a",
                 "turn_id": "turn-a",
                 "hook_event_name": "Stop",
-                "cwd": "/work/agent-beacon",
+                "cwd": "/work/vibe-buddy",
                 "last_assistant_message": message,
             });
             let payload = sanitized_payload(&source).expect("应有载荷");

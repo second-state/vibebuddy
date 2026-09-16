@@ -5,7 +5,7 @@
     <key>CFBundleDevelopmentRegion</key><string>zh_CN</string>
     <key>CFBundleDisplayName</key><string>Vibe Buddy</string>
     <key>CFBundleExecutable</key><string>VibeBuddy</string>
-    <key>CFBundleIdentifier</key><string>com.agentbeacon.app</string>
+    <key>CFBundleIdentifier</key><string>com.vibebuddy.app</string>
     <key>CFBundleInfoDictionaryVersion</key><string>6.0</string>
     <key>CFBundleName</key><string>Vibe Buddy</string>
     <key>CFBundlePackageType</key><string>APPL</string>

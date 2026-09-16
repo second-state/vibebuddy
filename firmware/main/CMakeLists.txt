@@ -1,5 +1,5 @@
 idf_component_register(
-    SRCS "agent_beacon_fw.c" "agent_audio.c" "agent_buttons.c" "agent_display.c" "agent_leisure.c" "agent_pomodoro.c" "agent_tally.c" "agent_voice_pack.c" "agent_voices.c"
+    SRCS "vibebuddy_fw.c" "agent_audio.c" "agent_buttons.c" "agent_display.c" "agent_leisure.c" "agent_pomodoro.c" "agent_tally.c" "agent_voice_pack.c" "agent_voices.c"
     PRIV_REQUIRES json esp_app_format esp_driver_gpio esp_driver_i2c esp_driver_i2s esp_driver_uart esp_driver_usb_serial_jtag esp_codec_dev esp_hw_support esp_lcd esp_partition mbedtls nvs_flash spi_flash
     INCLUDE_DIRS "."
     EMBED_FILES "assets/input_required.pcm" "assets/done.pcm" "assets/failed.pcm" "assets/focus_done.pcm" "assets/break_done.pcm"
@@ -26,5 +26,5 @@ endif()
 
 add_custom_target(agent_build_stamp DEPENDS "${build_stamp_header}")
 add_dependencies(${COMPONENT_LIB} agent_build_stamp)
-set_property(SOURCE agent_beacon_fw.c APPEND PROPERTY OBJECT_DEPENDS "${build_stamp_header}")
+set_property(SOURCE vibebuddy_fw.c APPEND PROPERTY OBJECT_DEPENDS "${build_stamp_header}")
 target_include_directories(${COMPONENT_LIB} PRIVATE "${CMAKE_CURRENT_BINARY_DIR}")

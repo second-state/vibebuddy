@@ -76,7 +76,7 @@ impl fmt::Display for ProtocolError {
             }
             Self::Serialize(error) => write!(formatter, "JSON 编码失败：{error}"),
             Self::UnsupportedVersion(version) => {
-                write!(formatter, "不支持 Beacon Protocol version {version}")
+                write!(formatter, "不支持 Vibe Buddy Protocol version {version}")
             }
         }
     }

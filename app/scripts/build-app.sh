@@ -20,7 +20,7 @@ version="${version:-0.0.0}"
 build_number="$(git -C "${repo_root}" describe --tags --always --dirty 2>/dev/null || echo dev)"
 
 echo "== Rust helper"
-cargo build --release --manifest-path "${repo_root}/Cargo.toml" -p beacond -p beacon-hook
+cargo build --release --manifest-path "${repo_root}/Cargo.toml" -p vibebuddyd -p vibebuddy-hook
 echo "== Swift App"
 if [[ ${debug} -eq 1 ]]; then
     swift build --package-path "${app_dir}" --product VibeBuddy
@@ -37,22 +37,22 @@ mkdir -p "${contents}/MacOS" "${contents}/Resources/firmware" "${contents}/Resou
 
 sed -e "s/__VERSION__/${version}/" -e "s/__BUILD__/${build_number}/" "${app_dir}/Info.plist" > "${contents}/Info.plist"
 cp "${swift_bin}" "${contents}/MacOS/VibeBuddy"
-cp "${repo_root}/target/release/beacond" "${contents}/MacOS/beacond"
-cp "${repo_root}/target/release/beacon-hook" "${contents}/MacOS/beacon-hook"
+cp "${repo_root}/target/release/vibebuddyd" "${contents}/MacOS/vibebuddyd"
+cp "${repo_root}/target/release/vibebuddy-hook" "${contents}/MacOS/vibebuddy-hook"
 
 echo "== 固件"
 fw="${repo_root}/firmware/build"
-if [[ -f "${fw}/bootloader/bootloader.bin" && -f "${fw}/partition_table/partition-table.bin" && -f "${fw}/agent-beacon-fw.bin" ]]; then
+if [[ -f "${fw}/bootloader/bootloader.bin" && -f "${fw}/partition_table/partition-table.bin" && -f "${fw}/vibebuddy-fw.bin" ]]; then
     cp "${fw}/bootloader/bootloader.bin" "${contents}/Resources/firmware/bootloader.bin"
     cp "${fw}/partition_table/partition-table.bin" "${contents}/Resources/firmware/partition-table.bin"
-    cp "${fw}/agent-beacon-fw.bin" "${contents}/Resources/firmware/agent-beacon-fw.bin"
+    cp "${fw}/vibebuddy-fw.bin" "${contents}/Resources/firmware/vibebuddy-fw.bin"
     # 构建标识要和盒子页脚报的一模一样：镜像里 esp_app_desc 的 version 加上
     # 本次构建的时刻戳，格式与固件 describe_firmware_build 一致。
     python3 - "${fw}" > "${contents}/Resources/firmware/build.txt" <<'PY'
 import re, struct, sys
 from pathlib import Path
 build = Path(sys.argv[1])
-image = (build / "agent-beacon-fw.bin").read_bytes()
+image = (build / "vibebuddy-fw.bin").read_bytes()
 # esp_app_desc_t 在镜像偏移 0x20：magic(4) secure_version(4) reserv1(8) version[32]
 magic, = struct.unpack_from("<I", image, 0x20)
 assert magic == 0xABCD5432, "找不到 esp_app_desc"

@@ -398,7 +398,7 @@ static void draw_pet_legs(int x, int y, int left_foot, int right_foot) {
   fill_rect(164 + x, 145 + y - right_foot, 13, 8, COLOR_PET_HIGHLIGHT);
 }
 
-static void draw_beaconling(agent_display_state_t state, uint32_t frame,
+static void draw_buddy(agent_display_state_t state, uint32_t frame,
                             int x_offset, uint16_t color) {
   int y_offset = 0;
   if (state == AGENT_DISPLAY_WORKING) {
@@ -1096,7 +1096,7 @@ static void draw_pet_scene(const char *label, uint16_t status_color) {
   if (current_task_count > 0) {
     draw_task_cards();
   }
-  draw_beaconling(link_lost ? AGENT_DISPLAY_OFFLINE : current_state,
+  draw_buddy(link_lost ? AGENT_DISPLAY_OFFLINE : current_state,
                   animation_frame, current_task_count > 0 ? 96 : 0,
                   status_color);
   draw_text_centered(162, label,

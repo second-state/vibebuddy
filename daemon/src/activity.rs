@@ -7,7 +7,7 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
-use beacon_protocol::{Event, VERSION};
+use vibebuddy_protocol::{Event, VERSION};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 
@@ -712,13 +712,13 @@ mod tests {
         tracker.associate_source(
             &working,
             ActivitySource::GitHubActions {
-                repo: "longzhi/agent-beacon".to_owned(),
+                repo: "longzhi/vibe-buddy".to_owned(),
                 run_id: 42,
             },
         );
 
         let waiting = id("waiting", "waiting:1");
-        tracker.require_input(&waiting, "CX:AGENT-BEACON");
+        tracker.require_input(&waiting, "CX:VIBE-BUDDY");
         let codex = ActivitySource::Codex {
             thread_id: "waiting".to_owned(),
         };
@@ -734,7 +734,7 @@ mod tests {
         tracker.observe(&turn, "CC:PROJECT", ActivityStatus::Working);
         let source = ActivitySource::ClaudeCode {
             session_id: "session-a".to_owned(),
-            cwd: Some("/work/agent-beacon".to_owned()),
+            cwd: Some("/work/vibe-buddy".to_owned()),
         };
         tracker.associate_source(&turn, source.clone());
 
@@ -750,7 +750,7 @@ mod tests {
         tracker.observe(&turn, "CC:PROJECT", ActivityStatus::Working);
         let source = ActivitySource::ClaudeCode {
             session_id: "session-a".to_owned(),
-            cwd: Some("/work/agent-beacon".to_owned()),
+            cwd: Some("/work/vibe-buddy".to_owned()),
         };
         tracker.associate_source(&turn, source.clone());
 
@@ -1101,12 +1101,12 @@ mod tests {
             Some("k2-source-navigation".to_owned()),
         ];
         assert_eq!(
-            card_title("CC:", &candidates, Some("agent-beacon"), "CLAUDE"),
+            card_title("CC:", &candidates, Some("vibe-buddy"), "CLAUDE"),
             "CC:EROS INFRA MORNING TRIA"
         );
         let branch = [Some("pomodoro-timer-feature-b509bd".to_owned())];
         assert_eq!(
-            card_title("CC:", &branch, Some("agent-beacon"), "CLAUDE"),
+            card_title("CC:", &branch, Some("vibe-buddy"), "CLAUDE"),
             "CC:POMODORO-TIMER-FEATURE"
         );
         // 中文标题在设备字库上是空白，退回下一个候选，再退回项目名。
@@ -1130,26 +1130,26 @@ mod tests {
             session_id: "s".to_owned(),
             key: "s:1".to_owned(),
         };
-        tracker.note_project(&id, "AGENT-BEACON");
+        tracker.note_project(&id, "VIBE-BUDDY");
         let event = tracker
             .observe(&id, "CC:POMODORO TIMER", ActivityStatus::Working)
             .expect("首个活动应可见");
         assert_eq!(event.extra["tasks"][0]["title"], "CC:POMODORO TIMER");
-        assert_eq!(event.extra["tasks"][0]["project"], "AGENT-BEACON");
+        assert_eq!(event.extra["tasks"][0]["project"], "VIBE-BUDDY");
     }
 
     #[test]
     fn project_title_falls_back_when_cwd_is_unusable() {
         assert_eq!(
-            project_title("CX:", Some("/work/agent-beacon"), "CODEX"),
-            "CX:AGENT-BEACON"
+            project_title("CX:", Some("/work/vibe-buddy"), "CODEX"),
+            "CX:VIBE-BUDDY"
         );
         assert_eq!(project_title("CX:", Some("/"), "CODEX"), "CX:CODEX");
         assert_eq!(project_title("CC:", None, "CLAUDE"), "CC:CLAUDE");
     }
 
     fn temp_tree(tag: &str) -> PathBuf {
-        let base = std::env::temp_dir().join(format!("agentbeacon-{}-{tag}", std::process::id()));
+        let base = std::env::temp_dir().join(format!("vibebuddy-{}-{tag}", std::process::id()));
         let _ = std::fs::remove_dir_all(&base);
         base
     }

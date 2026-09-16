@@ -25,7 +25,7 @@ use axum::http::StatusCode;
 use axum::response::sse::{Event as SseEvent, KeepAlive, Sse};
 use axum::routing::{get, post};
 use axum::{Json, Router};
-use beacon_protocol::{Event, VERSION};
+use vibebuddy_protocol::{Event, VERSION};
 use chrono::Timelike;
 use ci::CiWatcher;
 use claude_hooks::ClaudeHook;
@@ -46,7 +46,7 @@ const SWEEP_INTERVAL: Duration = Duration::from_secs(60);
 /// 心跳间隔。设备按这个节奏判断链路是否还活着，固件的超时是它的三倍。
 const HEARTBEAT_INTERVAL: Duration = Duration::from_secs(5);
 /// 构建时的 git 描述，由 `build.rs` 写入。
-const BUILD_REVISION: &str = env!("BEACON_BUILD");
+const BUILD_REVISION: &str = env!("VIBEBUDDY_BUILD");
 
 #[derive(Clone)]
 struct AppState {
@@ -96,7 +96,7 @@ impl AppState {
             operation: Arc::new(Mutex::new(None)),
             device_bus,
             status_changed,
-            app_version: env::var("BEACON_APP_VERSION").ok().filter(|value| !value.is_empty()),
+            app_version: env::var("VIBEBUDDY_APP_VERSION").ok().filter(|value| !value.is_empty()),
             serial: None,
         }
     }
@@ -151,13 +151,13 @@ async fn main() {
         .ok()
         .filter(|value| !value.trim().is_empty())
         .and_then(|value| EnvFilter::try_new(value).ok())
-        .unwrap_or_else(|| EnvFilter::new("beacond=info"));
+        .unwrap_or_else(|| EnvFilter::new("vibebuddyd=info"));
     tracing_subscriber::fmt().with_env_filter(log_filter).init();
 
-    let bind_address = env::var("BEACON_BIND")
+    let bind_address = env::var("VIBEBUDDY_BIND")
         .unwrap_or_else(|_| "127.0.0.1:7331".to_owned())
         .parse::<SocketAddr>()
-        .unwrap_or_else(|error| panic!("BEACON_BIND 无效：{error}"));
+        .unwrap_or_else(|error| panic!("VIBEBUDDY_BIND 无效：{error}"));
     let serial_config = SerialConfig::from_env();
     let (serial_transport, device_events) = SerialTransport::spawn(serial_config);
     let serial_transport = Arc::new(serial_transport);
@@ -183,7 +183,7 @@ async fn main() {
         .await
         .unwrap_or_else(|error| panic!("无法监听 {bind_address}：{error}"));
 
-    info!(address = %bind_address, "beacond 已启动");
+    info!(address = %bind_address, "vibebuddyd 已启动");
     axum::serve(listener, app)
         .await
         .unwrap_or_else(|error| panic!("HTTP server 失败：{error}"));
@@ -254,11 +254,11 @@ fn is_k2_press(event: &Event) -> bool {
         && event.extra.get("action").and_then(|value| value.as_str()) == Some("press")
 }
 
-/// App 看管时它把自己的 pid 放在 BEACON_PARENT_PID 里。App 被强杀后 daemon
+/// App 看管时它把自己的 pid 放在 VIBEBUDDY_PARENT_PID 里。App 被强杀后 daemon
 /// 会被 launchd 收养，父 pid 变成 1；那就跟着退出，别占着串口和端口等下一个
 /// App 起不来。macOS 没有 prctl(PR_SET_PDEATHSIG)，只能轮询。
 async fn watch_parent() {
-    let Some(expected) = env::var("BEACON_PARENT_PID")
+    let Some(expected) = env::var("VIBEBUDDY_PARENT_PID")
         .ok()
         .and_then(|value| value.parse::<u32>().ok())
     else {
@@ -306,11 +306,11 @@ fn build_identity_from(app_version: Option<&str>, revision: &str, built: &str) -
 
 /// 当日战绩的存放位置。缺少 `HOME` 时退回内存计数，不让 daemon 起不来。
 fn stats_file() -> Option<PathBuf> {
-    if let Ok(path) = env::var("BEACON_STATS_FILE") {
+    if let Ok(path) = env::var("VIBEBUDDY_STATS_FILE") {
         return Some(PathBuf::from(path));
     }
     let home = env::var("HOME").ok()?;
-    Some(PathBuf::from(home).join("Library/Application Support/AgentBeacon/stats.json"))
+    Some(PathBuf::from(home).join("Library/Application Support/VibeBuddy/stats.json"))
 }
 
 fn app(state: AppState) -> Router {
@@ -861,7 +861,7 @@ mod tests {
 
     #[tokio::test]
     async fn config_put_is_persisted_to_the_file() {
-        let dir = std::env::temp_dir().join(format!("beacond-config-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("vibebuddyd-config-{}", std::process::id()));
         let path = dir.join("config.json");
         let transport = Arc::new(RecordingTransport::default());
         let state = AppState::new(

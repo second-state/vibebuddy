@@ -2,7 +2,7 @@
 //!
 //! 与 Codex Adapter 共用同一个聚合器；差别只在事件名与活动身份的合成方式。
 
-use beacon_protocol::Event;
+use vibebuddy_protocol::Event;
 use serde::Deserialize;
 
 use crate::activity::{
@@ -109,7 +109,7 @@ mod tests {
     fn subagent_hook(name: &str, agent_id: &str) -> ClaudeHook {
         ClaudeHook {
             agent_id: Some(agent_id.to_owned()),
-            ..hook(name, "/work/agent-beacon")
+            ..hook(name, "/work/vibe-buddy")
         }
     }
 
@@ -117,27 +117,27 @@ mod tests {
     fn maps_claude_lifecycle_without_prompt_content() {
         let mut tracker = ActivityTracker::default();
 
-        let working = apply(&mut tracker, &mut SessionTitles::disabled(), hook("UserPromptSubmit", "/work/agent-beacon"))
+        let working = apply(&mut tracker, &mut SessionTitles::disabled(), hook("UserPromptSubmit", "/work/vibe-buddy"))
             .expect("开始事件应可见");
         assert_eq!(working.event, "task.start");
-        assert_eq!(working.title.as_deref(), Some("CC:AGENT-BEACON"));
+        assert_eq!(working.title.as_deref(), Some("CC:VIBE-BUDDY"));
 
         let waiting = apply(
             &mut tracker,
             &mut SessionTitles::disabled(),
-            hook("PermissionRequest", "/work/agent-beacon"),
+            hook("PermissionRequest", "/work/vibe-buddy"),
         )
         .expect("权限请求应可见");
         assert_eq!(waiting.event, "agent.input_required");
 
-        let done = apply(&mut tracker, &mut SessionTitles::disabled(), hook("Stop", "/work/agent-beacon")).expect("停止事件应可见");
+        let done = apply(&mut tracker, &mut SessionTitles::disabled(), hook("Stop", "/work/vibe-buddy")).expect("停止事件应可见");
         assert_eq!(done.event, "task.done");
     }
 
     #[test]
     fn parallel_subagents_are_separate_activities() {
         let mut tracker = ActivityTracker::default();
-        apply(&mut tracker, &mut SessionTitles::disabled(), hook("UserPromptSubmit", "/work/agent-beacon"));
+        apply(&mut tracker, &mut SessionTitles::disabled(), hook("UserPromptSubmit", "/work/vibe-buddy"));
         apply(&mut tracker, &mut SessionTitles::disabled(), subagent_hook("SubagentStart", "agent-1"));
         let two = apply(&mut tracker, &mut SessionTitles::disabled(), subagent_hook("SubagentStart", "agent-2"))
             .expect("第二个子 agent 应刷新卡片栈");
@@ -159,12 +159,12 @@ mod tests {
     #[test]
     fn stop_that_waits_for_a_reply_requests_input_instead_of_reporting_done() {
         let mut tracker = ActivityTracker::default();
-        apply(&mut tracker, &mut SessionTitles::disabled(), hook("UserPromptSubmit", "/work/agent-beacon"));
+        apply(&mut tracker, &mut SessionTitles::disabled(), hook("UserPromptSubmit", "/work/vibe-buddy"));
         let stop: ClaudeHook = serde_json::from_value(json!({
             "session_id": "session-a",
             "prompt_id": "turn-a",
             "hook_event_name": "Stop",
-            "cwd": "/work/agent-beacon",
+            "cwd": "/work/vibe-buddy",
             "response_kind": "input_required"
         }))
         .expect("等待回答的 Stop 载荷应可解析");
@@ -205,20 +205,20 @@ mod tests {
         use crate::codex_hooks::{self, CodexHook};
 
         let mut tracker = ActivityTracker::default();
-        apply(&mut tracker, &mut SessionTitles::disabled(), hook("UserPromptSubmit", "/work/agent-beacon"));
+        apply(&mut tracker, &mut SessionTitles::disabled(), hook("UserPromptSubmit", "/work/vibe-buddy"));
         let codex = CodexHook {
             session_id: "codex-session".to_owned(),
             turn_id: Some("codex-turn".to_owned()),
             thread_id: None,
             hook_event_name: "UserPromptSubmit".to_owned(),
-            cwd: Some("/work/agent-beacon".to_owned()),
+            cwd: Some("/work/vibe-buddy".to_owned()),
             response_kind: None,
         };
         let mixed = codex_hooks::apply(&mut tracker, &mut SessionTitles::disabled(), codex).expect("另一个 Agent 应刷新卡片栈");
 
         let tasks = mixed.extra["tasks"].as_array().expect("tasks 应为数组");
         assert_eq!(tasks.len(), 2, "同一目录下的两个 Agent 应各占一张卡");
-        assert_eq!(tasks[0]["title"], "CX:AGENT-BEACON");
-        assert_eq!(tasks[1]["title"], "CC:AGENT-BEACON");
+        assert_eq!(tasks[0]["title"], "CX:VIBE-BUDDY");
+        assert_eq!(tasks[1]["title"], "CC:VIBE-BUDDY");
     }
 }

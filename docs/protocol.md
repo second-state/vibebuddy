@@ -1,6 +1,6 @@
-# Beacon Protocol v1
+# Vibe Buddy Protocol v1
 
-Beacon Protocol 是 `beacond` 与 Vibe Buddy 设备之间的应用协议。v1 使用 UTF-8 NDJSON；transport 负责可靠地传送字节流，协议不依赖具体串口名称。
+Vibe Buddy Protocol 是 `vibebuddyd` 与 Vibe Buddy 设备之间的应用协议。v1 使用 UTF-8 NDJSON；transport 负责可靠地传送字节流，协议不依赖具体串口名称。
 
 ## Framing
 
@@ -42,7 +42,7 @@ Mac 到设备的首批事件：
 - `agent.idle`：回到空闲，不播放语音。
 - `device.heartbeat`：证明链路存活，不显示、不回显诊断行、不播放语音。
 
-`beacond` 可附加最多 3 项的 `tasks` 数组。数组按最近活动倒序，设备按给定顺序绘制任务卡：
+`vibebuddyd` 可附加最多 3 项的 `tasks` 数组。数组按最近活动倒序，设备按给定顺序绘制任务卡：
 
 ```json
 {"version":1,"event":"task.start","title":"GAMMA","tasks":[{"title":"GAMMA","status":"working","elapsed_s":75},{"title":"BETA","status":"input_required","elapsed_s":900}],"stats":["7 DONE","4 ASKS","1H23 BUSY"]}
@@ -50,15 +50,15 @@ Mac 到设备的首批事件：
 
 每项包含 `title`、`status` 和 `elapsed_s`，可选 `project`；当前状态值为 `working`、`input_required`、`done`、`failed`。`title` 是卡片第一行：Agent 自己给会话起的名字（Claude App 的会话标题、Codex 的线程名）或分支名，都没有才是项目名；`project` 是项目名，设备画在第二行，与标题重复时不画。旧固件会按 v1 规则忽略 `tasks` 与 `project`。未来事件可以包括 `task.progress`、`task.cancelled`、`agent.waiting`、`message`、`system` 和 `device.status`。
 
-`elapsed_s` 是该活动进入**当前状态**已经过去的秒数，不是距上一个事件的秒数：工作中的卡片回答「这个 turn 跑了多久」，等待确认的卡片回答「等了多久」。设备收到后自行继续计时，因为可见状态不变时 `beacond` 会去重、不再发消息，而屏幕上的数字必须一直走。也正因为要去重，`elapsed_s` 与 `stats` 都在去重之后才盖到事件上；放进快照会让每个工具事件都变成一次重绘，把工作中的动画不断打回第一帧。
+`elapsed_s` 是该活动进入**当前状态**已经过去的秒数，不是距上一个事件的秒数：工作中的卡片回答「这个 turn 跑了多久」，等待确认的卡片回答「等了多久」。设备收到后自行继续计时，因为可见状态不变时 `vibebuddyd` 会去重、不再发消息，而屏幕上的数字必须一直走。也正因为要去重，`elapsed_s` 与 `stats` 都在去重之后才盖到事件上；放进快照会让每个工具事件都变成一次重绘，把工作中的动画不断打回第一帧。
 
-`stats` 是最多 3 行当日战绩，空闲屏轮播它们。它随每条状态事件下发而不只随 `agent.idle`：`task.done` 之后设备是自己回到空闲的，那一刻正是用户会看的一眼，缓存的战绩必须已经包含刚刚完成的那一件。计数按本地自然日归零，并持久化到 `~/Library/Application Support/AgentBeacon/stats.json`，否则每次重启 daemon 屏幕上写着「今天」的数字都会归零。
+`stats` 是最多 3 行当日战绩，空闲屏轮播它们。它随每条状态事件下发而不只随 `agent.idle`：`task.done` 之后设备是自己回到空闲的，那一刻正是用户会看的一眼，缓存的战绩必须已经包含刚刚完成的那一件。计数按本地自然日归零，并持久化到 `~/Library/Application Support/VibeBuddy/stats.json`，否则每次重启 daemon 屏幕上写着「今天」的数字都会归零。
 
-当一个后台任务完成、但画面仍需显示其他活动任务时，`beacond` 会在当前状态事件上附加 `"announcement":"done"`。这是一次性语音通知，不改变画面状态；`announcement_id` 用于标识对应 turn。设备收到它时排队播放一次“任务完成”。失败走同一条路径，取值为 `"announcement":"failed"`，播放一次“任务遇到问题”。
+当一个后台任务完成、但画面仍需显示其他活动任务时，`vibebuddyd` 会在当前状态事件上附加 `"announcement":"done"`。这是一次性语音通知，不改变画面状态；`announcement_id` 用于标识对应 turn。设备收到它时排队播放一次“任务完成”。失败走同一条路径，取值为 `"announcement":"failed"`，播放一次“任务遇到问题”。
 
-当聚合任务变化仅需重绘既有的输入等待状态时，`beacond` 会附加 `"suppress_audio":true`。设备继续显示 `agent.input_required`，但不重复播放已经播过的提醒。`announcement` 的一次性通知优先于此字段。
+当聚合任务变化仅需重绘既有的输入等待状态时，`vibebuddyd` 会附加 `"suppress_audio":true`。设备继续显示 `agent.input_required`，但不重复播放已经播过的提醒。`announcement` 的一次性通知优先于此字段。
 
-`beacond` 每 5 秒发送一次心跳，并捎上自己的构建标识、本地小时数与本地日期：
+`vibebuddyd` 每 5 秒发送一次心跳，并捎上自己的构建标识、本地小时数与本地日期：
 
 ```json
 {"version":1,"event":"device.heartbeat","build":"9b642af 2026-09-14 17:41","hour":14,"day":20260915}
@@ -78,7 +78,7 @@ Mac 端发往 BOX 的 CH343 UART 桥时按线速分段写（每 128 字节等它
 {"version":1,"event":"button","button":"K2","action":"press"}
 ```
 
-当前只上报 K2 短按，在任何模式里都上报。K0（番茄钟）、K1（切换模式、长按去休闲）与 K2 长按（静音）由固件自己消费，不上报。短按在松开时才算数，因为只有等到松开才知道它不是长按的开头；上报时机因此从按下推迟到松开。模式与番茄钟见 [`pomodoro.md`](pomodoro.md)，休闲见 [`leisure.md`](leisure.md)。`beacond` 收到后按这个顺序选落点：等人回答的任务优先（屏幕主状态显示的就是它，而且它 blocking 着人）；其次是最近一次播报过结束的任务——它已经离开卡片栈，屏幕上再也看不到，而还在跑的任务一直挂在屏幕上、本来就不需要 K2 定位；再次才是最新工作项。落点由下一次播报接力替换，不设时间窗：这台设备的用处正是人不在电脑前，用墙上时钟让落点过期，等于假设用户一直守在旁边。选定活动后，Codex 顶层活动打开自身 thread，子 Agent 活动打开拥有它的父 thread；Claude Code 先把 Hook 报的 CLI `session_id` 连同 `cwd` 在 Claude App 的会话索引里解析成桌面会话 id，再用 `claude://code/continue?session=<桌面会话 id>` 精确跳转；解析不到（会话只跑在终端里）才退回 `claude://resume?session=<session_id>` 导入；GitHub Actions 打开对应 run。当前没有活动时回到最近一次可定位的来源；该定位会写入本机状态文件，daemon 重启后仍然有效。候选按这个顺序逐个试：Codex 线程先在本机线程表里核对存在，不存在就跳过，免得打开一个空白会话。K0、K1 和长按/释放尚未绑定。
+当前只上报 K2 短按，在任何模式里都上报。K0（番茄钟）、K1（切换模式、长按去休闲）与 K2 长按（静音）由固件自己消费，不上报。短按在松开时才算数，因为只有等到松开才知道它不是长按的开头；上报时机因此从按下推迟到松开。模式与番茄钟见 [`pomodoro.md`](pomodoro.md)，休闲见 [`leisure.md`](leisure.md)。`vibebuddyd` 收到后按这个顺序选落点：等人回答的任务优先（屏幕主状态显示的就是它，而且它 blocking 着人）；其次是最近一次播报过结束的任务——它已经离开卡片栈，屏幕上再也看不到，而还在跑的任务一直挂在屏幕上、本来就不需要 K2 定位；再次才是最新工作项。落点由下一次播报接力替换，不设时间窗：这台设备的用处正是人不在电脑前，用墙上时钟让落点过期，等于假设用户一直守在旁边。选定活动后，Codex 顶层活动打开自身 thread，子 Agent 活动打开拥有它的父 thread；Claude Code 先把 Hook 报的 CLI `session_id` 连同 `cwd` 在 Claude App 的会话索引里解析成桌面会话 id，再用 `claude://code/continue?session=<桌面会话 id>` 精确跳转；解析不到（会话只跑在终端里）才退回 `claude://resume?session=<session_id>` 导入；GitHub Actions 打开对应 run。当前没有活动时回到最近一次可定位的来源；该定位会写入本机状态文件，daemon 重启后仍然有效。候选按这个顺序逐个试：Codex 线程先在本机线程表里核对存在，不存在就跳过，免得打开一个空白会话。K0、K1 和长按/释放尚未绑定。
 
 固件输出的 `READY`、`EVENT`、`TITLE` 和 `ERROR` 行是实机链路验收用的诊断文本，不是设备到 Mac 的正式 JSON 事件。同类的还有 `MODE DUTY` / `POMODORO` / `LEISURE`（模式切换），`POMODORO FOCUS START` / `FOCUS END` / `BREAK START` / `BREAK END` / `PAUSED` / `RESUMED` / `STOPPED` / `BREAK SKIPPED`（番茄钟转换），`LEISURE ALERT` / `BORED` / `SLEEPY`、`LEISURE SKIT <名>`、`LEISURE LIGHTS OUT` / `ON`（休闲），以及 `CLOCK HOUR <n>`（收到的小时数变化）、`TALLY LOADED <次> <秒>S DAY <日期>`（开机恢复的当日记录）、`MUTE ON` / `OFF`（长按 K2）与 `AUDIO MUTED <哪句>`（静音期间被吞掉的语音）。番茄钟与休闲的状态都只在固件里，Mac 端只记日志。
 

@@ -230,7 +230,7 @@ mod tests {
         let spec = command_for(
             &ActivitySource::ClaudeCode {
                 session_id: "19b63622-e3e0-4cd0-a37e-dc8d71253155".to_owned(),
-                cwd: Some("/work/agent-beacon".to_owned()),
+                cwd: Some("/work/vibe-buddy".to_owned()),
             },
             Some("local_b65a60de-9adb-48b0-85c6-f9a178971322"),
         )
@@ -321,7 +321,7 @@ mod tests {
 
     fn temp_dir(tag: &str) -> PathBuf {
         let base =
-            std::env::temp_dir().join(format!("agentbeacon-open-{}-{tag}", std::process::id()));
+            std::env::temp_dir().join(format!("vibebuddy-open-{}-{tag}", std::process::id()));
         let _ = std::fs::remove_dir_all(&base);
         base
     }
@@ -347,7 +347,7 @@ mod tests {
             &dir,
             "local_19b63622-e3e0-4cd0-a37e-dc8d71253155",
             cli,
-            "/work/agent-beacon",
+            "/work/vibe-buddy",
             false,
             1_789_437_619_665,
         );
@@ -355,7 +355,7 @@ mod tests {
             &dir,
             "local_b65a60de-9adb-48b0-85c6-f9a178971322",
             cli,
-            "/work/agent-beacon/.claude/worktrees/git-status",
+            "/work/vibe-buddy/.claude/worktrees/git-status",
             false,
             1_789_437_616_240,
         );
@@ -363,7 +363,7 @@ mod tests {
         let picked = desktop_session_id(
             &root,
             cli,
-            Some("/work/agent-beacon/.claude/worktrees/git-status"),
+            Some("/work/vibe-buddy/.claude/worktrees/git-status"),
         );
         let _ = std::fs::remove_dir_all(&root);
 
@@ -422,7 +422,7 @@ mod tests {
     fn github_run_uses_the_exact_run_url() {
         let spec = command_for(
             &ActivitySource::GitHubActions {
-                repo: "longzhi/agent-beacon".to_owned(),
+                repo: "longzhi/vibe-buddy".to_owned(),
                 run_id: 42,
             },
             None,
@@ -431,7 +431,7 @@ mod tests {
 
         assert_eq!(
             spec.args,
-            ["https://github.com/longzhi/agent-beacon/actions/runs/42"]
+            ["https://github.com/longzhi/vibe-buddy/actions/runs/42"]
         );
     }
 }

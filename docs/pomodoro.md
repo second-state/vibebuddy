@@ -54,7 +54,7 @@
 
 ## 状态归属
 
-番茄钟的状态完全在固件里，`beacond` 不参与。它是设备 I/O 与确定性渲染，正是固件的职责；而且用户拿它计时的时候，Mac 端可能根本没在跑。固件只把转换以诊断行的形式发给 Mac（`POMODORO FOCUS START`、`FOCUS END`、`BREAK START`、`BREAK END`、`PAUSED`、`RESUMED`、`STOPPED`、`BREAK SKIPPED`，以及记录变化时的 `POMODORO TODAY <次> <秒>S DAY <日期>`），`beacond` 记进日志，不做别的。当日记录也留在设备上，不回传：专注一结束面板上的数字就该变，绕一圈 Mac 端只会引入延迟和不一致。
+番茄钟的状态完全在固件里，`vibebuddyd` 不参与。它是设备 I/O 与确定性渲染，正是固件的职责；而且用户拿它计时的时候，Mac 端可能根本没在跑。固件只把转换以诊断行的形式发给 Mac（`POMODORO FOCUS START`、`FOCUS END`、`BREAK START`、`BREAK END`、`PAUSED`、`RESUMED`、`STOPPED`、`BREAK SKIPPED`，以及记录变化时的 `POMODORO TODAY <次> <秒>S DAY <日期>`），`vibebuddyd` 记进日志，不做别的。当日记录也留在设备上，不回传：专注一结束面板上的数字就该变，绕一圈 Mac 端只会引入延迟和不一致。
 
 ## 验证
 

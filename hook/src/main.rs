@@ -1,4 +1,4 @@
-//! `beacon-hook codex` / `beacon-hook claude`：从 stdin 读 Hook 载荷，最小化后
+//! `vibebuddy-hook codex` / `vibebuddy-hook claude`：从 stdin 读 Hook 载荷，最小化后
 //! POST 给本机 daemon；daemon 不在、输入无效、网络失败都静默退出 0，不能
 //! 拖住 Agent。App 把它复制到 Application Support 的 bin 目录，Hook 配置指向
 //! 那里（ADR-0005），因此不依赖 python3，也不怕 App 挪位置。
@@ -50,7 +50,7 @@ fn main() {
                 return;
             };
             if let Some(home) = std::env::var_os("HOME") {
-                let log_dir = std::path::PathBuf::from(home).join("Library/Logs/AgentBeacon");
+                let log_dir = std::path::PathBuf::from(home).join("Library/Logs/VibeBuddy");
                 codex::trace(&source, &payload, &log_dir);
             }
             (codex::ENDPOINT, payload)
@@ -60,7 +60,7 @@ fn main() {
             None => return,
         },
         _ => {
-            eprintln!("用法: beacon-hook codex|claude  （从 stdin 读 Hook 载荷）");
+            eprintln!("用法: vibebuddy-hook codex|claude  （从 stdin 读 Hook 载荷）");
             return;
         }
     };

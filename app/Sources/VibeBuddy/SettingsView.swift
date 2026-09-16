@@ -287,7 +287,7 @@ struct AdvancedView: View {
         guard panel.runModal() == .OK, let target = panel.url else { return }
         let manager = FileManager.default
         try? manager.createDirectory(at: target, withIntermediateDirectories: true)
-        for name in ["beacond.log", "codex-hooks.log"] {
+        for name in ["vibebuddyd.log", "codex-hooks.log"] {
             let source = Resources.logsDirectory.appendingPathComponent(name)
             if manager.fileExists(atPath: source.path) { try? manager.copyItem(at: source, to: target.appendingPathComponent(name)) }
         }

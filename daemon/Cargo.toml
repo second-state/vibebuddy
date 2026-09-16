@@ -1,12 +1,12 @@
 [package]
-name = "beacond"
+name = "vibebuddyd"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
 
 [dependencies]
 axum.workspace = true
-beacon-protocol = { path = "../protocol" }
+vibebuddy-protocol = { path = "../protocol" }
 chrono.workspace = true
 rusqlite.workspace = true
 serde.workspace = true

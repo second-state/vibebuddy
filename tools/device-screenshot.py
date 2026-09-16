@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """从设备截图：发 `device.screenshot`，收行程编码的帧缓冲，写成 PNG。
 
-要独占串口，先停掉 beacond（见 tools/screenshot.sh）。打开串口时不碰
+要独占串口，先停掉 vibebuddyd（见 tools/screenshot.sh）。打开串口时不碰
 DTR/RTS，设备不会复位，画面保持原样。
 用法: device-screenshot.py PORT OUTPUT.png [scale]
 """

@@ -32,7 +32,7 @@ segments=()
 for target in "$@"; do
     case "${target}" in
         partition) segments+=(0x8000 "${build_dir}/partition_table/partition-table.bin") ;;
-        app) segments+=(0x10000 "${build_dir}/agent-beacon-fw.bin") ;;
+        app) segments+=(0x10000 "${build_dir}/vibebuddy-fw.bin") ;;
         bootloader) segments+=(0x0 "${build_dir}/bootloader/bootloader.bin") ;;
         *) echo "未知目标: ${target}" >&2; exit 1 ;;
     esac
