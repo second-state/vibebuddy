@@ -8,8 +8,8 @@
     tools/make-pomodoro-audio.py focus <语音.pcm> <输出.pcm>
     tools/make-pomodoro-audio.py break <语音.pcm> <输出.pcm>
 
-语音 PCM 由 macOS 的 `say -v Tingting` 生成，再用 ffmpeg 转成同样的格式，
-见 firmware/main/assets/README.md。
+语音 PCM 由 tools/make-voices.sh 生成（edge-tts 神经网络语音，再用 ffmpeg 转成
+同样的格式并归一化），见 firmware/main/assets/README.md。
 """
 
 from __future__ import annotations
