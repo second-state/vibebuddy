@@ -21,7 +21,6 @@ const SLIP_ESC_ESC: u8 = 0xDD;
 
 const OP_FLASH_BEGIN: u8 = 0x02;
 const OP_FLASH_DATA: u8 = 0x03;
-const OP_FLASH_END: u8 = 0x04;
 const OP_SYNC: u8 = 0x08;
 const OP_READ_REG: u8 = 0x0A;
 const OP_SPI_SET_PARAMS: u8 = 0x0B;
@@ -273,6 +272,7 @@ impl RomFlasher {
     pub fn write_segment(&mut self, segment: &Segment, progress: &mut Progress<'_>) -> Result<(), String> {
         let size = segment.data.len();
         let blocks = size.div_ceil(BLOCK_BYTES);
+        let started = Instant::now();
         let mut begin = Vec::new();
         for value in [size as u32, blocks as u32, BLOCK_BYTES as u32, segment.address, 0] {
             begin.extend_from_slice(&value.to_le_bytes());
@@ -291,11 +291,17 @@ impl RomFlasher {
             self.call(OP_FLASH_DATA, &data, checksum(&padded), Duration::from_secs(5))?;
             (progress.on_progress)(
                 (index + 1) as f32 / blocks as f32,
-                &format!("{:#x} 已写 {}/{} 块", segment.address, index + 1, blocks),
+                &format!(
+                    "{:#x} 已写 {}/{} 块，{:.1} s",
+                    segment.address,
+                    index + 1,
+                    blocks,
+                    started.elapsed().as_secs_f32()
+                ),
             );
         }
-        // 1 = 留在下载程序里；最后统一硬复位。
-        self.call(OP_FLASH_END, &1_u32.to_le_bytes(), 0, Duration::from_secs(3))?;
+        // 不发 FLASH_END：esptool 对 ROM 下载程序也不发，那会让它退出去跑
+        // 用户代码；写完直接校验，最后统一硬复位。
         self.verify(segment)
     }
 
