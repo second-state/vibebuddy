@@ -41,6 +41,9 @@ struct HookInstaller {
     static func deployBinary() throws {
         let destination = Resources.installedHookBinary
         try FileManager.default.createDirectory(at: destination.deletingLastPathComponent(), withIntermediateDirectories: true)
+        // 改名前的二进制跟着旧目录搬过来了，没人再引用它。
+        let legacy = destination.deletingLastPathComponent().appendingPathComponent("beacon-hook")
+        if FileManager.default.fileExists(atPath: legacy.path) { try? FileManager.default.removeItem(at: legacy) }
         let source = Resources.hookBinary
         guard FileManager.default.fileExists(atPath: source.path) else { return }
         if FileManager.default.fileExists(atPath: destination.path) {
