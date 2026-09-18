@@ -95,6 +95,7 @@ App 附带与之配套的固件三件套（bootloader、分区表、app）。Rel
 
 ## 实现记录（2026-09-16）
 
+- 日常使用的 App 装在 `/Applications/Vibe Buddy.app`，用 `app/scripts/build-app.sh --install` 送过去并启动；登录项与 Hook 路径都绑在包的位置上，worktree 里的 `app/build` 只是开发中间产物。
 - 构建用 SwiftPM 加装包脚本，不是 Xcode 工程：本机只有命令行工具，`xcodebuild` 不可用，而 `swift build` 能编 SwiftUI 与 AppKit；装了 Xcode 可直接打开 `app/Package.swift`。命令行工具也没有 XCTest 和 swift-testing，视图模型的缝用 `swift run --package-path app SelfTest` 的断言自检守着。
 - 固件烧录不用 espflash：它的 ROM 写块固定 1 KB、串口对象是具体类型没法包装，过不了 UART 桥；daemon 自己实现 ROM 下载协议，块 256 字节、桥接时按线速分段，MD5 校验后硬复位。
 - 语音包分块写入在桥上约 5 KB/s（1.2 MB 四分钟），比设计里估的慢一些；瓶颈是停等回执加 115200 波特，原生 USB 口快得多。
