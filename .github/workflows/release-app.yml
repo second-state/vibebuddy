@@ -1,0 +1,96 @@
+# main 上动到 App 装包内容的提交，自动出一版 Apple 芯片的 DMG 并发 GitHub Release。
+# 固件随 App 一起发（设备页的「更新」用的就是包里那份），所以 firmware/ 也算触发路径。
+name: release-app
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "app/**"
+      - "daemon/**"
+      - "hook/**"
+      - "protocol/**"
+      - "firmware/**"
+      - "voices/**"
+      - "tools/make_voice_pack.py"
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - ".github/workflows/release-app.yml"
+  workflow_dispatch:
+
+# 连续推送时排队而不是取消：每个 run 对应一个 tag，取消会留下跳号。
+concurrency:
+  group: release-app
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  firmware:
+    # ESP-IDF 官方只给 Linux 的 docker 镜像；三件套与架构无关，在这里构建后交给 macOS job。
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: espressif/esp-idf-ci-action@v1
+        with:
+          # 与 firmware/dependencies.lock 里的 idf 版本一致。
+          esp_idf_version: v5.5.3
+          target: esp32s3
+          path: firmware
+      - uses: actions/upload-artifact@v4
+        with:
+          name: firmware
+          retention-days: 1
+          # build-app.sh 要三件套，外加页脚构建标识用的时刻头文件。
+          path: |
+            firmware/build/bootloader/bootloader.bin
+            firmware/build/partition_table/partition-table.bin
+            firmware/build/vibebuddy-fw.bin
+            firmware/build/esp-idf/main/agent_build_stamp.h
+
+  app:
+    needs: firmware
+    # macos-15 是 Apple 芯片 runner，产物即 arm64；暂不出 Intel 版。
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: firmware
+          path: firmware/build
+      - name: 定版本号
+        id: version
+        run: |
+          version="$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -n 1)"
+          tag="v${version}-build.${GITHUB_RUN_NUMBER}"
+          # 先在本地打上 tag：daemon 的 build.rs 和 Info.plist 都取 git describe，
+          # 这样 App「关于」里的构建号与 Release 的 tag 一字不差。
+          git tag "${tag}"
+          echo "tag=${tag}" >> "${GITHUB_OUTPUT}"
+      - name: 测试
+        run: |
+          rustup update stable --no-self-update
+          cargo test --workspace
+          swift run --package-path app SelfTest
+      - name: 装包
+        run: |
+          app/scripts/build-app.sh
+          app/scripts/make-dmg.sh "VibeBuddy-${{ steps.version.outputs.tag }}-arm64.dmg"
+      - name: 发布
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          cat > notes.md <<'NOTES'
+          仅支持 Apple 芯片的 Mac（macOS 14 及以上）。打开 DMG，把 Vibe Buddy 拖进「应用程序」。
+
+          这一版没有 Apple 开发者签名与公证，首次打开会被 Gatekeeper 拦下。任选其一放行：
+
+          - 系统设置 → 隐私与安全性 → 找到 Vibe Buddy 的提示，点「仍要打开」；
+          - 或在终端执行 `xattr -dr com.apple.quarantine "/Applications/Vibe Buddy.app"`。
+          NOTES
+          gh release create "${{ steps.version.outputs.tag }}" \
+            "VibeBuddy-${{ steps.version.outputs.tag }}-arm64.dmg" \
+            --target "${GITHUB_SHA}" \
+            --title "Vibe Buddy ${{ steps.version.outputs.tag }}" \
+            --notes-file notes.md --generate-notes
