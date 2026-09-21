@@ -9,7 +9,7 @@ use std::time::Duration;
 use serde::Deserialize;
 use tokio::process::Command;
 
-use crate::activity::ActivitySource;
+use crate::activity::{ActivitySource, Surface};
 
 const OPEN_TIMEOUT: Duration = Duration::from_secs(5);
 const CODEX_BUNDLE_ID: &str = "com.openai.codex";
@@ -27,11 +27,9 @@ struct CommandSpec {
 
 /// 成功时返回实际打开的链接，方便日志说明 K2 到底跳去了哪里。
 pub async fn open(source: ActivitySource) -> Result<String, String> {
-    let desktop = match &source {
-        ActivitySource::ClaudeCode { session_id, cwd } => desktop_sessions_dir()
-            .and_then(|dir| desktop_session_id(&dir, session_id, cwd.as_deref())),
-        _ => None,
-    };
+    let desktop = reported_desktop_session(&source)
+        .map(str::to_owned)
+        .or_else(|| fallback_desktop_session(&source));
     let spec = command_for(&source, desktop.as_deref())?;
     let link = spec.args.last().cloned().unwrap_or_default();
     let output = tokio::time::timeout(
@@ -49,8 +47,15 @@ pub async fn open(source: ActivitySource) -> Result<String, String> {
 }
 
 fn command_for(source: &ActivitySource, desktop: Option<&str>) -> Result<CommandSpec, String> {
+    // 运行处先答一件事：人在不在这个 Agent 的 App 里。不在就别用 deeplink，
+    // 那会把终端里的会话导入成 App 里的一份副本。
+    match surface_of(source) {
+        Some(Surface::Host { bundle_id }) => return activate(bundle_id),
+        Some(Surface::Headless) => return Err("会话没有宿主窗口（SSH 或后台进程）".to_owned()),
+        _ => {}
+    }
     match source {
-        ActivitySource::Codex { thread_id } => {
+        ActivitySource::Codex { thread_id, .. } => {
             if !valid_identifier(thread_id) {
                 return Err("Codex thread id 含有非法字符".to_owned());
             }
@@ -100,6 +105,44 @@ fn command_for(source: &ActivitySource, desktop: Option<&str>) -> Result<Command
     }
 }
 
+/// Claude App 起的 Code 会话把桌面会话 id 放在进程环境里，Hook 原样上报。
+/// 它是 App 自己给的身份，直接可用——不必再拿 CLI session id 去磁盘上认领
+/// transcript，那条路一对多，会打开一个内容陈旧的影子会话（见 LESSONS.md）。
+fn reported_desktop_session(source: &ActivitySource) -> Option<&str> {
+    match source {
+        ActivitySource::ClaudeCode { surface: Surface::App { desktop_session_id }, .. } => desktop_session_id.as_deref(),
+        _ => None,
+    }
+}
+
+/// 旧 Hook 与旧状态文件不报桌面会话 id，只能按 cwd 在会话索引里消歧。
+fn fallback_desktop_session(source: &ActivitySource) -> Option<String> {
+    let ActivitySource::ClaudeCode { session_id, cwd, surface: Surface::App { desktop_session_id: None } } = source else {
+        return None;
+    };
+    desktop_session_by_cli(&desktop_sessions_dir()?, session_id, cwd.as_deref())
+}
+
+fn surface_of(source: &ActivitySource) -> Option<&Surface> {
+    match source {
+        ActivitySource::Codex { surface, .. } | ActivitySource::ClaudeCode { surface, .. } => Some(surface),
+        ActivitySource::GitHubActions { .. } => None,
+    }
+}
+
+/// 把宿主 App 拉到前台。认不认识这个 bundle id 无所谓——没见过的终端走的
+/// 也是这一条路，所以支持新终端不需要改代码。值来自 Hook，仍按不可信输入
+/// 收窄字符集。
+fn activate(bundle_id: &str) -> Result<CommandSpec, String> {
+    if !valid_bundle_id(bundle_id) {
+        return Err("宿主 bundle id 格式无效".to_owned());
+    }
+    Ok(CommandSpec {
+        program: "/usr/bin/open",
+        args: vec!["-b".to_owned(), bundle_id.to_owned()],
+    })
+}
+
 /// Claude App 为每个 Code 会话存一份记录。这里只读定位需要的字段。
 #[derive(Debug, Deserialize)]
 struct DesktopSession {
@@ -126,7 +169,7 @@ fn desktop_sessions_dir() -> Option<PathBuf> {
 /// `cliSessionId` 不是唯一键：worktree 被删除后会话迁回主仓库、fork，或者
 /// 一次 `claude://resume` 导入，都会让同一个 CLI 会话对应多条记录。工作目录
 /// 能把真身和影子分开——Hook 报的 cwd 就是那个进程实际待的地方。
-fn desktop_session_id(dir: &Path, cli_session_id: &str, cwd: Option<&str>) -> Option<String> {
+fn desktop_session_by_cli(dir: &Path, cli_session_id: &str, cwd: Option<&str>) -> Option<String> {
     desktop_session(dir, cli_session_id, cwd).map(|session| session.session_id)
 }
 
@@ -181,6 +224,11 @@ fn collect_desktop_sessions(dir: &Path, depth: u32, out: &mut Vec<DesktopSession
     }
 }
 
+/// bundle id 的合法字符与会话 id 相同，但必须是点分的，不含路径与空白。
+fn valid_bundle_id(value: &str) -> bool {
+    valid_identifier(value) && value.contains('.')
+}
+
 fn valid_desktop_id(value: &str) -> bool {
     value.starts_with(DESKTOP_ID_PREFIX) && valid_identifier(value)
 }
@@ -208,10 +256,116 @@ mod tests {
     use super::*;
 
     #[test]
+    fn a_reported_desktop_session_skips_the_disk_lookup() {
+        // App 自己给的身份优先，不再拿 CLI session id 去磁盘上认领 transcript。
+        let source = ActivitySource::ClaudeCode {
+            session_id: "19b63622-e3e0-4cd0-a37e-dc8d71253155".to_owned(),
+            cwd: Some("/work/vibe-buddy".to_owned()),
+            surface: Surface::App {
+                desktop_session_id: Some("local_b65a60de-9adb-48b0-85c6-f9a178971322".to_owned()),
+            },
+        };
+
+        assert_eq!(reported_desktop_session(&source), Some("local_b65a60de-9adb-48b0-85c6-f9a178971322"));
+        assert!(fallback_desktop_session(&source).is_none());
+    }
+
+    #[test]
+    fn a_terminal_session_never_looks_for_a_desktop_window() {
+        let source = ActivitySource::ClaudeCode {
+            session_id: "19b63622-e3e0-4cd0-a37e-dc8d71253155".to_owned(),
+            cwd: Some("/work/vibe-buddy".to_owned()),
+            surface: Surface::Host { bundle_id: "com.mitchellh.ghostty".to_owned() },
+        };
+
+        assert!(reported_desktop_session(&source).is_none());
+        assert!(fallback_desktop_session(&source).is_none());
+    }
+
+    #[test]
+    fn a_terminal_session_activates_its_host_instead_of_importing() {
+        // 人在 Ghostty 里跑 claude：deeplink 会把会话导入成 App 里的副本，
+        // 该做的是把那个终端拉到前台。
+        let spec = command_for(
+            &ActivitySource::ClaudeCode {
+                session_id: "19b63622-e3e0-4cd0-a37e-dc8d71253155".to_owned(),
+                cwd: Some("/work/vibe-buddy".to_owned()),
+                surface: Surface::Host { bundle_id: "com.mitchellh.ghostty".to_owned() },
+            },
+            None,
+        )
+        .expect("宿主应可激活");
+
+        assert_eq!(spec.program, "/usr/bin/open");
+        assert_eq!(spec.args, ["-b", "com.mitchellh.ghostty"]);
+    }
+
+    #[test]
+    fn an_unknown_host_needs_no_code_change() {
+        // 没见过的终端和见过的走同一条路，所以换终端不必改代码。
+        let spec = command_for(
+            &ActivitySource::Codex {
+                thread_id: "019c6e27-e55b-73d1-87d8-4e01f1f75043".to_owned(),
+                surface: Surface::Host { bundle_id: "net.example.SomeNewTerminal".to_owned() },
+            },
+            None,
+        )
+        .expect("未知宿主也该激活");
+
+        assert_eq!(spec.args, ["-b", "net.example.SomeNewTerminal"]);
+    }
+
+    #[test]
+    fn a_headless_session_is_skipped_rather_than_opened_wrong() {
+        // SSH 或守护进程起的会话没有任何窗口；返回错误让 K2 试下一个候选。
+        let spec = command_for(
+            &ActivitySource::Codex {
+                thread_id: "019c6e27-e55b-73d1-87d8-4e01f1f75043".to_owned(),
+                surface: Surface::Headless,
+            },
+            None,
+        );
+
+        assert!(spec.is_err());
+    }
+
+    #[test]
+    fn a_host_id_that_is_not_a_bundle_id_is_refused() {
+        // bundle id 来自 Hook，按不可信输入处理。
+        for bogus in ["../../evil", "com.example.a b", "no-dots", ""] {
+            assert!(
+                command_for(
+                    &ActivitySource::Codex {
+                        thread_id: "t".to_owned(),
+                        surface: Surface::Host { bundle_id: bogus.to_owned() },
+                    },
+                    None,
+                )
+                .is_err(),
+                "{bogus} 不该被接受"
+            );
+        }
+    }
+
+    #[test]
+    fn a_host_without_a_bundle_id_has_nowhere_to_go() {
+        // Hook 说是宿主却没给落点：跳过，不能退回 App 把会话导入进去。
+        assert_eq!(Surface::from_hook(Some("host"), None, None), Surface::Headless);
+    }
+
+    #[test]
+    fn an_older_hook_keeps_the_desktop_behaviour() {
+        // 旧 Hook 与旧状态文件都不报运行处，那时只支持桌面 App。
+        assert_eq!(Surface::from_hook(None, None, None), Surface::default());
+        assert!(matches!(Surface::default(), Surface::App { .. }));
+    }
+
+    #[test]
     fn codex_thread_uses_the_native_deep_link() {
         let spec = command_for(
             &ActivitySource::Codex {
                 thread_id: "019c6e27-e55b-73d1-87d8-4e01f1f75043".to_owned(),
+                surface: Surface::default(),
             },
             None,
         )
@@ -231,6 +385,7 @@ mod tests {
             &ActivitySource::ClaudeCode {
                 session_id: "19b63622-e3e0-4cd0-a37e-dc8d71253155".to_owned(),
                 cwd: Some("/work/vibe-buddy".to_owned()),
+                surface: Surface::default(),
             },
             Some("local_b65a60de-9adb-48b0-85c6-f9a178971322"),
         )
@@ -250,6 +405,7 @@ mod tests {
             &ActivitySource::ClaudeCode {
                 session_id: "19b63622-e3e0-4cd0-a37e-dc8d71253155".to_owned(),
                 cwd: None,
+                surface: Surface::default(),
             },
             None,
         )
@@ -268,6 +424,7 @@ mod tests {
                 &ActivitySource::ClaudeCode {
                     session_id: "19b63622-e3e0-4cd0-a37e-dc8d71253155".to_owned(),
                     cwd: None,
+                    surface: Surface::default(),
                 },
                 Some("local_../../tmp"),
             )
@@ -278,6 +435,7 @@ mod tests {
                 &ActivitySource::ClaudeCode {
                     session_id: "19b63622-e3e0-4cd0-a37e-dc8d71253155".to_owned(),
                     cwd: None,
+                    surface: Surface::default(),
                 },
                 Some("19b63622-e3e0-4cd0-a37e-dc8d71253155"),
             )
@@ -292,6 +450,7 @@ mod tests {
             command_for(
                 &ActivitySource::Codex {
                     thread_id: "../../tmp".to_owned(),
+                    surface: Surface::default(),
                 },
                 None,
             )
@@ -302,6 +461,7 @@ mod tests {
                 &ActivitySource::ClaudeCode {
                     session_id: "../../tmp".to_owned(),
                     cwd: None,
+                    surface: Surface::default(),
                 },
                 None,
             )
@@ -360,7 +520,7 @@ mod tests {
             1_789_437_616_240,
         );
 
-        let picked = desktop_session_id(
+        let picked = desktop_session_by_cli(
             &root,
             cli,
             Some("/work/vibe-buddy/.claude/worktrees/git-status"),
@@ -388,7 +548,7 @@ mod tests {
             1,
         );
 
-        let picked = desktop_session_id(&root, "cli-a", Some("/work/alpha"));
+        let picked = desktop_session_by_cli(&root, "cli-a", Some("/work/alpha"));
         let _ = std::fs::remove_dir_all(&root);
 
         assert_eq!(picked, None, "归档的会话不该被 K2 拉回来");
@@ -409,7 +569,7 @@ mod tests {
             5,
         );
 
-        let picked = desktop_session_id(&root, "cli-c", Some("/work/old-place"));
+        let picked = desktop_session_by_cli(&root, "cli-c", Some("/work/old-place"));
         let _ = std::fs::remove_dir_all(&root);
 
         assert_eq!(

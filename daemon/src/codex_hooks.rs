@@ -8,8 +8,7 @@ use serde::Deserialize;
 
 use crate::activity::{
     ActivityId, ActivitySource, ActivityStatus, ActivityTracker, card_title, display_title,
-    project_name,
-};
+    project_name, Surface};
 use crate::session_titles::{SessionTitles, git_branch};
 
 /// 任务卡上区分 Agent 的前缀。
@@ -29,6 +28,11 @@ pub struct CodexHook {
     pub cwd: Option<String>,
     #[serde(default)]
     pub response_kind: Option<String>,
+    /// 运行处：Hook 在本机按进程环境判定，daemon 只做路由。
+    #[serde(default)]
+    pub surface: Option<String>,
+    #[serde(default)]
+    pub host_bundle_id: Option<String>,
 }
 
 pub fn apply(
@@ -62,6 +66,7 @@ pub fn apply(
             .thread_id
             .clone()
             .unwrap_or_else(|| hook.session_id.clone()),
+        surface: Surface::from_hook(hook.surface.as_deref(), hook.host_bundle_id.clone(), None),
     };
     let event = match hook.hook_event_name.as_str() {
         "UserPromptSubmit" => {
@@ -126,6 +131,8 @@ mod tests {
             hook_event_name: "UserPromptSubmit".to_owned(),
             cwd: None,
             response_kind: None,
+            surface: None,
+            host_bundle_id: None,
         };
         assert!(apply(&mut tracker, &mut titles, ghost).is_none());
         assert!(tracker.focus_source().is_none());
@@ -138,6 +145,8 @@ mod tests {
             hook_event_name: "UserPromptSubmit".to_owned(),
             cwd: Some("/work/vibe-buddy".to_owned()),
             response_kind: None,
+            surface: None,
+            host_bundle_id: None,
         };
         assert!(apply(&mut tracker, &mut titles, fresh).is_some());
 
@@ -149,6 +158,8 @@ mod tests {
             hook_event_name: "UserPromptSubmit".to_owned(),
             cwd: None,
             response_kind: None,
+            surface: None,
+            host_bundle_id: None,
         };
         let event = apply(&mut tracker, &mut titles, known).expect("已知线程应可见");
         assert_eq!(event.title.as_deref(), Some("CX:REVIEW"));
@@ -166,6 +177,8 @@ mod tests {
             hook_event_name: name.to_owned(),
             cwd: Some(cwd.to_owned()),
             response_kind: None,
+            surface: None,
+            host_bundle_id: None,
         }
     }
 
@@ -187,6 +200,7 @@ mod tests {
             tracker.focus_source(),
             Some(ActivitySource::Codex {
                 thread_id: "parent-thread".to_owned(),
+                surface: Surface::default(),
             })
         );
     }

@@ -34,26 +34,33 @@ Claude Code 的 `prompt_id` 与 Codex 的 `turn_id` 语义对齐，都标识一�
 
 ## K2 导航
 
-Claude Code 虽然可以运行在终端里，但 K2 的用户目标是 Claude App 中拥有该 Activity 的 Code 会话，不是承载 CLI 的 terminal。
+K2 的落点取决于**运行处**：Agent 进程实际待在哪里。
 
-Hook 给的 `session_id` 是 **CLI 的**会话 id，它和桌面会话 id 是两个不同的 UUID，而且不是一对一：worktree 被删除后会话迁回主仓库、fork，以及每一次 `claude://resume` 导入，都会让同一个 CLI 会话多出一条桌面记录。所以 `vibebuddyd` 先查 Claude App 自己的会话索引，把 CLI 会话解析成桌面会话再打开：
+| 运行处 | 判据 | K2 打开 |
+| --- | --- | --- |
+| Claude App 的 Code 会话 | 有 `CLAUDE_CODE_HOST_SESSION_ID` | `claude://code/continue?session=<桌面会话 id>` |
+| 别的应用（终端、编辑器） | `__CFBundleIdentifier` 是别人 | `open -b <那个 bundle id>` |
+| 没有宿主（SSH、后台进程） | 两者都没有 | 跳过，试下一个候选 |
+
+判定在 Hook 里做，那是唯一看得见进程环境的地方；`vibebuddyd` 只做路由。Hook 上报 `surface`、`host_bundle_id` 与 `desktop_session_id` 三个派生字段，它们来自环境变量，不含用户内容。
+
+**桌面会话 id 由 Claude App 自己给出。** App 起的 Code 会话把它放在 `CLAUDE_CODE_HOST_SESSION_ID` 里，Hook 原样上报：
 
 ```text
-~/Library/Application Support/Claude/claude-code-sessions/<账号>/<组织>/local_*.json
-  { "sessionId": "local_…", "cliSessionId": "…", "cwd": "…", "isArchived": … }
+CLAUDE_CODE_HOST_SESSION_ID=local_44d42f48-a5cc-43c6-b95b-26407f579d39
 ```
 
-按 `cliSessionId` 取未归档的记录；有多条时用 Hook 报的 `cwd` 选中真身——那是 CLI 进程实际待的目录，影子记录的 `cwd` 停在别处。解析命中后用：
+早先的做法是拿 CLI `session_id` 去 `~/Library/Application Support/Claude/claude-code-sessions/` 里按 `cliSessionId` 加 `cwd` 消歧。那条路一对多——worktree 迁移、fork、每次 `claude://resume` 导入都会多出一条桌面记录——曾经打开过一个内容停在前一天的影子会话，每按一次还把整份 5.4 MB transcript 重新导入一遍（见 `LESSONS.md`）。环境变量是 App 给的权威身份，不需要猜。索引扫描只作为旧 Hook 与旧状态文件的回退保留。
 
-```text
-claude://code/continue?session=<桌面会话 id>
-```
+**终端会话不用 deeplink。** `claude://resume` 会把终端里的会话导入成 App 里的一份副本，人却还在终端里。落点改为把宿主应用拉到前台，bundle id 直接取自 `__CFBundleIdentifier`——LaunchServices 启动应用时注入，沿进程链继承到 Hook。
 
-这条链接按桌面会话 id 精确跳转，不读磁盘上的 transcript。只有解析不到（会话跑在终端里，Claude App 中没有对应窗口）时才退回 `claude://resume?session=<CLI session_id>`，此时导入正是想要的行为。
+这里不认识任何具体终端：读到什么 bundle id 就打开什么。Ghostty、iTerm2、WezTerm、Terminal.app、VS Code 与 Cursor 的集成终端走的都是同一条路，换一个没见过的终端也不需要改代码。不用 `TERM_PROGRAM` 正是因为那要维护一张终端名到 bundle id 的映射表。
 
-2026-09-15 已用本机 Claude 1.52386.6 验证：`code/continue` 使目标会话的 `lastFocusedAt` 前移，且不产生任何导入日志。
+**Claude App 的内嵌终端面板是个例外**：它的 `__CFBundleIdentifier` 也是 Claude App，但那是终端场景。区分靠 `CLAUDE_CODE_HOST_SESSION_ID` 缺席——面板里的 CLI 没有它。此时按宿主处理，K2 把 Claude App 拉到前台，人就落在那个面板上。
 
-`claude://resume` 不能单独承担 K2：它按 CLI session id 去磁盘认领 transcript，同一个 id 在多个项目目录下各有一份时只能挑一个。2026-09-14 到 15 之间 K2 就一直打开一个内容停在前一天的影子会话，并且每按一次都把整份 5.4 MB transcript 重新导入一遍。
+**不看 tty。** Agent 执行工具命令用的是非交互子进程，即使宿主是终端也报 `not a tty`（2026-09-21 在 Ghostty 里跑 codex 实测）。Hook 同样是子进程，同样没有 tty。
+
+2026-09-15 已用本机 Claude 1.52386.6 验证 `code/continue` 使目标会话的 `lastFocusedAt` 前移，且不产生任何导入日志。
 
 ## 隐私边界
 
@@ -65,6 +72,8 @@ Hook 的原始载荷含 `prompt`、`tool_input`、`tool_response`、`transcript_
 - `cwd`
 - `agent_id`
 - `agent_type`
+
+还有三个来自进程环境、不含用户内容的派生字段：`surface`、`host_bundle_id` 与 `desktop_session_id`（见上节）。
 
 当且仅当主会话的 `Stop` 被本机规则判定为等待回答时，额外加入派生字段 `response_kind`。子 agent 的最后一段是写给父会话的报告，不是向用户提问，因此 `SubagentStop` 不做该判定。
 

@@ -24,6 +24,22 @@ Codex 被强制结束时不会发送 `SessionEnd`，因此活动还必须能自�
 
 Codex Hook 没有直接提供“这条助手回复是否要求用户回答”的结构化字段。`Stop` 会提供 `last_assistant_message`，隐私过滤脚本仅在本机检查最后一段是否包含明确问题或回复指令，然后生成 `response_kind: input_required`。这是保守的文本规则，不是对回复正文做远端语义分析。
 
+## K2 导航与运行处
+
+K2 的落点取决于运行处，规则与 Claude Code 共用一套（见 [`claude-adapter.md`](claude-adapter.md#k2-导航)）：
+
+| 运行处 | 判据 | K2 打开 |
+| --- | --- | --- |
+| Codex App | `__CFBundleIdentifier` 是 `com.openai.codex` | `codex://threads/<thread_id>` |
+| 别的应用（终端、编辑器） | `__CFBundleIdentifier` 是别人 | `open -b <那个 bundle id>` |
+| 没有宿主（SSH、后台进程） | 没有 `__CFBundleIdentifier` | 跳过，试下一个候选 |
+
+Codex App 装在 `ChatGPT.app` 里，`codex:` scheme 也由那个 bundle 认领（2026-09-21 用 `lsregister` 核对）。
+
+Codex 自己注入 `CODEX_SESSION_ID` 与 `CODEX_THREAD_ID`，但它们对判定运行处没用——App 里的会话大概率也有。判定只看 `__CFBundleIdentifier`。
+
+Codex 没有 `CLAUDE_CODE_HOST_SESSION_ID` 那样的第二身份，因此没有办法纠正"跑在 Codex App 自己的终端面板里"这种情形：它会被判成 App 会话。后果有限——K2 仍然把 Codex App 拉到前台，只是落在 thread 视图而不是那个面板。
+
 ## 隐私边界
 
 Hook 的原始 JSON 可能含 prompt、transcript 路径、工具输入和工具输出。`tools/codex-hook.py` 在发送 HTTP 前只保留：
@@ -35,6 +51,8 @@ Hook 的原始 JSON 可能含 prompt、transcript 路径、工具输入和工具
 - `cwd`
 
 当且仅当 `Stop` 被本机规则判定为等待回答时，脚本还会加入派生字段 `response_kind`。`last_assistant_message` 本身不会发送给 daemon。
+
+此外还有两个来自进程环境、不含用户内容的派生字段：`surface` 与 `host_bundle_id`（见上节）。
 
 它只请求 `http://127.0.0.1:7331/v1/codex-hooks`，超时为 0.5 秒；daemon 未运行、载荷无效或连接失败时静默退出 0，不阻塞 Codex。不要改成直接 `curl --data-binary @-`，否则敏感字段会越过适配器边界。
 
