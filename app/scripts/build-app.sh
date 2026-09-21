@@ -30,6 +30,16 @@ build_number="$(git -C "${repo_root}" describe --tags --always --dirty 2>/dev/nu
 echo "== Rust helper"
 cargo build --release --manifest-path "${repo_root}/Cargo.toml" -p vibebuddyd -p vibebuddy-hook
 echo "== Swift App"
+# macOS 27 的 SDK 把 SwiftUI 的 @State 做成了宏，实现它的 SwiftUIMacros 插件只随
+# Xcode 发，命令行工具里没有，用默认 SDK 编译必败。只装了命令行工具时退回它
+# 自带的上一版 SDK；装了 Xcode 或自己设了 SDKROOT 的不动。
+clt="/Library/Developer/CommandLineTools"
+if [[ -z "${SDKROOT:-}" && "$(xcode-select -p 2>/dev/null)" == "${clt}" \
+      && ! -e "${clt}/usr/lib/swift/host/plugins/libSwiftUIMacros.dylib" \
+      && -d "${clt}/SDKs/MacOSX26.sdk" ]]; then
+    export SDKROOT="${clt}/SDKs/MacOSX26.sdk"
+    echo "命令行工具缺 SwiftUIMacros 插件，改用 ${SDKROOT}"
+fi
 if [[ ${debug} -eq 1 ]]; then
     swift build --package-path "${app_dir}" --product VibeBuddy
     swift_bin="${app_dir}/.build/debug/VibeBuddy"
