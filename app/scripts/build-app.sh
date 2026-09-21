@@ -96,8 +96,14 @@ for dir in "${repo_root}"/voices/*/; do
     fi
 done
 
-# ad-hoc 签名：登录项与通知都认包身份，未签名的包每次改动都像换了个 App。
-codesign --force --deep --sign - "${bundle}" 2>/dev/null || echo "codesign 不可用，跳过签名"
+# 登录项与通知都认包身份，未签名的包每次改动都像换了个 App。本机默认 ad-hoc；
+# 发布时 CI 用 CODESIGN_IDENTITY 给出 Developer ID，公证要求 hardened runtime
+# 与时间戳，这条路上签名失败就是构建失败。
+if [[ -n "${CODESIGN_IDENTITY:-}" ]]; then
+    codesign --force --deep --options runtime --timestamp --sign "${CODESIGN_IDENTITY}" "${bundle}"
+else
+    codesign --force --deep --sign - "${bundle}" 2>/dev/null || echo "codesign 不可用，跳过签名"
+fi
 echo "== 完成: ${bundle} (${version}, ${build_number})"
 
 if [[ ${install} -eq 1 ]]; then

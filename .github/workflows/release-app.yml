@@ -53,6 +53,10 @@ jobs:
     needs: firmware
     # macos-15 是 Apple 芯片 runner，产物即 arm64；暂不出 Intel 版。
     runs-on: macos-15
+    env:
+      # 五个签名 secrets 配齐才走 Developer ID 签名加公证，否则退回 ad-hoc。
+      # 配置方法见 tools/setup-release-signing.sh。
+      SIGNED: ${{ secrets.MACOS_CERT_P12 != '' && secrets.APPLE_APP_PASSWORD != '' }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/download-artifact@v4
@@ -73,22 +77,59 @@ jobs:
           rustup update stable --no-self-update
           cargo test --workspace
           swift run --package-path app SelfTest
+      - name: 导入签名证书
+        if: env.SIGNED == 'true'
+        env:
+          MACOS_CERT_P12: ${{ secrets.MACOS_CERT_P12 }}
+          MACOS_CERT_PASSWORD: ${{ secrets.MACOS_CERT_PASSWORD }}
+        run: |
+          # 证书放进只活在这个 job 里的临时钥匙串，密码随机，用完随 runner 销毁。
+          keychain="${RUNNER_TEMP}/signing.keychain-db"
+          keychain_password="$(uuidgen)"
+          security create-keychain -p "${keychain_password}" "${keychain}"
+          security set-keychain-settings -lut 21600 "${keychain}"
+          security unlock-keychain -p "${keychain_password}" "${keychain}"
+          echo "${MACOS_CERT_P12}" | base64 --decode > "${RUNNER_TEMP}/cert.p12"
+          security import "${RUNNER_TEMP}/cert.p12" -P "${MACOS_CERT_PASSWORD}" -A -t cert -f pkcs12 -k "${keychain}"
+          rm "${RUNNER_TEMP}/cert.p12"
+          security set-key-partition-list -S apple-tool:,apple: -k "${keychain_password}" "${keychain}" >/dev/null
+          security list-keychains -d user -s "${keychain}" login.keychain
+          identity="$(security find-identity -v -p codesigning "${keychain}" | sed -n 's/.*"\(Developer ID Application: .*\)"/\1/p' | head -n 1)"
+          [[ -n "${identity}" ]] || { echo "p12 里没有 Developer ID Application 证书" >&2; exit 1; }
+          echo "CODESIGN_IDENTITY=${identity}" >> "${GITHUB_ENV}"
       - name: 装包
         run: |
           app/scripts/build-app.sh
           app/scripts/make-dmg.sh "VibeBuddy-${{ steps.version.outputs.tag }}-arm64.dmg"
+      - name: 公证
+        if: env.SIGNED == 'true'
+        env:
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          APPLE_APP_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}
+        run: |
+          dmg="VibeBuddy-${{ steps.version.outputs.tag }}-arm64.dmg"
+          codesign --force --timestamp --sign "${CODESIGN_IDENTITY}" "${dmg}"
+          xcrun notarytool submit "${dmg}" --wait \
+            --apple-id "${APPLE_ID}" --team-id "${APPLE_TEAM_ID}" --password "${APPLE_APP_PASSWORD}"
+          # 公证没过时 notarytool 未必报非零，staple 拿不到票据会失败，由它把关；
+          # 再用 Gatekeeper 自己的判定确认一遍，没过就不发。
+          xcrun stapler staple "${dmg}"
+          spctl --assess --type open --context context:primary-signature --verbose "${dmg}"
       - name: 发布
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          cat > notes.md <<'NOTES'
-          仅支持 Apple 芯片的 Mac（macOS 14 及以上）。打开 DMG，把 Vibe Buddy 拖进「应用程序」。
+          echo "仅支持 Apple 芯片的 Mac（macOS 14 及以上）。打开 DMG，把 Vibe Buddy 拖进「应用程序」。" > notes.md
+          if [[ "${SIGNED}" != "true" ]]; then
+            cat >> notes.md <<'NOTES'
 
           这一版没有 Apple 开发者签名与公证，首次打开会被 Gatekeeper 拦下。任选其一放行：
 
           - 系统设置 → 隐私与安全性 → 找到 Vibe Buddy 的提示，点「仍要打开」；
           - 或在终端执行 `xattr -dr com.apple.quarantine "/Applications/Vibe Buddy.app"`。
           NOTES
+          fi
           gh release create "${{ steps.version.outputs.tag }}" \
             "VibeBuddy-${{ steps.version.outputs.tag }}-arm64.dmg" \
             --target "${GITHUB_SHA}" \
