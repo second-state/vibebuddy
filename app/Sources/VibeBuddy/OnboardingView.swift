@@ -34,10 +34,12 @@ struct OnboardingView: View {
             HStack {
                 if step > 0 && step < 5 { Button("上一步") { step -= 1 } }
                 Spacer()
-                if step == 1 || step == 3 { Button("跳过") { step += 1 } }
+                if step == 1 || step == 3 { Button("跳过") { step += 1 }.disabled(flashing) }
                 if step < 5 {
+                    // 刷机中不让翻页：翻过去进度就没人看了。
                     Button(step == 2 && !anyHookInstalled ? "先不接" : "下一步") { step += 1 }
                         .keyboardShortcut(.defaultAction)
+                        .disabled(step == 1 && flashing)
                 } else {
                     Button("开始使用", action: finish).keyboardShortcut(.defaultAction)
                 }
@@ -51,6 +53,7 @@ struct OnboardingView: View {
     }
 
     private var anyHookInstalled: Bool { model.hookInstalled.values.contains(true) }
+    private var flashing: Bool { model.operation?.kind == .firmware && model.operation?.state == .running }
 
     private var welcome: some View {
         HStack(alignment: .top, spacing: 24) {
@@ -66,18 +69,25 @@ struct OnboardingView: View {
     private var findDevice: some View {
         VStack(alignment: .leading, spacing: 12) {
             Text("把盒子用 USB 线插到这台 Mac。").font(.title3)
-            if let device = model.status?.device, device.connected, model.foreignFirmware {
+            if let operation = model.operation, operation.kind == .firmware, operation.state != .done {
+                // 烧录一开始 daemon 就让出串口，盒子在状态里变成"没连着"；进度必须
+                // 摆在连接判断之前，否则这一页会退回"还没找到盒子"，用户以为没开始
+                // （2026-09-22 同事首次刷机就这样点了下一步）。
+                Label("正在刷入 Vibe Buddy 固件…", systemImage: "arrow.down.circle").foregroundStyle(.orange)
+                OperationRow(operation: operation)
+                if operation.state == .failed {
+                    Text("按住盒子的 K0 再插一次线，让它进入下载模式，然后重试。").font(.caption).foregroundStyle(.secondary)
+                    Button("重试") { model.updateFirmware() }
+                } else {
+                    Text("盒子屏幕会黑几分钟，别拔线。刷完它自动重启，这里会变成「找到了」。")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+            } else if let device = model.status?.device, device.connected, model.foreignFirmware {
                 // 出厂机：串口在、固件不是我们的。刷入走和升级一样的烧录流程。
                 Label("找到盒子（\(device.port ?? "")），但它跑的不是 Vibe Buddy 固件。", systemImage: "exclamationmark.triangle")
                     .foregroundStyle(.orange)
                 if model.bundledFirmwareBuild == nil {
                     Text("这个构建没有附带固件，没法刷入。").font(.caption).foregroundStyle(.secondary)
-                } else if let operation = model.operation, operation.kind == .firmware {
-                    OperationRow(operation: operation)
-                    if operation.state == .failed {
-                        Text("按住盒子的 K0 再插一次线，让它进入下载模式，然后重试。").font(.caption).foregroundStyle(.secondary)
-                        Button("重试") { model.updateFirmware() }
-                    }
                 } else {
                     Button("刷入 Vibe Buddy 固件") { FlashConfirm.foreign(then: model.updateFirmware) }
                     Text("会清掉盒子里现有的固件与数据，无法恢复。原生 USB 口找不到盒子时，改接盒子的 UART 口。")
