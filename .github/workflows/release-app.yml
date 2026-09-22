@@ -111,12 +111,17 @@ jobs:
         run: |
           app/scripts/build-app.sh
           app/scripts/make-dmg.sh "VibeBuddy-${{ steps.version.outputs.label }}-arm64.dmg"
+          # 固件也单独分发：三件套加 build.txt，用户在设备页「从文件刷入…」选它。
+          ditto -c -k --norsrc "app/build/Vibe Buddy.app/Contents/Resources/firmware" \
+            "VibeBuddy-firmware-${{ steps.version.outputs.label }}.zip"
       - name: 留存自测包
         if: env.RELEASE != 'true'
         uses: actions/upload-artifact@v4
         with:
           name: VibeBuddy-${{ steps.version.outputs.label }}-arm64
-          path: VibeBuddy-${{ steps.version.outputs.label }}-arm64.dmg
+          path: |
+            VibeBuddy-${{ steps.version.outputs.label }}-arm64.dmg
+            VibeBuddy-firmware-${{ steps.version.outputs.label }}.zip
           retention-days: 7
       - name: 公证
         if: env.RELEASE == 'true' && env.SIGNED == 'true'
@@ -150,5 +155,6 @@ jobs:
           fi
           gh release create "${{ steps.version.outputs.label }}" \
             "VibeBuddy-${{ steps.version.outputs.label }}-arm64.dmg" \
+            "VibeBuddy-firmware-${{ steps.version.outputs.label }}.zip" \
             --title "Vibe Buddy ${{ steps.version.outputs.label }}" \
             --notes-file notes.md --generate-notes

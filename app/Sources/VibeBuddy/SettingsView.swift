@@ -281,6 +281,9 @@ struct DeviceView: View {
                         Button("重试") { model.updateFirmware() }.disabled(!(model.status?.device.connected ?? false))
                     }
                 }
+                // 单独分发的固件（Release 上的 VibeBuddy-firmware-*.zip）从这里进来。
+                Button("从文件刷入…") { flashFromFile() }
+                    .disabled(model.operationRunning || !(model.status?.device.connected ?? false))
                 Button("让盒子眨眼") { model.identify() }.disabled(model.operationRunning || !(model.status?.device.connected ?? false))
             }
             .formStyle(.grouped)
@@ -308,6 +311,31 @@ struct DeviceView: View {
         guard let device = model.status?.device else { return "daemon 没起来" }
         guard device.connected else { return "未找到盒子" }
         return "\(device.port ?? "") · \(device.bridge ? "UART 桥" : "原生 USB")"
+    }
+
+    private func flashFromFile() {
+        let panel = NSOpenPanel()
+        panel.title = "选择固件包"
+        panel.allowedContentTypes = [.zip]
+        panel.allowsMultipleSelection = false
+        guard panel.runModal() == .OK, let zip = panel.url else { return }
+        let package: FirmwarePackage
+        do {
+            package = try model.openFirmwarePackage(zip)
+        } catch {
+            model.lastError = error.localizedDescription
+            return
+        }
+        let alert = NSAlert()
+        alert.messageText = "刷入这份固件？"
+        alert.informativeText = """
+        固件包：\(package.build)
+        盒子现在：\(model.status?.device.firmwareBuild ?? "未知")
+        盒子会重启一次，语音包和当日战绩都保留。UART 桥上大约要几分钟。
+        """
+        alert.addButton(withTitle: "刷入")
+        alert.addButton(withTitle: "取消")
+        if alert.runModal() == .alertFirstButtonReturn { model.flashFirmware(package) }
     }
 
     private func confirmUpdate() {
