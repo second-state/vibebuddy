@@ -58,6 +58,7 @@ jobs:
     env:
       # 五个签名 secrets 配齐才走 Developer ID 签名加公证，否则退回 ad-hoc。
       # 配置方法见 tools/setup-release-signing.sh。
+      # secrets 在 run 创建那一刻快照；run 排队期间新写入的看不到，要再触发一次。
       SIGNED: ${{ secrets.MACOS_CERT_P12 != '' && secrets.APPLE_APP_PASSWORD != '' }}
       RELEASE: ${{ startsWith(github.ref, 'refs/tags/') }}
     steps:
