@@ -151,3 +151,13 @@ App 自己的接入页当时显示的是橙点加"等待第一次事件…（记
 还原的代价比看上去大：完全没碰过的文件可以直接 `git checkout HEAD --`，但改过的文件里噪声和实质改动混在同一个 hunk 中，只能整体还原后重做一遍。
 
 规则：不要在没有统一格式化过的仓库里跑包级或工作区级 `cargo fmt`。要格式化就只格式化新文件，或者用 `rustfmt <单个文件>`。提交前用 `git diff --numstat` 对一眼——改动行数远多于自己写的量，就是有噪声混进来了。
+
+## `sdkconfig.defaults` 只在 `sdkconfig` 不存在时生效
+
+2026-09-22 第一次构建 Release 装包要的固件三件套，`idf.py build` 报 app 分区装不下：二进制 1.47 MB，分区 1 MB。但 `firmware/partitions.csv` 里 factory 写的是 4M，`sdkconfig.defaults` 也写着 `CONFIG_PARTITION_TABLE_CUSTOM=y`。
+
+真正在用的是本机那份 `firmware/sdkconfig`，它里面是 `CONFIG_PARTITION_TABLE_SINGLE_APP=y` 加 `partitions_singleapp.csv`。ESP-IDF 只在 `sdkconfig` 不存在时拿 `sdkconfig.defaults` 生成它，之后 defaults 再改也不会回灌。那份 sdkconfig 早于自定义分区表加入仓库，于是自定义分区表从未生效——删掉它重新生成，构建立刻通过，app 分区 4 MB，余量 64%。
+
+影响比一次构建失败大：设备上跑的固件是用错分区布局烧进去的，仓库里声明的 `voices` 分区在那块 flash 上根本不存在。烧新固件会改写分区表，语音包要重写。
+
+`sdkconfig` 不在 git 里，所以这是每台机器各自独立的坑：谁的机器上留着旧的那份，谁就在悄悄用错配置，而且 CI 上永远复现不了——CI 是干净 checkout，没有 sdkconfig，走的是正确路径。判断方法：构建产物与仓库里声明的配置对不上时，先确认那份声明有没有真的被读进去，别先怀疑声明本身写错了。
