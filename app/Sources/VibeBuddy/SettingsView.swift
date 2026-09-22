@@ -79,7 +79,7 @@ struct VoicesView: View {
             VolumeRow(model: model)
             Divider()
             Text("播报音色").font(.headline)
-            Text("盒子现在用的是「\(currentVoiceName)」。挑一个试听，点「使用」写进盒子；不用刷固件。")
+            Text("盒子现在用的是「\(currentVoiceName)」。挑一个试听，点「使用」写进盒子；不用刷固件。UART 口上要写几分钟，写完盒子会用新音色说一句。")
                 .font(.callout).foregroundStyle(.secondary)
             ScrollView {
                 VStack(spacing: 8) {
