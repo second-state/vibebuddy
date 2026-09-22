@@ -261,7 +261,13 @@ TEST_KEYCHAIN="${WORK}/verify.keychain-db"
 security delete-keychain "${TEST_KEYCHAIN}" >/dev/null 2>&1 || true
 security create-keychain -p verify "${TEST_KEYCHAIN}"
 security import "${P12}" -P "${P12_PASSWORD}" -A -t cert -f pkcs12 -k "${TEST_KEYCHAIN}" >/dev/null
+# 信任链只对搜索列表里的钥匙串求值，不加进去 -v 一个都找不到（2026-09-22 实测）。
+SAVED_KEYCHAINS="$(security list-keychains -d user | tr -d '" ' | tr '\n' ' ')"
+# shellcheck disable=SC2086
+security list-keychains -d user -s "${TEST_KEYCHAIN}" ${SAVED_KEYCHAINS}
 IDENTITY="$(security find-identity -v -p codesigning "${TEST_KEYCHAIN}" | sed -n 's/.*"\(Developer ID Application: .*\)"/\1/p' | head -n 1)"
+# shellcheck disable=SC2086
+security list-keychains -d user -s ${SAVED_KEYCHAINS}
 security delete-keychain "${TEST_KEYCHAIN}"
 if [[ -z "${IDENTITY}" ]]; then
   warn "p12 导得进钥匙串，但里面没有可用的签名身份，先别往下走。"
