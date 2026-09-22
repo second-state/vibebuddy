@@ -38,7 +38,7 @@
 
 ### Stage 5 — Buttons（K2 已完成，2026-09-14）
 
-K2“打开当前来源”的按键与 Mac 激活链路已经通过实机验收：探针确认 K2 为 XL9555 P0.3、低电平有效（`P0: 0xFF → 0xF7 → 0xFF`）；设备通过 NDJSON 上报单击，用户短按后 `vibebuddyd` 能拉起目标应用。精确路由已修正两处：Codex 子 Agent 映射到父 thread；Claude Code 不再聚焦 Ghostty，而是打开 Claude App 的对应 Code 会话。2026-09-15 修正了其中的定位错误：CLI `session_id` 到桌面会话不是一对一，原先的 `claude://resume` 会打开一个内容陈旧的影子会话，现改为先解析桌面会话 id 再用 `claude://code/continue` 跳转。两条 deeplink 均已单独验证，完整 K2 页面跳转仍需一次实机短按确认。
+K2“打开当前来源”的按键与 Mac 激活链路已经通过实机验收：探针确认 K2 为 XL9555 P0.3、低电平有效（`P0: 0xFF → 0xF7 → 0xFF`）；设备通过 NDJSON 上报单击，用户短按后 `vibebuddyd` 能拉起目标应用。精确路由已修正两处：Codex 子 Agent 映射到父 thread；Claude Code 不再聚焦 Ghostty，而是打开 Claude App 的对应 Code 会话。2026-09-15 修正了其中的定位错误：CLI `session_id` 到桌面会话不是一对一，原先的 `claude://resume` 会打开一个内容陈旧的影子会话，现改为先解析桌面会话 id 再用 `claude://code/continue` 跳转。2026-09-22 把落点改为按运行处分派，并完成了实机短按验收：Claude App 的 Code 会话跳 `claude://code/continue?session=local_44d42f48…`（桌面会话 id 取自 `CLAUDE_CODE_HOST_SESSION_ID`，不再去磁盘上按 cwd 猜）；Ghostty 里的 claude CLI 与 codex 都落在 `com.mitchellh.ghostty`；跑在 Claude App 里的 codex 落在 `com.anthropic.claudefordesktop`。终端会话不再被导入成 App 里的副本。无宿主的会话（SSH、后台进程）跳过下一个候选，这一支只有单元测试与 Hook 端到端验证，没有实机场景。
 
 2026-09-15 加入第二个场景：番茄钟（专注 25 分钟、休息 5 分钟，表盘仿 Focus To-Do）。三个键各管一件事：K0 短按开始/暂停/继续、长按放弃，K1 切换场景，K2 照旧打开来源；阶段结束播钟声加语音并自动切到番茄钟，下一阶段等用户按 K0 才开始。状态机有主机测试，画面有主机预览。同日经 UART 桥烧录后实机确认三个键都工作：K0 为 GPIO0，K1 由候选位探针定为 XL9555 P0.4，K2 照旧打开来源；场景切换、开始、暂停、继续均有设备回报。第一次实机也暴露出短促轻点会被 100 ms 的采样加两次一致去抖丢掉，已改为 20 ms 采样、翻转即生效。专注结束与休息结束的钟声、语音和自动切场景尚待一次完整的 25 分钟实机验收。设计见 [`pomodoro.md`](pomodoro.md)。
 
