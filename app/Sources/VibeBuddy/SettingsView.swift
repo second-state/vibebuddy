@@ -269,6 +269,10 @@ struct DeviceView: View {
                 if model.firmwareUpdateAvailable {
                     Button("更新到 App 附带版本") { confirmUpdate() }
                         .disabled(model.operationRunning || !(model.status?.device.connected ?? false))
+                } else if model.foreignFirmware, model.bundledFirmwareBuild != nil {
+                    Text("盒子跑的不是 Vibe Buddy 固件。").foregroundStyle(.orange)
+                    Button("刷入 Vibe Buddy 固件") { FlashConfirm.foreign(then: model.updateFirmware) }
+                        .disabled(model.operationRunning)
                 }
                 if let operation = model.operation, operation.kind == .firmware {
                     OperationRow(operation: operation)
@@ -313,6 +317,20 @@ struct DeviceView: View {
         alert.addButton(withTitle: "更新")
         alert.addButton(withTitle: "取消")
         if alert.runModal() == .alertFirstButtonReturn { model.updateFirmware() }
+    }
+}
+
+/// 往出厂机上刷固件的确认：引导页和设备页共用一段话。
+enum FlashConfirm {
+    @MainActor
+    static func foreign(then flash: () -> Void) {
+        let alert = NSAlert()
+        alert.messageText = "把盒子刷成 Vibe Buddy？"
+        alert.informativeText = "盒子里现有的固件和数据会被清掉，无法恢复。刷完盒子自动重启，UART 口上大约要几分钟。"
+        alert.alertStyle = .warning
+        alert.addButton(withTitle: "刷入")
+        alert.addButton(withTitle: "取消")
+        if alert.runModal() == .alertFirstButtonReturn { flash() }
     }
 }
 
