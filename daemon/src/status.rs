@@ -33,6 +33,10 @@ impl DeviceState {
                 self.connected = true;
                 self.port = Some(port.clone());
                 self.bridge = *bridge;
+                // 新连上的口先当作身份未知：我们的固件收到 hello 立刻重报构建号；
+                // 一直不报的就是别的固件（出厂机），App 据此提供刷入。上一台盒子
+                // 留下的构建号不能冒充这一台。
+                self.firmware_build = None;
             }
             DeviceMessage::Disconnected => {
                 self.connected = false;
@@ -153,6 +157,17 @@ mod tests {
         assert_eq!(state.port, None);
         assert_eq!(state.firmware_build.as_deref(), Some("abc 2026-09-16 10:23"));
         assert_eq!(state.voice.as_deref(), Some("wanwanxiaohe"));
+    }
+
+    #[test]
+    fn a_new_connection_forgets_the_previous_firmware_build() {
+        // 换了一台出厂机插上来，上一台的构建号不能让 App 误以为它是我们的。
+        let mut state = DeviceState::default();
+        state.apply(&DeviceMessage::Connected { port: "/dev/cu.x".to_owned(), bridge: true });
+        state.apply(&line("DISPLAY READY BUILD abc 2026-09-16 10:23"));
+        state.apply(&DeviceMessage::Disconnected);
+        assert!(state.apply(&DeviceMessage::Connected { port: "/dev/cu.y".to_owned(), bridge: false }));
+        assert_eq!(state.firmware_build, None);
     }
 
     #[test]

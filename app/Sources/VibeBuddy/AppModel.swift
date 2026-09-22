@@ -14,6 +14,8 @@ final class AppModel: ObservableObject {
     @Published private(set) var hookInstalled: [HookAgent: Bool] = [:]
     @Published private(set) var launchAtLogin = LoginItem.isEnabled
     @Published private(set) var previewingVoice: String?
+    /// 串口开了却一直没报构建号：盒子跑的不是我们的固件（出厂机），该提供刷入。
+    @Published private(set) var foreignFirmware = false
 
     let client = DaemonClient()
     let supervisor = DaemonSupervisor()
@@ -23,6 +25,7 @@ final class AppModel: ObservableObject {
     var managesDaemon = true
 
     private var streamTask: Task<Void, Never>?
+    private var connectedSince: Date?
     private var linkLostSince: Date?
     private var linkNotified = false
 
@@ -58,7 +61,11 @@ final class AppModel: ObservableObject {
         if managesDaemon { supervisor.start() }
         streamTask = Task { [weak self] in await self?.followStatus() }
         Timer.scheduledTimer(withTimeInterval: 5, repeats: true) { [weak self] _ in
-            Task { @MainActor in self?.checkLink() }
+            Task { @MainActor in
+                self?.checkLink()
+                // 宽限期过了状态流不会再来消息，沉默要靠时钟发现。
+                self?.refreshForeignFirmware()
+            }
         }
     }
 
@@ -82,9 +89,23 @@ final class AppModel: ObservableObject {
     }
 
     private func apply(_ status: Status) {
+        if status.device.connected {
+            if connectedSince == nil { connectedSince = Date() }
+        } else {
+            connectedSince = nil
+        }
         self.status = status
         daemonAlive = true
         refreshMenu()
+        refreshForeignFirmware()
+    }
+
+    private func refreshForeignFirmware() {
+        let foreign = Firmware.foreign(
+            connected: status?.device.connected ?? false,
+            device: status?.device.firmwareBuild,
+            connectedFor: connectedSince.map { Date().timeIntervalSince($0) } ?? 0)
+        if foreign != foreignFirmware { foreignFirmware = foreign }
     }
 
     private func refreshMenu() {
@@ -154,6 +175,25 @@ final class AppModel: ObservableObject {
     func updateFirmware() {
         guard let files = Resources.firmwareFiles else { lastError = "这个构建没有附带固件"; return }
         run { try await self.client.flashFirmware(bootloader: files.bootloader, partitionTable: files.partitionTable, app: files.app) }
+    }
+
+    /// 用户自己拿到的固件包（CI 发的 zip）：解到临时目录，验完三件套再交给确认框。
+    /// 临时目录留到烧录结束，daemon 按路径读文件。
+    func openFirmwarePackage(_ zip: URL) throws -> FirmwarePackage {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("vibebuddy-firmware-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let unzip = Process()
+        unzip.executableURL = URL(fileURLWithPath: "/usr/bin/ditto")
+        unzip.arguments = ["-x", "-k", zip.path, directory.path]
+        try unzip.run()
+        unzip.waitUntilExit()
+        guard unzip.terminationStatus == 0 else { throw DaemonError(message: "解不开 \(zip.lastPathComponent)") }
+        return try FirmwarePackage.inspect(directory: directory)
+    }
+
+    func flashFirmware(_ package: FirmwarePackage) {
+        run { try await self.client.flashFirmware(bootloader: package.bootloader, partitionTable: package.partitionTable, app: package.app) }
     }
 
     func takeScreenshot() {

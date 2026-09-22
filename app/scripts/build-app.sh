@@ -55,6 +55,14 @@ mkdir -p "${contents}/MacOS" "${contents}/Resources/firmware" "${contents}/Resou
 
 sed -e "s/__VERSION__/${version}/" -e "s/__BUILD__/${build_number}/" "${app_dir}/Info.plist" > "${contents}/Info.plist"
 cp "${swift_bin}" "${contents}/MacOS/VibeBuddy"
+
+echo "== App 图标"
+# 菜单栏的像素脸同一份源码渲染成 App 图标，脸只在 PixelFace.swift 里定义一次。
+icon_tool="${app_dir}/.build/make-app-icon"
+swiftc -O "${app_dir}/Sources/VibeBuddy/PixelFace.swift" "${app_dir}/scripts/make-app-icon.swift" -o "${icon_tool}" 2>&1 | grep -v "warning:" || true
+[[ -x "${icon_tool}" ]] || { echo "图标生成器编译失败" >&2; exit 1; }
+"${icon_tool}" "${app_dir}/build/AppIcon.iconset"
+iconutil -c icns "${app_dir}/build/AppIcon.iconset" -o "${contents}/Resources/AppIcon.icns"
 cp "${repo_root}/target/release/vibebuddyd" "${contents}/MacOS/vibebuddyd"
 cp "${repo_root}/target/release/vibebuddy-hook" "${contents}/MacOS/vibebuddy-hook"
 
