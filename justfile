@@ -63,16 +63,17 @@ release version:
     # CI 收到标签才公证并发 Release；标签与 Cargo.toml 不一致时 CI 会拒绝，
     # 所以版本号只在这里改一次，提交与标签同一个 commit。
     v="{{version}}"
-    [[ "$v" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "版本号要像 0.2.0，不带 v" >&2; exit 2; }
+    [[ "${v}" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "版本号要像 0.2.0，不带 v" >&2; exit 2; }
     [[ "$(git branch --show-current)" == "main" ]] || { echo "只在 main 上发版" >&2; exit 2; }
     [[ -z "$(git status --porcelain)" ]] || { echo "工作树不干净" >&2; exit 2; }
     git fetch -q origin main
     [[ "$(git rev-parse HEAD)" == "$(git rev-parse origin/main)" ]] || { echo "本地 main 与 origin/main 不一致" >&2; exit 2; }
-    ! git rev-parse -q --verify "refs/tags/v$v" >/dev/null || { echo "v$v 已存在" >&2; exit 2; }
-    perl -pi -e 'BEGIN{$v=shift} s/^version = ".*"/version = "$v"/ && ($done++) unless $done' "$v" Cargo.toml
+    ! git rev-parse -q --verify "refs/tags/v${v}" >/dev/null || { echo "v${v} 已存在" >&2; exit 2; }
+    # 全角标点紧跟 $v 时 bash 会把它算进变量名，所以一律写 ${v}。
+    perl -pi -e 'BEGIN{$new=shift} s/^version = ".*"/version = "$new"/ && ($done++) unless $done' "${v}" Cargo.toml
     cargo update --workspace --offline -q
     git add Cargo.toml Cargo.lock
-    git commit -q -m "release: v$v"
-    git tag -a "v$v" -m "Vibe Buddy v$v"
-    git push -q origin main "v$v"
-    echo "已推送 v$v，CI 会公证并发 Release：gh run watch"
+    git commit -q -m "release: v${v}"
+    git tag -a "v${v}" -m "Vibe Buddy v${v}"
+    git push -q origin main "v${v}"
+    echo "已推送 v${v}，CI 会公证并发 Release：gh run watch"
