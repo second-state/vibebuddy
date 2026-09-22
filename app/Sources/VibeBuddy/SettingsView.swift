@@ -368,7 +368,13 @@ struct AdvancedView: View {
 
     var body: some View {
         Form {
-            Button("打开日志文件夹") { NSWorkspace.shared.open(Resources.logsDirectory) }
+            // 菜单栏 App 没有 Dock 图标，Finder 窗口和保存面板都可能开在别人窗口后面，
+            // 看起来像"点了没反应"（2026-09-22 同事机器上如此）。开文件夹显式把
+            // Finder 拉到前台；保存面板挂成设置窗的 sheet，躲不到后面去。
+            Button("打开日志文件夹") {
+                NSWorkspace.shared.activateFileViewerSelecting([Resources.logsDirectory.appendingPathComponent("vibebuddyd.log")])
+            }
+            LabeledContent("daemon", value: model.daemonAlive ? "运行中 · \(model.status?.daemon.build ?? "")" : "未运行")
             Button("重启 daemon") { model.restartDaemon() }
             Button("导出诊断…") { exportDiagnostics() }
             Section {
@@ -383,7 +389,19 @@ struct AdvancedView: View {
         let panel = NSSavePanel()
         panel.nameFieldStringValue = "vibe-buddy-diagnostics"
         panel.canCreateDirectories = true
-        guard panel.runModal() == .OK, let target = panel.url else { return }
+        if let window = NSApp.keyWindow {
+            panel.beginSheetModal(for: window) { response in
+                guard response == .OK, let target = panel.url else { return }
+                writeDiagnostics(to: target)
+            }
+        } else {
+            NSApp.activate(ignoringOtherApps: true)
+            guard panel.runModal() == .OK, let target = panel.url else { return }
+            writeDiagnostics(to: target)
+        }
+    }
+
+    private func writeDiagnostics(to target: URL) {
         let manager = FileManager.default
         try? manager.createDirectory(at: target, withIntermediateDirectories: true)
         for name in ["vibebuddyd.log", "codex-hooks.log"] {
