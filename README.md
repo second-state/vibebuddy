@@ -86,7 +86,7 @@ open "app/build/Vibe Buddy.app"
 
 App 用 SwiftPM 构建，只需要命令行工具；`swift run --package-path app SelfTest` 跑视图模型的自检。
 
-发布由 CI 完成：main 上动到 App 装包内容（`app/`、`daemon/`、`hook/`、`protocol/`、`firmware/`、`voices/`）的提交会触发 [`release-app`](.github/workflows/release-app.yml)，在 Linux 上构建固件、在 Apple 芯片的 runner 上跑测试并装包，用 `app/scripts/make-dmg.sh` 打成 DMG，发一个 `v<版本>-build.<序号>` 的 GitHub Release。目前只出 arm64。仓库配齐五个签名 secrets 后用 Developer ID 签名并公证，下载即可打开；没配时退回 ad-hoc 签名，首次打开要在「隐私与安全性」里放行。secrets 用 [`tools/setup-release-signing.sh`](tools/setup-release-signing.sh) 配：它带着走完申请证书、打包 p12、生成 App 专用密码，并逐项验证后写进 GitHub。
+发布由 CI 完成，见 [`release-app`](.github/workflows/release-app.yml)：在 Linux 上构建固件、在 Apple 芯片的 runner 上跑测试、装包、用 `app/scripts/make-dmg.sh` 打成 DMG。main 上动到装包内容（`app/`、`daemon/`、`hook/`、`protocol/`、`firmware/`、`voices/`）的提交只出一个保留 7 天的 artifact 供自测；打 `vX.Y.Z` 标签才公证并发 GitHub Release，标签必须与 `Cargo.toml` 的 `version` 一致，否则构建失败。发版步骤：改 `Cargo.toml` 的 version 并合进 main，再 `git tag v0.2.0 && git push origin v0.2.0`。目前只出 arm64。仓库配齐五个签名 secrets 后用 Developer ID 签名并公证，下载即可打开；没配时退回 ad-hoc 签名，首次打开要在「隐私与安全性」里放行。secrets 用 [`tools/setup-release-signing.sh`](tools/setup-release-signing.sh) 配：它带着走完申请证书、打包 p12、生成 App 专用密码，并逐项验证后写进 GitHub。
 
 ## Stage 2 daemon
 

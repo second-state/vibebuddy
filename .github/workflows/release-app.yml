@@ -1,9 +1,11 @@
-# main 上动到 App 装包内容的提交，自动出一版 Apple 芯片的 DMG 并发 GitHub Release。
+# Apple 芯片的 DMG。打 vX.Y.Z 标签才公证并发 GitHub Release；main 上动到装包内容的
+# 提交只构建、测试、签名，DMG 留作 7 天的 artifact 供自测。
 # 固件随 App 一起发（设备页的「更新」用的就是包里那份），所以 firmware/ 也算触发路径。
 name: release-app
 
 on:
   push:
+    tags: ["v[0-9]+.[0-9]+.[0-9]+"]
     branches: [main]
     paths:
       - "app/**"
@@ -18,10 +20,10 @@ on:
       - ".github/workflows/release-app.yml"
   workflow_dispatch:
 
-# 连续推送时排队而不是取消：每个 run 对应一个 tag，取消会留下跳号。
+# 标签发布不能被后来的推送取消；main 上连续推送只保留最新一次。
 concurrency:
-  group: release-app
-  cancel-in-progress: false
+  group: release-app-${{ github.ref }}
+  cancel-in-progress: ${{ !startsWith(github.ref, 'refs/tags/') }}
 
 permissions:
   contents: write
@@ -57,8 +59,12 @@ jobs:
       # 五个签名 secrets 配齐才走 Developer ID 签名加公证，否则退回 ad-hoc。
       # 配置方法见 tools/setup-release-signing.sh。
       SIGNED: ${{ secrets.MACOS_CERT_P12 != '' && secrets.APPLE_APP_PASSWORD != '' }}
+      RELEASE: ${{ startsWith(github.ref, 'refs/tags/') }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          # build.rs 和 Info.plist 都用 git describe --tags 做构建号，要能看到标签。
+          fetch-depth: 0
       - uses: actions/download-artifact@v4
         with:
           name: firmware
@@ -67,11 +73,15 @@ jobs:
         id: version
         run: |
           version="$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -n 1)"
-          tag="v${version}-build.${GITHUB_RUN_NUMBER}"
-          # 先在本地打上 tag：daemon 的 build.rs 和 Info.plist 都取 git describe，
-          # 这样 App「关于」里的构建号与 Release 的 tag 一字不差。
-          git tag "${tag}"
-          echo "tag=${tag}" >> "${GITHUB_OUTPUT}"
+          if [[ "${RELEASE}" == "true" ]]; then
+            # 标签就是版本；Cargo.toml 没跟上就停下，不发一个版本号说谎的包。
+            [[ "${GITHUB_REF_NAME}" == "v${version}" ]] || {
+              echo "标签 ${GITHUB_REF_NAME} 与 Cargo.toml 的 version ${version} 不一致" >&2; exit 1; }
+            label="${GITHUB_REF_NAME}"
+          else
+            label="$(git describe --tags --always)"
+          fi
+          echo "label=${label}" >> "${GITHUB_OUTPUT}"
       - name: 测试
         run: |
           rustup update stable --no-self-update
@@ -100,15 +110,22 @@ jobs:
       - name: 装包
         run: |
           app/scripts/build-app.sh
-          app/scripts/make-dmg.sh "VibeBuddy-${{ steps.version.outputs.tag }}-arm64.dmg"
+          app/scripts/make-dmg.sh "VibeBuddy-${{ steps.version.outputs.label }}-arm64.dmg"
+      - name: 留存自测包
+        if: env.RELEASE != 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: VibeBuddy-${{ steps.version.outputs.label }}-arm64
+          path: VibeBuddy-${{ steps.version.outputs.label }}-arm64.dmg
+          retention-days: 7
       - name: 公证
-        if: env.SIGNED == 'true'
+        if: env.RELEASE == 'true' && env.SIGNED == 'true'
         env:
           APPLE_ID: ${{ secrets.APPLE_ID }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
           APPLE_APP_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}
         run: |
-          dmg="VibeBuddy-${{ steps.version.outputs.tag }}-arm64.dmg"
+          dmg="VibeBuddy-${{ steps.version.outputs.label }}-arm64.dmg"
           codesign --force --timestamp --sign "${CODESIGN_IDENTITY}" "${dmg}"
           xcrun notarytool submit "${dmg}" --wait \
             --apple-id "${APPLE_ID}" --team-id "${APPLE_TEAM_ID}" --password "${APPLE_APP_PASSWORD}"
@@ -117,6 +134,7 @@ jobs:
           xcrun stapler staple "${dmg}"
           spctl --assess --type open --context context:primary-signature --verbose "${dmg}"
       - name: 发布
+        if: env.RELEASE == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -130,8 +148,7 @@ jobs:
           - 或在终端执行 `xattr -dr com.apple.quarantine "/Applications/Vibe Buddy.app"`。
           NOTES
           fi
-          gh release create "${{ steps.version.outputs.tag }}" \
-            "VibeBuddy-${{ steps.version.outputs.tag }}-arm64.dmg" \
-            --target "${GITHUB_SHA}" \
-            --title "Vibe Buddy ${{ steps.version.outputs.tag }}" \
+          gh release create "${{ steps.version.outputs.label }}" \
+            "VibeBuddy-${{ steps.version.outputs.label }}-arm64.dmg" \
+            --title "Vibe Buddy ${{ steps.version.outputs.label }}" \
             --notes-file notes.md --generate-notes
