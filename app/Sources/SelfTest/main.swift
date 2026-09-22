@@ -40,6 +40,10 @@ do {
     check(Firmware.updateAvailable(device: status.device.firmwareBuild, bundled: "def5678 2026-09-17 09:00"), "哈希不同可更新")
     check(!Firmware.updateAvailable(device: status.device.firmwareBuild, bundled: "abc1234-dirty 2026-09-16 13:11"), "哈希相同不更新")
     check(!Firmware.updateAvailable(device: nil, bundled: "def5678 x"), "盒子未报构建号不催")
+    check(Firmware.foreign(connected: true, device: nil, connectedFor: 6), "连着却沉默过了宽限期：出厂机")
+    check(!Firmware.foreign(connected: true, device: nil, connectedFor: 1), "刚连上还在宽限期内不算")
+    check(!Firmware.foreign(connected: true, device: "abc 1", connectedFor: 60), "报了构建号就是我们的")
+    check(!Firmware.foreign(connected: false, device: nil, connectedFor: 60), "没连着谈不上")
 } catch {
     check(false, "状态解码抛错：\(error)")
 }

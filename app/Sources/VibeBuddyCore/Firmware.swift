@@ -14,4 +14,12 @@ public enum Firmware {
         guard let deviceHash = hash(of: device), let bundledHash = hash(of: bundled) else { return false }
         return deviceHash != bundledHash
     }
+
+    /// 串口开了这么久还没报构建号，就当盒子跑的不是 Vibe Buddy 固件（出厂机）。
+    /// 我们的固件在 daemon 发 hello 后一秒内就会报，宽限取 5 秒。
+    public static let silenceGrace: TimeInterval = 5
+
+    public static func foreign(connected: Bool, device: String?, connectedFor: TimeInterval) -> Bool {
+        connected && device == nil && connectedFor >= silenceGrace
+    }
 }
