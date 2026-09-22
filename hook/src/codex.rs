@@ -7,8 +7,12 @@ use std::path::Path;
 use serde_json::{Map, Value};
 
 use crate::filter::requires_user_input;
+use crate::surface;
 
 pub const ENDPOINT: &str = "http://127.0.0.1:7331/v1/codex-hooks";
+/// Codex App 的 bundle id。它装在 ChatGPT.app 里，`codex:` scheme 也由那个
+/// bundle 认领（2026-09-21 用 lsregister 核对）。
+const BUNDLE_ID: &str = "com.openai.codex";
 const ALLOWED_FIELDS: [&str; 4] = ["session_id", "turn_id", "hook_event_name", "cwd"];
 
 /// transcript 第一行的 session_meta；读不到就当没有。
@@ -65,6 +69,7 @@ pub fn sanitized_payload(source: &Value) -> Option<Map<String, Value>> {
     {
         payload.insert("response_kind".to_owned(), Value::String("input_required".to_owned()));
     }
+    surface::write_into(&mut payload, &surface::detect(BUNDLE_ID));
     Some(payload)
 }
 

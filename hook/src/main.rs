@@ -6,6 +6,7 @@
 mod claude;
 mod codex;
 mod filter;
+mod surface;
 
 use std::io::{Read, Write};
 use std::net::{SocketAddr, TcpStream};

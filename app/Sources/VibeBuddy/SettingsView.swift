@@ -157,6 +157,7 @@ struct HooksView: View {
         VStack(alignment: .leading, spacing: 12) {
             Text("接入 Agent").font(.headline)
             Text("Vibe Buddy 只转发会话标识、事件名和工作目录，不转发 prompt 与回复。").font(.callout).foregroundStyle(.secondary)
+            Text("写的是用户级配置，装一次两处都算数：桌面应用里的会话，和终端里跑的同一个 Agent。").font(.callout).foregroundStyle(.secondary)
             ForEach(HookAgent.allCases, id: \.rawValue) { agent in
                 HookRow(model: model, agent: agent, pendingPlan: $pendingPlan)
             }

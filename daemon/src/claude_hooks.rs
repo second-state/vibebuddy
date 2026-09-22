@@ -6,8 +6,8 @@ use vibebuddy_protocol::Event;
 use serde::Deserialize;
 
 use crate::activity::{
-    ActivityId, ActivitySource, ActivityStatus, ActivityTracker, card_title, display_title,
-    project_name,
+    ActivityId, ActivitySource, ActivityStatus, ActivityTracker, Surface, card_title,
+    display_title, project_name,
 };
 use crate::session_titles::{SessionTitles, git_branch};
 
@@ -28,6 +28,13 @@ pub struct ClaudeHook {
     pub agent_id: Option<String>,
     #[serde(default)]
     pub response_kind: Option<String>,
+    /// 运行处：Hook 在本机按进程环境判定，daemon 只做路由。
+    #[serde(default)]
+    pub surface: Option<String>,
+    #[serde(default)]
+    pub host_bundle_id: Option<String>,
+    #[serde(default)]
+    pub desktop_session_id: Option<String>,
 }
 
 pub fn apply(
@@ -46,6 +53,7 @@ pub fn apply(
     let source = ActivitySource::ClaudeCode {
         session_id: hook.session_id.clone(),
         cwd: hook.cwd.clone(),
+        surface: Surface::from_hook(hook.surface.as_deref(), hook.host_bundle_id.clone(), hook.desktop_session_id.clone()),
     };
     let event = match hook.hook_event_name.as_str() {
         "UserPromptSubmit" => {
@@ -103,6 +111,9 @@ mod tests {
             cwd: Some(cwd.to_owned()),
             agent_id: None,
             response_kind: None,
+            surface: None,
+            host_bundle_id: None,
+            desktop_session_id: None,
         }
     }
 
@@ -213,6 +224,8 @@ mod tests {
             hook_event_name: "UserPromptSubmit".to_owned(),
             cwd: Some("/work/vibe-buddy".to_owned()),
             response_kind: None,
+            surface: None,
+            host_bundle_id: None,
         };
         let mixed = codex_hooks::apply(&mut tracker, &mut SessionTitles::disabled(), codex).expect("另一个 Agent 应刷新卡片栈");
 

@@ -28,6 +28,47 @@ pub enum ActivityStatus {
     InputRequired,
 }
 
+/// Agent 进程运行的地方，决定 K2 把人送回哪里。判定在 Hook 里做——只有它
+/// 看得到进程环境；daemon 只做路由，不重算。
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
+#[serde(tag = "surface", rename_all = "snake_case")]
+pub enum Surface {
+    /// 跑在 Agent 自己的桌面 App 里。Claude 另带桌面会话 id 定位到具体窗口；
+    /// Codex 只有 thread id，没有第二个身份。
+    App {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        desktop_session_id: Option<String>,
+    },
+    /// 跑在别的 App 里：终端、编辑器的集成终端，或任何没见过的宿主。这个
+    /// bundle id 就是落点，daemon 不需要认识它。
+    Host { bundle_id: String },
+    /// 没有宿主 App：SSH、守护进程、launchd 起的会话。K2 无处可去。
+    Headless,
+}
+
+impl Default for Surface {
+    /// 旧状态文件写于只支持桌面 App 的版本，按 App 读回，保持原有行为。
+    fn default() -> Self {
+        Self::App { desktop_session_id: None }
+    }
+}
+
+impl Surface {
+    /// 把 Hook 报的扁平字段合成运行处。
+    pub fn from_hook(kind: Option<&str>, host_bundle_id: Option<String>, desktop_session_id: Option<String>) -> Self {
+        match kind {
+            // 说是宿主却没给 bundle id：无处可去，不能退回 App 跳错地方。
+            Some("host") => match host_bundle_id {
+                Some(bundle_id) => Self::Host { bundle_id },
+                None => Self::Headless,
+            },
+            Some("headless") => Self::Headless,
+            // 认不出的值来自比 daemon 新的 Hook，按旧行为处理。
+            _ => Self::App { desktop_session_id },
+        }
+    }
+}
+
 /// K2 可以切回的 Mac 来源。这里只保存打开窗口所需的最小定位信息，
 /// 不保存 prompt、回复正文或命令内容。
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
@@ -35,13 +76,19 @@ pub enum ActivityStatus {
 pub enum ActivitySource {
     Codex {
         thread_id: String,
+        #[serde(default)]
+        surface: Surface,
     },
     /// `session_id` 是 CLI 的会话 id，它不足以定位窗口：worktree 迁移、fork 或
-    /// 一次 resume 导入都会让同一个 id 对应多个桌面会话。`cwd` 是消歧的钥匙。
+    /// 一次 resume 导入都会让同一个 id 对应多个桌面会话。跑在 App 里时用
+    /// `Surface::App` 带来的桌面会话 id 精确定位，那是 Claude 自己给的；
+    /// 只有旧 Hook 不报它时才退回 `cwd` 消歧。
     ClaudeCode {
         session_id: String,
         #[serde(default)]
         cwd: Option<String>,
+        #[serde(default)]
+        surface: Surface,
     },
     GitHubActions {
         repo: String,
@@ -721,6 +768,7 @@ mod tests {
         tracker.require_input(&waiting, "CX:VIBE-BUDDY");
         let codex = ActivitySource::Codex {
             thread_id: "waiting".to_owned(),
+            surface: Surface::default(),
         };
         tracker.associate_source(&waiting, codex.clone());
 
@@ -735,6 +783,7 @@ mod tests {
         let source = ActivitySource::ClaudeCode {
             session_id: "session-a".to_owned(),
             cwd: Some("/work/vibe-buddy".to_owned()),
+            surface: Surface::default(),
         };
         tracker.associate_source(&turn, source.clone());
 
@@ -751,6 +800,7 @@ mod tests {
         let source = ActivitySource::ClaudeCode {
             session_id: "session-a".to_owned(),
             cwd: Some("/work/vibe-buddy".to_owned()),
+            surface: Surface::default(),
         };
         tracker.associate_source(&turn, source.clone());
 
@@ -772,6 +822,7 @@ mod tests {
         let running = id("session-b", "session-b:turn");
         let finished_source = ActivitySource::Codex {
             thread_id: "thread-finished".to_owned(),
+            surface: Surface::default(),
         };
         tracker.observe(&finished, "CX:ALPHA", ActivityStatus::Working);
         tracker.associate_source(&finished, finished_source.clone());
@@ -780,6 +831,7 @@ mod tests {
             &running,
             ActivitySource::Codex {
                 thread_id: "thread-running".to_owned(),
+                surface: Surface::default(),
             },
         );
 
@@ -800,12 +852,14 @@ mod tests {
         let second = id("session-b", "session-b:turn");
         let second_source = ActivitySource::Codex {
             thread_id: "thread-second".to_owned(),
+            surface: Surface::default(),
         };
         tracker.observe(&first, "CX:ALPHA", ActivityStatus::Working);
         tracker.associate_source(
             &first,
             ActivitySource::Codex {
                 thread_id: "thread-first".to_owned(),
+                surface: Surface::default(),
             },
         );
         tracker.observe(&second, "CX:BETA", ActivityStatus::Working);
@@ -829,6 +883,7 @@ mod tests {
         let running = id("session-b", "session-b:turn");
         let finished_source = ActivitySource::Codex {
             thread_id: "thread-finished".to_owned(),
+            surface: Surface::default(),
         };
         tracker.observe(&finished, "CX:ALPHA", ActivityStatus::Working);
         tracker.associate_source(&finished, finished_source.clone());
@@ -837,6 +892,7 @@ mod tests {
             &running,
             ActivitySource::Codex {
                 thread_id: "thread-running".to_owned(),
+                surface: Surface::default(),
             },
         );
         tracker.finish(&finished, "CX:ALPHA");
@@ -861,12 +917,14 @@ mod tests {
         let waiting = id("session-b", "session-b:turn");
         let waiting_source = ActivitySource::Codex {
             thread_id: "thread-waiting".to_owned(),
+            surface: Surface::default(),
         };
         tracker.observe(&finished, "CX:ALPHA", ActivityStatus::Working);
         tracker.associate_source(
             &finished,
             ActivitySource::Codex {
                 thread_id: "thread-finished".to_owned(),
+                surface: Surface::default(),
             },
         );
         tracker.require_input(&waiting, "CX:BETA");
@@ -887,6 +945,7 @@ mod tests {
         let state_file = base.join("stats.json");
         let source = ActivitySource::Codex {
             thread_id: "thread-a".to_owned(),
+            surface: Surface::default(),
         };
         {
             let mut tracker = ActivityTracker::with_stats_file(state_file.clone());

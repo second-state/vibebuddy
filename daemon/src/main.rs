@@ -230,7 +230,7 @@ async fn open_k2_source(state: &AppState) {
         }
         for source in sources {
             // Codex 线程要先确认还在：打开一个不存在的线程得到的是空白会话。
-            if let ActivitySource::Codex { thread_id } = &source
+            if let ActivitySource::Codex { thread_id, .. } = &source
                 && state.titles.lock().await.codex_thread_known(thread_id) == Some(false)
             {
                 warn!(%thread_id, "K2 跳过不存在的 Codex 线程");
