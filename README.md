@@ -87,7 +87,7 @@ just install    # 装包、装进 /Applications 并启动
 
 App 用 SwiftPM 构建，只需要命令行工具；`swift run --package-path app SelfTest` 跑视图模型的自检。
 
-发布由 CI 完成，见 [`release-app`](.github/workflows/release-app.yml)：在 Linux 上构建固件、在 Apple 芯片的 runner 上跑测试、装包、用 `app/scripts/make-dmg.sh` 打成 DMG。main 上动到装包内容（`app/`、`daemon/`、`hook/`、`protocol/`、`firmware/`、`voices/`）的提交只出一个保留 7 天的 artifact 供自测；打 `vX.Y.Z` 标签才公证并发 GitHub Release，标签必须与 `Cargo.toml` 的 `version` 一致，否则构建失败。发版一条命令：在干净的 main 上 `just release 0.2.0`，它改 `Cargo.toml`、提交、打标签、推送。目前只出 arm64。仓库配齐五个签名 secrets 后用 Developer ID 签名并公证，下载即可打开；没配时退回 ad-hoc 签名，首次打开要在「隐私与安全性」里放行。secrets 用 [`tools/setup-release-signing.sh`](tools/setup-release-signing.sh) 配：它带着走完申请证书、打包 p12、生成 App 专用密码，并逐项验证后写进 GitHub。
+发布由 CI 完成，见 [`release-app`](.github/workflows/release-app.yml)：在 Linux 上构建固件、在 Apple 芯片的 runner 上跑测试、装包、用 `app/scripts/make-dmg.sh` 打成 DMG。main 上动到装包内容（`app/`、`daemon/`、`hook/`、`protocol/`、`firmware/`、`voices/`）的提交只出一个保留 7 天的 artifact 供自测；打 `vX.Y.Z` 标签才公证并发 GitHub Release，标签必须与 `Cargo.toml` 的 `version` 一致，否则构建失败。发版一条命令：在干净的 main 上 `just release 0.2.0`，它改 `Cargo.toml`、提交、打标签、推送。同一次发布还挂一个 `VibeBuddy-firmware-vX.Y.Z.zip`（固件三件套加 `build.txt`），拿到它的人在设置 → 设备「从文件刷入…」里选它即可烧进盒子。目前只出 arm64。仓库配齐五个签名 secrets 后用 Developer ID 签名并公证，下载即可打开；没配时退回 ad-hoc 签名，首次打开要在「隐私与安全性」里放行。secrets 用 [`tools/setup-release-signing.sh`](tools/setup-release-signing.sh) 配：它带着走完申请证书、打包 p12、生成 App 专用密码，并逐项验证后写进 GitHub。
 
 ## Stage 2 daemon
 

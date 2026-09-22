@@ -177,6 +177,25 @@ final class AppModel: ObservableObject {
         run { try await self.client.flashFirmware(bootloader: files.bootloader, partitionTable: files.partitionTable, app: files.app) }
     }
 
+    /// 用户自己拿到的固件包（CI 发的 zip）：解到临时目录，验完三件套再交给确认框。
+    /// 临时目录留到烧录结束，daemon 按路径读文件。
+    func openFirmwarePackage(_ zip: URL) throws -> FirmwarePackage {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("vibebuddy-firmware-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let unzip = Process()
+        unzip.executableURL = URL(fileURLWithPath: "/usr/bin/ditto")
+        unzip.arguments = ["-x", "-k", zip.path, directory.path]
+        try unzip.run()
+        unzip.waitUntilExit()
+        guard unzip.terminationStatus == 0 else { throw DaemonError(message: "解不开 \(zip.lastPathComponent)") }
+        return try FirmwarePackage.inspect(directory: directory)
+    }
+
+    func flashFirmware(_ package: FirmwarePackage) {
+        run { try await self.client.flashFirmware(bootloader: package.bootloader, partitionTable: package.partitionTable, app: package.app) }
+    }
+
     func takeScreenshot() {
         screenshotBusy = true
         Task {

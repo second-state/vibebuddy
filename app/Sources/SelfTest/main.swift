@@ -48,6 +48,44 @@ do {
     check(false, "状态解码抛错：\(error)")
 }
 
+// 1b. 固件包：zip 里带一层目录也找得到；验魔数；build.txt 优先于镜像里的版本串。
+do {
+    let root = FileManager.default.temporaryDirectory.appendingPathComponent("selftest-fw-\(UUID().uuidString)")
+    let nested = root.appendingPathComponent("firmware")
+    try FileManager.default.createDirectory(at: nested, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: root) }
+    func write(_ name: String, _ bytes: [UInt8]) throws { try Data(bytes).write(to: nested.appendingPathComponent(name)) }
+    var app = [UInt8](repeating: 0, count: 0x60)
+    app[0] = 0xE9
+    app[0x20...0x23] = [0x32, 0x54, 0xCD, 0xAB]
+    for (i, c) in "v9.9.9-dirty".utf8.enumerated() { app[0x30 + i] = c }
+    try write(FirmwarePackage.bootloaderName, [0xE9, 0x03, 0x02, 0x4F])
+    try write(FirmwarePackage.partitionTableName, [0xAA, 0x50, 0x01, 0x02])
+    try write(FirmwarePackage.appName, app)
+    let bare = try FirmwarePackage.inspect(directory: root)
+    check(bare.build == "v9.9.9-dirty", "没有 build.txt 时读镜像版本：\(bare.build)")
+    try Data("abc1234 2026-09-22 10:00\n".utf8).write(to: nested.appendingPathComponent(FirmwarePackage.buildName))
+    let stamped = try FirmwarePackage.inspect(directory: root)
+    check(stamped.build == "abc1234 2026-09-22 10:00", "build.txt 优先：\(stamped.build)")
+    check(stamped.app.lastPathComponent == FirmwarePackage.appName, "找到子目录里的 app 镜像")
+    try write(FirmwarePackage.partitionTableName, [0x00, 0x00])
+    do {
+        _ = try FirmwarePackage.inspect(directory: root)
+        check(false, "坏分区表应当被拒绝")
+    } catch let failure as FirmwarePackage.Failure {
+        check(failure == .notAnImage(FirmwarePackage.partitionTableName), "坏分区表报的是它自己：\(failure)")
+    }
+    try FileManager.default.removeItem(at: nested.appendingPathComponent(FirmwarePackage.appName))
+    do {
+        _ = try FirmwarePackage.inspect(directory: root)
+        check(false, "缺 app 镜像应当被拒绝")
+    } catch let failure as FirmwarePackage.Failure {
+        check(failure == .missing(FirmwarePackage.appName), "缺 app 镜像报缺文件：\(failure)")
+    }
+} catch {
+    check(false, "状态解码抛错：\(error)")
+}
+
 // 2. Hook 配置合并：不动别人的 Hook，旧 Python 条目被替换，移除后干净。
 let existing: [String: Any] = [
     "hooks": [
