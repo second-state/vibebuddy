@@ -636,6 +636,9 @@ static void handle_voice_event(const cJSON *message, const char *event) {
     }
     voice_reply("voice.written", -1, agent_voices_current_id());
     transport_write_value_line("VOICES ", agent_voices_current_id());
+    // 写完用新音色说一句：桥接上写要好几分钟，人未必守着 App 找试听键；
+    // 盒子自己开口就是最直接的"写好了"（2026-09-22 同事写完以为没声音）。
+    play_prompt(AGENT_AUDIO_DONE, "DONE");
     return;
   }
   voice_reply("voice.error", -1, "unknown voice event");
