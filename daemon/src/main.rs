@@ -337,7 +337,7 @@ fn app(state: AppState) -> Router {
 async fn post_screenshot(State(state): State<AppState>) -> axum::response::Response {
     use axum::response::IntoResponse;
     if matches!(&*state.operation.lock().await, Some(current) if current.state == OperationState::Running) {
-        return (StatusCode::CONFLICT, "设备上有操作在进行").into_response();
+        return (StatusCode::CONFLICT, "another device operation is in progress").into_response();
     }
     let bus = state.device_bus.subscribe();
     match screenshot::capture(state.transport.clone(), bus).await {
@@ -392,7 +392,7 @@ async fn begin_operation(
     if matches!(&*operation, Some(current) if current.state == OperationState::Running) {
         return Some((
             StatusCode::CONFLICT,
-            Json(ApiResponse { accepted: false, message: "设备上已有操作在进行".to_owned() }),
+            Json(ApiResponse { accepted: false, message: "another device operation is in progress".to_owned() }),
         ));
     }
     *operation = Some(Operation { kind, state: OperationState::Running, progress: 0.0, message });
@@ -444,7 +444,7 @@ async fn post_volume(
             StatusCode::BAD_REQUEST,
             Json(ApiResponse {
                 accepted: false,
-                message: format!("音量要在 {} 到 {} 之间", VOLUME_RANGE.start(), VOLUME_RANGE.end()),
+                message: format!("volume must be between {} and {}", VOLUME_RANGE.start(), VOLUME_RANGE.end()),
             }),
         );
     }
@@ -464,10 +464,10 @@ async fn post_voice_pack(
     let Some(voice) = voice_writer::voice_id_of(&body) else {
         return (
             StatusCode::BAD_REQUEST,
-            Json(ApiResponse { accepted: false, message: "请求体不是语音包".to_owned() }),
+            Json(ApiResponse { accepted: false, message: "request body is not a voice pack".to_owned() }),
         );
     };
-    if let Some(refused) = begin_operation(&state, OperationKind::VoicePack, format!("正在写入 {voice}")).await {
+    if let Some(refused) = begin_operation(&state, OperationKind::VoicePack, format!("writing {voice}")).await {
         return refused;
     }
     let bus = state.device_bus.subscribe();
@@ -488,7 +488,7 @@ async fn post_voice_pack(
                         kind: OperationKind::VoicePack,
                         state: OperationState::Done,
                         progress: 1.0,
-                        message: format!("已写入 {written}"),
+                        message: format!("wrote {written}"),
                     }))
                     .await;
             }
@@ -507,7 +507,7 @@ async fn post_voice_pack(
     });
     (
         StatusCode::ACCEPTED,
-        Json(ApiResponse { accepted: true, message: format!("开始写入 {voice}") }),
+        Json(ApiResponse { accepted: true, message: format!("started writing {voice}") }),
     )
 }
 
@@ -531,7 +531,7 @@ async fn post_firmware(
             _ => {
                 return (
                     StatusCode::BAD_REQUEST,
-                    Json(ApiResponse { accepted: false, message: format!("读不到固件文件 {}", path.display()) }),
+                    Json(ApiResponse { accepted: false, message: format!("cannot read firmware file {}", path.display()) }),
                 );
             }
         }
@@ -543,7 +543,7 @@ async fn post_firmware(
             _ => {
                 return (
                     StatusCode::CONFLICT,
-                    Json(ApiResponse { accepted: false, message: "没有连着的盒子".to_owned() }),
+                    Json(ApiResponse { accepted: false, message: "no box connected".to_owned() }),
                 );
             }
         }
@@ -551,10 +551,10 @@ async fn post_firmware(
     let Some(serial) = state.serial.clone() else {
         return (
             StatusCode::NOT_IMPLEMENTED,
-            Json(ApiResponse { accepted: false, message: "没有串口 worker".to_owned() }),
+            Json(ApiResponse { accepted: false, message: "no serial worker".to_owned() }),
         );
     };
-    if let Some(refused) = begin_operation(&state, OperationKind::Firmware, "让出串口".to_owned()).await {
+    if let Some(refused) = begin_operation(&state, OperationKind::Firmware, "releasing the serial port".to_owned()).await {
         return refused;
     }
     let task_state = state.clone();
@@ -570,12 +570,12 @@ async fn post_firmware(
             rom_flasher::flash(&port, bridge, &segments, &mut report)
         })
         .await
-        .unwrap_or_else(|error| Err(format!("烧录任务崩溃：{error}")));
+        .unwrap_or_else(|error| Err(format!("flash task crashed: {error}")));
         serial.set_suspended(false);
         let operation = match result {
             Ok(()) => {
                 info!("固件已烧录，等设备重启");
-                Operation { kind: OperationKind::Firmware, state: OperationState::Done, progress: 1.0, message: "烧录完成，设备重启中".to_owned() }
+                Operation { kind: OperationKind::Firmware, state: OperationState::Done, progress: 1.0, message: "flash complete, device restarting".to_owned() }
             }
             Err(error) => {
                 warn!(%error, "固件烧录失败");
@@ -584,7 +584,7 @@ async fn post_firmware(
         };
         task_state.set_operation(Some(operation)).await;
     });
-    (StatusCode::ACCEPTED, Json(ApiResponse { accepted: true, message: "开始烧录".to_owned() }))
+    (StatusCode::ACCEPTED, Json(ApiResponse { accepted: true, message: "started flashing".to_owned() }))
 }
 
 /// App 看管 daemon：退出即重启。先把响应发出去再退。
@@ -594,7 +594,7 @@ async fn post_restart() -> (StatusCode, Json<ApiResponse>) {
         info!("按 App 的要求退出，等它重新拉起");
         std::process::exit(0);
     });
-    (StatusCode::ACCEPTED, Json(ApiResponse { accepted: true, message: "daemon 即将重启".to_owned() }))
+    (StatusCode::ACCEPTED, Json(ApiResponse { accepted: true, message: "daemon is restarting".to_owned() }))
 }
 
 /// 定期告诉设备链路还活着。
@@ -724,21 +724,21 @@ async fn post_event(
             StatusCode::ACCEPTED,
             Json(ApiResponse {
                 accepted: true,
-                message: "事件已进入设备发送队列".to_owned(),
+                message: "event queued for the device".to_owned(),
             }),
         ),
         Err(TransportError::QueueFull) => (
             StatusCode::SERVICE_UNAVAILABLE,
             Json(ApiResponse {
                 accepted: false,
-                message: "设备发送队列已满".to_owned(),
+                message: "device send queue is full".to_owned(),
             }),
         ),
         Err(TransportError::Closed) => (
             StatusCode::SERVICE_UNAVAILABLE,
             Json(ApiResponse {
                 accepted: false,
-                message: "串口 worker 已停止".to_owned(),
+                message: "serial worker has stopped".to_owned(),
             }),
         ),
     }
@@ -784,7 +784,7 @@ async fn forward(state: AppState, event: Option<Event>) -> (StatusCode, Json<Api
             StatusCode::ACCEPTED,
             Json(ApiResponse {
                 accepted: true,
-                message: "Hook 已接收，可见状态未变化".to_owned(),
+                message: "hook accepted, visible state unchanged".to_owned(),
             }),
         );
     };

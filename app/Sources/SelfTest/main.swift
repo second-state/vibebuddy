@@ -28,13 +28,13 @@ do {
     check(status.operation?.kind == .voicePack && status.operation?.progress == 0.42, "操作解码")
     let menu = MenuState.derive(status: status, daemonAlive: true)
     check(menu.icon == .online, "在线图标")
-    check(menu.deviceLine == "盒子在线 · 固件 abc1234-dirty", "设备行：\(menu.deviceLine)")
-    check(menu.modeLine == "模式：番茄钟", "模式行：\(menu.modeLine)")
-    check(menu.todayLine == "今天：完成 3 · 确认 1 · 忙碌 1 小时 23 分", "战绩行：\(menu.todayLine)")
+    check(menu.deviceLine == "Box online · firmware abc1234-dirty", "设备行：\(menu.deviceLine)")
+    check(menu.modeLine == "Mode: Pomodoro", "模式行：\(menu.modeLine)")
+    check(menu.todayLine == "Today: done 3 · asks 1 · busy 1 h 23 min", "战绩行：\(menu.todayLine)")
     var offline = status
     offline.device.connected = false
     let offlineMenu = MenuState.derive(status: offline, daemonAlive: true)
-    check(offlineMenu.icon == .offline && offlineMenu.deviceLine == "未找到盒子", "离线菜单")
+    check(offlineMenu.icon == .offline && offlineMenu.deviceLine == "Box not found", "离线菜单")
     let down = MenuState.derive(status: nil, daemonAlive: false)
     check(down.icon == .daemonDown && down.deviceLineIsAction, "daemon 异常菜单")
     check(Firmware.updateAvailable(device: status.device.firmwareBuild, bundled: "def5678 2026-09-17 09:00"), "哈希不同可更新")
@@ -140,6 +140,14 @@ if let parsed = VoicePack(data: pack) {
     check(false, "语音包应能解析")
 }
 check(VoicePack(data: Data("garbage".utf8)) == nil, "垃圾不是语音包")
+
+// 4. Voice catalog: every entry has a language, and the picker puts the UI language first.
+let catalog = VoiceCatalogEntry.all
+check(Set(catalog.map(\.id)).count == catalog.count, "voice ids are unique")
+check(catalog.allSatisfy { ["zh", "en"].contains($0.language) }, "every voice has a known language")
+let englishFirst = VoiceCatalogEntry.sorted(catalog, preferring: "en")
+check(englishFirst.first?.language == "en" && englishFirst.count == catalog.count, "English UI lists English voices first")
+check(VoiceCatalogEntry.sorted(catalog, preferring: "zh").first?.id == "wanwanxiaohe", "Chinese UI keeps catalog order")
 
 if failures > 0 {
     print("\(failures) 处失败")

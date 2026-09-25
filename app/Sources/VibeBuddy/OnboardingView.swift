@@ -8,7 +8,7 @@ struct OnboardingView: View {
     @State private var step = 0
     @State private var pendingPlan: HookInstaller.Plan?
 
-    private let titles = ["欢迎", "找设备", "接入 Agent", "选音色", "登录时启动", "完成"]
+    private let titles: [LocalizedStringKey] = ["Welcome", "Find the box", "Connect agents", "Pick a voice", "Launch at login", "Done"]
 
     var body: some View {
         VStack(spacing: 16) {
@@ -32,16 +32,16 @@ struct OnboardingView: View {
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
             Divider()
             HStack {
-                if step > 0 && step < 5 { Button("上一步") { step -= 1 } }
+                if step > 0 && step < 5 { Button("Back") { step -= 1 } }
                 Spacer()
-                if step == 1 || step == 3 { Button("跳过") { step += 1 }.disabled(flashing) }
+                if step == 1 || step == 3 { Button("Skip") { step += 1 }.disabled(flashing) }
                 if step < 5 {
                     // 刷机中不让翻页：翻过去进度就没人看了。
-                    Button(step == 2 && !anyHookInstalled ? "先不接" : "下一步") { step += 1 }
+                    Button(step == 2 && !anyHookInstalled ? "Not now" : "Next") { step += 1 }
                         .keyboardShortcut(.defaultAction)
                         .disabled(step == 1 && flashing)
                 } else {
-                    Button("开始使用", action: finish).keyboardShortcut(.defaultAction)
+                    Button("Get started", action: finish).keyboardShortcut(.defaultAction)
                 }
             }
         }
@@ -59,8 +59,8 @@ struct OnboardingView: View {
         HStack(alignment: .top, spacing: 24) {
             Image(nsImage: PixelFace.largeImage()).interpolation(.none)
             VStack(alignment: .leading, spacing: 10) {
-                Text("Vibe Buddy 把 Codex 和 Claude Code 的状态变成盒子上的画面和声音。").font(.title3)
-                Text("接下来几步：插上盒子，接入 Agent，挑一个播报音色，决定要不要开机就启动。都能改，都能跳过。")
+                Text("Vibe Buddy turns what Codex and Claude Code are doing into pictures and sounds on the box.").font(.title3)
+                Text("Next: plug in the box, connect your agents, pick an announcement voice, and choose whether to launch at login. Everything can be changed or skipped.")
                     .foregroundStyle(.secondary)
             }
         }
@@ -68,37 +68,37 @@ struct OnboardingView: View {
 
     private var findDevice: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text("把盒子用 USB 线插到这台 Mac。").font(.title3)
+            Text("Connect the box to this Mac with a USB cable.").font(.title3)
             if let operation = model.operation, operation.kind == .firmware, operation.state != .done {
                 // 烧录一开始 daemon 就让出串口，盒子在状态里变成"没连着"；进度必须
                 // 摆在连接判断之前，否则这一页会退回"还没找到盒子"，用户以为没开始
                 // （2026-09-22 同事首次刷机就这样点了下一步）。
-                Label("正在刷入 Vibe Buddy 固件…", systemImage: "arrow.down.circle").foregroundStyle(.orange)
+                Label("Flashing Vibe Buddy firmware…", systemImage: "arrow.down.circle").foregroundStyle(.orange)
                 OperationRow(operation: operation)
                 if operation.state == .failed {
-                    Text("按住盒子的 K0 再插一次线，让它进入下载模式，然后重试。").font(.caption).foregroundStyle(.secondary)
-                    Button("重试") { model.updateFirmware() }
+                    Text("Hold K0 on the box and replug the cable to put it in download mode, then retry.").font(.caption).foregroundStyle(.secondary)
+                    Button("Retry") { model.updateFirmware() }
                 } else {
-                    Text("盒子屏幕会黑几分钟，别拔线。刷完它自动重启，这里会变成「找到了」。")
+                    Text("The box screen stays dark for a few minutes — don't unplug it. It restarts on its own when done, and this page will show it as found.")
                         .font(.caption).foregroundStyle(.secondary)
                 }
             } else if let device = model.status?.device, device.connected, model.foreignFirmware {
                 // 出厂机：串口在、固件不是我们的。刷入走和升级一样的烧录流程。
-                Label("找到盒子（\(device.port ?? "")），但它跑的不是 Vibe Buddy 固件。", systemImage: "exclamationmark.triangle")
+                Label("Found a box (\(device.port ?? "")), but it isn't running Vibe Buddy firmware.", systemImage: "exclamationmark.triangle")
                     .foregroundStyle(.orange)
                 if model.bundledFirmwareBuild == nil {
-                    Text("这个构建没有附带固件，没法刷入。").font(.caption).foregroundStyle(.secondary)
+                    Text("This build has no bundled firmware, so it can't flash the box.").font(.caption).foregroundStyle(.secondary)
                 } else {
-                    Button("刷入 Vibe Buddy 固件") { FlashConfirm.foreign(then: model.updateFirmware) }
-                    Text("会清掉盒子里现有的固件与数据，无法恢复。原生 USB 口找不到盒子时，改接盒子的 UART 口。")
+                    Button("Flash Vibe Buddy firmware") { FlashConfirm.foreign(then: model.updateFirmware) }
+                    Text("This erases the box's current firmware and data for good. If the native USB port doesn't find the box, use its UART port instead.")
                         .font(.caption).foregroundStyle(.secondary)
                 }
             } else if let device = model.status?.device, device.connected {
-                Label("找到了：\(device.port ?? "")", systemImage: "checkmark.circle.fill").foregroundStyle(.green)
-                Button("让它眨一下眼") { model.identify() }
-                Text("盒子背光闪了就是它。").font(.caption).foregroundStyle(.secondary)
+                Label("Found it: \(device.port ?? "")", systemImage: "checkmark.circle.fill").foregroundStyle(.green)
+                Button("Make it blink") { model.identify() }
+                Text("If the backlight flashes, that's the one.").font(.caption).foregroundStyle(.secondary)
             } else {
-                Label(model.daemonAlive ? "还没找到盒子，插上后这里会变。" : "daemon 正在启动…", systemImage: "cable.connector")
+                Label(model.daemonAlive ? "No box yet — this updates once you plug it in." : "Starting the daemon…", systemImage: "cable.connector")
                     .foregroundStyle(.secondary)
             }
         }
@@ -106,39 +106,48 @@ struct OnboardingView: View {
 
     private var hooks: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text("接入 Agent：让它们的进展传到盒子上。").font(.title3)
+            Text("Connect your agents so their progress shows up on the box.").font(.title3)
             ForEach(HookAgent.allCases, id: \.rawValue) { agent in
                 HookRow(model: model, agent: agent, pendingPlan: $pendingPlan)
             }
-            Text("只转发会话标识、事件名和工作目录。Codex 写入后要在它的 /hooks 页面信任一次。").font(.caption).foregroundStyle(.secondary)
+            Text("Only session IDs, event names and working directories are forwarded. After writing Codex's config, trust it once on its /hooks page.").font(.caption).foregroundStyle(.secondary)
         }
     }
 
     private var voices: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text("挑一个播报音色。").font(.title3)
+            Text("Pick an announcement voice.").font(.title3)
             ScrollView {
                 VStack(spacing: 6) {
-                    ForEach(VoiceCatalogEntry.all) { entry in VoiceCard(model: model, entry: entry) }
+                    ForEach(Resources.bundledVoices) { entry in VoiceCard(model: model, entry: entry) }
                 }
             }
             if let operation = model.operation, operation.kind == .voicePack { OperationRow(operation: operation) }
-            Text("不选就用盒子内置的湾湾小何。").font(.caption).foregroundStyle(.secondary)
+            Text(voiceFootnote).font(.caption).foregroundStyle(.secondary)
         }
+    }
+
+    /// The firmware's built-in voice speaks Chinese; point English users at an English pack.
+    private var voiceFootnote: String {
+        let englishBundled = Resources.bundledVoices.contains { $0.language == "en" }
+        if Resources.uiLanguage == "en" && englishBundled {
+            return String(localized: "The box's built-in voice speaks Chinese (Wanwan Xiaohe); pick an English voice above to hear announcements in English.")
+        }
+        return String(localized: "If you skip this, the box uses its built-in voice, Wanwan Xiaohe (Chinese).")
     }
 
     private var loginItem: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text("登录时自动启动 Vibe Buddy？").font(.title3)
-            Toggle("登录时启动", isOn: Binding(get: { model.launchAtLogin }, set: { model.setLaunchAtLogin($0) }))
-            Text("系统可能会提示「已添加后台项目」，那是 macOS 的正常提示。").font(.caption).foregroundStyle(.secondary)
+            Text("Start Vibe Buddy automatically when you log in?").font(.title3)
+            Toggle("Launch at login", isOn: Binding(get: { model.launchAtLogin }, set: { model.setLaunchAtLogin($0) }))
+            Text("macOS may say a background item was added — that's expected.").font(.caption).foregroundStyle(.secondary)
         }
     }
 
     private var done: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text("好了。").font(.title3)
-            Text("Vibe Buddy 住在菜单栏里：图标是氛围小助手的脸，盒子在线时睁着眼。想改什么，菜单里的「设置…」。")
+            Text("All set.").font(.title3)
+            Text("Vibe Buddy lives in the menu bar: the icon is the buddy's face, with its eyes open while the box is online. To change anything, choose Settings… from its menu.")
                 .foregroundStyle(.secondary)
         }
     }

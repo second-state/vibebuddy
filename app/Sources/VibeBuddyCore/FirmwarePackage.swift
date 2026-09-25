@@ -20,8 +20,8 @@ public struct FirmwarePackage: Equatable {
 
         public var errorDescription: String? {
             switch self {
-            case .missing(let name): return "固件包里没有 \(name)"
-            case .notAnImage(let name): return "\(name) 不是 ESP32-S3 的镜像"
+            case .missing(let name): return String(localized: "The firmware package has no \(name)")
+            case .notAnImage(let name): return String(localized: "\(name) is not an ESP32-S3 image")
             }
         }
     }

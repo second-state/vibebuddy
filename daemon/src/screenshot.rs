@@ -36,15 +36,15 @@ pub fn decode_runs(line: &str, pixels: &mut Vec<u8>) -> Result<(), String> {
     for run in line.split_whitespace() {
         let (color, count) = run
             .split_once(':')
-            .ok_or_else(|| format!("坏的行程段：{run}"))?;
-        let color = u16::from_str_radix(color, 16).map_err(|_| format!("坏的颜色：{color}"))?;
-        let count: usize = count.parse().map_err(|_| format!("坏的长度：{count}"))?;
+            .ok_or_else(|| format!("bad run: {run}"))?;
+        let color = u16::from_str_radix(color, 16).map_err(|_| format!("bad color: {color}"))?;
+        let count: usize = count.parse().map_err(|_| format!("bad length: {count}"))?;
         let rgb = rgb565_to_rgb(color);
         for _ in 0..count {
             pixels.extend_from_slice(&rgb);
         }
         if pixels.len() > WIDTH * HEIGHT * 3 {
-            return Err("像素多于一屏".to_owned());
+            return Err("more pixels than one screen".to_owned());
         }
     }
     Ok(())
@@ -85,13 +85,13 @@ pub async fn capture(
     loop {
         let message = match tokio::time::timeout_at(deadline, bus.recv()).await {
             Ok(Ok(message)) => message,
-            Ok(Err(broadcast::error::RecvError::Lagged(_))) => return Err("设备消息积压，截图行丢失".to_owned()),
-            Ok(Err(broadcast::error::RecvError::Closed)) => return Err("设备消息通道已关闭".to_owned()),
-            Err(_) => return Err("等待截图超时".to_owned()),
+            Ok(Err(broadcast::error::RecvError::Lagged(_))) => return Err("device messages backed up, screenshot rows lost".to_owned()),
+            Ok(Err(broadcast::error::RecvError::Closed)) => return Err("device message channel closed".to_owned()),
+            Err(_) => return Err("timed out waiting for the screenshot".to_owned()),
         };
         let line = match message {
             DeviceMessage::Line(line) => line,
-            DeviceMessage::Disconnected => return Err("链路断开".to_owned()),
+            DeviceMessage::Disconnected => return Err("link lost".to_owned()),
             _ => continue,
         };
         if let Some(header) = line.strip_prefix("SHOT BEGIN") {
@@ -105,7 +105,7 @@ pub async fn capture(
                 continue;
             }
             if pixels.len() != WIDTH * HEIGHT * 3 {
-                return Err(format!("帧不完整：{} 像素", pixels.len() / 3));
+                return Err(format!("incomplete frame: {} pixels", pixels.len() / 3));
             }
             return Ok(Frame { pixels, backlight_on });
         }

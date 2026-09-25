@@ -8,29 +8,51 @@
 # - 否则用 edge-tts（微软 Edge 的朗读接口，免费、不用密钥；不是正式公开的
 #   API，只用来一次性生成这几句），默认音色台湾女声 HsiaoYu，换音色改 VOICE。
 # 每一句各自归一化到 -1 dBFS 峰值；番茄钟的两句前面拼上钟声。
+# VOICE_LANG picks the language of the five lines: zh (default) or en. English
+# defaults the edge-tts voice to en-US-JennyNeural; the Doubao path just speaks
+# whatever text it is given, so pair VOICE_LANG=en with an English VOLC_VOICE.
 #
 # 用法: tools/make-voices.sh
 #       VOLC_API_KEY=... tools/make-voices.sh
 #       OUT_DIR=voices/hsiaochen VOICE=zh-TW-HsiaoChenNeural tools/make-voices.sh
+#       VOICE_LANG=en OUT_DIR=voices/jenny tools/make-voices.sh
+#       VOICE_LANG=en OUT_DIR=voices/guy VOICE=en-US-GuyNeural tools/make-voices.sh
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 # 默认直接覆盖固件资产；归档到音色库时用 OUT_DIR 指到 voices/<音色>/。
 assets="${OUT_DIR:-${repo_root}/firmware/main/assets}"
 mkdir -p "${assets}"
-voice="${VOICE:-zh-TW-HsiaoYuNeural}"
+language="${VOICE_LANG:-zh}"
+case "${language}" in
+    zh) default_voice="zh-TW-HsiaoYuNeural" ;;
+    en) default_voice="en-US-JennyNeural" ;;
+    *) echo "VOICE_LANG must be zh or en, got ${language}" >&2; exit 2 ;;
+esac
+voice="${VOICE:-${default_voice}}"
 volc_voice="${VOLC_VOICE:-zh_female_wanwanxiaohe_moon_bigtts}"
 work="$(mktemp -d -t voices)"
 trap 'rm -rf "${work}"' EXIT
 
-# 文件名 -> 台词。
-lines=(
-    "input_required|需要你确认"
-    "done|任务完成"
-    "failed|任务遇到问题"
-    "focus_voice|专注结束，休息一下"
-    "break_voice|休息结束"
-)
+# 文件名 -> 台词。Both languages say the same five things, in the same order as
+# the voice pack's clips (firmware/main/agent_voice_pack.h).
+if [[ "${language}" == "en" ]]; then
+    lines=(
+        "input_required|Need your input."
+        "done|Task complete."
+        "failed|Task hit a problem."
+        "focus_voice|Focus time's up. Take a break."
+        "break_voice|Break's over."
+    )
+else
+    lines=(
+        "input_required|需要你确认"
+        "done|任务完成"
+        "failed|任务遇到问题"
+        "focus_voice|专注结束，休息一下"
+        "break_voice|休息结束"
+    )
+fi
 
 synth() {
     local name="$1" text="$2" source

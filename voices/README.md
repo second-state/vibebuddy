@@ -12,6 +12,26 @@
 
 五句台词固定为：需要你确认 / 任务完成 / 任务遇到问题 / 专注结束，休息一下 / 休息结束，对应 `input_required` / `done` / `failed` / `focus_done` / `break_done`。
 
+英文版的五句是 `Need your input.` / `Task complete.` / `Task hit a problem.` / `Focus time's up. Take a break.` / `Break's over.`，由 `VOICE_LANG=en` 切换。
+
+## 英文音色（待定）
+
+App 的音色目录已经预留了两个英文音色，但音频还没入库：用哪个引擎、生成的音频能否公开分发还没定。
+
+| 目录 | 音色 | 引擎 | 状态 |
+|---|---|---|---|
+| `jenny/` | `en-US-JennyNeural` | 微软 edge-tts | 预留，未生成 |
+| `guy/` | `en-US-GuyNeural` | 微软 edge-tts | 预留，未生成 |
+
+定下来之后：
+
+```bash
+VOICE_LANG=en OUT_DIR=voices/jenny tools/make-voices.sh
+VOICE_LANG=en OUT_DIR=voices/guy VOICE=en-US-GuyNeural tools/make-voices.sh
+```
+
+目录里有了 PCM，`app/scripts/build-app.sh` 就会打出语音包，App 的音色列表随之出现这两项。换别的英文音色时，目录名要与 `app/Sources/VibeBuddyCore/VoicePack.swift` 里 `VoiceCatalogEntry.all` 的 id 一致，并在那里写上 `language: "en"`。英文台词比中文长，Jenny 一整套约 1.5 MB，仍在 2 MB 的 `voices` 分区以内。
+
 ## 重新生成
 
 ```bash

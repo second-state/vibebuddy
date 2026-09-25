@@ -27,6 +27,10 @@ version="$(sed -n 's/^version = "\(.*\)"/\1/p' "${repo_root}/Cargo.toml" | head 
 version="${version:-0.0.0}"
 build_number="$(git -C "${repo_root}" describe --tags --always --dirty 2>/dev/null || echo dev)"
 
+echo "== Localization"
+# A missing zh-Hans entry would silently show English to Chinese users; fail early.
+python3 "${repo_root}/tools/check-localization.py"
+
 echo "== Rust helper"
 cargo build --release --manifest-path "${repo_root}/Cargo.toml" -p vibebuddyd -p vibebuddy-hook
 echo "== Swift App"
@@ -55,6 +59,11 @@ mkdir -p "${contents}/MacOS" "${contents}/Resources/firmware" "${contents}/Resou
 
 sed -e "s/__VERSION__/${version}/" -e "s/__BUILD__/${build_number}/" "${app_dir}/Info.plist" > "${contents}/Info.plist"
 cp "${swift_bin}" "${contents}/MacOS/VibeBuddy"
+# UI copy is keyed in English; each lproj holds one language's table, and macOS
+# picks by the user's preferred languages (Chinese systems get zh-Hans).
+for lproj in "${app_dir}"/Localization/*.lproj; do
+    cp -R "${lproj}" "${contents}/Resources/"
+done
 
 echo "== App 图标"
 # 菜单栏的像素脸同一份源码渲染成 App 图标，脸只在 PixelFace.swift 里定义一次。

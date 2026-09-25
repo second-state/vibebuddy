@@ -65,10 +65,10 @@ async fn send(transport: &Arc<dyn Transport>, event: Event) -> Result<(), String
         match transport.send(frame.clone()) {
             Ok(()) => return Ok(()),
             Err(TransportError::QueueFull) => tokio::time::sleep(Duration::from_millis(50)).await,
-            Err(TransportError::Closed) => return Err("串口 worker 已停止".to_owned()),
+            Err(TransportError::Closed) => return Err("serial worker has stopped".to_owned()),
         }
     }
-    Err("设备发送队列一直满着".to_owned())
+    Err("device send queue stayed full".to_owned())
 }
 
 /// 等一条指定的设备回执。`voice.error` 与链路断开都算失败。
@@ -82,15 +82,15 @@ async fn wait_for(
         let message = match tokio::time::timeout_at(deadline, bus.recv()).await {
             Ok(Ok(message)) => message,
             Ok(Err(broadcast::error::RecvError::Lagged(_))) => continue,
-            Ok(Err(broadcast::error::RecvError::Closed)) => return Err("设备消息通道已关闭".to_owned()),
-            Err(_) => return Err(format!("等待 {wanted} 超时")),
+            Ok(Err(broadcast::error::RecvError::Closed)) => return Err("device message channel closed".to_owned()),
+            Err(_) => return Err(format!("timed out waiting for {wanted}")),
         };
         match message {
-            DeviceMessage::Disconnected => return Err("链路断开".to_owned()),
+            DeviceMessage::Disconnected => return Err("link lost".to_owned()),
             DeviceMessage::Event(event) if event.event == "voice.error" => {
                 // `message` 是协议信封里的正式字段，不在 extra 里。
-                let detail = event.message.as_deref().unwrap_or("未知错误");
-                return Err(format!("设备拒绝：{detail}"));
+                let detail = event.message.as_deref().unwrap_or("unknown error");
+                return Err(format!("device refused: {detail}"));
             }
             DeviceMessage::Event(event) if event.event == wanted => {
                 let matches = seq.is_none_or(|seq| {
@@ -112,7 +112,7 @@ pub async fn write_pack(
     pack: Vec<u8>,
     progress: impl Fn(f32),
 ) -> Result<String, String> {
-    voice_id_of(&pack).ok_or_else(|| "不是语音包".to_owned())?;
+    voice_id_of(&pack).ok_or_else(|| "not a voice pack".to_owned())?;
     send(&transport, begin_event(pack.len())).await?;
     wait_for(&mut bus, "voice.ready", None).await?;
     let total = pack.len().div_ceil(CHUNK_BYTES);
@@ -128,7 +128,7 @@ pub async fn write_pack(
         .get("voice")
         .and_then(|value| value.as_str())
         .map(str::to_owned)
-        .ok_or_else(|| "设备没有报告音色 id".to_owned())
+        .ok_or_else(|| "device did not report a voice id".to_owned())
 }
 
 #[cfg(test)]

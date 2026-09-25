@@ -277,7 +277,7 @@ fn find_port(config: &SerialConfig) -> Result<Option<PortChoice>, String> {
         [] => Ok(None),
         [choice] => Ok(Some(choice.clone())),
         choices => Err(format!(
-            "找到多个匹配设备：{}",
+            "found several matching devices: {}",
             choices.iter().map(|choice| choice.name.as_str()).collect::<Vec<_>>().join(", ")
         )),
     }

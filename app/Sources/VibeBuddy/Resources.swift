@@ -54,6 +54,18 @@ enum Resources {
         return VoicePack(data: data)
     }
 
+    /// The language the UI is actually shown in ("zh" or "en"), which follows the
+    /// system's preferred languages against the lproj folders the bundle ships.
+    static var uiLanguage: String {
+        (Bundle.main.preferredLocalizations.first ?? "en").hasPrefix("zh") ? "zh" : "en"
+    }
+
+    /// Catalog voices whose pack is in this build, UI-language voices first.
+    static var bundledVoices: [VoiceCatalogEntry] {
+        let bundled = VoiceCatalogEntry.all.filter { voicePack($0.id) != nil }
+        return VoiceCatalogEntry.sorted(bundled, preferring: uiLanguage)
+    }
+
     /// Application Support 下的固定位置：Hook 二进制、配置、日志都在附近。
     static var applicationSupport: URL {
         FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Library/Application Support/VibeBuddy")

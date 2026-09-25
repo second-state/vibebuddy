@@ -41,7 +41,7 @@ final class AppModel: ObservableObject {
             self.refreshMenu()
             // 「通知我」关掉时连这条也不弹；daemon 没起来时拿不到配置，按默认开。
             if self.status?.config.notifyLink ?? true {
-                Notifier.notify(title: "Vibe Buddy", body: "daemon 连续三次启动失败，点菜单栏图标重启。")
+                Notifier.notify(title: "Vibe Buddy", body: String(localized: "The daemon failed to start three times in a row. Click the menu bar icon to restart it."))
             }
         }
         refreshHookStates()
@@ -54,8 +54,8 @@ final class AppModel: ObservableObject {
             // 2026-09-16 改名迁移静默改写了 hooks.json，Codex 把六条 hook 当作
             // 改过的静默停用，盒子四个小时没播过 Codex 的事。这条不受「链路异常
             // 通知」开关管：它就是 App 自己动了手才需要人补一步。
-            Notifier.notify(title: "Codex 的 Hook 配置更新了",
-                            body: "Vibe Buddy 改写了 ~/.codex/hooks.json。Codex 会静默停用改过的 hook，请在 Codex 里输入 /hooks 重新信任，盒子才收得到 Codex 的事。")
+            Notifier.notify(title: String(localized: "Codex hook config updated"),
+                            body: String(localized: "Vibe Buddy rewrote ~/.codex/hooks.json. Codex silently disables hooks that change: type /hooks in Codex and re-trust them so the box keeps getting Codex events."))
         }
         refreshHookStates()
         if managesDaemon { supervisor.start() }
@@ -123,7 +123,7 @@ final class AppModel: ObservableObject {
         if linkLostSince == nil { linkLostSince = Date() }
         if !linkNotified, let since = linkLostSince, Date().timeIntervalSince(since) >= 30 {
             linkNotified = true
-            Notifier.notify(title: "盒子断开了", body: "Vibe Buddy 已经 30 秒没找到盒子，检查一下 USB 线。")
+            Notifier.notify(title: String(localized: "Box disconnected"), body: String(localized: "Vibe Buddy hasn't seen the box for 30 seconds. Check the USB cable."))
         }
     }
 
@@ -149,7 +149,7 @@ final class AppModel: ObservableObject {
         do {
             try LoginItem.set(enabled: enabled)
         } catch {
-            lastError = "登录时启动设置失败：\(error.localizedDescription)"
+            lastError = String(localized: "Couldn't change Launch at login: \(error.localizedDescription)")
         }
         launchAtLogin = LoginItem.isEnabled
     }
@@ -158,12 +158,12 @@ final class AppModel: ObservableObject {
     var operationRunning: Bool { operation?.state == .running }
 
     func writeVoice(_ id: String) {
-        guard let pack = Resources.voicePack(id) else { lastError = "App 里没有 \(id) 的语音包"; return }
+        guard let pack = Resources.voicePack(id) else { lastError = String(localized: "This app has no voice pack for \(id)"); return }
         run { try await self.client.writeVoicePack(pack.data) }
     }
 
     func togglePreview(_ id: String) {
-        guard let pack = Resources.voicePack(id) else { lastError = "App 里没有 \(id) 的语音包"; return }
+        guard let pack = Resources.voicePack(id) else { lastError = String(localized: "This app has no voice pack for \(id)"); return }
         preview.toggle(pack: pack)
         previewingVoice = preview.playingVoice
     }
@@ -173,7 +173,7 @@ final class AppModel: ObservableObject {
     }
 
     func updateFirmware() {
-        guard let files = Resources.firmwareFiles else { lastError = "这个构建没有附带固件"; return }
+        guard let files = Resources.firmwareFiles else { lastError = String(localized: "This build has no bundled firmware"); return }
         run { try await self.client.flashFirmware(bootloader: files.bootloader, partitionTable: files.partitionTable, app: files.app) }
     }
 
@@ -188,7 +188,7 @@ final class AppModel: ObservableObject {
         unzip.arguments = ["-x", "-k", zip.path, directory.path]
         try unzip.run()
         unzip.waitUntilExit()
-        guard unzip.terminationStatus == 0 else { throw DaemonError(message: "解不开 \(zip.lastPathComponent)") }
+        guard unzip.terminationStatus == 0 else { throw DaemonError(message: String(localized: "Couldn't unzip \(zip.lastPathComponent)")) }
         return try FirmwarePackage.inspect(directory: directory)
     }
 
@@ -240,7 +240,7 @@ final class AppModel: ObservableObject {
             try HookInstaller.deployBinary()
             try HookInstaller.apply(plan)
         } catch {
-            lastError = "写 Hook 配置失败：\(error.localizedDescription)"
+            lastError = String(localized: "Couldn't write the hook config: \(error.localizedDescription)")
         }
         refreshHookStates()
     }

@@ -4,7 +4,6 @@ import Foundation
 /// App 只需要读出音色 id 和各句的位置，用来试听和显示。
 public struct VoicePack: Equatable {
     public static let headerBytes = 256
-    public static let clipNames = ["需要你确认", "任务完成", "任务遇到问题", "专注结束，休息一下", "休息结束"]
 
     public var voiceID: String
     public var clips: [Range<Int>]
@@ -41,18 +40,33 @@ public struct VoicePack: Equatable {
     }
 }
 
-/// 五个候选音色的展示信息，与 voices/README.md 对应。
+/// 候选音色的展示信息，与 voices/README.md 对应。
+/// `language` is the language the five lines are spoken in, so the picker can put
+/// voices matching the UI language first. An entry only shows up once its pack is
+/// bundled (build-app.sh packs every voices/<id>/ that has PCM in it).
 public struct VoiceCatalogEntry: Equatable, Identifiable {
     public var id: String
     public var name: String
     public var tag: String
-    public init(id: String, name: String, tag: String) { self.id = id; self.name = name; self.tag = tag }
+    public var language: String
+    public init(id: String, name: String, tag: String, language: String) {
+        self.id = id; self.name = name; self.tag = tag; self.language = language
+    }
 
-    public static let all: [VoiceCatalogEntry] = [
-        VoiceCatalogEntry(id: "wanwanxiaohe", name: "湾湾小何", tag: "台湾口音 · 豆包语音 · 小智同款"),
-        VoiceCatalogEntry(id: "xiaohe2", name: "小何 2.0", tag: "普通话 · 豆包语音"),
-        VoiceCatalogEntry(id: "hsiaoyu", name: "晓雨", tag: "台湾口音 · 微软"),
-        VoiceCatalogEntry(id: "hsiaochen", name: "晓臻", tag: "台湾口音 · 微软"),
-        VoiceCatalogEntry(id: "xiaoxiao", name: "晓晓", tag: "普通话 · 微软"),
-    ]
+    public static var all: [VoiceCatalogEntry] {
+        [
+            VoiceCatalogEntry(id: "wanwanxiaohe", name: String(localized: "Wanwan Xiaohe"), tag: String(localized: "Chinese · Taiwanese accent · Doubao · same voice as Xiaozhi"), language: "zh"),
+            VoiceCatalogEntry(id: "xiaohe2", name: String(localized: "Xiaohe 2.0"), tag: String(localized: "Chinese · Mandarin · Doubao"), language: "zh"),
+            VoiceCatalogEntry(id: "hsiaoyu", name: String(localized: "HsiaoYu"), tag: String(localized: "Chinese · Taiwanese accent · Microsoft"), language: "zh"),
+            VoiceCatalogEntry(id: "hsiaochen", name: String(localized: "HsiaoChen"), tag: String(localized: "Chinese · Taiwanese accent · Microsoft"), language: "zh"),
+            VoiceCatalogEntry(id: "xiaoxiao", name: String(localized: "Xiaoxiao"), tag: String(localized: "Chinese · Mandarin · Microsoft"), language: "zh"),
+            VoiceCatalogEntry(id: "jenny", name: "Jenny", tag: String(localized: "English · US · Microsoft"), language: "en"),
+            VoiceCatalogEntry(id: "guy", name: "Guy", tag: String(localized: "English · US · Microsoft"), language: "en"),
+        ]
+    }
+
+    /// Voices in `language` first, catalog order otherwise preserved.
+    public static func sorted(_ entries: [VoiceCatalogEntry], preferring language: String) -> [VoiceCatalogEntry] {
+        entries.filter { $0.language == language } + entries.filter { $0.language != language }
+    }
 }

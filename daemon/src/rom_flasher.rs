@@ -89,7 +89,7 @@ impl RomFlasher {
         let port = serialport::new(port_name, BAUD)
             .timeout(Duration::from_millis(100))
             .open()
-            .map_err(|error| format!("打开串口失败：{error}"))?;
+            .map_err(|error| format!("failed to open serial port: {error}"))?;
         Ok(Self { port, paced })
     }
 
@@ -106,7 +106,7 @@ impl RomFlasher {
                         self.drain();
                         let magic = self.read_reg(CHIP_MAGIC_REG)?;
                         if magic != ESP32S3_MAGIC {
-                            return Err(format!("不是 ESP32-S3（magic {magic:#x}）"));
+                            return Err(format!("not an ESP32-S3 (magic {magic:#x})"));
                         }
                         return Ok(());
                     }
@@ -114,7 +114,7 @@ impl RomFlasher {
                 }
             }
         }
-        Err(format!("无法与 ROM 下载程序同步：{last_error}"))
+        Err(format!("cannot sync with the ROM loader: {last_error}"))
     }
 
     fn enter_bootloader(&mut self) -> Result<(), String> {
@@ -141,7 +141,7 @@ impl RomFlasher {
         self.port
             .write_data_terminal_ready(dtr)
             .and_then(|()| self.port.write_request_to_send(rts))
-            .map_err(|error| format!("设置 DTR/RTS 失败：{error}"))
+            .map_err(|error| format!("failed to set DTR/RTS: {error}"))
     }
 
     fn drain(&mut self) {
@@ -177,13 +177,13 @@ impl RomFlasher {
         loop {
             let remaining = deadline
                 .checked_duration_since(Instant::now())
-                .ok_or_else(|| "等待应答超时".to_owned())?;
+                .ok_or_else(|| "timed out waiting for a reply".to_owned())?;
             let _ = self.port.set_timeout(remaining.min(Duration::from_millis(200)));
             match self.port.read(&mut byte) {
                 Ok(1) => {}
                 Ok(_) => continue,
                 Err(error) if error.kind() == std::io::ErrorKind::TimedOut => continue,
-                Err(error) => return Err(format!("串口读取失败：{error}")),
+                Err(error) => return Err(format!("serial read failed: {error}")),
             }
             let value = byte[0];
             if !in_frame {
@@ -230,7 +230,7 @@ impl RomFlasher {
             if response.data.len() >= STATUS_BYTES {
                 let status = &response.data[response.data.len() - STATUS_BYTES..];
                 if status[0] != 0 {
-                    return Err(format!("ROM 返回错误 {:#04x}（命令 {op:#04x}）", status[1]));
+                    return Err(format!("ROM returned error {:#04x} (command {op:#04x})", status[1]));
                 }
             }
             return Ok(response);
@@ -306,7 +306,7 @@ impl RomFlasher {
             (progress.on_progress)(
                 (index + 1) as f32 / blocks as f32,
                 &format!(
-                    "{:#x} 已写 {}/{} 块，{:.1} s",
+                    "{:#x}: wrote {}/{} blocks, {:.1} s",
                     segment.address,
                     index + 1,
                     blocks,
@@ -327,11 +327,11 @@ impl RomFlasher {
         let timeout = Duration::from_secs(8 * (segment.data.len() as u64 / (1024 * 1024) + 1) + 5);
         let response = self.call(OP_SPI_FLASH_MD5, &data, 0, timeout)?;
         // ROM 回 32 个十六进制字符，后面跟状态字节。
-        let digest = response.data.get(..32).ok_or("MD5 应答过短")?;
+        let digest = response.data.get(..32).ok_or("MD5 reply too short")?;
         let actual = String::from_utf8_lossy(digest).to_ascii_lowercase();
         let expected = format!("{:x}", <md5::Md5 as md5::Digest>::digest(&segment.data));
         if actual != expected {
-            return Err(format!("{:#x} 处校验不符：flash {actual}，文件 {expected}", segment.address));
+            return Err(format!("verify mismatch at {:#x}: flash {actual}, file {expected}", segment.address));
         }
         Ok(())
     }
@@ -340,7 +340,7 @@ impl RomFlasher {
 /// 整个流程：进下载模式、认芯片、挂 flash、逐段写并校验、硬复位。
 pub fn flash(port_name: &str, paced: bool, segments: &[Segment], on_progress: &mut dyn FnMut(f32, &str)) -> Result<(), String> {
     let mut flasher = RomFlasher::open(port_name, paced)?;
-    on_progress(0.0, "进入下载模式");
+    on_progress(0.0, "entering download mode");
     flasher.connect()?;
     flasher.prepare_flash()?;
     let total: usize = segments.iter().map(|segment| segment.data.len()).sum();
@@ -356,7 +356,7 @@ pub fn flash(port_name: &str, paced: bool, segments: &[Segment], on_progress: &m
         flasher.write_segment(segment, &mut progress)?;
         done += segment.data.len();
     }
-    on_progress(1.0, "校验通过，重启设备");
+    on_progress(1.0, "verified, restarting device");
     flasher.hard_reset()
 }
 

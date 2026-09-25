@@ -54,12 +54,12 @@ struct DaemonClient {
     func setVolume(_ level: Int, preview: Bool) async throws {
         let body = try JSONSerialization.data(withJSONObject: ["level": level, "preview": preview])
         let (code, data) = try await post("/v1/device/volume", body: body, contentType: "application/json")
-        guard code == 202 else { throw DaemonError(message: DaemonClient.message(in: data) ?? "音量未被接受（\(code)）") }
+        guard code == 202 else { throw DaemonError(message: DaemonClient.message(in: data) ?? String(localized: "Volume change was rejected (\(code))")) }
     }
 
     func writeVoicePack(_ pack: Data) async throws {
         let (code, data) = try await post("/v1/device/voice-pack", body: pack, contentType: "application/octet-stream")
-        guard code == 202 else { throw DaemonError(message: DaemonClient.message(in: data) ?? "写入未被接受（\(code)）") }
+        guard code == 202 else { throw DaemonError(message: DaemonClient.message(in: data) ?? String(localized: "Voice pack write was rejected (\(code))")) }
     }
 
     func flashFirmware(bootloader: URL, partitionTable: URL, app: URL) async throws {
@@ -67,12 +67,12 @@ struct DaemonClient {
             "bootloader": bootloader.path, "partition_table": partitionTable.path, "app": app.path,
         ])
         let (code, data) = try await post("/v1/device/firmware", body: body, contentType: "application/json")
-        guard code == 202 else { throw DaemonError(message: DaemonClient.message(in: data) ?? "烧录未被接受（\(code)）") }
+        guard code == 202 else { throw DaemonError(message: DaemonClient.message(in: data) ?? String(localized: "Firmware flash was rejected (\(code))")) }
     }
 
     func screenshot() async throws -> Data {
         let (code, data) = try await post("/v1/device/screenshot")
-        guard code == 200 else { throw DaemonError(message: String(data: data, encoding: .utf8) ?? "截图失败（\(code)）") }
+        guard code == 200 else { throw DaemonError(message: String(data: data, encoding: .utf8) ?? String(localized: "Screenshot failed (\(code))")) }
         return data
     }
 

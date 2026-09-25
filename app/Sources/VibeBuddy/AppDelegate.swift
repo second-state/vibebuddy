@@ -62,11 +62,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         today.isEnabled = false
         menu.addItem(today)
         menu.addItem(.separator())
-        let settings = NSMenuItem(title: "设置…", action: #selector(showSettings), keyEquivalent: ",")
+        let settings = NSMenuItem(title: String(localized: "Settings…"), action: #selector(showSettings), keyEquivalent: ",")
         settings.target = self
         menu.addItem(settings)
         menu.addItem(.separator())
-        let quit = NSMenuItem(title: "退出 Vibe Buddy（盒子将离线）", action: #selector(quit), keyEquivalent: "q")
+        let quit = NSMenuItem(title: String(localized: "Quit Vibe Buddy (the box goes offline)"), action: #selector(quit), keyEquivalent: "q")
         quit.target = self
         menu.addItem(quit)
         statusItem.menu = menu
@@ -77,7 +77,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     @objc func showSettings() {
         if settingsWindow == nil {
             let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 640, height: 480), styleMask: [.titled, .closable, .miniaturizable], backing: .buffered, defer: false)
-            window.title = "Vibe Buddy 设置"
+            window.title = String(localized: "Vibe Buddy Settings")
             window.contentView = NSHostingView(rootView: SettingsView(model: model))
             window.center()
             window.isReleasedWhenClosed = false
@@ -90,7 +90,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func showOnboarding() {
         if onboardingWindow == nil {
             let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 560, height: 440), styleMask: [.titled, .closable], backing: .buffered, defer: false)
-            window.title = "欢迎使用 Vibe Buddy"
+            window.title = String(localized: "Welcome to Vibe Buddy")
             window.contentView = NSHostingView(rootView: OnboardingView(model: model, finish: { [weak self] in
                 UserDefaults.standard.set(true, forKey: "onboardingDone")
                 self?.onboardingWindow?.close()
@@ -128,10 +128,10 @@ enum LegacyLaunchAgent {
         let occupied = await portOccupied()
         guard hasPlist || occupied else { return }
         let alert = NSAlert()
-        alert.messageText = hasPlist ? "发现旧的 vibebuddyd 后台服务" : "7331 端口已经有 daemon 在跑"
-        alert.informativeText = "Vibe Buddy 现在自己看管 daemon，两个 daemon 会抢串口。卸掉旧的并接管吗？"
-        alert.addButton(withTitle: "卸载并接管")
-        alert.addButton(withTitle: "稍后")
+        alert.messageText = hasPlist ? String(localized: "Found an old vibebuddyd background service") : String(localized: "A daemon is already running on port 7331")
+        alert.informativeText = String(localized: "Vibe Buddy now manages its own daemon, and two daemons would fight over the serial port. Remove the old one and take over?")
+        alert.addButton(withTitle: String(localized: "Remove and take over"))
+        alert.addButton(withTitle: String(localized: "Later"))
         NSApp.activate(ignoringOtherApps: true)
         if alert.runModal() == .alertFirstButtonReturn {
             let bootout = Process()

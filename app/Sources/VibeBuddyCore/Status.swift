@@ -85,7 +85,7 @@ public enum StatusCoding {
         decoder.dateDecodingStrategy = .custom { decoder in
             let text = try decoder.singleValueContainer().decode(String.self)
             if let date = fractional.date(from: text) ?? plain.date(from: text) { return date }
-            throw DecodingError.dataCorrupted(.init(codingPath: decoder.codingPath, debugDescription: "坏的时间：\(text)"))
+            throw DecodingError.dataCorrupted(.init(codingPath: decoder.codingPath, debugDescription: "bad timestamp: \(text)"))
         }
         return decoder
     }
