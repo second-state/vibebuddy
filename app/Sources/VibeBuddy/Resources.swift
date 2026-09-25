@@ -56,15 +56,16 @@ enum Resources {
 
     /// The language the UI is actually shown in ("zh" or "en"), which follows the
     /// system's preferred languages against the lproj folders the bundle ships.
-    static var uiLanguage: String {
-        (Bundle.main.preferredLocalizations.first ?? "en").hasPrefix("zh") ? "zh" : "en"
-    }
+    static let uiLanguage: VoiceLanguage =
+        (Bundle.main.preferredLocalizations.first ?? "en").hasPrefix("zh") ? .zh : .en
 
-    /// Catalog voices whose pack is in this build, UI-language voices first.
-    static var bundledVoices: [VoiceCatalogEntry] {
-        let bundled = VoiceCatalogEntry.all.filter { voicePack($0.id) != nil }
+    /// Catalog voices whose pack is in this build, UI-language voices first. The bundle
+    /// can't change while the app runs, so this is worked out once (a file-existence
+    /// check per voice) rather than on every SwiftUI render.
+    static let bundledVoices: [VoiceCatalogEntry] = {
+        let bundled = VoiceCatalogEntry.all.filter { FileManager.default.fileExists(atPath: voicePackURL($0.id).path) }
         return VoiceCatalogEntry.sorted(bundled, preferring: uiLanguage)
-    }
+    }()
 
     /// Fixed location under Application Support: the hook binary, config and logs all live nearby.
     static var applicationSupport: URL {

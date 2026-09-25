@@ -8,8 +8,12 @@ each key to Chinese. This script extracts the keys from the Swift sources the wa
 the compiler builds them and reports keys missing from the table, table entries no
 source uses any more, and translations whose placeholders don't match their key.
 
-Interpolations are compared by count only: the extractor can't tell whether
-`\\(x)` is an Int (%lld) or a String (%@), so the table author picks the specifier.
+Source keys are matched by placeholder count only: the extractor can't tell
+whether `\\(x)` is an Int (%lld) or a String (%@), so the table author picks the
+specifier in the table key. Each translation must then take the same specifier
+types in the same argument order as its key (positional `%2$@` forms are ordered
+by index), because a mismatch makes the runtime lookup miss and silently show
+English.
 
 Usage: tools/check-localization.py   (exit 1 on any problem)
 """
@@ -30,6 +34,7 @@ VIEW_CALLS = ("Text(", "Label(", "Button(", "Toggle(", "LabeledContent(")
 UNTRANSLATED = {"App", "daemon", "—", "›"}
 PLACEHOLDER = "\0"
 SPECIFIER = re.compile(r"%(?:\d+\$)?(?:@|lld|ld|d|lf|f)")
+SPECIFIER_PARTS = re.compile(r"%(?:(\d+)\$)?(@|lld|ld|d|lf|f)")
 
 
 def read_literal(code: str, start: int) -> tuple[str, int]:
@@ -140,6 +145,14 @@ def table_entries() -> dict[str, str]:
     return entries
 
 
+def argument_types(text: str) -> list[str]:
+    """Specifier types in argument order; `%2$@` counts as the second argument."""
+    slots = []
+    for position, (index, kind) in enumerate(SPECIFIER_PARTS.findall(text), start=1):
+        slots.append((int(index) if index else position, kind))
+    return [kind for _, kind in sorted(slots)]
+
+
 def main() -> int:
     keys = source_keys()
     table = table_entries()
@@ -151,8 +164,11 @@ def main() -> int:
     for norm, key in normalised.items():
         if norm not in keys:
             problems.append(f"unused table entry: {key!r}")
-        if len(SPECIFIER.findall(key)) != len(SPECIFIER.findall(table[key])):
-            problems.append(f"placeholder count differs: {key!r} -> {table[key]!r}")
+        if argument_types(key) != argument_types(table[key]):
+            problems.append(
+                f"placeholders differ: {key!r} takes {argument_types(key)}, "
+                f"translation {table[key]!r} takes {argument_types(table[key])}"
+            )
     for problem in problems:
         print(problem, file=sys.stderr)
     if problems:

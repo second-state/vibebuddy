@@ -64,6 +64,9 @@ cp "${swift_bin}" "${contents}/MacOS/VibeBuddy"
 for lproj in "${app_dir}"/Localization/*.lproj; do
     cp -R "${lproj}" "${contents}/Resources/"
 done
+# Traditional Chinese systems get the Simplified table: most readers manage it,
+# which beats falling back to English. A real zh-Hant table would replace this copy.
+cp -R "${app_dir}/Localization/zh-Hans.lproj" "${contents}/Resources/zh-Hant.lproj"
 
 echo "== App icon"
 # The menu bar pixel face is rendered into the app icon from the same source; the face is defined once, in PixelFace.swift.

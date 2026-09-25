@@ -108,7 +108,6 @@ struct VoiceCard: View {
     @ObservedObject var model: AppModel
     let entry: VoiceCatalogEntry
 
-    private var bundled: Bool { Resources.voicePack(entry.id) != nil }
     private var inUse: Bool { model.status?.device.voice == entry.id }
 
     var body: some View {
@@ -116,7 +115,7 @@ struct VoiceCard: View {
             Button { model.togglePreview(entry.id) } label: {
                 Image(systemName: model.previewingVoice == entry.id ? "stop.fill" : "play.fill")
             }
-            .disabled(!bundled || model.operationRunning)
+            .disabled(model.operationRunning)
             VStack(alignment: .leading) {
                 Text(entry.name).font(.body.weight(.semibold))
                 Text(entry.tag).font(.caption).foregroundStyle(.secondary)
@@ -126,7 +125,7 @@ struct VoiceCard: View {
                 Label("In use", systemImage: "checkmark.circle.fill").foregroundStyle(.green)
             } else {
                 Button("Use") { model.writeVoice(entry.id) }
-                    .disabled(!bundled || model.operationRunning || !(model.status?.device.connected ?? false))
+                    .disabled(model.operationRunning || !(model.status?.device.connected ?? false))
             }
         }
         .padding(10)
@@ -144,7 +143,8 @@ struct OperationRow: View {
             case .done: Image(systemName: "checkmark.circle.fill").foregroundStyle(.green)
             case .failed: Image(systemName: "xmark.octagon.fill").foregroundStyle(.red)
             }
-            Text(summary).font(.callout).lineLimit(1).help(operation.message)
+            Text(summary).font(.callout).lineLimit(1)
+                .help(operation.state == .failed ? operation.message : "")
         }
     }
 

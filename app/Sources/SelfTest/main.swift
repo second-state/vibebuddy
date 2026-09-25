@@ -144,10 +144,10 @@ check(VoicePack(data: Data("garbage".utf8)) == nil, "garbage is not a voice pack
 // 4. Voice catalog: every entry has a language, and the picker puts the UI language first.
 let catalog = VoiceCatalogEntry.all
 check(Set(catalog.map(\.id)).count == catalog.count, "voice ids are unique")
-check(catalog.allSatisfy { ["zh", "en"].contains($0.language) }, "every voice has a known language")
-let englishFirst = VoiceCatalogEntry.sorted(catalog, preferring: "en")
-check(englishFirst.first?.language == "en" && englishFirst.count == catalog.count, "English UI lists English voices first")
-check(VoiceCatalogEntry.sorted(catalog, preferring: "zh").first?.id == "wanwanxiaohe", "Chinese UI keeps catalog order")
+check(catalog.contains { $0.language == .en } && catalog.contains { $0.language == .zh }, "catalog has voices in both languages")
+let englishFirst = VoiceCatalogEntry.sorted(catalog, preferring: .en)
+check(englishFirst.first?.language == .en && englishFirst.count == catalog.count, "English UI lists English voices first")
+check(VoiceCatalogEntry.sorted(catalog, preferring: .zh).first?.id == "wanwanxiaohe", "Chinese UI keeps catalog order")
 
 if failures > 0 {
     print("\(failures) failure(s)")

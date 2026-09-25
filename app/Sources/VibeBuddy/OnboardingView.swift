@@ -129,8 +129,8 @@ struct OnboardingView: View {
 
     /// The firmware's built-in voice speaks Chinese; point English users at an English pack.
     private var voiceFootnote: String {
-        let englishBundled = Resources.bundledVoices.contains { $0.language == "en" }
-        if Resources.uiLanguage == "en" && englishBundled {
+        let englishBundled = Resources.bundledVoices.contains { $0.language == .en }
+        if Resources.uiLanguage == .en && englishBundled {
             return String(localized: "The box's built-in voice speaks Chinese (Wanwan Xiaohe); pick an English voice above to hear announcements in English.")
         }
         return String(localized: "If you skip this, the box uses its built-in voice, Wanwan Xiaohe (Chinese).")
