@@ -1,5 +1,5 @@
-//! Codex 的 Hook：只转发会话与回合标识、事件名、工作目录；子 Agent 的
-//! 生命周期会话映射到桌面端可打开的父线程；`Stop` 时判定是否在等回答。
+//! Codex's hook: forwards only session and turn ids, the event name and the working directory; subagent
+//! lifecycle sessions map to the parent thread the desktop app can open; on `Stop` it decides whether an answer is awaited.
 
 use std::io::Write;
 use std::path::Path;
@@ -10,12 +10,12 @@ use crate::filter::requires_user_input;
 use crate::surface;
 
 pub const ENDPOINT: &str = "http://127.0.0.1:7331/v1/codex-hooks";
-/// Codex App 的 bundle id。它装在 ChatGPT.app 里，`codex:` scheme 也由那个
-/// bundle 认领（2026-09-21 用 lsregister 核对）。
+/// Codex App's bundle id. It ships inside ChatGPT.app, and the `codex:` scheme is claimed by that
+/// bundle too (checked with lsregister on 2026-09-21).
 const BUNDLE_ID: &str = "com.openai.codex";
 const ALLOWED_FIELDS: [&str; 4] = ["session_id", "turn_id", "hook_event_name", "cwd"];
 
-/// transcript 第一行的 session_meta；读不到就当没有。
+/// session_meta from the transcript's first line; treated as absent if it can't be read.
 fn transcript_meta(path: &str) -> Option<Map<String, Value>> {
     let file = std::fs::File::open(path).ok()?;
     let mut first_line = String::new();
@@ -24,7 +24,7 @@ fn transcript_meta(path: &str) -> Option<Map<String, Value>> {
     value.get("payload")?.as_object().cloned()
 }
 
-/// 把子 Agent 的生命周期会话映射到桌面端可打开的父会话。
+/// Maps a subagent's lifecycle session to the parent session the desktop app can open.
 pub fn navigable_thread_id(source: &Map<String, Value>) -> Option<String> {
     let session_id = source.get("session_id")?.as_str()?.to_owned();
     let Some(transcript_path) = source.get("transcript_path").and_then(Value::as_str) else {
@@ -73,8 +73,8 @@ pub fn sanitized_payload(source: &Value) -> Option<Map<String, Value>> {
     Some(payload)
 }
 
-/// 一行诊断记到本机日志：只有身份、事件名和目录，没有 prompt。
-/// Codex 会为后台会话也触发 Hook，出了问题得能看到它到底收到了什么。
+/// Logs one diagnostic line locally: only identity, event name and directory, never the prompt.
+/// Codex fires hooks for background sessions too; when something goes wrong we need to see what it actually received.
 pub fn trace(source: &Value, payload: &Map<String, Value>, log_dir: &Path) {
     let source = source.as_object().cloned().unwrap_or_default();
     let transcript = source.get("transcript_path").and_then(Value::as_str);
@@ -108,7 +108,7 @@ pub fn trace(source: &Value, payload: &Map<String, Value>, log_dir: &Path) {
         thread_source,
         keys.join(","),
     );
-    // 诊断不能影响主流程：写不进去就算了。
+    // Diagnostics must not affect the main flow: if the write fails, let it go.
     let _ = std::fs::create_dir_all(log_dir);
     if let Ok(mut log) = std::fs::OpenOptions::new()
         .append(true)

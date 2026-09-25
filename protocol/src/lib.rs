@@ -22,7 +22,7 @@ pub struct Event {
 }
 
 impl Event {
-    /// 只有事件名的信封；设备维护类的命令（hello、identify、screenshot）都长这样。
+    /// An envelope with only an event name; device maintenance commands (hello, identify, screenshot) all look like this.
     pub fn named(event: &str) -> Self {
         Self {
             version: VERSION,

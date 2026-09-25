@@ -1,7 +1,7 @@
-//! 与具体 Agent 无关的活动聚合。
+//! Agent-agnostic activity aggregation.
 //!
-//! Adapter 负责把某个 Agent 的事件翻译成这里的调用；任务卡排序、全局状态
-//! 优先级、去重、一次性播报和过期清理都只在这里实现一次。
+//! Adapters translate one agent's events into calls here; task-card ordering, global state
+//! priority, dedup, one-shot announcements and expiry are implemented here exactly once.
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -12,14 +12,14 @@ use serde::{Deserialize, Serialize};
 use serde_json::json;
 
 const MAX_VISIBLE_TASKS: usize = 3;
-/// 任务卡标题的显示上限，含区分 Agent 的前缀。
+/// Display limit for task-card titles, including the prefix that tells agents apart.
 const MAX_TITLE_CHARS: usize = 26;
-/// 工作中的活动若长时间没有任何事件，通常是 Agent 进程已经消失。
+/// A working activity with no events for a long time usually means the agent process is gone.
 const WORKING_TTL: Duration = Duration::from_secs(30 * 60);
-/// 等待用户回应可以持续很久，过期时间必须长到足够用户离开再回来。
+/// Waiting for the user can last a long time; the expiry must be long enough for them to leave and come back.
 const INPUT_REQUIRED_TTL: Duration = Duration::from_secs(4 * 60 * 60);
-/// Agent 工作过的项目根保留多久。超过这段时间没人在那儿干活，就不必再
-/// 关心它的 CI 了。
+/// How long to remember project roots an agent worked in. If nobody has worked there for this long,
+/// its CI is no longer worth watching.
 const WORKSPACE_TTL: Duration = Duration::from_secs(60 * 60);
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -28,49 +28,49 @@ pub enum ActivityStatus {
     InputRequired,
 }
 
-/// Agent 进程运行的地方，决定 K2 把人送回哪里。判定在 Hook 里做——只有它
-/// 看得到进程环境；daemon 只做路由，不重算。
+/// Where the agent process runs, which decides where K2 sends the user. The hook decides this — only it
+/// can see the process environment; the daemon only routes and never recomputes it.
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(tag = "surface", rename_all = "snake_case")]
 pub enum Surface {
-    /// 跑在 Agent 自己的桌面 App 里。Claude 另带桌面会话 id 定位到具体窗口；
-    /// Codex 只有 thread id，没有第二个身份。
+    /// Running in the agent's own desktop app. Claude also carries a desktop session id to find the exact window;
+    /// Codex only has a thread id, with no second identity.
     App {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         desktop_session_id: Option<String>,
     },
-    /// 跑在别的 App 里：终端、编辑器的集成终端，或任何没见过的宿主。这个
-    /// bundle id 就是落点，daemon 不需要认识它。
+    /// Running in some other app: a terminal, an editor's integrated terminal, or any host we haven't seen. This
+    /// bundle id is the destination; the daemon doesn't need to know it.
     Host { bundle_id: String },
-    /// 没有宿主 App：SSH、守护进程、launchd 起的会话。K2 无处可去。
+    /// No host app: SSH, daemons, sessions started by launchd. K2 has nowhere to go.
     Headless,
 }
 
 impl Default for Surface {
-    /// 旧状态文件写于只支持桌面 App 的版本，按 App 读回，保持原有行为。
+    /// Old state files were written by versions that only supported desktop apps; read them back as App to keep the old behavior.
     fn default() -> Self {
         Self::App { desktop_session_id: None }
     }
 }
 
 impl Surface {
-    /// 把 Hook 报的扁平字段合成运行处。
+    /// Combine the flat fields reported by the hook into a surface.
     pub fn from_hook(kind: Option<&str>, host_bundle_id: Option<String>, desktop_session_id: Option<String>) -> Self {
         match kind {
-            // 说是宿主却没给 bundle id：无处可去，不能退回 App 跳错地方。
+            // Claims a host but gave no bundle id: nowhere to go, and falling back to App would jump to the wrong place.
             Some("host") => match host_bundle_id {
                 Some(bundle_id) => Self::Host { bundle_id },
                 None => Self::Headless,
             },
             Some("headless") => Self::Headless,
-            // 认不出的值来自比 daemon 新的 Hook，按旧行为处理。
+            // Unrecognized values come from a hook newer than the daemon; treat them the old way.
             _ => Self::App { desktop_session_id },
         }
     }
 }
 
-/// K2 可以切回的 Mac 来源。这里只保存打开窗口所需的最小定位信息，
-/// 不保存 prompt、回复正文或命令内容。
+/// A Mac source K2 can switch back to. Only the minimal location needed to open the window is stored,
+/// never prompts, reply text or command contents.
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum ActivitySource {
@@ -79,10 +79,10 @@ pub enum ActivitySource {
         #[serde(default)]
         surface: Surface,
     },
-    /// `session_id` 是 CLI 的会话 id，它不足以定位窗口：worktree 迁移、fork 或
-    /// 一次 resume 导入都会让同一个 id 对应多个桌面会话。跑在 App 里时用
-    /// `Surface::App` 带来的桌面会话 id 精确定位，那是 Claude 自己给的；
-    /// 只有旧 Hook 不报它时才退回 `cwd` 消歧。
+    /// `session_id` is the CLI session id, which isn't enough to locate a window: a worktree move, a fork or
+    /// a resume import can all map one id to several desktop sessions. When running in the app, use the
+    /// desktop session id carried by `Surface::App` for an exact match — Claude provides it itself;
+    /// fall back to `cwd` for disambiguation only when an old hook doesn't report it.
     ClaudeCode {
         session_id: String,
         #[serde(default)]
@@ -96,7 +96,7 @@ pub enum ActivitySource {
     },
 }
 
-/// 活动的身份。`key` 在所有会话中唯一，`session_id` 用于会话级操作。
+/// An activity's identity. `key` is unique across all sessions; `session_id` is for session-level operations.
 #[derive(Clone, Debug)]
 pub struct ActivityId {
     pub session_id: String,
@@ -110,13 +110,13 @@ struct Activity {
     title: String,
     sequence: u64,
     updated_at: Instant,
-    /// 进入当前状态的时刻。与 `updated_at` 不同：工具事件每几秒刷新一次
-    /// `updated_at`，但卡片要回答的是「这个 turn 跑了多久」「等了多久」。
+    /// When the current state was entered. Unlike `updated_at`: tool events refresh `updated_at` every few
+    /// seconds, but the card answers "how long has this turn been running" and "how long has it waited".
     status_since: Instant,
     source: Option<ActivitySource>,
 }
 
-/// 当日战绩的快照：完成数、需要确认次数、忙碌秒数。
+/// Snapshot of today's stats: done count, times input was needed, busy seconds.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize)]
 pub struct TodaySummary {
     pub done: u32,
@@ -124,14 +124,14 @@ pub struct TodaySummary {
     pub busy_seconds: u64,
 }
 
-/// 空闲屏轮播的当日战绩。
+/// Today's stats rotated on the idle screen.
 #[derive(Debug, Default)]
 struct DailyStats {
     day: String,
     done: u32,
     asks: u32,
     busy_seconds: u64,
-    /// 当前这段「至少有一个活动」的起点；没有活动时为 `None`。
+    /// Start of the current stretch with at least one activity; `None` when there is none.
     busy_since: Option<Instant>,
 }
 
@@ -152,22 +152,22 @@ pub struct ActivityTracker {
     last_visible: Option<Event>,
     stats: DailyStats,
     stats_file: Option<PathBuf>,
-    /// 最近一次可定位的 Agent/CI 来源。当前活动结束或 daemon 重启后，K2
-    /// 仍应能回到刚才那件事，而不是变成一个只在“工作中”才有效的按钮。
+    /// The most recent locatable agent/CI source. After the current activity ends or the daemon restarts, K2
+    /// should still take the user back to what just happened, not become a button that only works while "working".
     last_source: Option<ActivitySource>,
-    /// 最近一次播报过结束的活动。它一直是 K2 的落点，直到下一次播报把它换
-    /// 掉——用墙上时钟让它过期是错的：这台设备的用处恰恰在于人不在电脑前，
-    /// 去接杯水回来再按，落点不该已经飘走。
+    /// The activity whose end was announced most recently. It stays K2's destination until the next announcement
+    /// replaces it — expiring it by wall clock is wrong: this device is useful precisely when the user is away from
+    /// the computer, and after fetching a glass of water the destination shouldn't have drifted away.
     recently_announced: Option<ActivitySource>,
-    /// Agent 最近工作过的项目根及最后一次看到的时间。
+    /// Project roots agents worked in recently, with the last time each was seen.
     workspaces: HashMap<PathBuf, Instant>,
-    /// 每个活动所属的项目名。标题第一行让给了会话名，项目名挪到第二行。
+    /// Project name for each activity. The title's first line goes to the session name; the project name moves to the second line.
     projects: HashMap<String, String>,
 }
 
 impl ActivityTracker {
-    /// 把战绩存到磁盘。只放在内存里的话，每次重启 daemon 数字都会归零，
-    /// 而屏幕上写的是「今天」，归零后它显示的就是错的。
+    /// Persist the stats to disk. Kept only in memory, the numbers reset on every daemon restart,
+    /// while the screen says "today" — after a reset it would be showing the wrong thing.
     pub fn with_stats_file(path: PathBuf) -> Self {
         let stored: StoredStats = std::fs::read_to_string(&path)
             .ok()
@@ -187,10 +187,10 @@ impl ActivityTracker {
         }
     }
 
-    /// 记下 Agent 正在哪个项目里工作。
+    /// Record which project an agent is working in.
     ///
-    /// 这是个与 Agent 无关的事实，解析工作也已经为任务卡标题做过一遍。
-    /// CI 靠它自动得出该关注哪些仓库，用户因此不必维护一份仓库清单。
+    /// This is an agent-agnostic fact, and the parsing was already done for the task-card title.
+    /// CI uses it to work out which repos to watch automatically, so users don't maintain a repo list.
     pub fn note_workspace(&mut self, cwd: Option<&str>) {
         let Some(root) = cwd.map(Path::new).and_then(project_root) else {
             return;
@@ -198,7 +198,7 @@ impl ActivityTracker {
         self.workspaces.insert(root, Instant::now());
     }
 
-    /// 最近有 Agent 活动的项目根。
+    /// Project roots with recent agent activity.
     pub fn recent_workspaces(&mut self) -> Vec<PathBuf> {
         let now = Instant::now();
         self.workspaces
@@ -206,8 +206,8 @@ impl ActivityTracker {
         self.workspaces.keys().cloned().collect()
     }
 
-    /// 给活动补上 K2 所需的来源定位。Adapter 在翻译事件后调用，因此事件若已
-    /// 把活动收起，这里会自然地成为 no-op。
+    /// Attach the source location K2 needs to an activity. Adapters call this after translating an event, so if the
+    /// event already closed the activity, this naturally becomes a no-op.
     pub fn associate_source(&mut self, id: &ActivityId, source: ActivitySource) {
         if let Some(activity) = self.activities.get_mut(&id.key) {
             activity.source = Some(source.clone());
@@ -218,22 +218,22 @@ impl ActivityTracker {
         }
     }
 
-    /// 记下刚播报过结束的活动，让 K2 在播报之后的短时间内仍能回到它。
+    /// Remember the activity whose end was just announced, so K2 can still return to it shortly afterwards.
     fn remember_announced(&mut self, activity: Activity) {
         if let Some(source) = activity.source {
             self.recently_announced = Some(source);
         }
     }
 
-    /// K2 的落点。与屏幕主状态同源，但多一条：最近播报过结束的活动排在当前
-    /// 工作项之前，并一直保持到下一次播报——用户是听到播报才去按的键，而那
-    /// 件事此刻已经不在屏幕上了。
+    /// K2's destination. Same source as the screen's main state, plus one rule: the activity most recently announced
+    /// as ended comes before the current work item and stays until the next announcement — the user presses the key
+    /// because they heard the announcement, and that item is no longer on screen.
     pub fn focus_source(&self) -> Option<ActivitySource> {
         self.focus_sources().into_iter().next()
     }
 
-    /// K2 的候选落点，按优先级排列、去重。第一个打不开（例如线程已不存在）
-    /// 就试下一个，而不是打开一个空白窗口。
+    /// K2's candidate destinations, in priority order and deduplicated. If the first can't be opened (say the
+    /// thread no longer exists), try the next instead of opening a blank window.
     pub fn focus_sources(&self) -> Vec<ActivitySource> {
         let mut sources: Vec<ActivitySource> = Vec::new();
         let mut push = |source: Option<ActivitySource>| {
@@ -243,17 +243,17 @@ impl ActivityTracker {
                 sources.push(source);
             }
         };
-        // 有任务在等人回答，那件事最急，先去那里。
+        // A task waiting for an answer is the most urgent; go there first.
         push(self.waiting_activity().and_then(|waiting| waiting.source.clone()));
-        // 播报过结束的那件事已经离开卡片栈，屏幕上再也看不到它；而还在跑的
-        // 任务一直挂在屏幕上，本来就不需要 K2 帮忙定位。
+        // The item whose end was announced has left the card stack and is no longer visible; tasks still running
+        // stay on screen, so they never needed K2's help to find.
         push(self.recently_announced.clone());
         push(self.focused_activity().and_then(|activity| activity.source.clone()));
         push(self.last_source.clone());
         sources
     }
 
-    /// 记录活动的当前状态，返回需要下发的可见状态。
+    /// Record the activity's current state and return the visible state to send.
     pub fn observe(
         &mut self,
         id: &ActivityId,
@@ -264,7 +264,7 @@ impl ActivityTracker {
         self.visible_activity()
     }
 
-    /// 标记活动正在等待用户回应。重复标记不会再次触发语音。
+    /// Mark the activity as waiting for the user. Marking it again doesn't trigger the voice again.
     pub fn require_input(&mut self, id: &ActivityId, title: &str) -> Option<Event> {
         if self
             .activities
@@ -280,7 +280,7 @@ impl ActivityTracker {
         Some(visible)
     }
 
-    /// 活动正常结束，产生一次完成播报；未被跟踪的活动只刷新画面。
+    /// The activity ended normally: announce completion once; untracked activities only refresh the screen.
     pub fn finish(&mut self, id: &ActivityId, title: &str) -> Option<Event> {
         let Some(finished) = self.activities.remove(&id.key) else {
             return self.visible_activity();
@@ -291,10 +291,10 @@ impl ActivityTracker {
         self.announce_end("task.done", id, title, "done")
     }
 
-    /// 活动以失败告终，产生一次失败播报。
+    /// The activity ended in failure: announce the failure once.
     ///
-    /// 与 `discard` 的区别是失败是任务的结果，必须让用户知道；`discard`
-    /// 用于「不知道结果」的收尾，不播报。
+    /// Unlike `discard`, failure is the task's outcome and the user must be told; `discard`
+    /// is for wrap-ups where the outcome is unknown, and doesn't announce.
     pub fn fail(&mut self, id: &ActivityId, title: &str) -> Option<Event> {
         let Some(failed) = self.activities.remove(&id.key) else {
             return self.visible_activity();
@@ -304,28 +304,28 @@ impl ActivityTracker {
         self.announce_end("task.error", id, title, "failed")
     }
 
-    /// 丢弃一个活动，不播报成功。
+    /// Drop an activity without announcing success.
     pub fn discard(&mut self, id: &ActivityId, idle_title: &str) -> Option<Event> {
         self.activities.remove(&id.key);
         self.sync_busy();
         self.idle_or_refresh(&id.session_id, idle_title)
     }
 
-    /// 丢弃整个会话的活动，不播报成功。
+    /// Drop all of a session's activities without announcing success.
     pub fn discard_session(&mut self, session_id: &str, idle_title: &str) -> Option<Event> {
         self.clear_session(session_id);
         self.idle_or_refresh(session_id, idle_title)
     }
 
-    /// 清除某个会话的既有活动，不产生事件。
+    /// Clear a session's existing activities without producing an event.
     pub fn clear_session(&mut self, session_id: &str) {
         self.activities
             .retain(|_, activity| activity.session_id != session_id);
         self.sync_busy();
     }
 
-    /// 清除已被遗弃的活动。Agent 被强制结束时不会发送收尾事件，
-    /// 若没有过期机制，这些活动会永久占用任务卡并让宠物停在需要确认。
+    /// Clear abandoned activities. An agent that is force-killed sends no wrap-up event;
+    /// without expiry those activities would hold task cards forever and leave the pet stuck on needs-input.
     pub fn sweep_expired(&mut self) -> Option<Event> {
         self.sweep_expired_at(Instant::now())
     }
@@ -348,11 +348,11 @@ impl ActivityTracker {
         self.idle_or_refresh(&expired_session, "TIMED OUT")
     }
 
-    /// 活动清空时回到空闲，否则只刷新画面。
+    /// Return to idle when no activities remain, otherwise just refresh the screen.
     ///
-    /// 不能写成 `visible_activity().or_else(idle)`：`visible_activity` 返回
-    /// `None` 有两种含义，没有活动和被去重吞掉，后者误报空闲会让仍在工作的
-    /// 任务从屏幕上消失。
+    /// Can't be written as `visible_activity().or_else(idle)`: `visible_activity` returning
+    /// `None` means two things, no activity or swallowed by dedup, and reporting idle for the latter would make
+    /// a still-working task vanish from the screen.
     fn idle_or_refresh(&mut self, session_id: &str, idle_title: &str) -> Option<Event> {
         if self.activities.is_empty() {
             self.deduplicate(event("agent.idle", session_id, idle_title))
@@ -361,7 +361,7 @@ impl ActivityTracker {
         }
     }
 
-    /// 记下活动所属的项目。要在 `observe` 之前调用：快照在 `observe` 里生成。
+    /// Record the activity's project. Must be called before `observe`: the snapshot is built inside `observe`.
     pub fn note_project(&mut self, id: &ActivityId, project: &str) {
         self.projects.insert(id.key.clone(), project.to_owned());
         let activities = &self.activities;
@@ -372,7 +372,7 @@ impl ActivityTracker {
     fn set_activity(&mut self, id: &ActivityId, title: &str, status: ActivityStatus) {
         self.sequence = self.sequence.wrapping_add(1);
         let now = Instant::now();
-        // 状态没变就保留起点，否则每次 PostToolUse 都会把计时清零。
+        // Keep the start time if the state hasn't changed, otherwise every PostToolUse would reset the timer.
         let status_since = self
             .activities
             .get(&id.key)
@@ -420,8 +420,8 @@ impl ActivityTracker {
         Some(visible)
     }
 
-    /// 把当前卡片栈挂到事件上。结束播报也要带：用户在听到"完成"的同时，
-    /// 应该看得见还剩什么在跑。
+    /// Attach the current card stack to the event. End announcements carry it too: while hearing "done",
+    /// the user should see what's still running.
     fn attach_tasks(&self, visible: &mut Event) {
         let mut activities: Vec<(&String, &Activity)> = self.activities.iter().collect();
         activities.sort_by_key(|(_, activity)| std::cmp::Reverse(activity.sequence));
@@ -449,11 +449,11 @@ impl ActivityTracker {
         );
     }
 
-    /// 结束播报必须说清是谁结束了。
+    /// An end announcement must say who ended.
     ///
-    /// 并行跑的时候，屏幕主状态属于另一件还在跑的事，把 "done" 挂到那个快照
-    /// 上等于告诉用户那一件完成了——而它没有。之前单任务能用，只是因为栈空
-    /// 时走的是另一条分支，标题恰好就是完成者。
+    /// When tasks run in parallel, the screen's main state belongs to another task still running; hanging "done" on that
+    /// snapshot tells the user that one finished — and it didn't. It used to work with a single task only because an empty
+    /// stack took a different branch, where the title happened to be the finisher.
     fn announce_end(
         &mut self,
         event_name: &str,
@@ -461,8 +461,8 @@ impl ActivityTracker {
         title: &str,
         announcement: &str,
     ) -> Option<Event> {
-        // 还有任务在等人回答时，屏幕留给它：那件事要用户动手，而"完成"只是
-        // 通知，播报一声就够了。与 K2 的落点规则同一套优先级。
+        // While a task is waiting for an answer, the screen stays on it: that item needs the user to act, while "done" is just
+        // a notice, and one announcement is enough. Same priority rules as K2's destination.
         let mut announced = match self.waiting_activity() {
             Some(waiting) => event(
                 "agent.input_required",
@@ -478,13 +478,13 @@ impl ActivityTracker {
         announced
             .extra
             .insert("announcement_id".to_owned(), json!(id.key));
-        // 屏幕现在停在这条播报上。下一个事件必须能把它刷回当前任务，所以这
-        // 一帧不能当去重基准——否则状态没变的下一帧会被吞掉，屏幕卡在这里。
+        // The screen is now showing this announcement. The next event must be able to refresh it back to the current task, so
+        // this frame can't be the dedup baseline — otherwise the next unchanged frame would be swallowed and the screen stuck here.
         self.last_visible = None;
         Some(announced)
     }
 
-    /// 正在等人回答的活动里最新的那个。它 blocking 着用户，排在一切之前。
+    /// The newest activity waiting for an answer. It is blocking the user and comes before everything else.
     fn waiting_activity(&self) -> Option<&Activity> {
         self.activities
             .values()
@@ -502,11 +502,11 @@ impl ActivityTracker {
         })
     }
 
-    /// 盖上只在发送这一刻才有意义的字段：卡片计时和当日战绩。
+    /// Stamp the fields that only mean something at send time: card timers and today's stats.
     ///
-    /// 它们不能进 `activity_snapshot`，因为那份快照要参与去重。这两个字段
-    /// 每秒都在变，一旦进入快照，每个工具事件都会绕过去重变成一帧重绘，
-    /// 把工作中的动画不断打回第一帧。
+    /// They can't go into `activity_snapshot`, because that snapshot takes part in dedup. Both fields
+    /// change every second; in the snapshot, every tool event would bypass dedup and become a redraw,
+    /// constantly knocking the working animation back to its first frame.
     pub fn stamp_live_fields(&mut self, event: &mut Event) {
         self.roll_day();
         event
@@ -537,7 +537,7 @@ impl ActivityTracker {
         }
     }
 
-    /// 当日战绩的数字形式，给 App 的状态接口用；空闲屏用的是 `stats_lines`。
+    /// Today's stats as numbers, for the app's status API; the idle screen uses `stats_lines`.
     pub fn today(&self) -> TodaySummary {
         TodaySummary {
             done: self.stats.done,
@@ -569,7 +569,7 @@ impl ActivityTracker {
         self.save_stats();
     }
 
-    /// 跨过本地自然日就清零。屏幕上写的是「今天」，就必须按今天算。
+    /// Reset when the local calendar day changes. The screen says "today", so it has to count today.
     fn roll_day(&mut self) {
         let today = chrono::Local::now().format("%Y-%m-%d").to_string();
         if self.stats.day == today {
@@ -580,12 +580,12 @@ impl ActivityTracker {
         self.stats.asks = 0;
         self.stats.busy_seconds = 0;
         if self.stats.busy_since.is_some() {
-            // 跨零点时仍在进行的活动从零点重新计时，不把昨天算进今天。
+            // Activities still running across midnight restart their timer at midnight; yesterday doesn't count toward today.
             self.stats.busy_since = Some(Instant::now());
         }
     }
 
-    /// 维护「至少有一个活动」的累计时长。
+    /// Maintain the accumulated time with at least one activity.
     fn sync_busy(&mut self) {
         match (self.activities.is_empty(), self.stats.busy_since) {
             (false, None) => self.stats.busy_since = Some(Instant::now()),
@@ -615,7 +615,7 @@ impl ActivityTracker {
         if let Some(parent) = path.parent() {
             let _ = std::fs::create_dir_all(parent);
         }
-        // 战绩丢了只是少一行展示，不值得让事件下发失败。
+        // Losing the stats only costs one line of display; not worth failing the event send.
         let _ = std::fs::write(path, text);
     }
 
@@ -628,7 +628,7 @@ impl ActivityTracker {
     }
 }
 
-/// 战绩行里的时长：一小时以内只给分钟，超过就给 `1H23`。
+/// Duration in the stats line: minutes only under an hour, `1H23` above.
 fn format_duration(seconds: u64) -> String {
     let minutes = seconds / 60;
     if minutes < 60 {
@@ -649,15 +649,15 @@ fn event(name: &str, session_id: &str, title: &str) -> Event {
     }
 }
 
-/// 从工作目录派生任务卡标题。不读取 prompt 或会话内容。
+/// Derive the task-card title from the working directory. Never reads prompts or session content.
 ///
-/// `prefix` 区分是哪个 Agent 在跑，`fallback` 用于工作目录不可用时。
-/// 两个 Agent 可能在同一个目录下工作，只有前缀能告诉用户该切到哪个窗口。
+/// `prefix` tells which agent is running; `fallback` is for when the working directory is unavailable.
+/// Two agents may work in the same directory, and only the prefix tells the user which window to switch to.
 pub fn project_title(prefix: &str, cwd: Option<&str>, fallback: &str) -> String {
     display_title(prefix, project_name(cwd).as_deref().unwrap_or(fallback), fallback)
 }
 
-/// 工作目录所属项目的名字（项目根目录名）。
+/// Name of the project the working directory belongs to (the project root's directory name).
 pub fn project_name(cwd: Option<&str>) -> Option<String> {
     let root = cwd.map(Path::new).and_then(project_root);
     root.as_deref()
@@ -667,10 +667,10 @@ pub fn project_name(cwd: Option<&str>) -> Option<String> {
         .map(str::to_owned)
 }
 
-/// 任务卡第一行：依次试 Agent 自己给会话起的名字，都不可用才写项目名。
+/// First line of a task card: try the agent's own session names in turn, and only fall back to the project name.
 ///
-/// “不可用”指滤掉设备字库画不出的字符之后剩不到三个字母数字——中文标题
-/// 在这块只有大写字母和数字的屏上会变成空白，退回项目名比留白好。
+/// "Unavailable" means fewer than three alphanumerics left after filtering characters the device font can't draw — a Chinese
+/// title would be blank on this uppercase-and-digits-only screen, and the project name beats blank space.
 pub fn card_title(
     prefix: &str,
     candidates: &[Option<String>],
@@ -690,8 +690,8 @@ pub fn card_title(
     display_title(prefix, project.unwrap_or(fallback), fallback)
 }
 
-/// 把任意名字压成任务卡放得下的标题：只保留字母数字、连字符和单个空格，
-/// 全大写。空格得留着：会话标题是几个词，粘在一起就读不出来了。
+/// Squash any name into a title that fits a task card: keep only alphanumerics, hyphens and single spaces,
+/// all uppercase. Spaces must stay: session titles are several words, and glued together they can't be read.
 pub fn display_title(prefix: &str, raw: &str, fallback: &str) -> String {
     let mut title = String::new();
     for character in raw.chars() {
@@ -708,7 +708,7 @@ pub fn display_title(prefix: &str, raw: &str, fallback: &str) -> String {
         .chars()
         .take(MAX_TITLE_CHARS.saturating_sub(prefix.chars().count()))
         .collect();
-    // 截断可能正好切在连字符或空格上，留着像少了半个词。
+    // Truncation may land right on a hyphen or space; leaving it looks like half a word is missing.
     let title = title.trim_end_matches([' ', '-', '_']);
     if title.is_empty() {
         format!("{prefix}{fallback}")
@@ -717,11 +717,11 @@ pub fn display_title(prefix: &str, raw: &str, fallback: &str) -> String {
     }
 }
 
-/// 从工作目录向上找到项目根。
+/// Walk up from the working directory to the project root.
 ///
-/// 直接取工作目录的名字会把 `repo/tools` 显示成 TOOLS，把 git worktree 显示成
-/// 分支目录名；用户认得项目名，不认得这两者。worktree 的 `.git` 是文件而非目录，
-/// 内容指回主仓库，因此两种情况都能还原成同一个项目名。
+/// Taking the working directory's name directly would show `repo/tools` as TOOLS and a git worktree as the
+/// branch directory name; users recognize the project name, not either of those. A worktree's `.git` is a file, not a directory,
+/// pointing back at the main repo, so both cases resolve to the same project name.
 fn project_root(cwd: &Path) -> Option<PathBuf> {
     for dir in cwd.ancestors() {
         let git = dir.join(".git");
@@ -813,8 +813,8 @@ mod tests {
         );
     }
 
-    /// 并行跑两个任务时，一个结束会播报，另一个还在跑。用户是听到播报才去
-    /// 按 K2 的，落点必须是刚播报的那件事，而不是恰好还活着的另一件。
+    /// With two tasks running in parallel, one finishes and is announced while the other keeps running. The user presses
+    /// K2 because they heard the announcement, so the destination must be what was just announced, not whichever other one is still alive.
     #[test]
     fn k2_returns_to_the_task_that_just_announced() {
         let mut tracker = ActivityTracker::default();
@@ -844,7 +844,7 @@ mod tests {
         );
     }
 
-    /// 落点由播报接力，不由时钟决定：第二个任务完成后，K2 改指它。
+    /// The destination is handed on by announcements, not decided by the clock: after the second task finishes, K2 points at it.
     #[test]
     fn the_next_announcement_takes_over_the_landing_spot() {
         let mut tracker = ActivityTracker::default();
@@ -875,7 +875,7 @@ mod tests {
         );
     }
 
-    /// 人离开工位再回来按 K2，落点不该因为时间流逝而飘走。
+    /// Leaving the desk and coming back to press K2, the destination shouldn't drift away just because time passed.
     #[test]
     fn the_landing_spot_does_not_expire_on_its_own() {
         let mut tracker = ActivityTracker::default();
@@ -897,7 +897,7 @@ mod tests {
         );
         tracker.finish(&finished, "CX:ALPHA");
 
-        // 中间那个任务一直在跑，刷新多少次都不该把落点抢走。
+        // The middle task keeps running; no number of refreshes should take the destination away.
         for _ in 0..5 {
             tracker.observe(&running, "CX:BETA", ActivityStatus::Working);
         }
@@ -909,7 +909,7 @@ mod tests {
         );
     }
 
-    /// 等人回答的任务是 blocking 的，排在刚播报完成的任务之前。
+    /// A task waiting for an answer is blocking and comes before a task just announced as done.
     #[test]
     fn a_task_waiting_for_a_reply_outranks_the_announcement() {
         let mut tracker = ActivityTracker::default();
@@ -1027,7 +1027,7 @@ mod tests {
         let alive = id("alive", "alive:1");
         tracker.observe(&alive, "ALIVE", ActivityStatus::Working);
 
-        // 另一个会话结束。它没有活动，画面也不该变化。
+        // Another session ends. It has no activity, and the screen shouldn't change.
         let emitted = tracker.discard_session("other", "ALL QUIET");
         assert!(
             emitted.is_none(),
@@ -1041,7 +1041,7 @@ mod tests {
         tracker.observe(&id("a", "a:1"), "ALPHA", ActivityStatus::Working);
         let other = id("b", "b:1");
         tracker.observe(&other, "BETA", ActivityStatus::Working);
-        // 让 BETA 成为当前可见状态后再丢弃它，迫使剩余快照与上一次不同。
+        // Make BETA the current visible state, then drop it, forcing the remaining snapshot to differ from the last one.
         let emitted = tracker.discard(&other, "INTERRUPTED");
         let emitted = emitted.expect("丢弃后应刷新为剩余活动");
         assert_eq!(emitted.event, "task.start", "仍有活动时不得报告空闲");
@@ -1168,7 +1168,7 @@ mod tests {
             card_title("CC:", &branch, Some("vibe-buddy"), "CLAUDE"),
             "CC:POMODORO-TIMER-FEATURE"
         );
-        // 中文标题在设备字库上是空白，退回下一个候选，再退回项目名。
+        // Chinese titles are blank in the device font; fall back to the next candidate, then to the project name.
         let chinese = [Some("制定两周交易计划".to_owned()), Some("PR 96".to_owned())];
         assert_eq!(
             card_title("CX:", &chinese, Some("eros-training-infra"), "CODEX"),

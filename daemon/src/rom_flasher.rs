@@ -1,10 +1,10 @@
-//! 用 ESP32-S3 的 ROM 串口下载协议烧固件，不加载 stub。
+//! Flashes firmware over the ESP32-S3 ROM serial download protocol, without loading a stub.
 //!
-//! 不用 espflash：它的 ROM 写块固定 1 KB、串口对象是具体类型没法包装，而
-//! BOX 的 CH343 桥一次只吞得下两百来字节（见 serial_transport 的分段注释；
-//! 之前的烧录脚本也是把 esptool 的块改成 0x100 才走通的）。这里块 256 字节，
-//! 桥接时每 128 字节按线速分段写。协议照 esptool：SLIP 封包、SYNC、READ_REG
-//! 认芯片、SPI_ATTACH、FLASH_BEGIN/DATA/END、SPI_FLASH_MD5 校验、RTS 硬复位。
+//! Not espflash: its ROM write block is fixed at 1 KB and its serial object is a concrete type we can't wrap,
+//! while the BOX's CH343 bridge only swallows about two hundred bytes at a time (see the chunking note in
+//! serial_transport; the earlier flashing script only worked after cutting esptool's block to 0x100). Blocks here are 256 bytes,
+//! written in 128-byte chunks paced at line rate over the bridge. The protocol follows esptool: SLIP framing, SYNC, READ_REG
+//! to identify the chip, SPI_ATTACH, FLASH_BEGIN/DATA/END, SPI_FLASH_MD5 verification, RTS hard reset.
 
 use std::io::{Read, Write};
 use std::time::{Duration, Instant};
@@ -28,7 +28,7 @@ const OP_SPI_FLASH_MD5: u8 = 0x13;
 
 const CHIP_MAGIC_REG: u32 = 0x4000_1000;
 const ESP32S3_MAGIC: u32 = 0x9;
-/// ROM loader 的应答末尾带 4 个状态字节（stub 是 2 个）。
+/// ROM loader replies end with 4 status bytes (the stub uses 2).
 const STATUS_BYTES: usize = 4;
 const CHECKSUM_SEED: u8 = 0xEF;
 
@@ -42,7 +42,7 @@ pub struct Progress<'a> {
     pub on_progress: &'a mut dyn FnMut(f32, &str),
 }
 
-/// SLIP 封包。
+/// SLIP framing.
 pub fn slip_encode(payload: &[u8]) -> Vec<u8> {
     let mut frame = Vec::with_capacity(payload.len() + 2);
     frame.push(SLIP_END);
@@ -57,7 +57,7 @@ pub fn slip_encode(payload: &[u8]) -> Vec<u8> {
     frame
 }
 
-/// 命令包：方向 0、操作码、数据长度、校验（只有 FLASH_DATA 用）、数据。
+/// Command packet: direction 0, opcode, data length, checksum (only FLASH_DATA uses it), data.
 pub fn command(op: u8, data: &[u8], checksum: u32) -> Vec<u8> {
     let mut packet = Vec::with_capacity(8 + data.len());
     packet.push(0x00);
@@ -68,7 +68,7 @@ pub fn command(op: u8, data: &[u8], checksum: u32) -> Vec<u8> {
     packet
 }
 
-/// FLASH_DATA 的校验：所有数据字节异或，种子 0xEF。
+/// FLASH_DATA checksum: XOR of all data bytes, seeded with 0xEF.
 pub fn checksum(data: &[u8]) -> u32 {
     u32::from(data.iter().fold(CHECKSUM_SEED, |acc, byte| acc ^ byte))
 }
@@ -93,7 +93,7 @@ impl RomFlasher {
         Ok(Self { port, paced })
     }
 
-    /// 经典的 DTR/RTS 序列把芯片拉进下载模式，然后同步。
+    /// The classic DTR/RTS sequence pulls the chip into download mode, then syncs.
     pub fn connect(&mut self) -> Result<(), String> {
         let mut last_error = String::new();
         for _ in 0..5 {
@@ -101,7 +101,7 @@ impl RomFlasher {
             for _ in 0..7 {
                 match self.sync() {
                     Ok(()) => {
-                        // 同步后 ROM 会连回好几个 SYNC 应答，清干净。
+                        // After syncing, the ROM sends back several more SYNC replies; drain them.
                         std::thread::sleep(Duration::from_millis(50));
                         self.drain();
                         let magic = self.read_reg(CHIP_MAGIC_REG)?;
@@ -118,7 +118,7 @@ impl RomFlasher {
     }
 
     fn enter_bootloader(&mut self) -> Result<(), String> {
-        // esptool 的 default_reset：EN 拉低，IO0 拉低的同时放开 EN。
+        // esptool's default_reset: pull EN low, then release EN while holding IO0 low.
         self.set_lines(false, true)?;
         std::thread::sleep(Duration::from_millis(100));
         self.set_lines(true, false)?;
@@ -129,7 +129,7 @@ impl RomFlasher {
         Ok(())
     }
 
-    /// 烧完硬复位：EN 拉低再放开，IO0 保持高。
+    /// Hard reset after flashing: pull EN low and release it, keeping IO0 high.
     pub fn hard_reset(&mut self) -> Result<(), String> {
         self.set_lines(false, true)?;
         std::thread::sleep(Duration::from_millis(100));
@@ -168,7 +168,7 @@ impl RomFlasher {
         Ok(())
     }
 
-    /// 读一个 SLIP 帧，直到超时。
+    /// Reads one SLIP frame, until the timeout.
     fn read_frame(&mut self, deadline: Instant) -> Result<Vec<u8>, String> {
         let mut frame = Vec::new();
         let mut in_frame = false;
@@ -262,7 +262,7 @@ impl RomFlasher {
             .map(|response| response.value)
     }
 
-    /// 让 ROM 挂上 SPI flash 并告诉它 16 MB 的参数。
+    /// Has the ROM attach the SPI flash and tells it the 16 MB parameters.
     pub fn prepare_flash(&mut self) -> Result<(), String> {
         let mut attach = Vec::new();
         attach.extend_from_slice(&0_u32.to_le_bytes());
@@ -283,7 +283,7 @@ impl RomFlasher {
         for value in [size as u32, blocks as u32, BLOCK_BYTES as u32, segment.address, 0] {
             begin.extend_from_slice(&value.to_le_bytes());
         }
-        // 擦除按每 MB 约 40 秒放宽超时，esptool 也是这个数。
+        // Erasing gets about 40 seconds of extra timeout per MB, the same figure esptool uses.
         let erase_timeout = Duration::from_secs(10 + 40 * (size as u64 / (1024 * 1024) + 1));
         self.call(OP_FLASH_BEGIN, &begin, 0, erase_timeout)?;
         for (index, block) in segment.data.chunks(BLOCK_BYTES).enumerate() {
@@ -314,8 +314,8 @@ impl RomFlasher {
                 ),
             );
         }
-        // 不发 FLASH_END：esptool 对 ROM 下载程序也不发，那会让它退出去跑
-        // 用户代码；写完直接校验，最后统一硬复位。
+        // No FLASH_END: esptool doesn't send it to the ROM loader either, since it would exit to run
+        // user code; verify right after writing and hard-reset once at the end.
         self.verify(segment)
     }
 
@@ -326,7 +326,7 @@ impl RomFlasher {
         }
         let timeout = Duration::from_secs(8 * (segment.data.len() as u64 / (1024 * 1024) + 1) + 5);
         let response = self.call(OP_SPI_FLASH_MD5, &data, 0, timeout)?;
-        // ROM 回 32 个十六进制字符，后面跟状态字节。
+        // The ROM replies with 32 hex characters followed by the status bytes.
         let digest = response.data.get(..32).ok_or("MD5 reply too short")?;
         let actual = String::from_utf8_lossy(digest).to_ascii_lowercase();
         let expected = format!("{:x}", <md5::Md5 as md5::Digest>::digest(&segment.data));
@@ -337,7 +337,7 @@ impl RomFlasher {
     }
 }
 
-/// 整个流程：进下载模式、认芯片、挂 flash、逐段写并校验、硬复位。
+/// The whole flow: enter download mode, identify the chip, attach flash, write and verify each segment, hard reset.
 pub fn flash(port_name: &str, paced: bool, segments: &[Segment], on_progress: &mut dyn FnMut(f32, &str)) -> Result<(), String> {
     let mut flasher = RomFlasher::open(port_name, paced)?;
     on_progress(0.0, "entering download mode");

@@ -1,13 +1,13 @@
 #!/usr/bin/env python3
-"""用火山引擎豆包语音合成一句话，存成 24 kHz、16-bit、单声道 WAV。
+"""Synthesize one line with Volcano Engine Doubao TTS and save it as a 24 kHz, 16-bit, mono WAV.
 
-用法：
-    VOLC_API_KEY=<豆包语音控制台的 API Key> tools/volc-tts.py <音色> <文本> <输出.wav>
+Usage:
+    VOLC_API_KEY=<API key from the Doubao Speech console> tools/volc-tts.py <voice> <text> <output.wav>
 
-走的是 V3 HTTP Chunked 单向流式接口：服务端逐块返回 JSON，每块的 data 是
-base64 的 PCM；code 20000000 表示合成结束。X-Api-Resource-Id 决定模型版本
-和计费项：默认 seed-tts-1.0（湾湾小何等 1.0 音色），2.0 音色要用
-VOLC_RESOURCE_ID=seed-tts-2.0。两个版本都得先在控制台开通对应的字符版。
+Uses the V3 HTTP chunked one-way streaming API: the server returns JSON chunk by chunk, each chunk's data is
+base64 PCM; code 20000000 means synthesis is finished. X-Api-Resource-Id selects the model version
+and billing item: the default is seed-tts-1.0 (Wanwan Xiaohe and other 1.0 voices); 2.0 voices need
+VOLC_RESOURCE_ID=seed-tts-2.0. Either version must first be enabled (the per-character plan) in the console.
 """
 
 from __future__ import annotations

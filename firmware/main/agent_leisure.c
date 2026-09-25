@@ -1,9 +1,9 @@
 #include "agent_leisure.h"
 
-// 只依赖标准头：这个导演要能在 Mac 上直接编译跑测试（tools/test-leisure.sh）。
+// Standard headers only: this director must compile and run its tests directly on the Mac (tools/test-leisure.sh).
 
-// 实机验收时把所有时限压缩，几分钟内走完无聊、困倦、关背光、被唤醒。
-// 正式固件不定义它。
+// For on-device acceptance, compresses every time limit so bored, sleepy, backlight off
+// and waking up all happen within a few minutes. Release firmware doesn't define it.
 #ifndef AGENT_TIME_SCALE
 #define AGENT_TIME_SCALE 1u
 #endif
@@ -12,14 +12,14 @@
 #define LIGHTS_OUT_AFTER_MS \
   (AGENT_LEISURE_LIGHTS_OUT_AFTER_MS / AGENT_TIME_SCALE)
 
-/// 进入一个档位后多久开第一场；之后的间隔按档位随机。
+/// How long after entering a level the first skit starts; later gaps are random per level.
 #define FIRST_SKIT_DELAY_MS (3000u)
 #define BORED_GAP_MIN_MS (20000u / AGENT_TIME_SCALE)
 #define BORED_GAP_MAX_MS (40000u / AGENT_TIME_SCALE)
 #define SLEEPY_GAP_MIN_MS (120000u / AGENT_TIME_SCALE)
 #define SLEEPY_GAP_MAX_MS (300000u / AGENT_TIME_SCALE)
 
-/// 各剧目时长；0 表示一直演到档位变化。
+/// Length of each skit; 0 means it plays until the level changes.
 static const uint32_t SKIT_LENGTH_MS[AGENT_SKIT_COUNT] = {
     [AGENT_SKIT_NONE] = 0,      [AGENT_SKIT_PATROL] = 12000,
     [AGENT_SKIT_BALL] = 12000,  [AGENT_SKIT_READ] = 15000,
@@ -39,7 +39,7 @@ static uint32_t skit_started_ms;
 static uint32_t next_skit_at_ms;
 
 static uint32_t rng_next(void) {
-  // xorshift32：够随机，也够小。
+  // xorshift32: random enough, and small enough.
   uint32_t x = rng_state;
   x ^= x << 13;
   x ^= x >> 17;
@@ -52,7 +52,7 @@ static uint32_t rng_between(uint32_t low, uint32_t high) {
   return low + rng_next() % (high - low + 1u);
 }
 
-/// 夜里：23 点到早上 7 点。不知道几点就当白天，宁可亮着也不要在下午关灯。
+/// Night: 23:00 to 07:00. An unknown hour counts as daytime: better to stay lit than go dark in the afternoon.
 static bool is_night(void) { return hour >= 23 || (hour >= 0 && hour < 7); }
 
 static agent_leisure_tier_t tier_for(uint32_t now_ms) {
@@ -77,7 +77,7 @@ static uint32_t gap_for(agent_leisure_tier_t which) {
   return rng_between(BORED_GAP_MIN_MS, BORED_GAP_MAX_MS);
 }
 
-/// 剧目权重。夜里多睡少玩；今天一件没做就无聊地踢球，做得多就累得梦多。
+/// Skit weights. At night, more sleep and less play; nothing done today means bored ball-kicking, lots done means tired and more dreams.
 static void skit_weights(agent_leisure_tier_t which, unsigned *weights) {
   for (int index = 0; index < AGENT_SKIT_COUNT; index++) {
     weights[index] = 0;
@@ -118,7 +118,7 @@ static void skit_weights(agent_leisure_tier_t which, unsigned *weights) {
 static agent_skit_t pick_skit(agent_leisure_tier_t which) {
   unsigned weights[AGENT_SKIT_COUNT];
   skit_weights(which, weights);
-  // 不连着演同一出；只剩一出可选时才允许重复。
+  // Don't play the same skit twice in a row; repeat only when it is the only choice left.
   unsigned total = 0;
   unsigned total_without_last = 0;
   for (int index = 0; index < AGENT_SKIT_COUNT; index++) {

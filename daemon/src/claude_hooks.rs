@@ -1,6 +1,6 @@
-//! Claude Code 生命周期事件到通用活动模型的映射。
+//! Maps Claude Code lifecycle events onto the generic activity model.
 //!
-//! 与 Codex Adapter 共用同一个聚合器；差别只在事件名与活动身份的合成方式。
+//! Shares the aggregator with the Codex adapter; only event names and how activity identity is built differ.
 
 use vibebuddy_protocol::Event;
 use serde::Deserialize;
@@ -11,9 +11,9 @@ use crate::activity::{
 };
 use crate::session_titles::{SessionTitles, git_branch};
 
-/// 任务卡上区分 Agent 的前缀。
+/// Prefix on task cards that tells agents apart.
 const PREFIX: &str = "CC:";
-/// 工作目录不可用时的任务卡标题。
+/// Task-card title when the working directory isn't available.
 const FALLBACK_TITLE: &str = "CLAUDE";
 
 #[derive(Debug, Deserialize)]
@@ -28,7 +28,7 @@ pub struct ClaudeHook {
     pub agent_id: Option<String>,
     #[serde(default)]
     pub response_kind: Option<String>,
-    /// 运行处：Hook 在本机按进程环境判定，daemon 只做路由。
+    /// Where it runs: the hook decides from the process environment on this Mac; the daemon only routes.
     #[serde(default)]
     pub surface: Option<String>,
     #[serde(default)]
@@ -45,7 +45,7 @@ pub fn apply(
     tracker.note_workspace(hook.cwd.as_deref());
     let id = activity_id(&hook);
     let cwd = hook.cwd.as_deref();
-    // 第一行写 Claude App 给会话起的标题，没有就写分支，再没有才是项目名。
+    // First line: the title Claude App gave the session, else the branch, else the project name.
     let project = project_name(cwd);
     let candidates = [titles.claude(&hook.session_id, cwd), cwd.and_then(git_branch)];
     let title = card_title(PREFIX, &candidates, project.as_deref(), FALLBACK_TITLE);
@@ -70,7 +70,7 @@ pub fn apply(
             }
         }
         "SubagentStop" => tracker.finish(&id, &title),
-        // 回合因 API 错误结束：既不是成功也不是任务失败。
+        // The turn ended on an API error: neither a success nor a task failure.
         "StopFailure" => tracker.discard(&id, "STOPPED"),
         "SessionEnd" => tracker.discard_session(&hook.session_id, "ALL QUIET"),
         _ => None,
@@ -79,8 +79,8 @@ pub fn apply(
     event
 }
 
-/// Claude Code 的后台 agent 共享父会话的 `session_id` 与 `prompt_id`，
-/// 因此必须把 `agent_id` 并入身份，否则并行的子 agent 会互相覆盖。
+/// Claude Code's background agents share the parent session's `session_id` and `prompt_id`,
+/// so `agent_id` must be part of the identity, or parallel subagents overwrite each other.
 fn activity_id(hook: &ClaudeHook) -> ActivityId {
     let mut key = hook.session_id.clone();
     if let Some(prompt_id) = hook.prompt_id.as_deref() {

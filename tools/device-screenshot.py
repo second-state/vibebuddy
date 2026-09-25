@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
-"""从设备截图：发 `device.screenshot`，收行程编码的帧缓冲，写成 PNG。
+"""Screenshot the device: send `device.screenshot`, receive the run-length-encoded framebuffer, write a PNG.
 
-要独占串口，先停掉 vibebuddyd（见 tools/screenshot.sh）。打开串口时不碰
-DTR/RTS，设备不会复位，画面保持原样。
-用法: device-screenshot.py PORT OUTPUT.png [scale]
+Needs exclusive use of the serial port, so stop vibebuddyd first (see tools/screenshot.sh). Opening the port
+leaves DTR/RTS alone, so the device doesn't reset and the screen stays as it is.
+Usage: device-screenshot.py PORT OUTPUT.png [scale]
 """
 
 from __future__ import annotations
@@ -78,7 +78,7 @@ def main(argv: list[str]) -> int:
         print(f"帧不完整：收到 {len(pixels)} 像素，应为 {WIDTH * HEIGHT}", file=sys.stderr)
         return 1
     if not backlight_on:
-        # 背光关着，人眼看到的就是一块黑屏；把画面压暗到几乎不可见。
+        # With the backlight off, what a person sees is a black screen; dim the image until it is barely visible.
         pixels = [bytes(channel // 8 for channel in pixel) for pixel in pixels]
     write_png(output_path, pixels, scale)
     print(f"{output_path} 背光{'开' if backlight_on else '关'}")

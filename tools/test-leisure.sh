@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# 在 Mac 上编译并运行休闲导演的测试；不需要 ESP-IDF。
+# Build and run the leisure director tests on the Mac; no ESP-IDF needed.
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"

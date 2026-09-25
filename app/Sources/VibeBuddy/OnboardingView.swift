@@ -1,7 +1,7 @@
 import SwiftUI
 import VibeBuddyCore
 
-/// 首次引导：欢迎 → 找设备 → 接入 → 选音色 → 登录时启动 → 完成。
+/// First-run onboarding: welcome → find the box → connect agents → pick a voice → launch at login → done.
 struct OnboardingView: View {
     @ObservedObject var model: AppModel
     let finish: () -> Void
@@ -36,7 +36,7 @@ struct OnboardingView: View {
                 Spacer()
                 if step == 1 || step == 3 { Button("Skip") { step += 1 }.disabled(flashing) }
                 if step < 5 {
-                    // 刷机中不让翻页：翻过去进度就没人看了。
+                    // No paging while flashing: once you page away, nobody is watching the progress.
                     Button(step == 2 && !anyHookInstalled ? "Not now" : "Next") { step += 1 }
                         .keyboardShortcut(.defaultAction)
                         .disabled(step == 1 && flashing)
@@ -70,9 +70,9 @@ struct OnboardingView: View {
         VStack(alignment: .leading, spacing: 12) {
             Text("Connect the box to this Mac with a USB cable.").font(.title3)
             if let operation = model.operation, operation.kind == .firmware, operation.state != .done {
-                // 烧录一开始 daemon 就让出串口，盒子在状态里变成"没连着"；进度必须
-                // 摆在连接判断之前，否则这一页会退回"还没找到盒子"，用户以为没开始
-                // （2026-09-22 同事首次刷机就这样点了下一步）。
+                // As soon as flashing starts the daemon releases the serial port and the box shows as "not connected"; progress must
+                // come before the connection check, or this page falls back to "no box yet" and the user thinks nothing started
+                // (a colleague clicked Next exactly like that on their first flash, 2026-09-22).
                 Label("Flashing Vibe Buddy firmware…", systemImage: "arrow.down.circle").foregroundStyle(.orange)
                 OperationRow(operation: operation)
                 if operation.state == .failed {
@@ -83,7 +83,7 @@ struct OnboardingView: View {
                         .font(.caption).foregroundStyle(.secondary)
                 }
             } else if let device = model.status?.device, device.connected, model.foreignFirmware {
-                // 出厂机：串口在、固件不是我们的。刷入走和升级一样的烧录流程。
+                // Factory box: the serial port is there but the firmware isn't ours. Flashing uses the same path as an upgrade.
                 Label("Found a box (\(device.port ?? "")), but it isn't running Vibe Buddy firmware.", systemImage: "exclamationmark.triangle")
                     .foregroundStyle(.orange)
                 if model.bundledFirmwareBuild == nil {

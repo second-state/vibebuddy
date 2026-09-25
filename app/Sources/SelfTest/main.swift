@@ -1,5 +1,5 @@
-// 视图模型缝的自检：一段状态 JSON 进，菜单文案、图标状态、Hook 配置合并结果出。
-// `swift run SelfTest`；任何一条不过就以非零退出。
+// Self-test for the view-model seams: status JSON in; menu copy, icon state and hook config merges out.
+// `swift run SelfTest`; exits non-zero if any check fails.
 import Foundation
 import VibeBuddyCore
 
@@ -11,7 +11,7 @@ func check(_ condition: Bool, _ message: String, file: String = #file, line: Int
     }
 }
 
-// 1. 状态 JSON 解码，时间带微秒与时区。
+// 1. Status JSON decoding, with microsecond timestamps and time zones.
 let sample = """
 {"daemon":{"build":"0.3.0 abc1234 2026-09-16 10:50","app_version":"0.3.0"},
  "device":{"connected":true,"port":"/dev/cu.usbmodem1","bridge":true,"mode":"pomodoro","firmware_build":"abc1234-dirty 2026-09-16 13:11","voice":"xiaohe2","volume":65},
@@ -48,7 +48,7 @@ do {
     check(false, "状态解码抛错：\(error)")
 }
 
-// 1b. 固件包：zip 里带一层目录也找得到；验魔数；build.txt 优先于镜像里的版本串。
+// 1b. Firmware package: found even inside an extra zip folder; magic numbers checked; build.txt wins over the image's version string.
 do {
     let root = FileManager.default.temporaryDirectory.appendingPathComponent("selftest-fw-\(UUID().uuidString)")
     let nested = root.appendingPathComponent("firmware")
@@ -86,7 +86,7 @@ do {
     check(false, "状态解码抛错：\(error)")
 }
 
-// 2. Hook 配置合并：不动别人的 Hook，旧 Python 条目被替换，移除后干净。
+// 2. Hook config merge: others' hooks untouched, old Python entries replaced, clean after removal.
 let existing: [String: Any] = [
     "hooks": [
         "PreToolUse": [["matcher": "Bash", "hooks": [["type": "command", "command": "'/Users/x/.codex/hooks/rtk-rewrite.sh'"]]]],
@@ -112,7 +112,7 @@ check(removedHooks.keys.sorted() == ["PreToolUse"], "移除后只剩别人的：
 let diff = HookConfig.describeChange(from: existing, to: installed, agent: .codex)
 check(diff.contains("- Stop: /usr/bin/python3 /old/codex-hook.py") && diff.contains("+ Stop: \"\(binary)\" codex"), "差异说明：\(diff)")
 check(HookAgent.claude.events.count == 8, "Claude 八个事件")
-// Codex 信任提示：配置比最近一次事件新才报警；没收到过事件不下结论；读不到文件时间不报警。
+// Codex trust hint: warn only if the config is newer than the last event; no verdict without events; no warning if the file time is unreadable.
 let earlier = Date(timeIntervalSince1970: 1_000)
 let later = Date(timeIntervalSince1970: 2_000)
 check(HookConfig.codexTrustHint(configModifiedAt: later, lastEvent: nil) == .waitingFirstEvent, "没收到过事件：等待")
@@ -120,7 +120,7 @@ check(HookConfig.codexTrustHint(configModifiedAt: later, lastEvent: earlier) == 
 check(HookConfig.codexTrustHint(configModifiedAt: earlier, lastEvent: later) == .trusted, "改完之后收到过事件：已在运行")
 check(HookConfig.codexTrustHint(configModifiedAt: nil, lastEvent: later) == .trusted, "读不到文件时间不报警")
 
-// 3. 语音包解析。
+// 3. Voice pack parsing.
 var pack = Data(count: 256)
 pack.replaceSubrange(0..<4, with: Data("VBVP".utf8))
 pack.replaceSubrange(16..<23, with: Data("hsiaoyu".utf8))

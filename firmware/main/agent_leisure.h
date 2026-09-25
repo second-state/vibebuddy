@@ -3,27 +3,28 @@
 #include <stdbool.h>
 #include <stdint.h>
 
-/// 休闲模式的导演：管无聊度、抽剧目、决定什么时候转暗和关背光。
-/// 不读时钟、不碰硬件，所有入口都由调用方传入毫秒计数，允许回绕。
+/// Director for leisure mode: tracks boredom, draws skits, and decides when to dim and
+/// turn off the backlight. It reads no clock and touches no hardware; every entry point
+/// takes a millisecond count from the caller, and wraparound is allowed.
 
-/// 空闲多久算无聊、多久算困倦、夜里困倦多久后关背光。
+/// How long idle counts as bored, as sleepy, and how long sleepy at night before the backlight goes off.
 #define AGENT_LEISURE_BORED_AFTER_MS (5u * 60u * 1000u)
 #define AGENT_LEISURE_SLEEPY_AFTER_MS (30u * 60u * 1000u)
 #define AGENT_LEISURE_LIGHTS_OUT_AFTER_MS (90u * 60u * 1000u)
-/// 剧目动画的帧长：8 fps。
+/// Frame length of skit animations: 8 fps.
 #define AGENT_LEISURE_FRAME_MS 125u
 
 typedef enum {
-  /// 待命：现有的呼吸、眨眼、轮播战绩。
+  /// Standby: the usual breathing, blinking and rotating stats.
   AGENT_LEISURE_ALERT,
-  /// 无聊：隔一会儿演一段小剧目。
+  /// Bored: play a short skit every so often.
   AGENT_LEISURE_BORED,
-  /// 困倦：以睡觉为主，画面转暗。
+  /// Sleepy: mostly sleeping, with the screen dimmed.
   AGENT_LEISURE_SLEEPY,
 } agent_leisure_tier_t;
 
 typedef enum {
-  /// 剧目之间的普通空闲。
+  /// Plain idle between skits.
   AGENT_SKIT_NONE,
   AGENT_SKIT_PATROL,
   AGENT_SKIT_BALL,
@@ -32,7 +33,7 @@ typedef enum {
   AGENT_SKIT_HIDE,
   AGENT_SKIT_STARTLE,
   AGENT_SKIT_DREAM,
-  /// 困倦期的底色：睡觉。
+  /// Base look while sleepy: sleeping.
   AGENT_SKIT_SLEEP,
   AGENT_SKIT_COUNT,
 } agent_skit_t;
@@ -40,27 +41,27 @@ typedef enum {
 typedef struct {
   agent_leisure_tier_t tier;
   agent_skit_t skit;
-  /// 当前剧目已经演了几帧。
+  /// How many frames of the current skit have played.
   uint32_t skit_frame;
-  /// 困倦：画面转暗。
+  /// Sleepy: dim the screen.
   bool dim;
-  /// 夜里睡久了：关背光。
+  /// Asleep long enough at night: backlight off.
   bool lights_out;
 } agent_leisure_view_t;
 
 void agent_leisure_init(uint32_t seed, uint32_t now_ms);
-/// 任何活动都把无聊度清零：Agent 有动静、按键、番茄钟在走。
+/// Any activity resets boredom: agent activity, a key press, a running pomodoro.
 void agent_leisure_note_activity(uint32_t now_ms);
-/// K1 长按：现在就去玩。
+/// K1 long press: go play right now.
 void agent_leisure_force_bored(uint32_t now_ms);
-/// 本地小时数，来自 Mac 端心跳；-1 表示不知道。
+/// Local hour from the Mac's heartbeat; -1 means unknown.
 void agent_leisure_set_hour(int hour);
-/// 当日完成的专注或任务数，决定它是累了还是无聊。
+/// Focus sessions or tasks completed today, which decides whether it is tired or bored.
 void agent_leisure_set_done_count(unsigned done);
-/// 推进导演。档位或剧目变了返回 true。
+/// Advances the director. Returns true when the level or skit changed.
 bool agent_leisure_tick(uint32_t now_ms);
 void agent_leisure_view(uint32_t now_ms, agent_leisure_view_t *view);
-/// 测试与预览用：立刻开演某个剧目。
+/// For tests and previews: start a given skit immediately.
 void agent_leisure_start_skit(agent_skit_t skit, uint32_t now_ms);
 
 const char *agent_leisure_tier_name(agent_leisure_tier_t tier);

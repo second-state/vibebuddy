@@ -15,7 +15,7 @@ esp_err_t agent_tally_init(void) {
   esp_err_t result = nvs_flash_init();
   if (result == ESP_ERR_NVS_NO_FREE_PAGES ||
       result == ESP_ERR_NVS_NEW_VERSION_FOUND) {
-    // 分区格式过期时擦掉重来：里面只有一天的计数，丢了不心疼。
+    // If the partition format is stale, erase and start over: it only holds one day's counts, no great loss.
     ESP_RETURN_ON_ERROR(nvs_flash_erase(), TAG, "擦除 NVS 失败");
     result = nvs_flash_init();
   }

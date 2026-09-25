@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
-# 装出 Vibe Buddy.app：Rust 的两个 helper、Swift 的 App、固件三件套、五个语音包。
+# Assembles Vibe Buddy.app: the two Rust helpers, the Swift app, the three firmware images, and the voice packs.
 #
-# 用法: app/scripts/build-app.sh [--debug] [--install]
-#   --debug    允许没有固件（设备页隐藏「更新」），Swift 用 debug 配置。
-#   --install  装完拷到 /Applications 并从那里启动。日常使用的 App 必须装在这里：
-#              worktree 里的 build 目录随时会被删，登录项与 Hook 绑在那上面，
-#              下次开机就什么都不剩（2026-09-17 出过一次）。
-# Release 构建要求 firmware/build 里有三件套，缺了就失败并提示先构建固件。
+# Usage: app/scripts/build-app.sh [--debug] [--install]
+#   --debug    Allow a build without firmware (the Device tab hides "Update"); Swift uses the debug configuration.
+#   --install  Copy the result to /Applications and launch it from there. The app you use day to day must live there:
+#              a worktree's build directory can be deleted at any time, and the login item and hooks point into it,
+#              so after the next reboot nothing is left (this happened once on 2026-09-17).
+# A release build requires the three images in firmware/build; if any is missing it fails and says to build the firmware first.
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
@@ -21,8 +21,8 @@ for arg in "$@"; do
     esac
 done
 
-# 语义版本取 Cargo 工作区的 version（仓库还没有 tag，git describe 只是哈希）；
-# 构建号是 git 描述，App「关于」里两者都显示，心跳里只带语义版本。
+# The semantic version comes from the Cargo workspace version (the repo had no tags yet, so git describe is just a hash);
+# the build number is the git description. The app's About shows both; the heartbeat carries only the semantic version.
 version="$(sed -n 's/^version = "\(.*\)"/\1/p' "${repo_root}/Cargo.toml" | head -n 1)"
 version="${version:-0.0.0}"
 build_number="$(git -C "${repo_root}" describe --tags --always --dirty 2>/dev/null || echo dev)"
@@ -34,9 +34,9 @@ python3 "${repo_root}/tools/check-localization.py"
 echo "== Rust helper"
 cargo build --release --manifest-path "${repo_root}/Cargo.toml" -p vibebuddyd -p vibebuddy-hook
 echo "== Swift App"
-# macOS 27 的 SDK 把 SwiftUI 的 @State 做成了宏，实现它的 SwiftUIMacros 插件只随
-# Xcode 发，命令行工具里没有，用默认 SDK 编译必败。只装了命令行工具时退回它
-# 自带的上一版 SDK；装了 Xcode 或自己设了 SDKROOT 的不动。
+# The macOS 27 SDK turns SwiftUI's @State into a macro, and the SwiftUIMacros plugin implementing it ships only
+# with Xcode, not the command line tools, so compiling against the default SDK always fails. With only the command
+# line tools installed, fall back to their bundled previous SDK; leave Xcode installs and an explicit SDKROOT alone.
 clt="/Library/Developer/CommandLineTools"
 if [[ -z "${SDKROOT:-}" && "$(xcode-select -p 2>/dev/null)" == "${clt}" \
       && ! -e "${clt}/usr/lib/swift/host/plugins/libSwiftUIMacros.dylib" \
@@ -66,7 +66,7 @@ for lproj in "${app_dir}"/Localization/*.lproj; do
 done
 
 echo "== App 图标"
-# 菜单栏的像素脸同一份源码渲染成 App 图标，脸只在 PixelFace.swift 里定义一次。
+# The menu bar pixel face is rendered into the app icon from the same source; the face is defined once, in PixelFace.swift.
 icon_tool="${app_dir}/.build/make-app-icon"
 swiftc -O "${app_dir}/Sources/VibeBuddy/PixelFace.swift" "${app_dir}/scripts/make-app-icon.swift" -o "${icon_tool}" 2>&1 | grep -v "warning:" || true
 [[ -x "${icon_tool}" ]] || { echo "图标生成器编译失败" >&2; exit 1; }
@@ -81,14 +81,14 @@ if [[ -f "${fw}/bootloader/bootloader.bin" && -f "${fw}/partition_table/partitio
     cp "${fw}/bootloader/bootloader.bin" "${contents}/Resources/firmware/bootloader.bin"
     cp "${fw}/partition_table/partition-table.bin" "${contents}/Resources/firmware/partition-table.bin"
     cp "${fw}/vibebuddy-fw.bin" "${contents}/Resources/firmware/vibebuddy-fw.bin"
-    # 构建标识要和盒子页脚报的一模一样：镜像里 esp_app_desc 的 version 加上
-    # 本次构建的时刻戳，格式与固件 describe_firmware_build 一致。
+    # The build ID must match exactly what the box footer reports: the esp_app_desc version in the image plus
+    # this build's timestamp, formatted like the firmware's describe_firmware_build.
     python3 - "${fw}" > "${contents}/Resources/firmware/build.txt" <<'PY'
 import re, struct, sys
 from pathlib import Path
 build = Path(sys.argv[1])
 image = (build / "vibebuddy-fw.bin").read_bytes()
-# esp_app_desc_t 在镜像偏移 0x20：magic(4) secure_version(4) reserv1(8) version[32]
+# esp_app_desc_t sits at image offset 0x20: magic(4) secure_version(4) reserv1(8) version[32]
 magic, = struct.unpack_from("<I", image, 0x20)
 assert magic == 0xABCD5432, "找不到 esp_app_desc"
 version = image[0x30:0x50].split(b"\0", 1)[0].decode()[:24]
@@ -113,9 +113,9 @@ for dir in "${repo_root}"/voices/*/; do
     fi
 done
 
-# 登录项与通知都认包身份，未签名的包每次改动都像换了个 App。本机默认 ad-hoc；
-# 发布时 CI 用 CODESIGN_IDENTITY 给出 Developer ID，公证要求 hardened runtime
-# 与时间戳，这条路上签名失败就是构建失败。
+# Login items and notifications key on the bundle's identity, so an unsigned bundle looks like a new app after every change. Locally we sign ad hoc;
+# for releases CI passes a Developer ID in CODESIGN_IDENTITY, and notarization requires the hardened runtime
+# and a timestamp, so on that path a signing failure fails the build.
 if [[ -n "${CODESIGN_IDENTITY:-}" ]]; then
     codesign --force --deep --options runtime --timestamp --sign "${CODESIGN_IDENTITY}" "${bundle}"
 else
@@ -126,7 +126,7 @@ echo "== 完成: ${bundle} (${version}, ${build_number})"
 if [[ ${install} -eq 1 ]]; then
     installed="/Applications/Vibe Buddy.app"
     echo "== 安装到 ${installed}"
-    # 正在跑的实例先请它退出（顺带退 daemon），换包之后再拉起。
+    # Ask a running instance to quit first (which also stops its daemon), swap the bundle, then relaunch.
     if pgrep -xq VibeBuddy; then
         osascript -e 'quit app id "com.vibebuddy.app"' >/dev/null 2>&1 || true
         for _ in $(seq 1 50); do pgrep -xq VibeBuddy || break; sleep 0.2; done

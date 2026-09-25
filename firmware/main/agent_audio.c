@@ -33,7 +33,7 @@
 
 static const char *TAG = "agent_audio";
 static i2s_chan_handle_t tx_handle;
-/// 只有 ES8311 版本才有；NS4168 版本没有音量可调。
+/// Only the ES8311 variant has one; the NS4168 variant has no adjustable volume.
 static esp_codec_dev_handle_t codec_device;
 static unsigned volume = AGENT_AUDIO_VOLUME_DEFAULT;
 static QueueHandle_t prompt_queue;
@@ -89,7 +89,7 @@ static unsigned clamp_volume(unsigned level) {
   return level;
 }
 
-/// 开机读回上次的音量；没存过就是默认值。NVS 由 agent_tally_init 先初始化。
+/// Reads back the last volume at boot; the default if none was saved. agent_tally_init initializes NVS first.
 static void load_volume(void) {
   nvs_handle_t handle;
   if (nvs_open(VOLUME_NAMESPACE, NVS_READONLY, &handle) != ESP_OK) {
@@ -143,7 +143,7 @@ static esp_err_t init_i2s(void) {
 static esp_err_t init_es8311(i2c_master_bus_handle_t i2c_bus) {
   audio_codec_i2c_cfg_t i2c_config = {
       .port = I2C_NUM_0,
-      // esp_codec_dev 接收 8 位线地址，内部再转换成 7 位地址。
+      // esp_codec_dev takes the 8-bit wire address and converts it to 7-bit internally.
       .addr = ES8311_ADDRESS << 1,
       .bus_handle = i2c_bus,
   };
@@ -223,7 +223,7 @@ static void audio_task(void *argument) {
       continue;
     }
 
-    // 先标记在播再取指针：语音包写入那边靠这个顺序判断映射区还有没有人用。
+    // Mark playing before taking the pointer: the voice pack writer relies on this order to tell whether the mapped region is still in use.
     playing = true;
     __sync_synchronize();
     const uint8_t *start;

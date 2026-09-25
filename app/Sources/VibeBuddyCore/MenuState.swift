@@ -1,6 +1,6 @@
 import Foundation
 
-/// 菜单栏图标与菜单文案，从状态快照与 daemon 存活情况推出来。
+/// Menu bar icon and menu copy, derived from the status snapshot and whether the daemon is alive.
 /// Copy is keyed in English and looked up in the host bundle (the app ships
 /// zh-Hans.lproj); without a table, as in SelfTest, the English key is shown.
 public struct MenuState: Equatable {
@@ -9,7 +9,7 @@ public struct MenuState: Equatable {
     public var deviceLine: String
     public var modeLine: String
     public var todayLine: String
-    /// 第一行可点：daemon 异常时点它重启。
+    /// The first line is clickable: when the daemon is down, clicking it restarts it.
     public var deviceLineIsAction: Bool
 
     public init(icon: Icon, deviceLine: String, modeLine: String, todayLine: String, deviceLineIsAction: Bool) {

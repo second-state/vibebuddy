@@ -184,15 +184,15 @@ finish() {
 # Replace the example below. Set TOTAL_STAGES to match the stages you write.
 # ──────────────────────────────────────────────────────────────────────────
 
-# 给 .github/workflows/release-app.yml 配齐 Developer ID 签名与公证要用的五个
-# GitHub secrets。私钥、CSR、p12 都留在 ~/.vibebuddy-signing（不进仓库、不写 .env）；
-# 中途退出后重跑，已生成的私钥会接着用。
+# Set up the five GitHub secrets that .github/workflows/release-app.yml needs for Developer ID
+# signing and notarization. The private key, CSR and p12 stay in ~/.vibebuddy-signing (never in the repo or .env);
+# rerunning after quitting halfway reuses the private key already generated.
 
 TOTAL_STAGES=5
 
 cd "$(dirname "${BASH_SOURCE[0]}")/.."
-# 固定用系统自带的 LibreSSL：Homebrew 的 OpenSSL 3 默认出的 p12，macOS 的
-# security import 读不了。
+# Always use the system LibreSSL: p12 files made by Homebrew's OpenSSL 3 with default settings can't be read
+# by macOS's security import.
 OPENSSL=/usr/bin/openssl
 WORK="${HOME}/.vibebuddy-signing"
 KEY="${WORK}/developer-id.key"
@@ -238,7 +238,7 @@ if [[ "${SUBJECT}" != *"Developer ID Application"* ]]; then
   warn "这张不是 Developer ID Application 证书：${SUBJECT}"
   exit 1
 fi
-# 证书与私钥必须是一对，否则导出的 p12 在 CI 上签不了名。
+# The certificate and private key must be a pair, or the exported p12 can't sign on CI.
 if [[ "$("${OPENSSL}" x509 -in "${WORK}/developer-id.pem" -noout -modulus)" != "$("${OPENSSL}" rsa -in "${KEY}" -noout -modulus 2>/dev/null)" ]]; then
   warn "这张证书不是用 ${CSR} 申请的，和本机私钥对不上。"
   exit 1
@@ -256,12 +256,12 @@ export P12_PASSWORD
   -certfile "${WORK}/DeveloperIDG2CA.pem" -name "Developer ID Application" \
   -out "${P12}" -passout env:P12_PASSWORD
 chmod 600 "${P12}"
-# 照 CI 的做法在临时钥匙串里导一遍，确认 codesign 认得出这个身份。
+# Import it into a temporary keychain the way CI does, to confirm codesign recognizes the identity.
 TEST_KEYCHAIN="${WORK}/verify.keychain-db"
 security delete-keychain "${TEST_KEYCHAIN}" >/dev/null 2>&1 || true
 security create-keychain -p verify "${TEST_KEYCHAIN}"
 security import "${P12}" -P "${P12_PASSWORD}" -A -t cert -f pkcs12 -k "${TEST_KEYCHAIN}" >/dev/null
-# 信任链只对搜索列表里的钥匙串求值，不加进去 -v 一个都找不到（2026-09-22 实测）。
+# The trust chain is only evaluated for keychains in the search list; without adding it, -v finds nothing (verified 2026-09-22).
 SAVED_KEYCHAINS="$(security list-keychains -d user | tr -d '" ' | tr '\n' ' ')"
 # shellcheck disable=SC2086
 security list-keychains -d user -s "${TEST_KEYCHAIN}" ${SAVED_KEYCHAINS}
@@ -297,7 +297,7 @@ step "登录 → 「登录与安全」→「App 专用密码」→ 生成，名�
 step "复制弹出来的 xxxx-xxxx-xxxx-xxxx。"
 while true; do
   ask_secret APPLE_APP_PASSWORD "粘贴 App 专用密码:"
-  # 真的拿它向公证服务登录一次；能列出历史记录才算对。
+  # Actually log in to the notary service with it once; it only counts if the history can be listed.
   if xcrun notarytool history --apple-id "${APPLE_ID}" --team-id "${APPLE_TEAM_ID}" \
        --password "${APPLE_APP_PASSWORD}" >/dev/null 2>&1; then
     printf '  %s✓%s 公证服务接受这组凭据\n' "$GREEN" "$RESET"

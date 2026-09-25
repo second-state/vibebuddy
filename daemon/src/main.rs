@@ -41,34 +41,34 @@ use tokio_stream::wrappers::BroadcastStream;
 use tracing::{info, warn};
 use tracing_subscriber::EnvFilter;
 
-/// 最后一个会话僵死后不会再有 Hook 事件，只能靠定时扫描释放画面。
+/// Once the last session hangs there are no more hook events; only a periodic sweep can free the screen.
 const SWEEP_INTERVAL: Duration = Duration::from_secs(60);
-/// 心跳间隔。设备按这个节奏判断链路是否还活着，固件的超时是它的三倍。
+/// Heartbeat interval. The device uses this cadence to judge whether the link is alive; the firmware timeout is three times it.
 const HEARTBEAT_INTERVAL: Duration = Duration::from_secs(5);
-/// 构建时的 git 描述，由 `build.rs` 写入。
+/// Build-time git description, written by `build.rs`.
 const BUILD_REVISION: &str = env!("VIBEBUDDY_BUILD");
 
 #[derive(Clone)]
 struct AppState {
     transport: Arc<dyn Transport>,
-    /// 所有 Agent 共享一个聚合器：设备只有一块屏幕和一只小灯灵。
+    /// All agents share one aggregator: the device has just one screen and one little buddy.
     activities: Arc<Mutex<ActivityTracker>>,
-    /// 会话标题的查询与缓存：Claude App 的会话标题、Codex 的线程名。
+    /// Session title lookup and cache: Claude app session titles and Codex thread names.
     titles: Arc<Mutex<SessionTitles>>,
-    /// 设备此刻的样子，从诊断行里拼出来。
+    /// What the device looks like right now, pieced together from diagnostic lines.
     device: Arc<Mutex<DeviceState>>,
     hooks_seen: Arc<Mutex<HooksSeen>>,
     config: Arc<Mutex<Config>>,
     config_path: Option<PathBuf>,
-    /// 正在写语音包或烧固件；同一时刻只有一个。
+    /// Writing a voice pack or flashing firmware; only one at a time.
     operation: Arc<Mutex<Option<Operation>>>,
-    /// 设备消息的广播：写语音包、截图这些要等回执的操作各自订阅。
+    /// Broadcast of device messages: operations that wait for an ack, like voice-pack writes and screenshots, each subscribe.
     device_bus: broadcast::Sender<DeviceMessage>,
-    /// 状态变了就叫一声，状态流据此推一份新快照。
+    /// Pinged whenever the status changes; the status stream pushes a new snapshot on it.
     status_changed: broadcast::Sender<()>,
-    /// App 的版本，随心跳报给设备；没有 App 时为 None。
+    /// The app's version, reported to the device with the heartbeat; None when there is no app.
     app_version: Option<String>,
-    /// 真正的串口 worker，烧固件时要让它让出端口；测试里没有。
+    /// The real serial worker, which must give up the port while flashing; absent in tests.
     serial: Option<Arc<SerialTransport>>,
 }
 
@@ -189,8 +189,8 @@ async fn main() {
         .unwrap_or_else(|error| panic!("HTTP server 失败：{error}"));
 }
 
-/// 设备到 Mac 的事件目前只开放 K2 单击。优先打开当前活动；空闲时返回最近
-/// 一次可定位的 Agent/CI 来源。
+/// Device-to-Mac events currently only allow a K2 click. Open the current activity first; when idle, return the
+/// most recent locatable agent/CI source.
 async fn handle_device_events(
     state: AppState,
     mut events: tokio::sync::mpsc::Receiver<DeviceMessage>,
@@ -200,14 +200,14 @@ async fn handle_device_events(
     }
 }
 
-/// 每条设备消息都走这里：更新设备状态、广播给等回执的操作，K2 则去开来源。
-/// 测试也从这里注入设备消息，所以它不能依赖串口。
+/// Every device message goes through here: update device state, broadcast to operations waiting for acks, and K2 opens the source.
+/// Tests inject device messages here too, so it must not depend on the serial port.
 async fn publish_device_message(state: &AppState, message: DeviceMessage) {
     if state.device.lock().await.apply(&message) {
         state.notify_status();
     }
     let _ = state.device_bus.send(message.clone());
-    // 刚连上先问一声，设备会把模式、固件构建号、音色重报一遍。
+    // Ask right after connecting; the device reports its mode, firmware build and voice again.
     if matches!(message, DeviceMessage::Connected { .. }) {
         send_event(state, device_command("device.hello"));
     }
@@ -229,7 +229,7 @@ async fn open_k2_source(state: &AppState) {
             return;
         }
         for source in sources {
-            // Codex 线程要先确认还在：打开一个不存在的线程得到的是空白会话。
+            // Check a Codex thread still exists first: opening a missing thread gives a blank session.
             if let ActivitySource::Codex { thread_id, .. } = &source
                 && state.titles.lock().await.codex_thread_known(thread_id) == Some(false)
             {
@@ -237,7 +237,7 @@ async fn open_k2_source(state: &AppState) {
                 continue;
             }
             match source_opener::open(source).await {
-                // 记下链接本身：跳错地方时，日志要能直接说出跳去了哪儿。
+                // Log the link itself: when it jumps to the wrong place, the log should say exactly where it went.
                 Ok(link) => {
                     info!(%link, "K2 已打开当前活动来源");
                     break;
@@ -254,9 +254,9 @@ fn is_k2_press(event: &Event) -> bool {
         && event.extra.get("action").and_then(|value| value.as_str()) == Some("press")
 }
 
-/// App 看管时它把自己的 pid 放在 VIBEBUDDY_PARENT_PID 里。App 被强杀后 daemon
-/// 会被 launchd 收养，父 pid 变成 1；那就跟着退出，别占着串口和端口等下一个
-/// App 起不来。macOS 没有 prctl(PR_SET_PDEATHSIG)，只能轮询。
+/// When the app supervises it, the app puts its pid in VIBEBUDDY_PARENT_PID. If the app is force-killed, the daemon
+/// is adopted by launchd and its parent pid becomes 1; then exit too, rather than holding the serial port and HTTP port so
+/// the next app can't start. macOS has no prctl(PR_SET_PDEATHSIG), so this has to poll.
 async fn watch_parent() {
     let Some(expected) = env::var("VIBEBUDDY_PARENT_PID")
         .ok()
@@ -274,11 +274,11 @@ async fn watch_parent() {
     }
 }
 
-/// daemon 的构建标识：git 描述加上二进制自己的时间戳。
+/// The daemon's build identifier: the git description plus the binary's own timestamp.
 ///
-/// 时间戳取可执行文件的 mtime，不用编译期常量。`build.rs` 只在它声明的依赖
-/// 变化时才重跑；改一行源码重新链接时，编译期写下的时刻不会更新，正好在你
-/// 最需要它准的时候骗你。
+/// The timestamp is the executable's mtime, not a compile-time constant. `build.rs` only reruns when its declared
+/// dependencies change; when you edit one line and relink, the time recorded at compile time doesn't update, lying to
+/// you exactly when you most need it to be accurate.
 fn build_identity(app_version: Option<&str>) -> String {
     let built = std::env::current_exe()
         .and_then(|path| path.metadata())
@@ -293,7 +293,7 @@ fn build_identity(app_version: Option<&str>) -> String {
     build_identity_from(app_version, BUILD_REVISION, &built)
 }
 
-/// App 在时它的版本号排最前：设备页脚那一行就是 App 版本加构建号。
+/// When the app is present its version comes first: the device footer line is the app version plus the build.
 fn build_identity_from(app_version: Option<&str>, revision: &str, built: &str) -> String {
     let mut parts = Vec::new();
     if let Some(version) = app_version {
@@ -304,7 +304,7 @@ fn build_identity_from(app_version: Option<&str>, revision: &str, built: &str) -
     parts.join(" ").trim_end().to_owned()
 }
 
-/// 当日战绩的存放位置。缺少 `HOME` 时退回内存计数，不让 daemon 起不来。
+/// Where today's stats are stored. Without `HOME`, fall back to in-memory counts so the daemon still starts.
 fn stats_file() -> Option<PathBuf> {
     if let Ok(path) = env::var("VIBEBUDDY_STATS_FILE") {
         return Some(PathBuf::from(path));
@@ -333,7 +333,7 @@ fn app(state: AppState) -> Router {
         .with_state(state)
 }
 
-/// 截一张盒子当前画面，回 PNG。写语音包或烧固件时不截：截图行会挤掉回执。
+/// Capture the box's current screen and return a PNG. Refused while writing a voice pack or flashing: screenshot lines would crowd out acks.
 async fn post_screenshot(State(state): State<AppState>) -> axum::response::Response {
     use axum::response::IntoResponse;
     if matches!(&*state.operation.lock().await, Some(current) if current.state == OperationState::Running) {
@@ -353,7 +353,7 @@ async fn get_status(State(state): State<AppState>) -> Json<Status> {
     Json(state.snapshot().await)
 }
 
-/// SSE：连上先推一份，之后状态一变再推一份完整快照。
+/// SSE: push one snapshot on connect, then a full snapshot whenever the status changes.
 async fn status_stream(
     State(state): State<AppState>,
 ) -> Sse<impl tokio_stream::Stream<Item = Result<SseEvent, Infallible>>> {
@@ -382,7 +382,7 @@ fn device_command(name: &str) -> Event {
     Event::named(name)
 }
 
-/// 设备上同一时刻只能有一个操作：占上位就返回 None，否则回给调用方 409。
+/// Only one operation can run on the device at a time: returns None once the slot is taken, otherwise a 409 for the caller.
 async fn begin_operation(
     state: &AppState,
     kind: OperationKind,
@@ -401,8 +401,8 @@ async fn begin_operation(
     None
 }
 
-/// 从阻塞线程或写入循环里报进度。只在操作还在跑时写：完成后迟到的回调
-/// 不能把 100% 改回去。
+/// Report progress from a blocking thread or the write loop. Only written while the operation is running: a late callback
+/// after completion must not turn 100% back.
 fn report_progress(state: &AppState, fraction: f32, message: Option<String>) {
     let state = state.clone();
     tokio::spawn(async move {
@@ -422,19 +422,19 @@ async fn post_identify(State(state): State<AppState>) -> (StatusCode, Json<ApiRe
     post_event(State(state), Json(device_command("device.identify"))).await
 }
 
-/// 与固件 `AGENT_AUDIO_VOLUME_MIN/MAX` 一致：下限不到零，静音另有按键且不持久化。
+/// Matches the firmware's `AGENT_AUDIO_VOLUME_MIN/MAX`: the floor is above zero; muting has its own button and isn't persisted.
 const VOLUME_RANGE: std::ops::RangeInclusive<u8> = 20..=100;
 
 #[derive(serde::Deserialize)]
 struct VolumeRequest {
     level: u8,
-    /// 让盒子用新音量播一句"任务完成"，滑块才不是盲调。
+    /// Have the box play "task complete" at the new volume, so the slider isn't adjusted blind.
     #[serde(default)]
     preview: bool,
 }
 
-/// 调音量：越界直接拒绝而不是替用户改数。设备应用后回 `VOLUME` 行，
-/// 状态里的音量随之更新，App 显示的始终是盒子上的值。
+/// Set the volume: out-of-range values are rejected rather than adjusted for the user. The device answers with a `VOLUME` line
+/// once applied, the status volume follows, and the app always shows the value on the box.
 async fn post_volume(
     State(state): State<AppState>,
     Json(request): Json<VolumeRequest>,
@@ -456,7 +456,7 @@ async fn post_volume(
     post_event(State(state), Json(event)).await
 }
 
-/// 写语音包：请求体就是包本身。写入在后台跑，进度在状态流里。
+/// Write a voice pack: the request body is the pack itself. The write runs in the background with progress in the status stream.
 async fn post_voice_pack(
     State(state): State<AppState>,
     body: Bytes,
@@ -518,8 +518,8 @@ struct FirmwareRequest {
     app: PathBuf,
 }
 
-/// 烧固件：三件套的路径由 App 给出（都在它的包里）。串口 worker 让出端口，
-/// ROM 协议逐段写并校验，完了硬复位、worker 重连。进度走状态流。
+/// Flash firmware: the app supplies the three image paths (all inside its bundle). The serial worker releases the port,
+/// the ROM protocol writes and verifies each segment, then hard-resets and the worker reconnects. Progress goes through the status stream.
 async fn post_firmware(
     State(state): State<AppState>,
     Json(request): Json<FirmwareRequest>,
@@ -560,7 +560,7 @@ async fn post_firmware(
     let task_state = state.clone();
     tokio::spawn(async move {
         serial.set_suspended(true);
-        // 等 worker 真把端口放掉。
+        // Wait until the worker has actually let go of the port.
         tokio::time::sleep(Duration::from_millis(800)).await;
         let progress_state = task_state.clone();
         let result = tokio::task::spawn_blocking(move || {
@@ -587,7 +587,7 @@ async fn post_firmware(
     (StatusCode::ACCEPTED, Json(ApiResponse { accepted: true, message: "started flashing".to_owned() }))
 }
 
-/// App 看管 daemon：退出即重启。先把响应发出去再退。
+/// The app supervises the daemon: exiting means restarting. Send the response first, then exit.
 async fn post_restart() -> (StatusCode, Json<ApiResponse>) {
     tokio::spawn(async {
         tokio::time::sleep(Duration::from_millis(200)).await;
@@ -597,10 +597,10 @@ async fn post_restart() -> (StatusCode, Json<ApiResponse>) {
     (StatusCode::ACCEPTED, Json(ApiResponse { accepted: true, message: "daemon is restarting".to_owned() }))
 }
 
-/// 定期告诉设备链路还活着。
+/// Periodically tell the device the link is still alive.
 ///
-/// 没有心跳时，daemon 崩溃或串口断开后设备会一直显示最后一个状态，
-/// 看上去任务仍在进行。状态设备最严重的失败是显示过时状态而不自知。
+/// Without heartbeats, after a daemon crash or serial disconnect the device would keep showing the last state,
+/// looking as if a task were still running. The worst failure for a status device is showing stale state without knowing it.
 async fn send_heartbeats(state: AppState) {
     let build = build_identity(state.app_version.as_deref());
     info!(build = %build, "Mac 端构建标识");
@@ -610,17 +610,17 @@ async fn send_heartbeats(state: AppState) {
         let now = chrono::Local::now();
         let heartbeat = heartbeat_event(&build, now.hour(), local_day(&now));
         match heartbeat.to_ndjson() {
-            // 队列满意味着设备已经收不到东西，这时心跳没有意义，丢弃即可。
+            // A full queue means the device isn't receiving anything; a heartbeat is pointless then, so just drop it.
             Ok(frame) => drop(state.transport.send(frame)),
             Err(error) => warn!(%error, "心跳编码失败"),
         }
     }
 }
 
-/// 心跳捎带三样东西：构建标识、本地小时数、本地日期。都随每次心跳重复发，
-/// 因为设备可能随时重启，一次性的握手会丢。小时数让小灯灵知道现在是白天
-/// 还是夜里，日期让番茄钟知道什么时候算新的一天：设备没有时钟，也不该
-/// 为了这个去连 Wi-Fi。
+/// The heartbeat piggybacks three things: build identifier, local hour and local date. All are repeated with every heartbeat
+/// because the device may restart at any time and a one-off handshake would be lost. The hour tells the buddy whether it's day
+/// or night, and the date tells the pomodoro when a new day starts: the device has no clock and shouldn't
+/// join Wi-Fi just for that.
 fn heartbeat_event(build: &str, hour: u32, day: u32) -> Event {
     Event {
         version: VERSION,
@@ -638,19 +638,19 @@ fn heartbeat_event(build: &str, hour: u32, day: u32) -> Event {
     }
 }
 
-/// 本地日期压成一个整数 YYYYMMDD：设备只需要比较它变没变。
+/// Local date packed into one integer YYYYMMDD: the device only needs to compare whether it changed.
 fn local_day(now: &chrono::DateTime<chrono::Local>) -> u32 {
     use chrono::Datelike;
     now.year() as u32 * 10_000 + now.month() * 100 + now.day()
 }
 
-/// 轮询 GitHub Actions。没有配置仓库时它什么也不做。
+/// Poll GitHub Actions. Does nothing when no repos are configured.
 async fn poll_ci(state: AppState) {
     let mut watcher = CiWatcher::default();
     let mut ticker = tokio::time::interval(ci::POLL_INTERVAL);
     loop {
         ticker.tick().await;
-        // 先取数据再上锁：`gh` 可能跑上几秒，持锁等它会把 Hook 全堵住。
+        // Fetch before taking the lock: `gh` may run for seconds, and holding the lock meanwhile would block all hooks.
         let workspaces = state.activities.lock().await.recent_workspaces();
         let fetched = watcher.fetch(&workspaces).await;
         if fetched.is_empty() {
@@ -690,7 +690,7 @@ async fn sweep_expired_activities(state: AppState) {
     }
 }
 
-/// 后台任务发事件的共用路径。队列满或编码失败只记日志，不影响下一轮。
+/// Shared path for background tasks sending events. A full queue or encoding failure is only logged and doesn't affect the next round.
 fn send_event(state: &AppState, event: Event) {
     match event.to_ndjson() {
         Ok(frame) => {
@@ -833,7 +833,7 @@ mod tests {
         DeviceMessage::Event(serde_json::from_str(json).expect("测试事件应可解析"))
     }
 
-    /// 等记录型 Transport 里出现第 `index` 条事件。
+    /// Wait for the `index`-th event to show up in the recording transport.
     async fn nth_event(transport: &RecordingTransport, index: usize) -> Event {
         for _ in 0..200 {
             if let Some(event) = transport.events().get(index) {
@@ -891,7 +891,7 @@ mod tests {
         let second = body.frame().await.expect("状态变了再推一份").expect("帧可读");
         let second = String::from_utf8_lossy(second.data_ref().expect("数据帧")).into_owned();
         assert!(second.contains("\"connected\":true"), "{second}");
-        let _ = to_bytes; // 只用到帧接口
+        let _ = to_bytes; // only the frame interface is used
     }
 
     #[tokio::test]
@@ -976,7 +976,7 @@ mod tests {
     async fn writing_a_voice_pack_waits_for_each_acknowledgement() {
         let transport = Arc::new(RecordingTransport::default());
         let state = test_state(transport.clone());
-        let pack = sample_pack("hsiaoyu", 1000); // 1256 字节 → 两块
+        let pack = sample_pack("hsiaoyu", 1000); // 1256 bytes → two chunks
 
         let (status, _) = post_voice_pack(State(state.clone()), Bytes::from(pack.clone())).await;
         assert_eq!(status, StatusCode::ACCEPTED);

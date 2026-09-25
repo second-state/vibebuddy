@@ -1,12 +1,12 @@
 import Foundation
 
-/// 一份可烧录的固件：三件套加构建标识。App 附带的那份和用户从文件选的那份
-/// 都长这样，文件名与装包脚本、CI 打的 zip 一致。
+/// A flashable firmware: the three images plus a build ID. The copy bundled with the app and one the user picks from a file
+/// both look like this; file names match the bundling script and the zip CI produces.
 public struct FirmwarePackage: Equatable {
     public let bootloader: URL
     public let partitionTable: URL
     public let app: URL
-    /// 「哈希 日期 时间」，与盒子页脚报的同一格式；没有 build.txt 时只有镜像里的版本字符串。
+    /// "hash date time", the same format the box footer reports; without build.txt, just the version string in the image.
     public let build: String
 
     public static let bootloaderName = "bootloader.bin"
@@ -26,15 +26,15 @@ public struct FirmwarePackage: Equatable {
         }
     }
 
-    /// 在目录里（含子目录，zip 常带一层文件夹）找三件套，验魔数，读构建标识。
+    /// Finds the three images in a directory (including subdirectories, since zips often add a folder), checks magic numbers, reads the build ID.
     public static func inspect(directory: URL) throws -> FirmwarePackage {
         let files = try locate(in: directory)
         guard let bootloader = files[bootloaderName] else { throw Failure.missing(bootloaderName) }
         guard let table = files[partitionTableName] else { throw Failure.missing(partitionTableName) }
         guard let app = files[appName] else { throw Failure.missing(appName) }
 
-        // ESP 镜像头第一个字节 0xE9；分区表每条以 0xAA 0x50 开头；
-        // app 镜像偏移 0x20 是 esp_app_desc 的 magic 0xABCD5432（小端）。
+        // An ESP image header starts with byte 0xE9; each partition table entry starts with 0xAA 0x50;
+        // the app image has esp_app_desc's magic 0xABCD5432 (little endian) at offset 0x20.
         guard try prefix(of: bootloader, count: 1) == Data([0xE9]) else { throw Failure.notAnImage(bootloaderName) }
         guard try prefix(of: table, count: 2) == Data([0xAA, 0x50]) else { throw Failure.notAnImage(partitionTableName) }
         let header = try prefix(of: app, count: 0x50)

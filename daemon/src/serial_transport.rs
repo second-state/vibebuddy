@@ -13,23 +13,23 @@ const USB_SERIAL_JTAG_PID: u16 = 0x1001;
 const QINHENG_VID: u16 = 0x1a86;
 const USB_SINGLE_SERIAL_PID: u16 = 0x55d3;
 const QUEUE_CAPACITY: usize = 64;
-/// 截图一次 240 行、语音包写入每块一条回执，队列要装得下一屏。
+/// A screenshot is 240 lines and a voice-pack write gets one receipt per block; the queue must hold a full screen.
 const DEVICE_EVENT_CAPACITY: usize = 512;
 const BAUD_RATE: u32 = 115_200;
 const RECONNECT_DELAY: Duration = Duration::from_millis(500);
 const CONNECT_SETTLE_DELAY: Duration = Duration::from_millis(1_500);
-/// BOX 的 CH343 UART 桥吞不下一整行：主机一次推超过一两百字节，桥的缓冲
-/// 就被冲掉——每 384 字节丢 32 字节再把后面 32 字节重复一遍，长度不变、
-/// 内容错位。设备侧用直接轮询 FIFO 的对照实验证明无辜。桥接时按线速分段，
-/// 每段写完等它在线上走完再写下一段。
+/// The BOX's CH343 UART bridge can't swallow a whole line: push more than one or two hundred bytes at once and
+/// its buffer gets flushed, dropping 32 bytes every 384 and repeating the next 32, so the length stays right but
+/// the content shifts. A control experiment polling the FIFO directly on the device cleared the device side. Over the bridge,
+/// write in line-rate chunks and wait for each to clear the wire before writing the next.
 const PACE_MARGIN: Duration = Duration::from_millis(1);
 
-/// 设备到 Mac 的一切：JSON 事件、诊断行，以及链路本身的连与断。
+/// Everything from the device to the Mac: JSON events, diagnostic lines, and the link connecting and dropping.
 #[derive(Clone, Debug)]
 pub enum DeviceMessage {
     Event(Event),
     Line(String),
-    /// `bridge` 为真表示接在 BOX 的 CH343 UART 桥上：写要分段，烧录要小块。
+    /// `bridge` means we're on the BOX's CH343 UART bridge: writes must be chunked and flashing uses small blocks.
     Connected { port: String, bridge: bool },
     Disconnected,
 }
@@ -73,7 +73,7 @@ impl SerialTransport {
         (Self { sender, suspend }, device_receiver)
     }
 
-    /// 让出串口给烧录：worker 关掉端口并停止重连，直到再次放开。
+    /// Hands the serial port to the flasher: the worker closes the port and stops reconnecting until released.
     pub fn set_suspended(&self, suspended: bool) {
         let _ = self.suspend.send(suspended);
     }
@@ -98,7 +98,7 @@ async fn serial_worker(
 
     loop {
         if *suspend.borrow() {
-            // 烧录期间不碰串口，也不攒帧：心跳照旧在发，设备重启后它们都过时了。
+            // While flashing, leave the port alone and don't queue frames: heartbeats keep coming, but they're stale once the device reboots.
             pending.clear();
             tokio::select! {
                 changed = suspend.changed() => {
@@ -196,7 +196,7 @@ async fn serial_worker(
     }
 }
 
-/// 桥接口按线速分段写；原生 USB 口整帧写。
+/// Bridge ports are written in line-rate chunks; native USB ports get the whole frame at once.
 async fn write_frame(port: &mut SerialStream, frame: &[u8], paced: bool) -> std::io::Result<()> {
     if !paced {
         port.write_all(frame).await?;
@@ -210,16 +210,16 @@ async fn write_frame(port: &mut SerialStream, frame: &[u8], paced: bool) -> std:
     Ok(())
 }
 
-/// 这么多字节在 115200 波特下需要多久走完，外加一点余量。烧录走的是另一条
-/// 同步的串口路径，用同一个算法。
+/// How long this many bytes take at 115200 baud, plus a little headroom. Flashing uses a separate
+/// synchronous serial path with the same formula.
 pub fn piece_delay(bytes: usize) -> Duration {
     Duration::from_micros(bytes as u64 * 10 * 1_000_000 / u64::from(BAUD_RATE)) + PACE_MARGIN
 }
 
-/// 桥接时每次最多写这么多字节再等它走完。
+/// Over the bridge, write at most this many bytes, then wait for them to clear.
 pub const PACE_PIECE_BYTES: usize = 128;
 
-/// 只有 BOX 的 UART 桥需要分段；乐鑫原生 USB 口自己有流控。
+/// Only the BOX's UART bridge needs chunking; Espressif's native USB port has its own flow control.
 fn needs_pacing(vid: u16, pid: u16) -> bool {
     (vid, pid) == (QINHENG_VID, USB_SINGLE_SERIAL_PID)
 }
@@ -233,7 +233,7 @@ struct PortChoice {
 fn find_port(config: &SerialConfig) -> Result<Option<PortChoice>, String> {
     let ports = tokio_serial::available_ports().map_err(|error| error.to_string())?;
     if let Some(port) = &config.explicit_port {
-        // 指定端口时照样查它的 VID/PID 决定节奏；系统里查不到就按最保守的桥接算。
+        // An explicitly given port still has its VID/PID looked up to choose pacing; if the system can't find it, assume the bridge, the most conservative case.
         let paced = ports
             .iter()
             .find(|candidate| &candidate.port_name == port)
@@ -348,7 +348,7 @@ fn process_device_line(line: &[u8], event_sender: &mpsc::Sender<DeviceMessage>) 
         }
     } else {
         let line = String::from_utf8_lossy(line).into_owned();
-        // 截图的几百行不进日志，其余诊断行照旧记一笔。
+        // Screenshot lines (hundreds of them) stay out of the log; other diagnostic lines are still logged.
         if !line.starts_with("SHOT ") && !line.starts_with("ECHO ") {
             info!(message = %line, "设备消息");
         }
@@ -407,7 +407,7 @@ mod tests {
 
     #[test]
     fn a_piece_waits_for_its_own_wire_time_plus_margin() {
-        // 128 字节 × 10 位 / 115200 ≈ 11.1 ms，加 1 ms 余量。
+        // 128 bytes × 10 bits / 115200 ≈ 11.1 ms, plus 1 ms headroom.
         let delay = piece_delay(128);
         assert!(delay >= Duration::from_micros(12_100) && delay <= Duration::from_micros(12_200), "{delay:?}");
     }

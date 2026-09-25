@@ -34,8 +34,8 @@ struct GeneralView: View {
     }
 }
 
-/// 音量滑块：值来自盒子的状态，松手才发；拖动中不让状态流把滑块拽回去。
-/// 下限 20：能存下来的零音量就是持久静音，而静音有意只在盒子上、不持久化。
+/// Volume slider: the value comes from the box's status and is sent on release; while dragging, the status stream can't yank it back.
+/// Floor of 20: a saved zero volume would be a persistent mute, and muting is deliberately box-only and not persisted.
 struct VolumeRow: View {
     @ObservedObject var model: AppModel
     @State private var level: Double = 65
@@ -195,7 +195,7 @@ struct HookRow: View {
     private var present: Bool { model.hookPresent(agent) }
     private var installed: Bool { model.hookInstalled[agent] ?? false }
     private var lastEvent: Date? { agent == .codex ? model.status?.hooks.codex : model.status?.hooks.claude }
-    /// 只有 Codex 有信任这一关；Claude Code 改完配置下个会话就生效。
+    /// Only Codex has a trust step; Claude Code picks up config changes in its next session.
     private var codexHint: CodexTrustHint? {
         guard agent == .codex, installed else { return nil }
         return HookConfig.codexTrustHint(configModifiedAt: model.hookConfigModifiedAt(agent), lastEvent: lastEvent)
@@ -297,7 +297,7 @@ struct DeviceView: View {
                         Button("Retry") { model.updateFirmware() }.disabled(!(model.status?.device.connected ?? false))
                     }
                 }
-                // 单独分发的固件（Release 上的 VibeBuddy-firmware-*.zip）从这里进来。
+                // Separately distributed firmware (VibeBuddy-firmware-*.zip on Releases) comes in here.
                 Button("Flash from file…") { flashFromFile() }
                     .disabled(model.operationRunning || !(model.status?.device.connected ?? false))
                 Button("Make the box blink") { model.identify() }.disabled(model.operationRunning || !(model.status?.device.connected ?? false))
@@ -361,7 +361,7 @@ struct DeviceView: View {
     }
 }
 
-/// 往出厂机上刷固件的确认：引导页和设备页共用一段话。
+/// Confirmation for flashing a factory box: shared by onboarding and the Device tab.
 enum FlashConfirm {
     @MainActor
     static func foreign(then flash: () -> Void) {
@@ -380,9 +380,9 @@ struct AdvancedView: View {
 
     var body: some View {
         Form {
-            // 菜单栏 App 没有 Dock 图标，Finder 窗口和保存面板都可能开在别人窗口后面，
-            // 看起来像"点了没反应"（2026-09-22 同事机器上如此）。开文件夹显式把
-            // Finder 拉到前台；保存面板挂成设置窗的 sheet，躲不到后面去。
+            // A menu bar app has no Dock icon, so Finder windows and save panels can open behind other windows
+            // and look like "clicking did nothing" (seen on a colleague's machine on 2026-09-22). Opening the folder explicitly
+            // brings Finder to the front; the save panel is a sheet on the Settings window so it can't hide behind.
             Button("Open logs folder") {
                 NSWorkspace.shared.activateFileViewerSelecting([Resources.logsDirectory.appendingPathComponent("vibebuddyd.log")])
             }
@@ -396,7 +396,7 @@ struct AdvancedView: View {
         .formStyle(.grouped)
     }
 
-    /// 日志、配置、两边构建标识打成一个文件夹，不含任何 Hook 载荷。
+    /// Logs, config and both sides' build IDs in one folder, with no hook payloads.
     private func exportDiagnostics() {
         let panel = NSSavePanel()
         panel.nameFieldStringValue = "vibe-buddy-diagnostics"
@@ -420,7 +420,7 @@ struct AdvancedView: View {
             let source = Resources.logsDirectory.appendingPathComponent(name)
             if manager.fileExists(atPath: source.path) { try? manager.copyItem(at: source, to: target.appendingPathComponent(name)) }
         }
-        // 配置从 daemon 拿，不直接碰它的文件。
+        // Get the config from the daemon instead of touching its file.
         if let config = model.status?.config, let data = try? StatusCoding.encoder().encode(config) {
             try? data.write(to: target.appendingPathComponent("config.json"))
         }

@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
-"""把一个音色目录下的五句 PCM 打成语音包。
+"""Pack the five PCM clips in a voice directory into a voice pack.
 
-用法：
-    tools/make_voice_pack.py <音色目录> <音色 id> <输出.bin>
+Usage:
+    tools/make_voice_pack.py <voice dir> <voice id> <output.bin>
 
-音色目录里要有 input_required / done / failed / focus_done / break_done 五个
-.pcm（24 kHz、16-bit、双声道），顺序固定。字节布局见 firmware/main/agent_voice_pack.h。
+The voice directory must contain the five input_required / done / failed / focus_done / break_done
+.pcm files (24 kHz, 16-bit, stereo), in that fixed order. Byte layout: see firmware/main/agent_voice_pack.h.
 """
 
 from __future__ import annotations

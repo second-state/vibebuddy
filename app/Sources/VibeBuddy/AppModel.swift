@@ -2,7 +2,7 @@ import AppKit
 import Foundation
 import VibeBuddyCore
 
-/// 界面看到的一切都从这里来：状态快照、daemon 存活、菜单状态、操作结果。
+/// Everything the UI shows comes from here: the status snapshot, daemon liveness, menu state, operation results.
 @MainActor
 final class AppModel: ObservableObject {
     @Published private(set) var status: Status?
@@ -14,14 +14,14 @@ final class AppModel: ObservableObject {
     @Published private(set) var hookInstalled: [HookAgent: Bool] = [:]
     @Published private(set) var launchAtLogin = LoginItem.isEnabled
     @Published private(set) var previewingVoice: String?
-    /// 串口开了却一直没报构建号：盒子跑的不是我们的固件（出厂机），该提供刷入。
+    /// Serial port open but no build ID ever reported: the box isn't running our firmware (a factory box), so offer to flash it.
     @Published private(set) var foreignFirmware = false
 
     let client = DaemonClient()
     let supervisor = DaemonSupervisor()
     let preview = VoicePreview()
     let bundledFirmwareBuild = Resources.bundledFirmwareBuild
-    /// 由 App 自己看管 daemon；发现旧 LaunchAgent 且用户不肯卸时为 false。
+    /// Whether the app manages the daemon itself; false when an old LaunchAgent was found and the user kept it.
     var managesDaemon = true
 
     private var streamTask: Task<Void, Never>?
@@ -39,7 +39,7 @@ final class AppModel: ObservableObject {
             guard let self else { return }
             self.daemonAlive = false
             self.refreshMenu()
-            // 「通知我」关掉时连这条也不弹；daemon 没起来时拿不到配置，按默认开。
+            // With "Notify me" off, not even this one shows; without a daemon there's no config, so default to on.
             if self.status?.config.notifyLink ?? true {
                 Notifier.notify(title: "Vibe Buddy", body: String(localized: "The daemon failed to start three times in a row. Click the menu bar icon to restart it."))
             }
@@ -51,9 +51,9 @@ final class AppModel: ObservableObject {
         Resources.migrateLegacyDirectories()
         try? HookInstaller.deployBinary()
         if HookInstaller.migrateLegacyCommands().contains(.codex) {
-            // 2026-09-16 改名迁移静默改写了 hooks.json，Codex 把六条 hook 当作
-            // 改过的静默停用，盒子四个小时没播过 Codex 的事。这条不受「链路异常
-            // 通知」开关管：它就是 App 自己动了手才需要人补一步。
+            // On 2026-09-16 the rename migration silently rewrote hooks.json, Codex treated all six hooks
+            // as changed and silently disabled them, and the box announced nothing from Codex for four hours. This one ignores the
+            // link-notification switch: the app itself made the change, so a person has to finish the job.
             Notifier.notify(title: String(localized: "Codex hook config updated"),
                             body: String(localized: "Vibe Buddy rewrote ~/.codex/hooks.json. Codex silently disables hooks that change: type /hooks in Codex and re-trust them so the box keeps getting Codex events."))
         }
@@ -63,7 +63,7 @@ final class AppModel: ObservableObject {
         Timer.scheduledTimer(withTimeInterval: 5, repeats: true) { [weak self] _ in
             Task { @MainActor in
                 self?.checkLink()
-                // 宽限期过了状态流不会再来消息，沉默要靠时钟发现。
+                // Once the grace period passes the status stream sends nothing new, so a timer has to notice the silence.
                 self?.refreshForeignFirmware()
             }
         }
@@ -112,7 +112,7 @@ final class AppModel: ObservableObject {
         menu = MenuState.derive(status: status, daemonAlive: daemonAlive)
     }
 
-    /// 链路断开 30 秒去抖后才弹一次通知；插回来就复位。
+    /// Notify once after the link has been down for 30 seconds (debounced); reset when it's plugged back in.
     private func checkLink() {
         guard let status, daemonAlive, status.config.notifyLink else { linkLostSince = nil; return }
         if status.device.connected {
@@ -127,7 +127,7 @@ final class AppModel: ObservableObject {
         }
     }
 
-    // MARK: 操作
+    // MARK: Operations
 
     func restartDaemon() {
         if managesDaemon { supervisor.restart() } else { Task { try? await client.restart() } }
@@ -177,8 +177,8 @@ final class AppModel: ObservableObject {
         run { try await self.client.flashFirmware(bootloader: files.bootloader, partitionTable: files.partitionTable, app: files.app) }
     }
 
-    /// 用户自己拿到的固件包（CI 发的 zip）：解到临时目录，验完三件套再交给确认框。
-    /// 临时目录留到烧录结束，daemon 按路径读文件。
+    /// A firmware package the user obtained (the zip CI publishes): unzip to a temp directory and verify the three images before the confirmation dialog.
+    /// The temp directory stays until flashing ends, since the daemon reads the files by path.
     func openFirmwarePackage(_ zip: URL) throws -> FirmwarePackage {
         let directory = FileManager.default.temporaryDirectory
             .appendingPathComponent("vibebuddy-firmware-\(UUID().uuidString)")
@@ -220,7 +220,7 @@ final class AppModel: ObservableObject {
         }
     }
 
-    // MARK: 接入
+    // MARK: Agent hooks
 
     func refreshHookStates() {
         for agent in HookAgent.allCases {
@@ -231,7 +231,7 @@ final class AppModel: ObservableObject {
     func hookPresent(_ agent: HookAgent) -> Bool { HookInstaller.isPresent(agent) }
     func hookConfigModifiedAt(_ agent: HookAgent) -> Date? { HookInstaller.configModifiedAt(agent) }
 
-    /// 返回要确认的差异；调用方确认后再 apply。
+    /// Returns the diff to confirm; the caller applies it after confirmation.
     func hookInstallPlan(_ agent: HookAgent) -> HookInstaller.Plan { HookInstaller.installPlan(for: agent) }
     func hookRemovePlan(_ agent: HookAgent) -> HookInstaller.Plan { HookInstaller.removePlan(for: agent) }
 

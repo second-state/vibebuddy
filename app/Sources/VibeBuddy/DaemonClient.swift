@@ -1,7 +1,7 @@
 import Foundation
 import VibeBuddyCore
 
-/// 和 daemon 说话只走本机 HTTP；状态流是 SSE。
+/// Talks to the daemon over local HTTP only; the status stream is SSE.
 struct DaemonClient {
     let base = URL(string: "http://127.0.0.1:7331")!
 
@@ -19,7 +19,7 @@ struct DaemonClient {
         return try StatusCoding.decoder().decode(Status.self, from: data)
     }
 
-    /// 一直读状态流，每收到一份快照就回调；断了就抛错，调用方决定何时重连。
+    /// Reads the status stream, calling back with each snapshot; throws when it drops, and the caller decides when to reconnect.
     func stream(onStatus: @escaping (Status) -> Void) async throws {
         var request = self.request("/v1/status/stream")
         request.timeoutInterval = 3600 * 24
@@ -50,7 +50,7 @@ struct DaemonClient {
 
     func identify() async throws { try await post("/v1/device/identify") }
 
-    /// 盒子应用后回报 VOLUME 行，状态流里的音量才更新；preview 让它用新音量播一句。
+    /// The box reports a VOLUME line once applied, which is when the volume in the status stream updates; preview makes it play a line at the new volume.
     func setVolume(_ level: Int, preview: Bool) async throws {
         let body = try JSONSerialization.data(withJSONObject: ["level": level, "preview": preview])
         let (code, data) = try await post("/v1/device/volume", body: body, contentType: "application/json")

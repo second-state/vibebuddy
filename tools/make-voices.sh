@@ -1,18 +1,18 @@
 #!/usr/bin/env bash
-# 用神经网络语音重新生成固件里的五句话，写进 firmware/main/assets/。
+# Regenerate the firmware's five lines with neural TTS and write them to firmware/main/assets/.
 #
-# 两个引擎二选一：
-# - 设了 VOLC_API_KEY 就用火山引擎豆包语音（tools/volc-tts.py），默认音色
-#   湾湾小何（1.0 模型），换音色改 VOLC_VOICE；2.0 音色还要把 VOLC_RESOURCE_ID
-#   设成 seed-tts-2.0；
-# - 否则用 edge-tts（微软 Edge 的朗读接口，免费、不用密钥；不是正式公开的
-#   API，只用来一次性生成这几句），默认音色台湾女声 HsiaoYu，换音色改 VOICE。
-# 每一句各自归一化到 -1 dBFS 峰值；番茄钟的两句前面拼上钟声。
+# One of two engines:
+# - with VOLC_API_KEY set, Volcano Engine Doubao TTS (tools/volc-tts.py), default voice
+#   Wanwan Xiaohe (1.0 model); change voices with VOLC_VOICE, and for a 2.0 voice also set VOLC_RESOURCE_ID
+#   to seed-tts-2.0;
+# - otherwise edge-tts (Microsoft Edge's read-aloud service: free, no key; not an officially public
+#   API, only used to generate these few lines once), default voice the Taiwanese female HsiaoYu; change with VOICE.
+# Each line is normalized to a -1 dBFS peak on its own; the two pomodoro lines get a chime in front.
 # VOICE_LANG picks the language of the five lines: zh (default) or en. English
 # defaults the edge-tts voice to en-US-JennyNeural; the Doubao path just speaks
 # whatever text it is given, so pair VOICE_LANG=en with an English VOLC_VOICE.
 #
-# 用法: tools/make-voices.sh
+# Usage: tools/make-voices.sh
 #       VOLC_API_KEY=... tools/make-voices.sh
 #       OUT_DIR=voices/hsiaochen VOICE=zh-TW-HsiaoChenNeural tools/make-voices.sh
 #       VOICE_LANG=en OUT_DIR=voices/jenny tools/make-voices.sh
@@ -20,7 +20,7 @@
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-# 默认直接覆盖固件资产；归档到音色库时用 OUT_DIR 指到 voices/<音色>/。
+# Overwrites the firmware assets by default; to archive into the voice library, point OUT_DIR at voices/<voice>/.
 assets="${OUT_DIR:-${repo_root}/firmware/main/assets}"
 mkdir -p "${assets}"
 language="${VOICE_LANG:-zh}"
@@ -34,7 +34,7 @@ volc_voice="${VOLC_VOICE:-zh_female_wanwanxiaohe_moon_bigtts}"
 work="$(mktemp -d -t voices)"
 trap 'rm -rf "${work}"' EXIT
 
-# 文件名 -> 台词。Both languages say the same five things, in the same order as
+# File name -> line. Both languages say the same five things, in the same order as
 # the voice pack's clips (firmware/main/agent_voice_pack.h).
 if [[ "${language}" == "en" ]]; then
     lines=(
@@ -64,7 +64,7 @@ synth() {
         uvx --from edge-tts edge-tts --voice "${voice}" --text "${text}" \
             --write-media "${source}" >/dev/null
     fi
-    # 先量峰值再补增益到 -1 dBFS；单声道转双声道会掉 3 dB，量的是转换后的结果。
+    # Measure the peak first, then add gain up to -1 dBFS; mono-to-stereo loses 3 dB, so measure after converting.
     ffmpeg -loglevel error -y -i "${source}" -ar 24000 -ac 2 \
         -f s16le -acodec pcm_s16le "${work}/${name}.raw"
     local peak

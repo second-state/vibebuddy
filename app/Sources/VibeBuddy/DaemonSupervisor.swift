@@ -1,6 +1,6 @@
 import Foundation
 
-/// 看管包内的 vibebuddyd：拉起、崩了按 1、2、5 秒退避重启，连续三次失败停手。
+/// Supervises the bundled vibebuddyd: starts it, restarts it after a crash with 1, 2, 5 second backoff, and gives up after three failures in a row.
 @MainActor
 final class DaemonSupervisor {
     enum State: Equatable { case stopped, running, givenUp }
@@ -20,7 +20,7 @@ final class DaemonSupervisor {
         launch()
     }
 
-    /// 用户点了「重启」：不算失败，重新计数。
+    /// The user clicked Restart: not a failure, so the count starts over.
     func restart() {
         failures = 0
         if let process, process.isRunning {
@@ -47,11 +47,11 @@ final class DaemonSupervisor {
         process.executableURL = Resources.daemonBinary
         var environment = ProcessInfo.processInfo.environment
         environment["VIBEBUDDY_APP_VERSION"] = Resources.bundleVersion
-        // daemon 看着这个 pid：App 被强杀（SIGKILL）时它也能在两秒内退出，
-        // 不会变成孤儿占着端口。
+        // The daemon watches this pid, so even if the app is killed (SIGKILL) it exits within two seconds
+        // instead of lingering as an orphan holding the port.
         environment["VIBEBUDDY_PARENT_PID"] = String(ProcessInfo.processInfo.processIdentifier)
         process.environment = environment
-        // 日志与 LaunchAgent 时代同一个位置，「打开日志」就能找到。
+        // Logs go where they did in the LaunchAgent era, so "Open logs folder" finds them.
         try? FileManager.default.createDirectory(at: Resources.logsDirectory, withIntermediateDirectories: true)
         let logURL = Resources.logsDirectory.appendingPathComponent("vibebuddyd.log")
         if !FileManager.default.fileExists(atPath: logURL.path) {
@@ -77,8 +77,8 @@ final class DaemonSupervisor {
     private func handleExit(status: Int32) {
         process = nil
         if stopping { return }
-        // 退出码 0 是 daemon 应 App 的要求主动退出（POST /v1/daemon/restart），
-        // 立刻拉起，不算失败。
+        // Exit code 0 means the daemon quit at the app's request (POST /v1/daemon/restart);
+        // relaunch right away and don't count it as a failure.
         if status == 0 {
             launch()
             return

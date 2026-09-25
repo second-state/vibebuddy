@@ -1,7 +1,7 @@
 import Foundation
 
-/// 语音包（firmware/main/agent_voice_pack.h）：256 字节包头加五段 PCM。
-/// App 只需要读出音色 id 和各句的位置，用来试听和显示。
+/// Voice pack (firmware/main/agent_voice_pack.h): a 256-byte header plus five PCM clips.
+/// The app only needs the voice id and each clip's location, for previews and display.
 public struct VoicePack: Equatable {
     public static let headerBytes = 256
 
@@ -28,7 +28,7 @@ public struct VoicePack: Equatable {
         self.data = data
     }
 
-    /// 五句连起来的 PCM，中间留 300 ms 静音；试听就放它。
+    /// The five clips joined with 300 ms of silence between them; this is what a preview plays.
     public func previewPCM() -> Data {
         var pcm = Data()
         let gap = Data(count: 24_000 * 2 * 2 * 3 / 10)
@@ -40,7 +40,7 @@ public struct VoicePack: Equatable {
     }
 }
 
-/// 候选音色的展示信息，与 voices/README.md 对应。
+/// Display info for the candidate voices, matching voices/README.md.
 /// `language` is the language the five lines are spoken in, so the picker can put
 /// voices matching the UI language first. An entry only shows up once its pack is
 /// bundled (build-app.sh packs every voices/<id>/ that has PCM in it).

@@ -1,7 +1,7 @@
-//! `vibebuddy-hook codex` / `vibebuddy-hook claude`：从 stdin 读 Hook 载荷，最小化后
-//! POST 给本机 daemon；daemon 不在、输入无效、网络失败都静默退出 0，不能
-//! 拖住 Agent。App 把它复制到 Application Support 的 bin 目录，Hook 配置指向
-//! 那里（ADR-0005），因此不依赖 python3，也不怕 App 挪位置。
+//! `vibebuddy-hook codex` / `vibebuddy-hook claude`: reads the hook payload from stdin, minimizes it and
+//! POSTs it to the local daemon; a missing daemon, invalid input or network failure all exit 0 silently, so it never
+//! holds up the agent. The app copies it into the bin directory under Application Support and the hook config points
+//! there (ADR-0005), so it doesn't depend on python3 and survives the app being moved.
 
 mod claude;
 mod codex;
@@ -17,7 +17,7 @@ use serde_json::{Map, Value};
 const TIMEOUT: Duration = Duration::from_millis(500);
 
 fn post_json(endpoint: &str, payload: &Map<String, Value>) -> std::io::Result<()> {
-    // endpoint 形如 http://127.0.0.1:7331/path；只认这种，不做完整的 URL 解析。
+    // The endpoint looks like http://127.0.0.1:7331/path; only that form is accepted, no full URL parsing.
     let rest = endpoint.strip_prefix("http://").unwrap_or(endpoint);
     let (host, path) = rest.split_once('/').unwrap_or((rest, ""));
     let address: SocketAddr = host.parse().map_err(std::io::Error::other)?;

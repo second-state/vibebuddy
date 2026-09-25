@@ -1,5 +1,5 @@
-// 在 Mac 上把 agent_display.c 的画面渲染成 PPM，用来在烧录前看版式。
-// 直接 include 源文件：预览要的是同一份绘制代码，不是它的复制品。
+// Renders agent_display.c's screens to PPM on the Mac, to check the layout before flashing.
+// Includes the source file directly: the preview needs the same drawing code, not a copy of it.
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -41,7 +41,7 @@ static void snapshot(const char *directory, const char *name) {
 
 static void set_ms(uint32_t ms) { stub_tick_count = ms / portTICK_PERIOD_MS; }
 
-/// 把每个剧目逐帧渲染出来，脚本再拼成 GIF。
+/// Renders every skit frame by frame; a script then stitches them into a GIF.
 static void render_skits(const char *directory) {
   static const struct {
     agent_skit_t skit;
@@ -121,8 +121,8 @@ int main(int argc, char **argv) {
   agent_display_set_mode(AGENT_MODE_POMODORO);
   agent_display_show(AGENT_DISPLAY_IDLE, NULL);
 
-  // 闹铃头三秒逐帧：抖动 20 帧各 100 ms，之后脉动每拍 500 ms；按 10 帧
-  // 每秒拼成 GIF，脉动一拍占 5 帧。
+  // The alarm's first three seconds frame by frame: 20 shake frames of 100 ms each,
+  // then a 500 ms pulse per beat; stitched into a GIF at 10 fps, one beat is 5 frames.
   for (unsigned frame = 0; frame < 30; frame++) {
     if (frame < RING_ALARM_SHAKE_FRAMES) {
       animation_frame = frame;
@@ -142,7 +142,7 @@ int main(int argc, char **argv) {
   snapshot(directory, "pomodoro_alarm_pulse_dim");
   animation_frame = 0;
   snapshot(directory, "pomodoro_alarm_pulse");
-  // 待开始的样子本身也要看，先把闹铃按掉。
+  // The waiting-to-start look needs checking too, so dismiss the alarm first.
   ring_alarm = false;
   snapshot(directory, "pomodoro_break_pending");
 

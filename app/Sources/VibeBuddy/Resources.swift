@@ -1,14 +1,14 @@
 import Foundation
 import VibeBuddyCore
 
-/// App 包里的东西在哪：两个 helper、固件三件套、语音包。
+/// Where things live in the app bundle: the two helpers, the three firmware images, the voice packs.
 enum Resources {
-    /// 语义版本，随心跳报给设备。
+    /// Semantic version, reported to the device with the heartbeat.
     static var bundleVersion: String {
         Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "dev"
     }
 
-    /// 构建号（git 描述），只在界面上显示。
+    /// Build number (git description), shown in the UI only.
     static var bundleBuild: String {
         Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "dev"
     }
@@ -28,7 +28,7 @@ enum Resources {
 
     static var firmwareDirectory: URL { resourcesDirectory.appendingPathComponent("firmware") }
 
-    /// 附带固件的构建标识（打包脚本写的），没有附带固件时为 nil。
+    /// Build ID of the bundled firmware (written by the bundling script); nil when no firmware is bundled.
     static var bundledFirmwareBuild: String? {
         let url = firmwareDirectory.appendingPathComponent("build.txt")
         guard let text = try? String(contentsOf: url, encoding: .utf8) else { return nil }
@@ -66,7 +66,7 @@ enum Resources {
         return VoiceCatalogEntry.sorted(bundled, preferring: uiLanguage)
     }
 
-    /// Application Support 下的固定位置：Hook 二进制、配置、日志都在附近。
+    /// Fixed location under Application Support: the hook binary, config and logs all live nearby.
     static var applicationSupport: URL {
         FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Library/Application Support/VibeBuddy")
     }
@@ -76,7 +76,7 @@ enum Resources {
         FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Library/Logs/VibeBuddy")
     }
 
-    /// 改名之前的目录（AgentBeacon 时代）。首次启动把它们搬到新位置。
+    /// Directories from before the rename (the AgentBeacon era). First launch moves them to the new location.
     static var legacyDirectories: [(from: URL, to: URL)] {
         let home = FileManager.default.homeDirectoryForCurrentUser
         return [

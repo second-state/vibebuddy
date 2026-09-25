@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# 给设备截图：短暂停掉 vibebuddyd 独占串口，取帧，再把 vibebuddyd 拉起来。
-# 用法: tools/screenshot.sh /dev/cu.usbmodemXXXX 输出.png
+# Screenshot the device: briefly stop vibebuddyd to get the serial port, grab a frame, then bring vibebuddyd back.
+# Usage: tools/screenshot.sh /dev/cu.usbmodemXXXX output.png
 set -euo pipefail
 
 serial_port="${1:?用法: screenshot.sh <串口> <输出.png>}"

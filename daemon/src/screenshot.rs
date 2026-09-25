@@ -1,5 +1,5 @@
-//! 设备截图：发 `device.screenshot`，收行程编码的帧缓冲（`SHOT BEGIN` /
-//! 若干 `SHOT` 行 / `SHOT END`），转成 PNG。格式与 tools/device-screenshot.py 一致。
+//! Device screenshots: sends `device.screenshot`, receives the run-length-encoded framebuffer (`SHOT BEGIN` /
+//! a number of `SHOT` lines / `SHOT END`) and turns it into a PNG. Same format as tools/device-screenshot.py.
 
 use std::sync::Arc;
 use std::time::Duration;
@@ -11,11 +11,11 @@ use crate::serial_transport::{DeviceMessage, Transport};
 
 pub const WIDTH: usize = 320;
 pub const HEIGHT: usize = 240;
-/// 桥接下一帧要走十几秒；再留些余量给设备当时正在忙的事。
+/// Over the bridge one frame takes over ten seconds; leave some headroom for whatever the device is busy with.
 const TIMEOUT: Duration = Duration::from_secs(60);
 
 pub struct Frame {
-    /// RGB888，按行。
+    /// RGB888, row by row.
     pub pixels: Vec<u8>,
     pub backlight_on: bool,
 }
@@ -31,7 +31,7 @@ fn rgb565_to_rgb(color: u16) -> [u8; 3] {
     ]
 }
 
-/// 把 `SHOT` 行里的 `rgb565:长度` 段展开进像素缓冲。
+/// Expands the `rgb565:length` runs of a `SHOT` line into the pixel buffer.
 pub fn decode_runs(line: &str, pixels: &mut Vec<u8>) -> Result<(), String> {
     for run in line.split_whitespace() {
         let (color, count) = run
@@ -60,7 +60,7 @@ pub fn encode_png(frame: &Frame) -> Result<Vec<u8>, String> {
         let pixels = if frame.backlight_on {
             frame.pixels.clone()
         } else {
-            // 背光关着时画面本来就看不见；压暗成一张"熄灯"的图，而不是假装亮着。
+            // With the backlight off the picture can't be seen anyway; dim it into a "lights out" image rather than pretend it's lit.
             frame.pixels.iter().map(|value| value / 4).collect()
         };
         writer.write_image_data(&pixels).map_err(|error| error.to_string())?;
@@ -68,7 +68,7 @@ pub fn encode_png(frame: &Frame) -> Result<Vec<u8>, String> {
     Ok(output)
 }
 
-/// 抓一帧。要求调用方已经订阅了设备消息，免得错过第一行。
+/// Grabs one frame. The caller must already be subscribed to device messages so the first line isn't missed.
 pub async fn capture(
     transport: Arc<dyn Transport>,
     mut bus: broadcast::Receiver<DeviceMessage>,

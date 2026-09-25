@@ -1,18 +1,18 @@
 #include "agent_pomodoro.h"
 
-// 只依赖标准头，不碰 FreeRTOS 或 ESP-IDF：这个状态机要能在 Mac 上直接
-// 编译跑测试（见 tools/test-pomodoro.sh）。
+// Standard headers only, no FreeRTOS or ESP-IDF: this state machine must compile
+// and run its tests directly on the Mac (see tools/test-pomodoro.sh).
 
-// 实机验收用的时间压缩（见 main/CMakeLists.txt）；正式固件不定义它。
+// Time compression for on-device acceptance (see main/CMakeLists.txt); release firmware doesn't define it.
 #ifndef AGENT_TIME_SCALE
 #define AGENT_TIME_SCALE 1u
 #endif
 
 static agent_pomodoro_phase_t phase;
 static agent_pomodoro_run_t run;
-/// 运行中：阶段截止的毫秒计数。
+/// Running: the millisecond count at which the phase ends.
 static uint32_t deadline_ms;
-/// 暂停中：剩余毫秒。暂停时把时间冻结成一个数，恢复时再展开成截止时刻。
+/// Paused: remaining milliseconds. Pausing freezes time into one number; resuming turns it back into a deadline.
 static uint32_t remaining_ms;
 static agent_pomodoro_tally_t tally;
 
@@ -22,7 +22,7 @@ static uint32_t phase_length(agent_pomodoro_phase_t which) {
   return full / AGENT_TIME_SCALE;
 }
 
-/// 用有符号差值比较，让毫秒计数回绕时仍然正确。
+/// Compares by signed difference so it stays correct when the millisecond count wraps.
 static uint32_t remaining_while_running(uint32_t now_ms) {
   int32_t left = (int32_t)(deadline_ms - now_ms);
   return left > 0 ? (uint32_t)left : 0u;
@@ -61,12 +61,12 @@ agent_pomodoro_transition_t agent_pomodoro_tick(uint32_t now_ms) {
   if ((int32_t)(now_ms - deadline_ms) < 0) {
     return AGENT_POMODORO_NOTHING;
   }
-  // 下一阶段停在待开始，等用户按键：休息什么时候开始、下一段专注什么
-  // 时候开始，都是用户的决定。
+  // The next phase waits to start until the user presses a key: when the break
+  // starts and when the next focus starts are both the user's call.
   run = AGENT_POMODORO_PENDING;
   if (phase == AGENT_POMODORO_FOCUS) {
     tally.completed++;
-    // 记的是完整的一段专注，不是压缩后的长度：验收固件跑 25 秒也算 25 分钟。
+    // Record a full focus session, not the compressed length: 25 seconds on acceptance firmware still counts as 25 minutes.
     tally.focus_s += AGENT_POMODORO_FOCUS_MS / 1000u;
     phase = AGENT_POMODORO_BREAK;
     return AGENT_POMODORO_FOCUS_ENDED;
@@ -98,8 +98,8 @@ bool agent_pomodoro_set_day(uint32_t day) {
   if (day == 0 || day == tally.day) {
     return false;
   }
-  // 换日：清零。第一次听说日期时记录本来就是空的，清零也无妨；
-  // 若重启后恢复的是昨天的记录，正好在这里归零。
+  // New day: reset. The first time we hear a date the record is empty anyway, so
+  // resetting is harmless; if a restart restored yesterday's record, it resets here.
   tally.day = day;
   tally.completed = 0;
   tally.focus_s = 0;

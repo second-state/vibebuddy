@@ -3,7 +3,7 @@
 #include <stdbool.h>
 #include <stdint.h>
 
-/// 番茄钟：专注 25 分钟，休息 5 分钟。时长暂时固定。
+/// Pomodoro: 25 minutes of focus, 5 minutes of break. Durations are fixed for now.
 #define AGENT_POMODORO_FOCUS_MS (25u * 60u * 1000u)
 #define AGENT_POMODORO_BREAK_MS (5u * 60u * 1000u)
 
@@ -12,26 +12,27 @@ typedef enum {
   AGENT_POMODORO_BREAK,
 } agent_pomodoro_phase_t;
 
-/// 每个阶段都由用户按键开始，不自动衔接：专注结束后停在“休息待开始”，
-/// 休息结束后停在“专注待开始”（也就是空闲）。
+/// Every phase starts with a key press, never automatically: after focus ends it waits
+/// at "break ready", and after the break ends at "focus ready" (that is, idle).
 typedef enum {
   AGENT_POMODORO_PENDING,
   AGENT_POMODORO_RUNNING,
   AGENT_POMODORO_PAUSED,
 } agent_pomodoro_run_t;
 
-/// 阶段结束是只消费一次的边沿：语音与模式切换都挂在它上面，
-/// 同一次结束不得触发第二遍。
+/// A phase end is an edge consumed once: voice and mode switches hang off it, so the
+/// same end must not fire twice.
 typedef enum {
   AGENT_POMODORO_NOTHING,
   AGENT_POMODORO_FOCUS_ENDED,
   AGENT_POMODORO_BREAK_ENDED,
 } agent_pomodoro_transition_t;
 
-/// 当日记录：完成的专注次数与累计专注秒数。日期来自 Mac 端心跳，
-/// 变了就清零；重启后由存储恢复。只记完成的专注，放弃的不算。
+/// Today's record: completed focus sessions and total focus seconds. The date comes from
+/// the Mac's heartbeat and a change resets it; it is restored from storage after a
+/// restart. Only completed focus sessions count, abandoned ones don't.
 typedef struct {
-  /// 本地日期 YYYYMMDD；0 表示还没从 Mac 端听说过今天是哪天。
+  /// Local date as YYYYMMDD; 0 means the Mac hasn't told us today's date yet.
   uint32_t day;
   unsigned completed;
   uint32_t focus_s;
@@ -40,35 +41,36 @@ typedef struct {
 typedef struct {
   agent_pomodoro_phase_t phase;
   agent_pomodoro_run_t run;
-  /// 当前阶段还剩多少毫秒；待开始时给出这一阶段的全长。
+  /// Milliseconds left in the current phase; the phase's full length while waiting to start.
   uint32_t remaining_ms;
-  /// 当前阶段的全长，画圆环时作分母。
+  /// Full length of the current phase, the denominator when drawing the ring.
   uint32_t total_ms;
-  /// 今天完成的专注次数与累计专注秒数。
+  /// Focus sessions completed today and total focus seconds.
   unsigned completed;
   uint32_t focus_s;
 } agent_pomodoro_view_t;
 
-/// 空闲：还没开始的专注。
+/// Idle: a focus session not yet started.
 static inline bool agent_pomodoro_is_idle(const agent_pomodoro_view_t *view) {
   return view->phase == AGENT_POMODORO_FOCUS &&
          view->run == AGENT_POMODORO_PENDING;
 }
 
-/// 本模块不读时钟，所有入口都由调用方传入毫秒计数，允许回绕。
+/// This module reads no clock; every entry point takes a millisecond count from the caller, and wraparound is allowed.
 void agent_pomodoro_init(void);
-/// 短按：待开始时开始这一阶段；运行中暂停；暂停中继续。
+/// Short press: start the phase when waiting; pause when running; resume when paused.
 void agent_pomodoro_toggle(uint32_t now_ms);
-/// 长按：放弃当前阶段，回到空闲。休息待开始时按它就是跳过休息。
-/// 已完成的次数不受影响。
+/// Long press: abandon the current phase and return to idle. Pressed while the break is
+/// waiting to start, it skips the break. Completed counts are unaffected.
 void agent_pomodoro_stop(void);
-/// 推进时钟。阶段刚结束时返回对应的转换，之后返回 NOTHING。
+/// Advances the clock. Returns the matching transition right when a phase ends, NOTHING afterwards.
 agent_pomodoro_transition_t agent_pomodoro_tick(uint32_t now_ms);
 void agent_pomodoro_view(uint32_t now_ms, agent_pomodoro_view_t *view);
 
-/// 重启后从存储恢复当日记录。
+/// Restores today's record from storage after a restart.
 void agent_pomodoro_restore_tally(const agent_pomodoro_tally_t *tally);
-/// 心跳里的本地日期。与记录的日期不同就清零并记下新日期；返回 true 表示
-/// 记录变了、该存一次。0 表示不知道，忽略。
+/// The local date from a heartbeat. If it differs from the recorded date, reset and store
+/// the new date; returns true when the record changed and should be saved. 0 means
+/// unknown and is ignored.
 bool agent_pomodoro_set_day(uint32_t day);
 void agent_pomodoro_tally(agent_pomodoro_tally_t *tally);

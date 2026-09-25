@@ -14,8 +14,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var terminationSignal: DispatchSourceSignal?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
-        // `kill`/`pkill` 发来的 SIGTERM 默认直接结束进程，daemon 会变成孤儿；
-        // 接住它走正常退出，applicationWillTerminate 才有机会停掉 daemon。
+        // A SIGTERM from `kill`/`pkill` ends the process outright by default, orphaning the daemon;
+        // catch it and quit normally so applicationWillTerminate gets a chance to stop the daemon.
         signal(SIGTERM, SIG_IGN)
         let source = DispatchSource.makeSignalSource(signal: SIGTERM, queue: .main)
         source.setEventHandler { NSApp.terminate(nil) }
@@ -48,7 +48,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func render(_ state: MenuState) {
         statusItem.button?.image = PixelFace.image(eyesClosed: state.icon != .online)
-        // 链路断开或 daemon 没起来都灰掉：闭眼加变灰才是"它不在"。
+        // Gray out when the link is down or the daemon isn't up: closed eyes plus gray means "it's not there".
         statusItem.button?.appearsDisabled = state.icon != .online
         let menu = NSMenu()
         let device = NSMenuItem(title: state.deviceLine, action: state.deviceLineIsAction ? #selector(restartDaemon) : nil, keyEquivalent: "")
@@ -106,15 +106,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     @objc private func quit() { NSApp.terminate(nil) }
 }
 
-/// 旧的 LaunchAgent 时代：发现它就提议卸掉并接管，两套 daemon 不能同时抢串口。
+/// Leftover from the LaunchAgent era: if found, offer to remove it and take over, since two daemons can't share the serial port.
 enum LegacyLaunchAgent {
-    /// 改名前的标签：要认的是旧机器上留下的那个，不能跟着改。
+    /// The label from before the rename: it must match what old machines still have, so it can't be renamed.
     static let label = "com.agentbeacon.beacond"
     static var plist: URL {
         FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Library/LaunchAgents/\(label).plist")
     }
 
-    /// 7331 上已经有 daemon 在应答：不管是谁起的，都不能再拉一个。
+    /// A daemon already answers on 7331: whoever started it, we must not launch another.
     static func portOccupied() async -> Bool {
         var request = URLRequest(url: URL(string: "http://127.0.0.1:7331/v1/status")!)
         request.timeoutInterval = 1
@@ -140,11 +140,11 @@ enum LegacyLaunchAgent {
             try? bootout.run()
             bootout.waitUntilExit()
             if hasPlist { try? FileManager.default.trashItem(at: plist, resultingItemURL: nil) }
-            // 不是 LaunchAgent 起的（比如手工 cargo run），请它自己退出。
+            // Not started by the LaunchAgent (e.g. a manual cargo run): ask it to exit itself.
             if occupied { try? await DaemonClient().restart() }
             model.managesDaemon = true
         } else {
-            // 用户留着旧服务：本次不拉自己的 daemon，只跟旧的说话。
+            // The user keeps the old service: don't launch our own daemon this time, just talk to the old one.
             model.managesDaemon = false
         }
     }

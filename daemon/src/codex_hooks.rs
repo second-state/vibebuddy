@@ -1,7 +1,7 @@
-//! Codex 生命周期事件到通用活动模型的映射。
+//! Maps Codex lifecycle events onto the generic activity model.
 //!
-//! 这里只做翻译：任务卡聚合、去重、播报和过期都在 [`crate::activity`]。
-//! Adapter 不持有状态，因为设备只有一块屏幕，所有 Agent 共享同一个聚合器。
+//! This only translates: task-card aggregation, dedup, announcements and expiry live in [`crate::activity`].
+//! The adapter holds no state, because the device has one screen and all agents share one aggregator.
 
 use vibebuddy_protocol::Event;
 use serde::Deserialize;
@@ -11,9 +11,9 @@ use crate::activity::{
     project_name, Surface};
 use crate::session_titles::{SessionTitles, git_branch};
 
-/// 任务卡上区分 Agent 的前缀。
+/// Prefix on task cards that tells agents apart.
 const PREFIX: &str = "CX:";
-/// 工作目录不可用时的任务卡标题。
+/// Task-card title when the working directory isn't available.
 const FALLBACK_TITLE: &str = "CODEX";
 
 #[derive(Debug, Deserialize)]
@@ -28,7 +28,7 @@ pub struct CodexHook {
     pub cwd: Option<String>,
     #[serde(default)]
     pub response_kind: Option<String>,
-    /// 运行处：Hook 在本机按进程环境判定，daemon 只做路由。
+    /// Where it runs: the hook decides from the process environment on this Mac; the daemon only routes.
     #[serde(default)]
     pub surface: Option<String>,
     #[serde(default)]
@@ -43,13 +43,13 @@ pub fn apply(
     tracker.note_workspace(hook.cwd.as_deref());
     let id = activity_id(&hook);
     let cwd = hook.cwd.as_deref();
-    // 第一行写 Codex 线程的名字（用户起的名或线程记录的分支），没有就写
-    // 本地分支，再没有才是项目名。
+    // First line: the Codex thread's name (user-given, or the branch the thread recorded), else
+    // the local branch, else the project name.
     let project = project_name(cwd);
     let thread_id = hook.thread_id.clone().unwrap_or_else(|| hook.session_id.clone());
-    // Codex 的后台会话（回合结束后生成 ambient suggestions 的那种）也触发
-    // 同一套 Hook：没有工作目录，线程表里也没有它。它不是用户的活动，
-    // 不该有卡片、不该播报，更不该成为 K2 的落点——打开它是一个空白会话。
+    // Codex's background sessions (the ones that generate ambient suggestions after a turn) fire
+    // the same hooks: no working directory, and absent from the thread table. They aren't user activity:
+    // no card, no announcement, and certainly not a K2 target, since opening one gives a blank session.
     if project.is_none() && titles.codex_thread_known(&thread_id) == Some(false) {
         tracing::info!(
             session = %hook.session_id,
@@ -90,7 +90,7 @@ pub fn apply(
     event
 }
 
-/// Codex 用 `session_id` 与 `turn_id` 合成活动身份。
+/// Codex builds activity identity from `session_id` and `turn_id`.
 fn activity_id(hook: &CodexHook) -> ActivityId {
     let key = match hook.turn_id.as_deref() {
         Some(turn_id) => format!("{}:{turn_id}", hook.session_id),
@@ -137,7 +137,7 @@ mod tests {
         assert!(apply(&mut tracker, &mut titles, ghost).is_none());
         assert!(tracker.focus_source().is_none());
 
-        // 有工作目录的会话照常，即便线程表暂时还没有它。
+        // Sessions with a working directory count as usual, even if the thread table doesn't have them yet.
         let fresh = CodexHook {
             session_id: "fresh".to_owned(),
             turn_id: Some("t1".to_owned()),
@@ -150,7 +150,7 @@ mod tests {
         };
         assert!(apply(&mut tracker, &mut titles, fresh).is_some());
 
-        // 线程表里有的会话，没有工作目录也算数。
+        // Sessions in the thread table count even without a working directory.
         let known = CodexHook {
             session_id: "real-thread".to_owned(),
             turn_id: Some("t1".to_owned()),
@@ -288,8 +288,8 @@ mod tests {
         assert_eq!(waiting.event, "agent.input_required");
         assert_eq!(waiting.title.as_deref(), Some("CX:BETA"));
 
-        // 结束播报说的是谁结束了，屏幕就显示谁；alpha 还在跑，由它后续的事件
-        // 把屏幕刷回去。
+        // The finish announcement says who finished, so the screen shows that one; alpha is still running and
+        // its later events will bring the screen back.
         let done =
             apply(&mut tracker, &mut SessionTitles::disabled(), hook("waiting", "Stop", "/work/beta")).expect("结束应产生播报");
         assert_eq!(done.event, "task.done");
@@ -301,8 +301,8 @@ mod tests {
         assert_eq!(back.title.as_deref(), Some("CX:ALPHA"));
     }
 
-    /// 一个任务完成时，另一个正等着人回答：屏幕必须留给等回答的那个，它要用
-    /// 户动手；"完成"播报一声就够了。
+    /// One task finishes while another is waiting for an answer: the screen must stay on the waiting one,
+    /// since it needs the user to act; a single "done" announcement is enough.
     #[test]
     fn finishing_one_task_does_not_hide_another_waiting_for_a_reply() {
         let mut tracker = ActivityTracker::default();

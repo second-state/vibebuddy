@@ -1,6 +1,6 @@
-//! 判断助手的最后一段是否在等待用户回答。两个 Adapter 共用这一套规则，
-//! 它的误判会同时影响两条链路；背景见 docs/adr/0002。规则与原来的
-//! tools/hook_filter.py 逐条对应。
+//! Decides whether the assistant's last message is waiting for the user to answer. Both adapters share these rules,
+//! so a misjudgment affects both pipelines at once; background in docs/adr/0002. The rules map one-to-one to the old
+//! tools/hook_filter.py.
 
 use std::sync::OnceLock;
 

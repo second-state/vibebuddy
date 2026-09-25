@@ -1,6 +1,6 @@
-//! Claude Code 的 Hook：只转发会话与回合标识、事件名、工作目录和子 Agent
-//! 身份；`Stop` 时判定是否在等回答。子 Agent 的最后一段是写给父会话的报告，
-//! 不是向用户提问，因此只判定主会话。
+//! Claude Code's hook: forwards only session and turn ids, the event name, the working directory and the subagent
+//! identity; on `Stop` it decides whether an answer is awaited. A subagent's last message is a report to the parent session,
+//! not a question for the user, so only the main session is judged.
 
 use serde_json::{Map, Value};
 
@@ -8,9 +8,9 @@ use crate::filter::requires_user_input;
 use crate::surface::{self, Surface};
 
 pub const ENDPOINT: &str = "http://127.0.0.1:7331/v1/claude-hooks";
-/// Claude App 的 bundle id：`__CFBundleIdentifier` 等于它才可能是 App 会话。
+/// Claude App's bundle id: only when `__CFBundleIdentifier` equals it can this be an app session.
 const BUNDLE_ID: &str = "com.anthropic.claudefordesktop";
-/// App 起的 Code 会话才有这个环境变量，值就是桌面会话 id。
+/// Only Code sessions started by the app have this variable; its value is the desktop session id.
 const DESKTOP_SESSION_ENV: &str = "CLAUDE_CODE_HOST_SESSION_ID";
 const ALLOWED_FIELDS: [&str; 6] = ["session_id", "prompt_id", "hook_event_name", "cwd", "agent_id", "agent_type"];
 
@@ -39,9 +39,9 @@ pub fn sanitized_payload(source: &Value) -> Option<Map<String, Value>> {
     Some(payload)
 }
 
-/// Claude App 的内嵌终端面板，`__CFBundleIdentifier` 同样是 Claude App，但它
-/// 是终端场景：只有 App 自己起的 Code 会话才带 `CLAUDE_CODE_HOST_SESSION_ID`。
-/// 缺它就把 Claude App 当宿主——K2 把它拉到前台，人就在那个面板里。
+/// Claude App's embedded terminal panel also has Claude App as `__CFBundleIdentifier`, but it
+/// is a terminal case: only Code sessions the app starts itself carry `CLAUDE_CODE_HOST_SESSION_ID`.
+/// Without it, treat Claude App as the host: K2 brings it to the front, and the user is in that panel.
 fn resolve_surface(detected: Surface, desktop_session: Option<&str>) -> Surface {
     match (detected, desktop_session) {
         (Surface::App, None) => Surface::Host(BUNDLE_ID.to_owned()),
@@ -53,8 +53,8 @@ fn resolve_surface(detected: Surface, desktop_session: Option<&str>) -> Surface 
 mod tests {
     use super::*;
 
-    /// 运行处来自环境变量，测试进程里取决于测试跑在哪，与被测的过滤无关。
-    /// 判定本身由 resolve_surface 与 surface 模块的纯函数测试覆盖。
+    /// The surface comes from environment variables, so in a test process it depends on where the test runs, unrelated to the filter under test.
+    /// The decision itself is covered by resolve_surface and the pure-function tests in the surface module.
     fn without_surface(mut payload: Map<String, Value>) -> Map<String, Value> {
         for key in ["surface", "host_bundle_id", "desktop_session_id"] {
             payload.remove(key);
@@ -107,7 +107,7 @@ mod tests {
 
     #[test]
     fn the_apps_own_terminal_panel_is_a_host_not_a_code_session() {
-        // 面板里的 CLI 继承了 Claude App 的 bundle id，但没有桌面会话 id。
+        // The CLI in the panel inherits Claude App's bundle id but has no desktop session id.
         assert_eq!(
             resolve_surface(Surface::App, None),
             Surface::Host(BUNDLE_ID.to_owned())
