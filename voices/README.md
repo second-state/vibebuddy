@@ -30,7 +30,7 @@ VOICE_LANG=en OUT_DIR=voices/jenny tools/make-voices.sh
 VOICE_LANG=en OUT_DIR=voices/guy VOICE=en-US-GuyNeural tools/make-voices.sh
 ```
 
-目录里有了 PCM，`app/scripts/build-app.sh` 就会打出语音包，App 的音色列表随之出现这两项。换别的英文音色时，目录名要与 `app/Sources/VibeBuddyCore/VoicePack.swift` 里 `VoiceCatalogEntry.all` 的 id 一致，并在那里写上 `language: "en"`。英文台词比中文长，Jenny 一整套约 1.5 MB，仍在 2 MB 的 `voices` 分区以内。
+目录里有了 PCM，`app/scripts/build-app.sh` 就会打出语音包，App 的音色列表随之出现这两项。换别的英文音色时，目录名要与 `app/Sources/VibeBuddyCore/VoicePack.swift` 里 `VoiceCatalogEntry.all` 的 id 一致，并在那里写上 `language: .en`。英文台词比中文长，Jenny 一整套约 1.5 MB，仍在 2 MB 的 `voices` 分区以内。
 
 ## 重新生成
 

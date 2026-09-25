@@ -86,6 +86,29 @@ _Avoid_: 空闲时间（会与值班的空闲状态混）
 休闲模式里随机演出的一段几秒到十几秒的动画，例如巡逻、踢球、看书。
 _Avoid_: 动画、小动作（那是值班空闲时的眨眼伸懒腰）
 
+### 英文界面用语
+
+App 英文界面与英文日志里的固定说法。写英文文案时用这些词，不另造同义词。
+
+| 中文 | English | 说明 |
+|---|---|---|
+| 盒子 | box | 指设备本身；界面里小写，句首大写 |
+| 氛围小助手 | the buddy | 角色；产品名仍是 Vibe Buddy |
+| 链路 | link | 设置页「Link」一栏，断开时说 disconnected |
+| 接入 / 修复 / 移除 | Connect / Repair / Remove | Hook 的三个操作；设置页标签页叫 Agents，未接入叫 Not set up |
+| 播报音色 | announcement voice | 选音色的地方；单说音色时用 voice |
+| 内置音色 | built-in voice | 固件自带的湾湾小何 |
+| 语音包 | voice pack | |
+| 音量 / 静音 | volume / mute | |
+| 模式 | mode | |
+| 值班 / 番茄钟 / 休闲 | On duty / Pomodoro / Leisure | 界面用首字母大写；代码与注释里是 duty / pomodoro / leisure |
+| 剧目 | skit | 休闲模式里的小表演 |
+| 当日战绩 | today's stats | 菜单里写作 Today: done · asks · busy |
+| 需要确认 | needs input | 语音台词是 Need your input.，战绩里计作 asks |
+| 任务卡 | task card | |
+| 固件 / 刷入 | firmware / flash | |
+| UART 桥 / 原生 USB | UART bridge / native USB | |
+
 ### 活动生命周期
 
 **Session**：
