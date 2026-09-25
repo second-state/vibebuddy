@@ -63,17 +63,18 @@ release version:
     # CI only notarizes and publishes a Release when it gets a tag, and rejects a tag that disagrees with Cargo.toml,
     # so the version is changed only here, once, with the commit and the tag on the same commit.
     v="{{version}}"
-    [[ "${v}" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "版本号要像 0.2.0，不带 v" >&2; exit 2; }
-    [[ "$(git branch --show-current)" == "main" ]] || { echo "只在 main 上发版" >&2; exit 2; }
-    [[ -z "$(git status --porcelain)" ]] || { echo "工作树不干净" >&2; exit 2; }
+    [[ "${v}" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "version must look like 0.2.0, without a leading v" >&2; exit 2; }
+    [[ "$(git branch --show-current)" == "main" ]] || { echo "releases are cut from main only" >&2; exit 2; }
+    [[ -z "$(git status --porcelain)" ]] || { echo "working tree is not clean" >&2; exit 2; }
     git fetch -q origin main
-    [[ "$(git rev-parse HEAD)" == "$(git rev-parse origin/main)" ]] || { echo "本地 main 与 origin/main 不一致" >&2; exit 2; }
-    ! git rev-parse -q --verify "refs/tags/v${v}" >/dev/null || { echo "v${v} 已存在" >&2; exit 2; }
-    # Bash counts full-width punctuation right after $v as part of the variable name, so always write ${v}.
+    [[ "$(git rev-parse HEAD)" == "$(git rev-parse origin/main)" ]] || { echo "local main differs from origin/main" >&2; exit 2; }
+    ! git rev-parse -q --verify "refs/tags/v${v}" >/dev/null || { echo "v${v} already exists" >&2; exit 2; }
+    # Always write ${v}, not $v: a character right after $v can be read as part of the name
+    # (full-width punctuation in the old Chinese messages did exactly that).
     perl -pi -e 'BEGIN{$new=shift} s/^version = ".*"/version = "$new"/ && ($done++) unless $done' "${v}" Cargo.toml
     cargo update --workspace --offline -q
     git add Cargo.toml Cargo.lock
     git commit -q -m "release: v${v}"
     git tag -a "v${v}" -m "Vibe Buddy v${v}"
     git push -q origin main "v${v}"
-    echo "已推送 v${v}，CI 会公证并发 Release：gh run watch"
+    echo "pushed v${v}; CI will notarize and publish the Release: gh run watch"

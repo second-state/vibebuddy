@@ -133,7 +133,7 @@ impl AppState {
         if let Some(path) = &self.config_path
             && let Err(error) = snapshot.save(path)
         {
-            warn!(%error, path = %path.display(), "配置保存失败");
+            warn!(%error, path = %path.display(), "failed to save config");
         }
         self.notify_status();
     }
@@ -157,7 +157,7 @@ async fn main() {
     let bind_address = env::var("VIBEBUDDY_BIND")
         .unwrap_or_else(|_| "127.0.0.1:7331".to_owned())
         .parse::<SocketAddr>()
-        .unwrap_or_else(|error| panic!("VIBEBUDDY_BIND 无效：{error}"));
+        .unwrap_or_else(|error| panic!("invalid VIBEBUDDY_BIND: {error}"));
     let serial_config = SerialConfig::from_env();
     let (serial_transport, device_events) = SerialTransport::spawn(serial_config);
     let serial_transport = Arc::new(serial_transport);
@@ -181,12 +181,12 @@ async fn main() {
     let app = app(state);
     let listener = tokio::net::TcpListener::bind(bind_address)
         .await
-        .unwrap_or_else(|error| panic!("无法监听 {bind_address}：{error}"));
+        .unwrap_or_else(|error| panic!("cannot listen on {bind_address}: {error}"));
 
-    info!(address = %bind_address, "vibebuddyd 已启动");
+    info!(address = %bind_address, "vibebuddyd started");
     axum::serve(listener, app)
         .await
-        .unwrap_or_else(|error| panic!("HTTP server 失败：{error}"));
+        .unwrap_or_else(|error| panic!("HTTP server failed: {error}"));
 }
 
 /// Device-to-Mac events currently only allow a K2 click. Open the current activity first; when idle, return the
@@ -217,7 +217,7 @@ async fn publish_device_message(state: &AppState, message: DeviceMessage) {
     if is_k2_press(&event) {
         open_k2_source(state).await;
     } else if !event.event.starts_with("voice.") && event.event != "echo" {
-        info!(event = %event.event, "忽略未绑定的设备事件");
+        info!(event = %event.event, "ignoring unbound device event");
     }
 }
 
@@ -225,7 +225,7 @@ async fn open_k2_source(state: &AppState) {
     {
         let sources = state.activities.lock().await.focus_sources();
         if sources.is_empty() {
-            info!("K2 已按下，但当前没有可打开的活动");
+            info!("K2 pressed, but there is no activity to open");
             return;
         }
         for source in sources {
@@ -233,16 +233,16 @@ async fn open_k2_source(state: &AppState) {
             if let ActivitySource::Codex { thread_id, .. } = &source
                 && state.titles.lock().await.codex_thread_known(thread_id) == Some(false)
             {
-                warn!(%thread_id, "K2 跳过不存在的 Codex 线程");
+                warn!(%thread_id, "K2 skipped a Codex thread that no longer exists");
                 continue;
             }
             match source_opener::open(source).await {
                 // Log the link itself: when it jumps to the wrong place, the log should say exactly where it went.
                 Ok(link) => {
-                    info!(%link, "K2 已打开当前活动来源");
+                    info!(%link, "K2 opened the current activity's source");
                     break;
                 }
-                Err(error) => warn!(%error, "K2 打开来源失败，试下一个候选"),
+                Err(error) => warn!(%error, "K2 failed to open source, trying the next candidate"),
             }
         }
     }
@@ -268,7 +268,7 @@ async fn watch_parent() {
     loop {
         ticker.tick().await;
         if std::os::unix::process::parent_id() != expected {
-            info!(expected, "看管我的 App 已经不在，跟着退出");
+            info!(expected, "the supervising app is gone, exiting too");
             std::process::exit(0);
         }
     }
@@ -481,7 +481,7 @@ async fn post_voice_pack(
         .await;
         match result {
             Ok(written) => {
-                info!(voice = %written, "语音包已写入设备");
+                info!(voice = %written, "voice pack written to device");
                 task_state.save_config(|config| config.voice = Some(written.clone())).await;
                 task_state
                     .set_operation(Some(Operation {
@@ -493,7 +493,7 @@ async fn post_voice_pack(
                     .await;
             }
             Err(error) => {
-                warn!(%error, "语音包写入失败");
+                warn!(%error, "voice pack write failed");
                 task_state
                     .set_operation(Some(Operation {
                         kind: OperationKind::VoicePack,
@@ -574,11 +574,11 @@ async fn post_firmware(
         serial.set_suspended(false);
         let operation = match result {
             Ok(()) => {
-                info!("固件已烧录，等设备重启");
+                info!("firmware flashed, waiting for the device to restart");
                 Operation { kind: OperationKind::Firmware, state: OperationState::Done, progress: 1.0, message: "flash complete, device restarting".to_owned() }
             }
             Err(error) => {
-                warn!(%error, "固件烧录失败");
+                warn!(%error, "firmware flash failed");
                 Operation { kind: OperationKind::Firmware, state: OperationState::Failed, progress: 0.0, message: error }
             }
         };
@@ -591,7 +591,7 @@ async fn post_firmware(
 async fn post_restart() -> (StatusCode, Json<ApiResponse>) {
     tokio::spawn(async {
         tokio::time::sleep(Duration::from_millis(200)).await;
-        info!("按 App 的要求退出，等它重新拉起");
+        info!("exiting at the app's request; it will relaunch us");
         std::process::exit(0);
     });
     (StatusCode::ACCEPTED, Json(ApiResponse { accepted: true, message: "daemon is restarting".to_owned() }))
@@ -603,7 +603,7 @@ async fn post_restart() -> (StatusCode, Json<ApiResponse>) {
 /// looking as if a task were still running. The worst failure for a status device is showing stale state without knowing it.
 async fn send_heartbeats(state: AppState) {
     let build = build_identity(state.app_version.as_deref());
-    info!(build = %build, "Mac 端构建标识");
+    info!(build = %build, "Mac-side build id");
     let mut ticker = tokio::time::interval(HEARTBEAT_INTERVAL);
     loop {
         ticker.tick().await;
@@ -612,7 +612,7 @@ async fn send_heartbeats(state: AppState) {
         match heartbeat.to_ndjson() {
             // A full queue means the device isn't receiving anything; a heartbeat is pointless then, so just drop it.
             Ok(frame) => drop(state.transport.send(frame)),
-            Err(error) => warn!(%error, "心跳编码失败"),
+            Err(error) => warn!(%error, "failed to encode heartbeat"),
         }
     }
 }
@@ -665,7 +665,7 @@ async fn poll_ci(state: AppState) {
             events
         };
         for event in events {
-            info!(event = %event.event, "CI 状态变化");
+            info!(event = %event.event, "CI status changed");
             send_event(&state, event);
         }
     }
@@ -685,7 +685,7 @@ async fn sweep_expired_activities(state: AppState) {
         let Some(event) = event else {
             continue;
         };
-        info!(event = %event.event, "清除过期的活动");
+        info!(event = %event.event, "clearing expired activity");
         send_event(&state, event);
     }
 }
@@ -695,10 +695,10 @@ fn send_event(state: &AppState, event: Event) {
     match event.to_ndjson() {
         Ok(frame) => {
             if let Err(error) = state.transport.send(frame) {
-                warn!(?error, "状态未能进入发送队列");
+                warn!(?error, "status could not be queued for sending");
             }
         }
-        Err(error) => warn!(%error, "状态编码失败"),
+        Err(error) => warn!(%error, "failed to encode status"),
     }
 }
 
@@ -804,7 +804,7 @@ mod tests {
 
     impl Transport for RecordingTransport {
         fn send(&self, frame: Vec<u8>) -> Result<(), TransportError> {
-            self.frames.lock().expect("mutex 不应中毒").push(frame);
+            self.frames.lock().expect("mutex should not be poisoned").push(frame);
             Ok(())
         }
     }
@@ -813,9 +813,9 @@ mod tests {
         fn events(&self) -> Vec<Event> {
             self.frames
                 .lock()
-                .expect("mutex 不应中毒")
+                .expect("mutex should not be poisoned")
                 .iter()
-                .map(|frame| serde_json::from_slice(frame).expect("帧应是合法事件"))
+                .map(|frame| serde_json::from_slice(frame).expect("frame should be a valid event"))
                 .collect()
         }
     }
@@ -830,7 +830,7 @@ mod tests {
     }
 
     fn device_event(json: &str) -> DeviceMessage {
-        DeviceMessage::Event(serde_json::from_str(json).expect("测试事件应可解析"))
+        DeviceMessage::Event(serde_json::from_str(json).expect("test event should parse"))
     }
 
     /// Wait for the `index`-th event to show up in the recording transport.
@@ -841,7 +841,7 @@ mod tests {
             }
             tokio::time::sleep(Duration::from_millis(5)).await;
         }
-        panic!("第 {index} 条事件迟迟没有出现");
+        panic!("event {index} never showed up");
     }
 
     #[test]
@@ -882,14 +882,14 @@ mod tests {
         let state = test_state(transport);
         let response = status_stream(State(state.clone())).await.into_response();
         let mut body = response.into_body();
-        let first = body.frame().await.expect("先推一份").expect("帧可读");
-        let first = String::from_utf8_lossy(first.data_ref().expect("数据帧")).into_owned();
+        let first = body.frame().await.expect("first snapshot is pushed").expect("frame is readable");
+        let first = String::from_utf8_lossy(first.data_ref().expect("data frame")).into_owned();
         assert!(first.starts_with("event: status\n"), "{first}");
         assert!(first.contains("\"connected\":false"), "{first}");
 
         publish_device_message(&state, DeviceMessage::Connected { port: "/dev/cu.s".to_owned(), bridge: false }).await;
-        let second = body.frame().await.expect("状态变了再推一份").expect("帧可读");
-        let second = String::from_utf8_lossy(second.data_ref().expect("数据帧")).into_owned();
+        let second = body.frame().await.expect("another snapshot is pushed after the status changes").expect("frame is readable");
+        let second = String::from_utf8_lossy(second.data_ref().expect("data frame")).into_owned();
         assert!(second.contains("\"connected\":true"), "{second}");
         let _ = to_bytes; // only the frame interface is used
     }
@@ -927,7 +927,7 @@ mod tests {
             publish_device_message(&state, DeviceMessage::Line("SHOT 0000:320".to_owned())).await;
         }
         publish_device_message(&state, DeviceMessage::Line("SHOT END".to_owned())).await;
-        let response = handle.await.expect("截图任务不该崩");
+        let response = handle.await.expect("screenshot task should not panic");
         assert_eq!(response.status(), StatusCode::OK);
         assert_eq!(response.headers()["content-type"], "image/png");
     }
@@ -985,7 +985,7 @@ mod tests {
         assert_eq!(begin.event, "voice.begin");
         assert_eq!(begin.extra["size"], 1256);
         tokio::time::sleep(Duration::from_millis(20)).await;
-        assert_eq!(transport.events().len(), 1, "没收到 ready 之前不能发块");
+        assert_eq!(transport.events().len(), 1, "no chunk may be sent before ready arrives");
 
         publish_device_message(&state, device_event(r#"{"version":1,"event":"voice.ready","seq":-1}"#)).await;
         let first = nth_event(&transport, 1).await;
@@ -993,7 +993,7 @@ mod tests {
         assert_eq!(first.extra["seq"], 0);
         assert_eq!(first.extra["crc"], crc32fast::hash(&pack[..672]));
         tokio::time::sleep(Duration::from_millis(20)).await;
-        assert_eq!(transport.events().len(), 2, "没收到 ack 之前不能发下一块");
+        assert_eq!(transport.events().len(), 2, "the next chunk may not be sent before the ack arrives");
 
         publish_device_message(&state, device_event(r#"{"version":1,"event":"voice.ack","seq":0}"#)).await;
         let second = nth_event(&transport, 2).await;
@@ -1010,7 +1010,7 @@ mod tests {
             }
             tokio::time::sleep(Duration::from_millis(5)).await;
         }
-        let operation = state.operation.lock().await.clone().expect("应有操作记录");
+        let operation = state.operation.lock().await.clone().expect("an operation should be recorded");
         assert_eq!(operation.state, OperationState::Done);
         assert_eq!(state.config.lock().await.voice.as_deref(), Some("hsiaoyu"));
     }
@@ -1033,7 +1033,7 @@ mod tests {
             }
             tokio::time::sleep(Duration::from_millis(5)).await;
         }
-        let operation = state.operation.lock().await.clone().expect("应有操作记录");
+        let operation = state.operation.lock().await.clone().expect("an operation should be recorded");
         assert_eq!(operation.state, OperationState::Failed);
         assert!(operation.message.contains("ESP_ERR_INVALID_SIZE"), "{}", operation.message);
         assert_eq!(state.config.lock().await.voice, None);
@@ -1055,7 +1055,7 @@ mod tests {
         let transport = Arc::new(RecordingTransport::default());
         let event: Event =
             serde_json::from_str(r#"{"version":1,"event":"task.done","title":"Hello"}"#)
-                .expect("测试消息应可解析");
+                .expect("test message should parse");
 
         let (status, Json(response)) =
             post_event(State(test_state(transport.clone())), Json(event)).await;
@@ -1063,7 +1063,7 @@ mod tests {
         assert_eq!(status, StatusCode::ACCEPTED);
         assert!(response.accepted);
         assert_eq!(
-            transport.frames.lock().expect("mutex 不应中毒").as_slice(),
+            transport.frames.lock().expect("mutex should not be poisoned").as_slice(),
             [b"{\"version\":1,\"event\":\"task.done\",\"title\":\"Hello\"}\n"]
         );
     }
@@ -1072,8 +1072,8 @@ mod tests {
     fn heartbeat_carries_build_local_hour_and_day() {
         let frame = heartbeat_event("abc1234 2026-09-15 12:00", 23, 20260915)
             .to_ndjson()
-            .expect("心跳应可编码");
-        let text = String::from_utf8(frame).expect("心跳必须是 UTF-8");
+            .expect("heartbeat should encode");
+        let text = String::from_utf8(frame).expect("heartbeat must be UTF-8");
         assert!(text.contains(r#""event":"device.heartbeat""#));
         assert!(text.contains(r#""build":"abc1234 2026-09-15 12:00""#));
         assert!(text.contains(r#""hour":23"#));
@@ -1092,13 +1092,13 @@ mod tests {
         let event: Event = serde_json::from_str(
             r#"{"version":1,"event":"button","button":"K2","action":"press"}"#,
         )
-        .expect("按钮事件应可解析");
+        .expect("button event should parse");
         assert!(is_k2_press(&event));
 
         let release: Event = serde_json::from_str(
             r#"{"version":1,"event":"button","button":"K2","action":"release"}"#,
         )
-        .expect("释放事件应可解析");
+        .expect("release event should parse");
         assert!(!is_k2_press(&release));
     }
 }

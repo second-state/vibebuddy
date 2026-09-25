@@ -200,54 +200,54 @@ CSR="${WORK}/developer-id.csr"
 P12="${WORK}/developer-id.p12"
 mkdir -p "${WORK}"; chmod 700 "${WORK}"
 
-banner "Vibe Buddy 发布签名配置"
+banner "Vibe Buddy release signing setup"
 
-stage "生成私钥与证书请求（CSR）"
-say "Developer ID 证书要用一把只有你持有的私钥去申请。私钥放在 ${WORK}，"
-say "以后换机器或证书到期续签都靠它，请自己另外备份一份。"
+stage "Generate a private key and certificate signing request (CSR)"
+say "A Developer ID certificate is requested with a private key only you hold. It lives in ${WORK};"
+say "you need it to move machines or renew the certificate, so keep your own backup."
 if [[ -f "${KEY}" ]]; then
-  note "已有 ${KEY}，接着用。"
+  note "Found ${KEY}, reusing it."
 else
-  ask CSR_EMAIL "Apple 开发者账号的邮箱（只写进 CSR）:"
+  ask CSR_EMAIL "Apple Developer account email (only written into the CSR):"
   "${OPENSSL}" genrsa -out "${KEY}" 2048 2>/dev/null
   chmod 600 "${KEY}"
   "${OPENSSL}" req -new -key "${KEY}" -out "${CSR}" -subj "/emailAddress=${CSR_EMAIL}/CN=Vibe Buddy Developer ID/C=CN"
 fi
 [[ -f "${CSR}" ]] || "${OPENSSL}" req -new -key "${KEY}" -out "${CSR}" -subj "/CN=Vibe Buddy Developer ID/C=CN"
 printf '  %s✓%s CSR: %s\n' "$GREEN" "$RESET" "${CSR}"
-pause "按回车去申请证书"
+pause "Press Enter to request the certificate"
 
-stage "申请 Developer ID Application 证书"
-warn "只有账号持有人（Account Holder）能建 Developer ID 证书。"
+stage "Request a Developer ID Application certificate"
+warn "Only the Account Holder can create Developer ID certificates."
 open_url "https://developer.apple.com/account/resources/certificates/add"
-step "Software 一栏选「Developer ID Application」，Continue。"
-step "Profile Type / Sub-CA 选「G2 Sub-CA」，Continue。"
-step "Choose File 选这个文件（已拷进剪贴板，文件框里按 ⌘⇧G 粘贴）：${CSR}"
+step "Under Software, choose Developer ID Application, then Continue."
+step "For Profile Type / Sub-CA, choose G2 Sub-CA, then Continue."
+step "Choose File and pick this file (copied to the clipboard; press ⌘⇧G in the file dialog and paste): ${CSR}"
 printf '%s' "${CSR}" | pbcopy 2>/dev/null || true
-step "Continue → Download，得到 developerID_application.cer。"
+step "Continue → Download to get developerID_application.cer."
 CER=""
 while [[ ! -f "${CER}" ]]; do
-  ask CER_INPUT "下载好的 .cer 路径（回车用 ~/Downloads/developerID_application.cer）:"
+  ask CER_INPUT "Path to the downloaded .cer (Enter for ~/Downloads/developerID_application.cer):"
   CER="${CER_INPUT:-${HOME}/Downloads/developerID_application.cer}"
   CER="${CER/#\~/${HOME}}"
-  [[ -f "${CER}" ]] || warn "找不到 ${CER}"
+  [[ -f "${CER}" ]] || warn "Cannot find ${CER}"
 done
 "${OPENSSL}" x509 -inform DER -in "${CER}" -out "${WORK}/developer-id.pem"
 SUBJECT="$("${OPENSSL}" x509 -in "${WORK}/developer-id.pem" -noout -subject)"
 if [[ "${SUBJECT}" != *"Developer ID Application"* ]]; then
-  warn "这张不是 Developer ID Application 证书：${SUBJECT}"
+  warn "This is not a Developer ID Application certificate: ${SUBJECT}"
   exit 1
 fi
 # The certificate and private key must be a pair, or the exported p12 can't sign on CI.
 if [[ "$("${OPENSSL}" x509 -in "${WORK}/developer-id.pem" -noout -modulus)" != "$("${OPENSSL}" rsa -in "${KEY}" -noout -modulus 2>/dev/null)" ]]; then
-  warn "这张证书不是用 ${CSR} 申请的，和本机私钥对不上。"
+  warn "This certificate wasn't requested with ${CSR}; it doesn't match the local private key."
   exit 1
 fi
 printf '  %s✓%s %s\n' "$GREEN" "$RESET" "${SUBJECT#subject=}"
-pause "按回车打包 p12"
+pause "Press Enter to package the p12"
 
-stage "打包 p12，写入证书相关的 secrets"
-say "把私钥、证书和 Apple 的 G2 中间证书打成一个 p12，密码随机生成。"
+stage "Package the p12 and write the certificate secrets"
+say "Bundling the private key, certificate and Apple's G2 intermediate into a p12 with a random password."
 curl -fsSL "https://www.apple.com/certificateauthority/DeveloperIDG2CA.cer" -o "${WORK}/DeveloperIDG2CA.cer"
 "${OPENSSL}" x509 -inform DER -in "${WORK}/DeveloperIDG2CA.cer" -out "${WORK}/DeveloperIDG2CA.pem"
 P12_PASSWORD="$("${OPENSSL}" rand -hex 24)"
@@ -270,48 +270,48 @@ IDENTITY="$(security find-identity -v -p codesigning "${TEST_KEYCHAIN}" | sed -n
 security list-keychains -d user -s ${SAVED_KEYCHAINS}
 security delete-keychain "${TEST_KEYCHAIN}"
 if [[ -z "${IDENTITY}" ]]; then
-  warn "p12 导得进钥匙串，但里面没有可用的签名身份，先别往下走。"
+  warn "The p12 imports into a keychain but has no usable signing identity; stopping here."
   exit 1
 fi
-printf '  %s✓%s 签名身份: %s\n' "$GREEN" "$RESET" "${IDENTITY}"
+printf '  %s✓%s signing identity: %s\n' "$GREEN" "$RESET" "${IDENTITY}"
 set_secret MACOS_CERT_P12 "$(base64 < "${P12}" | tr -d '\n')"
 set_secret MACOS_CERT_PASSWORD "${P12_PASSWORD}"
-note "p12 密码只存在 GitHub secret 里；要再用就重跑本脚本重新打包。"
+note "The p12 password is stored only in the GitHub secret; to use it again, rerun this script to repackage."
 pause
 
-stage "Apple ID 与 Team ID"
+stage "Apple ID and Team ID"
 TEAM_GUESS="$(printf '%s' "${IDENTITY}" | sed -n 's/.*(\([A-Z0-9]\{10\}\))$/\1/p')"
-say "公证用你的 Apple ID 登录。Team ID 从证书里读到的是：${TEAM_GUESS:-（没读到）}"
-note "核对处：https://developer.apple.com/account → Membership details → Team ID"
-ask APPLE_TEAM_ID "Team ID（回车用 ${TEAM_GUESS:-上面查到的值}）:"
+say "Notarization signs in with your Apple ID. Team ID read from the certificate: ${TEAM_GUESS:-(not found)}"
+note "Check it at: https://developer.apple.com/account → Membership details → Team ID"
+ask APPLE_TEAM_ID "Team ID (Enter for ${TEAM_GUESS:-the value above}):"
 APPLE_TEAM_ID="${APPLE_TEAM_ID:-${TEAM_GUESS}}"
-ask APPLE_ID "Apple 开发者账号的邮箱:"
+ask APPLE_ID "Apple Developer account email:"
 set_secret APPLE_TEAM_ID "${APPLE_TEAM_ID}"
 set_secret APPLE_ID "${APPLE_ID}"
 pause
 
-stage "App 专用密码"
-say "公证服务不收 Apple ID 的登录密码，要一个 App 专用密码。"
+stage "App-specific password"
+say "The notary service won't take your Apple ID password; it needs an app-specific password."
 open_url "https://account.apple.com/account/manage"
-step "登录 → 「登录与安全」→「App 专用密码」→ 生成，名称填 vibe-buddy-notary。"
-step "复制弹出来的 xxxx-xxxx-xxxx-xxxx。"
+step "Sign in → Sign-In and Security → App-Specific Passwords → generate one named vibe-buddy-notary."
+step "Copy the xxxx-xxxx-xxxx-xxxx it shows."
 while true; do
-  ask_secret APPLE_APP_PASSWORD "粘贴 App 专用密码:"
+  ask_secret APPLE_APP_PASSWORD "Paste the app-specific password:"
   # Actually log in to the notary service with it once; it only counts if the history can be listed.
   if xcrun notarytool history --apple-id "${APPLE_ID}" --team-id "${APPLE_TEAM_ID}" \
        --password "${APPLE_APP_PASSWORD}" >/dev/null 2>&1; then
-    printf '  %s✓%s 公证服务接受这组凭据\n' "$GREEN" "$RESET"
+    printf '  %s✓%s the notary service accepted these credentials\n' "$GREEN" "$RESET"
     break
   fi
-  warn "公证服务拒绝了这组 Apple ID / Team ID / 密码。"
-  confirm "重新粘贴一次？" || { SKIPPED+=("GitHub secret APPLE_APP_PASSWORD（凭据未通过验证）"); break; }
+  warn "The notary service rejected this Apple ID / Team ID / password."
+  confirm "Paste it again?" || { SKIPPED+=("GitHub secret APPLE_APP_PASSWORD (credentials failed verification)"); break; }
 done
 if [[ " ${SKIPPED[*]-} " != *"APPLE_APP_PASSWORD"* ]]; then
   set_secret APPLE_APP_PASSWORD "${APPLE_APP_PASSWORD}"
 fi
-if (( ${#SKIPPED[@]} == 0 )) && confirm "现在就触发一次 release-app，出第一版签名加公证的 DMG？"; then
-  gh workflow run release-app.yml --ref main && note "已触发，进度：gh run watch"
+if (( ${#SKIPPED[@]} == 0 )) && confirm "Trigger release-app now to build the first signed and notarized DMG?"; then
+  gh workflow run release-app.yml --ref main && note "Triggered; follow it with: gh run watch"
 fi
 
 finish
-note "私钥与 p12 在 ${WORK}，请备份；这个目录不要进任何仓库。"
+note "The private key and p12 are in ${WORK}; back them up and never commit this directory."

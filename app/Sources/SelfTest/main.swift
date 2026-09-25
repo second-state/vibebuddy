@@ -7,7 +7,7 @@ var failures = 0
 func check(_ condition: Bool, _ message: String, file: String = #file, line: Int = #line) {
     if !condition {
         failures += 1
-        print("失败 \(line): \(message)")
+        print("FAIL \(line): \(message)")
     }
 }
 
@@ -17,35 +17,35 @@ let sample = """
  "device":{"connected":true,"port":"/dev/cu.usbmodem1","bridge":true,"mode":"pomodoro","firmware_build":"abc1234-dirty 2026-09-16 13:11","voice":"xiaohe2","volume":65},
  "today":{"done":3,"asks":1,"busy_seconds":4980},
  "hooks":{"codex":"2026-09-16T13:31:30.060465+08:00","claude":null},
- "operation":{"kind":"voice_pack","state":"running","progress":0.42,"message":"正在写入 hsiaoyu"},
+ "operation":{"kind":"voice_pack","state":"running","progress":0.42,"message":"writing hsiaoyu"},
  "config":{"voice":"xiaohe2","notify_link":true}}
 """
 do {
     let status = try StatusCoding.decoder().decode(Status.self, from: Data(sample.utf8))
-    check(status.device.mode == "pomodoro", "模式解码")
-    check(status.device.volume == 65, "音量解码")
-    check(status.hooks.codex != nil && status.hooks.claude == nil, "Hook 时间解码")
-    check(status.operation?.kind == .voicePack && status.operation?.progress == 0.42, "操作解码")
+    check(status.device.mode == "pomodoro", "mode decodes")
+    check(status.device.volume == 65, "volume decodes")
+    check(status.hooks.codex != nil && status.hooks.claude == nil, "hook timestamps decode")
+    check(status.operation?.kind == .voicePack && status.operation?.progress == 0.42, "operation decodes")
     let menu = MenuState.derive(status: status, daemonAlive: true)
-    check(menu.icon == .online, "在线图标")
-    check(menu.deviceLine == "Box online · firmware abc1234-dirty", "设备行：\(menu.deviceLine)")
-    check(menu.modeLine == "Mode: Pomodoro", "模式行：\(menu.modeLine)")
-    check(menu.todayLine == "Today: done 3 · asks 1 · busy 1 h 23 min", "战绩行：\(menu.todayLine)")
+    check(menu.icon == .online, "online icon")
+    check(menu.deviceLine == "Box online · firmware abc1234-dirty", "device line: \(menu.deviceLine)")
+    check(menu.modeLine == "Mode: Pomodoro", "mode line: \(menu.modeLine)")
+    check(menu.todayLine == "Today: done 3 · asks 1 · busy 1 h 23 min", "today line: \(menu.todayLine)")
     var offline = status
     offline.device.connected = false
     let offlineMenu = MenuState.derive(status: offline, daemonAlive: true)
-    check(offlineMenu.icon == .offline && offlineMenu.deviceLine == "Box not found", "离线菜单")
+    check(offlineMenu.icon == .offline && offlineMenu.deviceLine == "Box not found", "offline menu")
     let down = MenuState.derive(status: nil, daemonAlive: false)
-    check(down.icon == .daemonDown && down.deviceLineIsAction, "daemon 异常菜单")
-    check(Firmware.updateAvailable(device: status.device.firmwareBuild, bundled: "def5678 2026-09-17 09:00"), "哈希不同可更新")
-    check(!Firmware.updateAvailable(device: status.device.firmwareBuild, bundled: "abc1234-dirty 2026-09-16 13:11"), "哈希相同不更新")
-    check(!Firmware.updateAvailable(device: nil, bundled: "def5678 x"), "盒子未报构建号不催")
-    check(Firmware.foreign(connected: true, device: nil, connectedFor: 6), "连着却沉默过了宽限期：出厂机")
-    check(!Firmware.foreign(connected: true, device: nil, connectedFor: 1), "刚连上还在宽限期内不算")
-    check(!Firmware.foreign(connected: true, device: "abc 1", connectedFor: 60), "报了构建号就是我们的")
-    check(!Firmware.foreign(connected: false, device: nil, connectedFor: 60), "没连着谈不上")
+    check(down.icon == .daemonDown && down.deviceLineIsAction, "daemon-down menu")
+    check(Firmware.updateAvailable(device: status.device.firmwareBuild, bundled: "def5678 2026-09-17 09:00"), "different hash offers an update")
+    check(!Firmware.updateAvailable(device: status.device.firmwareBuild, bundled: "abc1234-dirty 2026-09-16 13:11"), "same hash offers no update")
+    check(!Firmware.updateAvailable(device: nil, bundled: "def5678 x"), "no nagging when the box reports no build")
+    check(Firmware.foreign(connected: true, device: nil, connectedFor: 6), "connected but silent past the grace period: factory firmware")
+    check(!Firmware.foreign(connected: true, device: nil, connectedFor: 1), "just connected, still within the grace period: not foreign")
+    check(!Firmware.foreign(connected: true, device: "abc 1", connectedFor: 60), "a reported build means it is ours")
+    check(!Firmware.foreign(connected: false, device: nil, connectedFor: 60), "not connected: not foreign")
 } catch {
-    check(false, "状态解码抛错：\(error)")
+    check(false, "status decoding threw: \(error)")
 }
 
 // 1b. Firmware package: found even inside an extra zip folder; magic numbers checked; build.txt wins over the image's version string.
@@ -63,27 +63,27 @@ do {
     try write(FirmwarePackage.partitionTableName, [0xAA, 0x50, 0x01, 0x02])
     try write(FirmwarePackage.appName, app)
     let bare = try FirmwarePackage.inspect(directory: root)
-    check(bare.build == "v9.9.9-dirty", "没有 build.txt 时读镜像版本：\(bare.build)")
+    check(bare.build == "v9.9.9-dirty", "without build.txt the image version is used: \(bare.build)")
     try Data("abc1234 2026-09-22 10:00\n".utf8).write(to: nested.appendingPathComponent(FirmwarePackage.buildName))
     let stamped = try FirmwarePackage.inspect(directory: root)
-    check(stamped.build == "abc1234 2026-09-22 10:00", "build.txt 优先：\(stamped.build)")
-    check(stamped.app.lastPathComponent == FirmwarePackage.appName, "找到子目录里的 app 镜像")
+    check(stamped.build == "abc1234 2026-09-22 10:00", "build.txt wins: \(stamped.build)")
+    check(stamped.app.lastPathComponent == FirmwarePackage.appName, "finds the app image in a subdirectory")
     try write(FirmwarePackage.partitionTableName, [0x00, 0x00])
     do {
         _ = try FirmwarePackage.inspect(directory: root)
-        check(false, "坏分区表应当被拒绝")
+        check(false, "a bad partition table is rejected")
     } catch let failure as FirmwarePackage.Failure {
-        check(failure == .notAnImage(FirmwarePackage.partitionTableName), "坏分区表报的是它自己：\(failure)")
+        check(failure == .notAnImage(FirmwarePackage.partitionTableName), "a bad partition table names itself: \(failure)")
     }
     try FileManager.default.removeItem(at: nested.appendingPathComponent(FirmwarePackage.appName))
     do {
         _ = try FirmwarePackage.inspect(directory: root)
-        check(false, "缺 app 镜像应当被拒绝")
+        check(false, "a missing app image is rejected")
     } catch let failure as FirmwarePackage.Failure {
-        check(failure == .missing(FirmwarePackage.appName), "缺 app 镜像报缺文件：\(failure)")
+        check(failure == .missing(FirmwarePackage.appName), "a missing app image reports the missing file: \(failure)")
     }
 } catch {
-    check(false, "状态解码抛错：\(error)")
+    check(false, "status decoding threw: \(error)")
 }
 
 // 2. Hook config merge: others' hooks untouched, old Python entries replaced, clean after removal.
@@ -96,29 +96,29 @@ let existing: [String: Any] = [
 ]
 let binary = "/Users/x/Library/Application Support/VibeBuddy/bin/vibebuddy-hook"
 let installed = HookConfig.install(into: existing, agent: .codex, binary: binary)
-check(HookConfig.isInstalled(in: installed, agent: .codex, binary: binary), "装好后检测为已装")
-check(!HookConfig.isInstalled(in: existing, agent: .codex, binary: binary), "装前检测为未装")
-check((installed["model"] as? String) == "gpt-5", "其它键保留")
+check(HookConfig.isInstalled(in: installed, agent: .codex, binary: binary), "detected as installed after install")
+check(!HookConfig.isInstalled(in: existing, agent: .codex, binary: binary), "detected as not installed before install")
+check((installed["model"] as? String) == "gpt-5", "other keys are kept")
 let installedHooks = installed["hooks"] as! [String: Any]
 let preToolUse = installedHooks["PreToolUse"] as! [[String: Any]]
-check(preToolUse.count == 1 && (preToolUse[0]["matcher"] as? String) == "Bash", "别人的 PreToolUse 不动（Codex 事件表里没有它）")
+check(preToolUse.count == 1 && (preToolUse[0]["matcher"] as? String) == "Bash", "someone else's PreToolUse is untouched (it is not in the Codex event list)")
 let stop = installedHooks["Stop"] as! [[String: Any]]
 let stopCommands = stop.flatMap { ($0["hooks"] as! [[String: Any]]).map { $0["command"] as! String } }
-check(stopCommands == ["\"\(binary)\" codex"], "旧的 Python 条目被替换：\(stopCommands)")
-check(HookAgent.codex.events.allSatisfy { installedHooks[$0] != nil }, "六个事件都在")
+check(stopCommands == ["\"\(binary)\" codex"], "the old Python entry is replaced: \(stopCommands)")
+check(HookAgent.codex.events.allSatisfy { installedHooks[$0] != nil }, "all six events are present")
 let removed = HookConfig.removed(from: installed)
 let removedHooks = removed["hooks"] as! [String: Any]
-check(removedHooks.keys.sorted() == ["PreToolUse"], "移除后只剩别人的：\(removedHooks.keys.sorted())")
+check(removedHooks.keys.sorted() == ["PreToolUse"], "after removal only other hooks remain: \(removedHooks.keys.sorted())")
 let diff = HookConfig.describeChange(from: existing, to: installed, agent: .codex)
-check(diff.contains("- Stop: /usr/bin/python3 /old/codex-hook.py") && diff.contains("+ Stop: \"\(binary)\" codex"), "差异说明：\(diff)")
-check(HookAgent.claude.events.count == 8, "Claude 八个事件")
+check(diff.contains("- Stop: /usr/bin/python3 /old/codex-hook.py") && diff.contains("+ Stop: \"\(binary)\" codex"), "change description: \(diff)")
+check(HookAgent.claude.events.count == 8, "Claude has eight events")
 // Codex trust hint: warn only if the config is newer than the last event; no verdict without events; no warning if the file time is unreadable.
 let earlier = Date(timeIntervalSince1970: 1_000)
 let later = Date(timeIntervalSince1970: 2_000)
-check(HookConfig.codexTrustHint(configModifiedAt: later, lastEvent: nil) == .waitingFirstEvent, "没收到过事件：等待")
-check(HookConfig.codexTrustHint(configModifiedAt: later, lastEvent: earlier) == .changedSinceLastEvent(later), "配置比最近事件新：要重新信任")
-check(HookConfig.codexTrustHint(configModifiedAt: earlier, lastEvent: later) == .trusted, "改完之后收到过事件：已在运行")
-check(HookConfig.codexTrustHint(configModifiedAt: nil, lastEvent: later) == .trusted, "读不到文件时间不报警")
+check(HookConfig.codexTrustHint(configModifiedAt: later, lastEvent: nil) == .waitingFirstEvent, "no event yet: waiting")
+check(HookConfig.codexTrustHint(configModifiedAt: later, lastEvent: earlier) == .changedSinceLastEvent(later), "config newer than the last event: needs re-trust")
+check(HookConfig.codexTrustHint(configModifiedAt: earlier, lastEvent: later) == .trusted, "event received after the change: running")
+check(HookConfig.codexTrustHint(configModifiedAt: nil, lastEvent: later) == .trusted, "no alarm when the file time is unreadable")
 
 // 3. Voice pack parsing.
 var pack = Data(count: 256)
@@ -133,13 +133,13 @@ for index in 0..<5 {
 }
 pack.append(Data(repeating: 1, count: 150))
 if let parsed = VoicePack(data: pack) {
-    check(parsed.voiceID == "hsiaoyu", "音色 id")
-    check(parsed.clips[4] == (256 + 100)..<(256 + 150), "第五句位置")
-    check(parsed.previewPCM().count == 150 + 4 * 28_800, "试听拼接长度 \(parsed.previewPCM().count)")
+    check(parsed.voiceID == "hsiaoyu", "voice id")
+    check(parsed.clips[4] == (256 + 100)..<(256 + 150), "fifth clip range")
+    check(parsed.previewPCM().count == 150 + 4 * 28_800, "preview length \(parsed.previewPCM().count)")
 } else {
-    check(false, "语音包应能解析")
+    check(false, "voice pack parses")
 }
-check(VoicePack(data: Data("garbage".utf8)) == nil, "垃圾不是语音包")
+check(VoicePack(data: Data("garbage".utf8)) == nil, "garbage is not a voice pack")
 
 // 4. Voice catalog: every entry has a language, and the picker puts the UI language first.
 let catalog = VoiceCatalogEntry.all
@@ -150,7 +150,7 @@ check(englishFirst.first?.language == "en" && englishFirst.count == catalog.coun
 check(VoiceCatalogEntry.sorted(catalog, preferring: "zh").first?.id == "wanwanxiaohe", "Chinese UI keeps catalog order")
 
 if failures > 0 {
-    print("\(failures) 处失败")
+    print("\(failures) failure(s)")
     exit(1)
 }
-print("自检通过")
+print("self-test passed")

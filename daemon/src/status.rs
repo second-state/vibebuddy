@@ -129,9 +129,9 @@ mod tests {
         assert!(state.apply(&line("DISPLAY READY BUILD 21a8360-dirty 2026-09-16 10:23")));
         assert!(state.apply(&line("VOICES builtin")));
         assert!(state.apply(&line("MODE POMODORO")));
-        assert!(!state.apply(&line("MODE POMODORO")), "没变就不算变");
+        assert!(!state.apply(&line("MODE POMODORO")), "no change is not a change");
         assert!(state.apply(&line("VOLUME 65")));
-        assert!(!state.apply(&line("VOLUME ERROR")), "报错不改音量");
+        assert!(!state.apply(&line("VOLUME ERROR")), "an error does not change the volume");
         assert_eq!(
             state,
             DeviceState {

@@ -129,7 +129,7 @@ mod tests {
         let mut tracker = ActivityTracker::default();
 
         let working = apply(&mut tracker, &mut SessionTitles::disabled(), hook("UserPromptSubmit", "/work/vibe-buddy"))
-            .expect("开始事件应可见");
+            .expect("start event should be visible");
         assert_eq!(working.event, "task.start");
         assert_eq!(working.title.as_deref(), Some("CC:VIBE-BUDDY"));
 
@@ -138,10 +138,10 @@ mod tests {
             &mut SessionTitles::disabled(),
             hook("PermissionRequest", "/work/vibe-buddy"),
         )
-        .expect("权限请求应可见");
+        .expect("permission request should be visible");
         assert_eq!(waiting.event, "agent.input_required");
 
-        let done = apply(&mut tracker, &mut SessionTitles::disabled(), hook("Stop", "/work/vibe-buddy")).expect("停止事件应可见");
+        let done = apply(&mut tracker, &mut SessionTitles::disabled(), hook("Stop", "/work/vibe-buddy")).expect("stop event should be visible");
         assert_eq!(done.event, "task.done");
     }
 
@@ -151,19 +151,19 @@ mod tests {
         apply(&mut tracker, &mut SessionTitles::disabled(), hook("UserPromptSubmit", "/work/vibe-buddy"));
         apply(&mut tracker, &mut SessionTitles::disabled(), subagent_hook("SubagentStart", "agent-1"));
         let two = apply(&mut tracker, &mut SessionTitles::disabled(), subagent_hook("SubagentStart", "agent-2"))
-            .expect("第二个子 agent 应刷新卡片栈");
+            .expect("second subagent should refresh the card stack");
 
-        let tasks = two.extra["tasks"].as_array().expect("tasks 应为数组");
-        assert_eq!(tasks.len(), 3, "父会话与两个子 agent 应各占一张卡");
+        let tasks = two.extra["tasks"].as_array().expect("tasks should be an array");
+        assert_eq!(tasks.len(), 3, "parent session and two subagents should each get a card");
 
         let first = apply(&mut tracker, &mut SessionTitles::disabled(), subagent_hook("SubagentStop", "agent-1"))
-            .expect("子 agent 结束应产生事件");
+            .expect("subagent stop should produce an event");
         assert_eq!(
             first.extra.get("announcement").and_then(|v| v.as_str()),
             Some("done"),
-            "一个子 agent 结束不应吞掉播报"
+            "one subagent stopping must not swallow the announcement"
         );
-        let remaining = first.extra["tasks"].as_array().expect("tasks 应为数组");
+        let remaining = first.extra["tasks"].as_array().expect("tasks should be an array");
         assert_eq!(remaining.len(), 2);
     }
 
@@ -178,9 +178,9 @@ mod tests {
             "cwd": "/work/vibe-buddy",
             "response_kind": "input_required"
         }))
-        .expect("等待回答的 Stop 载荷应可解析");
+        .expect("Stop payload awaiting an answer should parse");
 
-        let waiting = apply(&mut tracker, &mut SessionTitles::disabled(), stop).expect("等待回答应产生可见事件");
+        let waiting = apply(&mut tracker, &mut SessionTitles::disabled(), stop).expect("awaiting an answer should produce a visible event");
         assert_eq!(waiting.event, "agent.input_required");
         assert!(!waiting.extra.contains_key("announcement"));
     }
@@ -193,10 +193,10 @@ mod tests {
             prompt_id: Some("turn-b".to_owned()),
             ..hook("UserPromptSubmit", "/work/beta")
         };
-        let resumed = apply(&mut tracker, &mut SessionTitles::disabled(), next).expect("新 turn 应可见");
+        let resumed = apply(&mut tracker, &mut SessionTitles::disabled(), next).expect("new turn should be visible");
 
-        let tasks = resumed.extra["tasks"].as_array().expect("tasks 应为数组");
-        assert_eq!(tasks.len(), 1, "同一会话的上一个 turn 应被清除");
+        let tasks = resumed.extra["tasks"].as_array().expect("tasks should be an array");
+        assert_eq!(tasks.len(), 1, "the previous turn of the same session should be cleared");
         assert_eq!(tasks[0]["title"], "CC:BETA");
     }
 
@@ -206,7 +206,7 @@ mod tests {
         apply(&mut tracker, &mut SessionTitles::disabled(), hook("UserPromptSubmit", "/work/alpha"));
 
         let stopped = apply(&mut tracker, &mut SessionTitles::disabled(), hook("StopFailure", "/work/alpha"))
-            .expect("API 错误应回到空闲状态");
+            .expect("API error should return to idle");
         assert_eq!(stopped.event, "agent.idle");
         assert_eq!(stopped.title.as_deref(), Some("STOPPED"));
     }
@@ -227,10 +227,10 @@ mod tests {
             surface: None,
             host_bundle_id: None,
         };
-        let mixed = codex_hooks::apply(&mut tracker, &mut SessionTitles::disabled(), codex).expect("另一个 Agent 应刷新卡片栈");
+        let mixed = codex_hooks::apply(&mut tracker, &mut SessionTitles::disabled(), codex).expect("another agent should refresh the card stack");
 
-        let tasks = mixed.extra["tasks"].as_array().expect("tasks 应为数组");
-        assert_eq!(tasks.len(), 2, "同一目录下的两个 Agent 应各占一张卡");
+        let tasks = mixed.extra["tasks"].as_array().expect("tasks should be an array");
+        assert_eq!(tasks.len(), 2, "two agents in the same directory should each get a card");
         assert_eq!(tasks[0]["title"], "CX:VIBE-BUDDY");
         assert_eq!(tasks[1]["title"], "CC:VIBE-BUDDY");
     }

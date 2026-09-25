@@ -246,7 +246,7 @@ impl RomFlasher {
             op,
             write_ms = written.as_millis() as u64,
             wait_ms = (started.elapsed() - written).as_millis() as u64,
-            "ROM 命令"
+            "ROM command"
         );
         response
     }
@@ -300,7 +300,7 @@ impl RomFlasher {
                     address = format_args!("{:#x}", segment.address),
                     blocks = index + 1,
                     ms_per_block = started.elapsed().as_millis() as u64 / (index as u64 + 1),
-                    "烧录进度"
+                    "flash progress"
                 );
             }
             (progress.on_progress)(

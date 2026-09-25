@@ -75,13 +75,13 @@ def main(argv: list[str]) -> int:
     port.close()
 
     if len(pixels) != WIDTH * HEIGHT:
-        print(f"帧不完整：收到 {len(pixels)} 像素，应为 {WIDTH * HEIGHT}", file=sys.stderr)
+        print(f"incomplete frame: got {len(pixels)} pixels, expected {WIDTH * HEIGHT}", file=sys.stderr)
         return 1
     if not backlight_on:
         # With the backlight off, what a person sees is a black screen; dim the image until it is barely visible.
         pixels = [bytes(channel // 8 for channel in pixel) for pixel in pixels]
     write_png(output_path, pixels, scale)
-    print(f"{output_path} 背光{'开' if backlight_on else '关'}")
+    print(f"{output_path} backlight {'on' if backlight_on else 'off'}")
     return 0
 
 

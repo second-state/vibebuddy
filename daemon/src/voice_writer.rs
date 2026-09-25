@@ -153,7 +153,7 @@ mod tests {
         assert_eq!(event.extra["seq"], 7);
         assert_eq!(event.extra["crc"], crc32fast::hash(&piece));
         assert_eq!(event.extra["data"].as_str().map(str::len), Some(896));
-        let frame = event.to_ndjson().expect("一块要能装进一行");
-        assert!(frame.len() <= 1024, "{} 字节", frame.len());
+        let frame = event.to_ndjson().expect("a chunk must fit in one line");
+        assert!(frame.len() <= 1024, "{} bytes", frame.len());
     }
 }

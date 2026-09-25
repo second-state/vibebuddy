@@ -11,7 +11,7 @@ static int failures;
   do {                                                                    \
     if (!(condition)) {                                                   \
       failures++;                                                         \
-      fprintf(stderr, "%s:%d: 失败: %s\n", __FILE__, __LINE__, #condition); \
+      fprintf(stderr, "%s:%d: failed: %s\n", __FILE__, __LINE__, #condition); \
     }                                                                     \
   } while (0)
 
@@ -123,9 +123,9 @@ int main(void) {
   a_corrupted_header_is_rejected();
   a_clip_outside_the_pack_is_rejected();
   if (failures != 0) {
-    fprintf(stderr, "%d 处失败\n", failures);
+    fprintf(stderr, "%d failure(s)\n", failures);
     return EXIT_FAILURE;
   }
-  printf("语音包格式测试通过\n");
+  printf("voice pack format tests passed\n");
   return EXIT_SUCCESS;
 }

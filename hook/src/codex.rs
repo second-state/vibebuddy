@@ -125,10 +125,10 @@ mod tests {
 
     fn temp_transcript(name: &str, meta: Value) -> std::path::PathBuf {
         let dir = std::env::temp_dir().join(format!("vibebuddy-hook-{}", std::process::id()));
-        std::fs::create_dir_all(&dir).expect("临时目录");
+        std::fs::create_dir_all(&dir).expect("temp dir");
         let path = dir.join(name);
         std::fs::write(&path, format!("{}\n", serde_json::json!({"type": "session_meta", "payload": meta})))
-            .expect("写 transcript");
+            .expect("write transcript");
         path
     }
 
@@ -149,7 +149,7 @@ mod tests {
             "cwd": "/work/memories",
             "transcript_path": transcript.to_string_lossy(),
         });
-        let payload = sanitized_payload(&source).expect("应有载荷");
+        let payload = sanitized_payload(&source).expect("should have a payload");
         assert_eq!(payload["thread_id"], "parent-thread");
         assert!(!payload.contains_key("transcript_path"));
     }
@@ -167,7 +167,7 @@ mod tests {
             "cwd": "/work/vibe-buddy",
             "transcript_path": transcript.to_string_lossy(),
         });
-        let payload = sanitized_payload(&source).expect("应有载荷");
+        let payload = sanitized_payload(&source).expect("should have a payload");
         assert_eq!(payload["thread_id"], "user-session");
         assert!(!payload.contains_key("transcript_path"));
     }
@@ -181,7 +181,7 @@ mod tests {
             "cwd": "/work/vibe-buddy",
             "last_assistant_message": "第一项推荐使用 GitHub Issues。\n\n是否采用 GitHub Issues？直接回复“是”即可。",
         });
-        let payload = sanitized_payload(&source).expect("应有载荷");
+        let payload = sanitized_payload(&source).expect("should have a payload");
         assert_eq!(payload["response_kind"], "input_required");
         assert!(!payload.contains_key("last_assistant_message"));
     }
@@ -195,7 +195,7 @@ mod tests {
             "cwd": "/work/vibe-buddy",
             "last_assistant_message": "修复已完成，全量测试通过。",
         });
-        let payload = sanitized_payload(&source).expect("应有载荷");
+        let payload = sanitized_payload(&source).expect("should have a payload");
         assert!(!payload.contains_key("response_kind"));
     }
 
@@ -209,7 +209,7 @@ mod tests {
                 "cwd": "/work/vibe-buddy",
                 "last_assistant_message": message,
             });
-            let payload = sanitized_payload(&source).expect("应有载荷");
+            let payload = sanitized_payload(&source).expect("should have a payload");
             assert!(!payload.contains_key("response_kind"), "{message}");
         }
     }

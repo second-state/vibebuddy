@@ -50,7 +50,7 @@ def synthesize(key: str, resource_id: str, speaker: str, text: str) -> bytes:
         response = urllib.request.urlopen(request, timeout=60)
     except urllib.error.HTTPError as error:
         detail = error.read().decode("utf-8", errors="replace")[:300]
-        sys.exit(f"火山引擎拒绝请求 HTTP {error.code}: {detail}")
+        sys.exit(f"Volcengine rejected the request: HTTP {error.code}: {detail}")
 
     pcm = bytearray()
     decoder = json.JSONDecoder()
@@ -69,9 +69,9 @@ def synthesize(key: str, resource_id: str, speaker: str, text: str) -> bytes:
                 if message.get("data"):
                     pcm += base64.b64decode(message["data"])
             elif code != 20000000:
-                sys.exit(f"火山引擎返回错误 {code}: {message.get('message')}")
+                sys.exit(f"Volcengine returned error {code}: {message.get('message')}")
     if not pcm:
-        sys.exit("火山引擎没有返回音频数据")
+        sys.exit("Volcengine returned no audio data")
     return bytes(pcm)
 
 
@@ -81,7 +81,7 @@ def main(argv: list[str]) -> None:
     speaker, text, output_path = argv[1:]
     key = os.environ.get("VOLC_API_KEY")
     if not key:
-        sys.exit("需要环境变量 VOLC_API_KEY")
+        sys.exit("VOLC_API_KEY must be set")
     resource_id = os.environ.get("VOLC_RESOURCE_ID", "seed-tts-1.0")
     pcm = synthesize(key, resource_id, speaker, text)
     with wave.open(output_path, "wb") as output:
@@ -89,7 +89,7 @@ def main(argv: list[str]) -> None:
         output.setsampwidth(2)
         output.setframerate(SAMPLE_RATE)
         output.writeframes(pcm)
-    print(f"{output_path}: {len(pcm) / 2 / SAMPLE_RATE:.2f} 秒")
+    print(f"{output_path}: {len(pcm) / 2 / SAMPLE_RATE:.2f} s")
 
 
 if __name__ == "__main__":

@@ -59,8 +59,8 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("beacon-config-{}", std::process::id()));
         let path = dir.join("config.json");
         assert_eq!(Config::load(&path), Config::default());
-        std::fs::create_dir_all(&dir).expect("建临时目录");
-        std::fs::write(&path, "not json").expect("写坏文件");
+        std::fs::create_dir_all(&dir).expect("create temp dir");
+        std::fs::write(&path, "not json").expect("write broken file");
         assert_eq!(Config::load(&path), Config::default());
         let _ = std::fs::remove_dir_all(dir);
     }
@@ -73,7 +73,7 @@ mod tests {
             voice: Some("wanwanxiaohe".to_owned()),
             notify_link: false,
         };
-        config.save(&path).expect("保存配置");
+        config.save(&path).expect("save config");
         assert_eq!(Config::load(&path), config);
         let _ = std::fs::remove_dir_all(dir);
     }

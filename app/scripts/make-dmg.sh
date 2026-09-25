@@ -7,9 +7,9 @@ set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 bundle="${repo_root}/app/build/Vibe Buddy.app"
-output="${1:?用法: make-dmg.sh <输出.dmg>}"
+output="${1:?usage: make-dmg.sh <output.dmg>}"
 
-[[ -d "${bundle}" ]] || { echo "没有 ${bundle}，先跑 app/scripts/build-app.sh" >&2; exit 1; }
+[[ -d "${bundle}" ]] || { echo "${bundle} not found; run app/scripts/build-app.sh first" >&2; exit 1; }
 
 staging="$(mktemp -d)"
 trap 'rm -rf "${staging}"' EXIT
@@ -18,4 +18,4 @@ ln -s /Applications "${staging}/Applications"
 
 rm -f "${output}"
 hdiutil create -volname "Vibe Buddy" -srcfolder "${staging}" -fs HFS+ -format UDZO -ov "${output}" >/dev/null
-echo "== 完成: ${output}"
+echo "== Done: ${output}"

@@ -74,7 +74,7 @@ synth() {
     gain="$(python3 -c "print(f'{-1.0 - float(\"${peak}\"):.2f}')")"
     ffmpeg -loglevel error -y -f s16le -ar 24000 -ac 2 -i "${work}/${name}.raw" \
         -af "volume=${gain}dB" -f s16le -acodec pcm_s16le "${work}/${name}.pcm"
-    echo "${name}: 峰值 ${peak} dB，增益 ${gain} dB"
+    echo "${name}: peak ${peak} dB, gain ${gain} dB"
 }
 
 for entry in "${lines[@]}"; do

@@ -53,12 +53,12 @@ impl CiWatcher {
         for repo in repos {
             // Log one line the first time a repository is watched, or "why isn't CI showing" can't be answered.
             if self.announced.insert(repo.clone()) {
-                info!(%repo, "开始关注 CI");
+                info!(%repo, "watching CI");
             }
             match latest_run(&program, &repo).await {
                 Ok(Some(run)) => {
                     if self.quiet.remove(&repo) {
-                        info!(%repo, "CI 状态已恢复");
+                        info!(%repo, "CI status recovered");
                     }
                     fetched.push((repo, run));
                 }
@@ -68,7 +68,7 @@ impl CiWatcher {
                 Err(error) => {
                     // A persisting error logged every 30 seconds is thousands of lines a day. Log only the first.
                     if self.quiet.insert(repo.clone()) {
-                        warn!(%repo, %error, "读取 CI 状态失败");
+                        warn!(%repo, %error, "failed to read CI status");
                     }
                 }
             }
@@ -212,14 +212,14 @@ async fn latest_run(program: &str, repo: &str) -> Result<Option<Run>, String> {
 
     let output = tokio::time::timeout(COMMAND_TIMEOUT, command)
         .await
-        .map_err(|_| "gh 超时".to_owned())?
-        .map_err(|error| format!("无法执行 gh：{error}"))?;
+        .map_err(|_| "gh timed out".to_owned())?
+        .map_err(|error| format!("cannot run gh: {error}"))?;
     if !output.status.success() {
         return Err(String::from_utf8_lossy(&output.stderr).trim().to_owned());
     }
 
     let runs: Vec<Run> = serde_json::from_slice(&output.stdout)
-        .map_err(|error| format!("gh 输出无法解析：{error}"))?;
+        .map_err(|error| format!("cannot parse gh output: {error}"))?;
     Ok(runs.into_iter().next())
 }
 
@@ -302,7 +302,7 @@ mod tests {
 
         assert!(
             events.is_empty(),
-            "daemon 每次重启都把仓库最近一次历史结果播一遍是不能接受的"
+            "the daemon must not re-announce the latest historical run on every restart"
         );
     }
 

@@ -122,7 +122,7 @@ mod tests {
     #[test]
     fn runs_expand_to_rgb_pixels() {
         let mut pixels = Vec::new();
-        decode_runs("f800:2 07e0:1", &mut pixels).expect("合法的行程");
+        decode_runs("f800:2 07e0:1", &mut pixels).expect("valid runs");
         assert_eq!(pixels, vec![255, 0, 0, 255, 0, 0, 0, 255, 0]);
         assert!(decode_runs("zz:1", &mut pixels).is_err());
         assert!(decode_runs("ffff", &mut pixels).is_err());
@@ -131,7 +131,7 @@ mod tests {
     #[test]
     fn a_full_frame_encodes_as_png() {
         let frame = Frame { pixels: vec![0x80; WIDTH * HEIGHT * 3], backlight_on: true };
-        let png = encode_png(&frame).expect("编码 PNG");
+        let png = encode_png(&frame).expect("encode PNG");
         assert_eq!(&png[..8], b"\x89PNG\r\n\x1a\n");
     }
 }

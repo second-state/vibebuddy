@@ -73,7 +73,7 @@ mod tests {
             "transcript_path": "/Users/someone/.claude/projects/x.jsonl",
             "session_title": "内部项目代号",
         }))
-        .expect("应有载荷");
+        .expect("should have a payload");
         assert_eq!(
             Value::Object(without_surface(payload)),
             serde_json::json!({"session_id": "s1", "prompt_id": "p1", "hook_event_name": "UserPromptSubmit", "cwd": "/work/vibe-buddy"})
@@ -85,7 +85,7 @@ mod tests {
         let payload = sanitized_payload(&serde_json::json!({
             "session_id": "s1", "prompt_id": "p1", "hook_event_name": "SubagentStart", "agent_id": "a1", "agent_type": "Explore",
         }))
-        .expect("应有载荷");
+        .expect("should have a payload");
         assert_eq!(payload["agent_id"], "a1");
         assert_eq!(payload["agent_type"], "Explore");
     }
@@ -95,7 +95,7 @@ mod tests {
         let payload = sanitized_payload(&serde_json::json!({
             "session_id": "s1", "prompt_id": "p1", "hook_event_name": "Stop", "last_assistant_message": "我该用方案 A 还是方案 B？",
         }))
-        .expect("应有载荷");
+        .expect("should have a payload");
         assert_eq!(payload["response_kind"], "input_required");
         assert!(!payload.contains_key("last_assistant_message"));
     }
@@ -126,7 +126,7 @@ mod tests {
         let payload = sanitized_payload(&serde_json::json!({
             "session_id": "s1", "prompt_id": "p1", "hook_event_name": "SubagentStop", "agent_id": "a1", "last_assistant_message": "要继续深入排查吗？",
         }))
-        .expect("应有载荷");
+        .expect("should have a payload");
         assert!(!payload.contains_key("response_kind"));
     }
 }

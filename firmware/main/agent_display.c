@@ -200,7 +200,7 @@ static esp_err_t xl9555_write(uint8_t reg, uint8_t value) {
 static esp_err_t set_backlight(bool enabled) {
   uint8_t output;
   ESP_RETURN_ON_ERROR(xl9555_read(XL9555_OUTPUT_PORT0, &output), TAG,
-                      "读取 XL9555 output 失败");
+                      "failed to read XL9555 output");
   if (enabled) {
     output |= XL9555_LCD_BACKLIGHT_MASK;
   } else {
@@ -583,7 +583,7 @@ static esp_err_t present(void) {
   ESP_RETURN_ON_ERROR(esp_lcd_panel_draw_bitmap(panel_handle, 0, 0,
                                                 DISPLAY_WIDTH, DISPLAY_HEIGHT,
                                                 framebuffer),
-                      TAG, "提交 LCD framebuffer 失败");
+                      TAG, "failed to submit LCD framebuffer");
   if (xSemaphoreTake(transfer_done, pdMS_TO_TICKS(1000)) != pdTRUE) {
     return ESP_ERR_TIMEOUT;
   }
@@ -1437,7 +1437,7 @@ esp_err_t agent_display_init(void) {
   };
   i2c_master_bus_handle_t i2c_bus;
   ESP_RETURN_ON_ERROR(i2c_new_master_bus(&i2c_config, &i2c_bus), TAG,
-                      "初始化 I2C 失败");
+                      "failed to init I2C");
 
   i2c_device_config_t xl9555_config = {
       .dev_addr_length = I2C_ADDR_BIT_LEN_7,
@@ -1446,23 +1446,23 @@ esp_err_t agent_display_init(void) {
   };
   ESP_RETURN_ON_ERROR(
       i2c_master_bus_add_device(i2c_bus, &xl9555_config, &xl9555_handle), TAG,
-      "添加 XL9555 失败");
+      "failed to add XL9555");
 
   uint8_t direction;
   ESP_RETURN_ON_ERROR(xl9555_read(XL9555_CONFIG_PORT0, &direction), TAG,
-                      "探测 XL9555 失败");
+                      "failed to probe XL9555");
   direction &= (uint8_t)~XL9555_LCD_BACKLIGHT_MASK;
   ESP_RETURN_ON_ERROR(xl9555_write(XL9555_CONFIG_PORT0, direction), TAG,
-                      "配置 LCD 背光方向失败");
-  ESP_RETURN_ON_ERROR(set_backlight(false), TAG, "关闭 LCD 背光失败");
+                      "failed to configure LCD backlight direction");
+  ESP_RETURN_ON_ERROR(set_backlight(false), TAG, "failed to turn off LCD backlight");
 
   gpio_config_t read_pin_config = {
       .pin_bit_mask = 1ULL << LCD_NUM_RD,
       .mode = GPIO_MODE_INPUT_OUTPUT,
       .pull_up_en = GPIO_PULLUP_ENABLE,
   };
-  ESP_RETURN_ON_ERROR(gpio_config(&read_pin_config), TAG, "配置 LCD RD 失败");
-  ESP_RETURN_ON_ERROR(gpio_set_level(LCD_NUM_RD, 1), TAG, "拉高 LCD RD 失败");
+  ESP_RETURN_ON_ERROR(gpio_config(&read_pin_config), TAG, "failed to configure LCD RD");
+  ESP_RETURN_ON_ERROR(gpio_set_level(LCD_NUM_RD, 1), TAG, "failed to drive LCD RD high");
 
   esp_lcd_i80_bus_handle_t i80_bus;
   esp_lcd_i80_bus_config_t bus_config = {
@@ -1477,7 +1477,7 @@ esp_err_t agent_display_init(void) {
       .sram_trans_align = 4,
   };
   ESP_RETURN_ON_ERROR(esp_lcd_new_i80_bus(&bus_config, &i80_bus), TAG,
-                      "初始化 LCD i80 bus 失败");
+                      "failed to init LCD i80 bus");
 
   transfer_done = xSemaphoreCreateBinary();
   if (transfer_done == NULL) {
@@ -1503,7 +1503,7 @@ esp_err_t agent_display_init(void) {
   };
   esp_lcd_panel_io_handle_t panel_io;
   ESP_RETURN_ON_ERROR(esp_lcd_new_panel_io_i80(i80_bus, &io_config, &panel_io),
-                      TAG, "初始化 LCD panel IO 失败");
+                      TAG, "failed to init LCD panel IO");
 
   esp_lcd_panel_dev_config_t panel_config = {
       .reset_gpio_num = GPIO_NUM_NC,
@@ -1512,35 +1512,35 @@ esp_err_t agent_display_init(void) {
   };
   ESP_RETURN_ON_ERROR(
       esp_lcd_new_panel_st7789(panel_io, &panel_config, &panel_handle), TAG,
-      "初始化 ST7789 失败");
+      "failed to init ST7789");
   ESP_RETURN_ON_ERROR(esp_lcd_panel_reset(panel_handle), TAG,
-                      "复位 ST7789 失败");
+                      "failed to reset ST7789");
   ESP_RETURN_ON_ERROR(esp_lcd_panel_init(panel_handle), TAG,
-                      "配置 ST7789 失败");
+                      "failed to configure ST7789");
   ESP_RETURN_ON_ERROR(esp_lcd_panel_invert_color(panel_handle, true), TAG,
-                      "设置 LCD 颜色反转失败");
+                      "failed to set LCD color inversion");
   ESP_RETURN_ON_ERROR(esp_lcd_panel_set_gap(panel_handle, 0, 0), TAG,
-                      "设置 LCD offset 失败");
+                      "failed to set LCD offset");
 
   uint8_t memory_access = 0x00;
   uint8_t pixel_format = 0x65;
   ESP_RETURN_ON_ERROR(
       esp_lcd_panel_io_tx_param(panel_io, 0x36, &memory_access, 1), TAG,
-      "设置 LCD memory access 失败");
+      "failed to set LCD memory access");
   ESP_RETURN_ON_ERROR(
       esp_lcd_panel_io_tx_param(panel_io, 0x3a, &pixel_format, 1), TAG,
-      "设置 LCD pixel format 失败");
+      "failed to set LCD pixel format");
   ESP_RETURN_ON_ERROR(esp_lcd_panel_swap_xy(panel_handle, true), TAG,
-                      "设置 LCD 方向失败");
+                      "failed to set LCD orientation");
   ESP_RETURN_ON_ERROR(esp_lcd_panel_mirror(panel_handle, true, false), TAG,
-                      "设置 LCD 镜像失败");
+                      "failed to set LCD mirroring");
   ESP_RETURN_ON_ERROR(esp_lcd_panel_disp_on_off(panel_handle, true), TAG,
-                      "打开 LCD panel 失败");
+                      "failed to turn on LCD panel");
 
   display_ready = true;
   ESP_RETURN_ON_ERROR(agent_display_show(AGENT_DISPLAY_IDLE, NULL), TAG,
-                      "绘制初始页面失败");
-  ESP_RETURN_ON_ERROR(set_backlight(true), TAG, "打开 LCD 背光失败");
+                      "failed to draw initial screen");
+  ESP_RETURN_ON_ERROR(set_backlight(true), TAG, "failed to turn on LCD backlight");
   backlight_on = true;
   return ESP_OK;
 }

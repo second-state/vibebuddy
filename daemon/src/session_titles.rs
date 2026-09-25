@@ -219,7 +219,7 @@ mod tests {
             std::process::id()
         ));
         let _ = std::fs::remove_dir_all(&base);
-        std::fs::create_dir_all(&base).expect("创建临时目录");
+        std::fs::create_dir_all(&base).expect("create temp dir");
         base
     }
 

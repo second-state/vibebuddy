@@ -14,7 +14,7 @@ add_custom_command(
     OUTPUT "${build_stamp_header}" "${CMAKE_CURRENT_BINARY_DIR}/agent_build_stamp.never"
     COMMAND ${CMAKE_COMMAND} -DOUTPUT_FILE=${build_stamp_header}
             -P "${CMAKE_CURRENT_LIST_DIR}/build_stamp.cmake"
-    COMMENT "记录本次构建时刻"
+    COMMENT "Recording the build timestamp"
     VERBATIM
 )
 # For on-device acceptance: idf.py -B firmware/build-fast -DTIME_SCALE=60 build

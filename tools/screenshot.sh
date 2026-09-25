@@ -3,8 +3,8 @@
 # Usage: tools/screenshot.sh /dev/cu.usbmodemXXXX output.png
 set -euo pipefail
 
-serial_port="${1:?用法: screenshot.sh <串口> <输出.png>}"
-output="${2:?用法: screenshot.sh <串口> <输出.png>}"
+serial_port="${1:?usage: screenshot.sh <serial-port> <output.png>}"
+output="${2:?usage: screenshot.sh <serial-port> <output.png>}"
 python="${HOME}/.espressif/tools/python/v5.5.3/venv/bin/python"
 label="gui/$(id -u)/com.vibebuddy.vibebuddyd"
 plist="${HOME}/Library/LaunchAgents/com.vibebuddy.vibebuddyd.plist"

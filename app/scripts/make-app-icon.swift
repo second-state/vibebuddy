@@ -7,7 +7,7 @@ import AppKit
 struct MakeAppIcon {
     static func main() {
         guard CommandLine.arguments.count == 2 else {
-            FileHandle.standardError.write("用法: make-app-icon <输出.iconset>\n".data(using: .utf8)!)
+            FileHandle.standardError.write("usage: make-app-icon <output.iconset>\n".data(using: .utf8)!)
             exit(2)
         }
         let out = URL(fileURLWithPath: CommandLine.arguments[1])

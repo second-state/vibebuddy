@@ -10,7 +10,7 @@ static int failures;
   do {                                                                      \
     if (!(condition)) {                                                     \
       failures++;                                                           \
-      fprintf(stderr, "%s:%d: 断言失败: %s\n", __FILE__, __LINE__,          \
+      fprintf(stderr, "%s:%d: assertion failed: %s\n", __FILE__, __LINE__,          \
               #condition);                                                  \
     }                                                                       \
   } while (0)
@@ -222,9 +222,9 @@ int main(void) {
   nothing_done_means_kicking_the_ball();
   millisecond_counter_may_wrap();
   if (failures != 0) {
-    fprintf(stderr, "%d 处失败\n", failures);
+    fprintf(stderr, "%d failure(s)\n", failures);
     return EXIT_FAILURE;
   }
-  puts("leisure: 全部通过");
+  puts("leisure: all passed");
   return EXIT_SUCCESS;
 }

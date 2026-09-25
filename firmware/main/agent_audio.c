@@ -63,18 +63,18 @@ static esp_err_t enable_speaker(i2c_master_bus_handle_t i2c_bus) {
   i2c_master_dev_handle_t handle;
   ESP_RETURN_ON_ERROR(
       i2c_master_bus_add_device(i2c_bus, &device_config, &handle), TAG,
-      "添加 XL9555 音频控制失败");
+      "failed to add XL9555 audio control");
 
   uint8_t direction;
   ESP_RETURN_ON_ERROR(xl9555_read(handle, XL9555_CONFIG_PORT0, &direction), TAG,
-                      "读取 XL9555 direction 失败");
+                      "failed to read XL9555 direction");
   direction &= (uint8_t)~XL9555_SPEAKER_MASK;
   ESP_RETURN_ON_ERROR(xl9555_write(handle, XL9555_CONFIG_PORT0, direction), TAG,
-                      "配置扬声器使能方向失败");
+                      "failed to configure speaker enable direction");
 
   uint8_t output;
   ESP_RETURN_ON_ERROR(xl9555_read(handle, XL9555_OUTPUT_PORT0, &output), TAG,
-                      "读取 XL9555 output 失败");
+                      "failed to read XL9555 output");
   output |= XL9555_SPEAKER_MASK;
   return xl9555_write(handle, XL9555_OUTPUT_PORT0, output);
 }
@@ -105,7 +105,7 @@ static void load_volume(void) {
 static esp_err_t save_volume(void) {
   nvs_handle_t handle;
   ESP_RETURN_ON_ERROR(nvs_open(VOLUME_NAMESPACE, NVS_READWRITE, &handle), TAG,
-                      "打开 NVS 失败");
+                      "failed to open NVS");
   esp_err_t result = nvs_set_u32(handle, VOLUME_KEY, volume);
   if (result == ESP_OK) {
     result = nvs_commit(handle);
@@ -119,7 +119,7 @@ static esp_err_t init_i2s(void) {
       I2S_CHANNEL_DEFAULT_CONFIG(I2S_NUM_0, I2S_ROLE_MASTER);
   channel_config.auto_clear = true;
   ESP_RETURN_ON_ERROR(i2s_new_channel(&channel_config, &tx_handle, NULL), TAG,
-                      "创建 I2S TX 失败");
+                      "failed to create I2S TX");
 
   i2s_std_config_t standard_config = {
       .clk_cfg = I2S_STD_CLK_DEFAULT_CONFIG(AUDIO_SAMPLE_RATE),
@@ -136,7 +136,7 @@ static esp_err_t init_i2s(void) {
   };
   standard_config.clk_cfg.mclk_multiple = I2S_MCLK_MULTIPLE_256;
   ESP_RETURN_ON_ERROR(i2s_channel_init_std_mode(tx_handle, &standard_config),
-                      TAG, "初始化 I2S 标准模式失败");
+                      TAG, "failed to init I2S standard mode");
   return i2s_channel_enable(tx_handle);
 }
 
@@ -236,7 +236,7 @@ static void audio_task(void *argument) {
                                          &bytes_written, portMAX_DELAY);
     playing = false;
     if (result != ESP_OK || bytes_written != (size_t)(end - start)) {
-      ESP_LOGE(TAG, "语音播放失败: %s, %u/%u bytes", esp_err_to_name(result),
+      ESP_LOGE(TAG, "voice playback failed: %s, %u/%u bytes", esp_err_to_name(result),
                (unsigned)bytes_written, (unsigned)(end - start));
     }
   }
@@ -264,10 +264,10 @@ esp_err_t agent_audio_init(void) {
       return result;
     }
     audio_status = "ES8311";
-    ESP_LOGI(TAG, "检测到 ES8311 音频版本");
+    ESP_LOGI(TAG, "ES8311 audio variant detected");
   } else if (probe_result == ESP_ERR_NOT_FOUND) {
     audio_status = "NS4168";
-    ESP_LOGI(TAG, "未检测到 ES8311，使用 NS4168 I2S 音频版本");
+    ESP_LOGI(TAG, "ES8311 not detected, using NS4168 I2S audio variant");
   } else {
     audio_status = "ES8311 PROBE";
     return probe_result;

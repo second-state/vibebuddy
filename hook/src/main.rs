@@ -61,7 +61,7 @@ fn main() {
             None => return,
         },
         _ => {
-            eprintln!("用法: vibebuddy-hook codex|claude  （从 stdin 读 Hook 载荷）");
+            eprintln!("usage: vibebuddy-hook codex|claude  (reads the hook payload from stdin)");
             return;
         }
     };

@@ -11,10 +11,10 @@ set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 build_dir="${BUILD_DIR:-${repo_root}/firmware/build}"
-serial_port="${1:?用法: flash-bridge.sh <串口> partition|app|bootloader ...}"
+serial_port="${1:?usage: flash-bridge.sh <serial-port> partition|app|bootloader ...}"
 shift
 if [[ $# -eq 0 ]]; then
-    echo "至少给一个要写的目标：partition、app 或 bootloader" >&2
+    echo "give at least one target to write: partition, app or bootloader" >&2
     exit 1
 fi
 
@@ -34,7 +34,7 @@ for target in "$@"; do
         partition) segments+=(0x8000 "${build_dir}/partition_table/partition-table.bin") ;;
         app) segments+=(0x10000 "${build_dir}/vibebuddy-fw.bin") ;;
         bootloader) segments+=(0x0 "${build_dir}/bootloader/bootloader.bin") ;;
-        *) echo "未知目标: ${target}" >&2; exit 1 ;;
+        *) echo "unknown target: ${target}" >&2; exit 1 ;;
     esac
 done
 

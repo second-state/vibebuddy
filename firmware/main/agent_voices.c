@@ -64,7 +64,7 @@ static bool map_and_validate(void) {
   if (esp_partition_mmap(partition, 0, partition->size,
                          ESP_PARTITION_MMAP_DATA, &pointer,
                          &map_handle) != ESP_OK) {
-    ESP_LOGW(TAG, "映射 voices 分区失败");
+    ESP_LOGW(TAG, "failed to map voices partition");
     return false;
   }
   mapped = pointer;
@@ -76,7 +76,7 @@ static bool map_and_validate(void) {
   uint32_t crc = agent_voice_pack_crc32(
       0, mapped + AGENT_VOICE_PACK_HEADER_BYTES, parsed.payload_length);
   if (crc != parsed.payload_crc32) {
-    ESP_LOGW(TAG, "语音包载荷 CRC 不符");
+    ESP_LOGW(TAG, "voice pack payload CRC mismatch");
     unmap();
     return false;
   }
@@ -177,7 +177,7 @@ esp_err_t agent_voices_chunk(uint32_t seq, const char *base64,
   }
   uint32_t actual = agent_voice_pack_crc32(0, chunk_buffer, decoded);
   if (actual != crc32) {
-    ESP_LOGW(TAG, "第 %lu 块 CRC 收到 %08lx，应为 %08lx", (unsigned long)seq,
+    ESP_LOGW(TAG, "chunk %lu CRC got %08lx, expected %08lx", (unsigned long)seq,
              (unsigned long)actual, (unsigned long)crc32);
     return ESP_ERR_INVALID_CRC;
   }
@@ -217,11 +217,11 @@ esp_err_t agent_voices_end(void) {
   }
   agent_voice_pack_t parsed;
   if (!agent_voice_pack_parse(header_buffer, partition->size, &parsed)) {
-    ESP_LOGW(TAG, "语音包包头无效");
+    ESP_LOGW(TAG, "invalid voice pack header");
     return ESP_ERR_INVALID_RESPONSE;
   }
   if (AGENT_VOICE_PACK_HEADER_BYTES + parsed.payload_length != expected_total) {
-    ESP_LOGW(TAG, "包头载荷长度 %lu 与收到的 %lu 不符",
+    ESP_LOGW(TAG, "header payload length %lu does not match received %lu",
              (unsigned long)parsed.payload_length,
              (unsigned long)(expected_total - AGENT_VOICE_PACK_HEADER_BYTES));
     return ESP_ERR_INVALID_SIZE;
@@ -242,7 +242,7 @@ esp_err_t agent_voices_end(void) {
     offset += block;
   }
   if (crc != parsed.payload_crc32) {
-    ESP_LOGW(TAG, "载荷 CRC 回读 %08lx，包头 %08lx", (unsigned long)crc,
+    ESP_LOGW(TAG, "payload CRC readback %08lx, header %08lx", (unsigned long)crc,
              (unsigned long)parsed.payload_crc32);
     return ESP_ERR_INVALID_CRC;
   }

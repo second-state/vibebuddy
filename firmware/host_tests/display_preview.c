@@ -33,7 +33,7 @@ static void snapshot(const char *directory, const char *name) {
   char path[512];
   snprintf(path, sizeof(path), "%s/%s.ppm", directory, name);
   if (render_current_state() != ESP_OK) {
-    fprintf(stderr, "渲染失败: %s\n", name);
+    fprintf(stderr, "render failed: %s\n", name);
     exit(EXIT_FAILURE);
   }
   write_ppm(path);
@@ -71,7 +71,7 @@ static void render_skits(const char *directory) {
 
 int main(int argc, char **argv) {
   if (argc < 2 || argc > 3) {
-    fprintf(stderr, "用法: %s <输出目录> [leisure]\n", argv[0]);
+    fprintf(stderr, "usage: %s <output dir> [leisure]\n", argv[0]);
     return EXIT_FAILURE;
   }
   const char *directory = argv[1];

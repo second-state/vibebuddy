@@ -809,7 +809,7 @@ mod tests {
         assert_eq!(
             tracker.focus_source(),
             Some(source),
-            "任务刚完成后，K2 仍应能返回对应会话"
+            "right after a task finishes, K2 should still return to its session"
         );
     }
 
@@ -840,7 +840,7 @@ mod tests {
         assert_eq!(
             tracker.focus_source(),
             Some(finished_source),
-            "K2 应回到刚播报完成的任务，而不是还在跑的那个"
+            "K2 should return to the task just announced as done, not the one still running"
         );
     }
 
@@ -871,7 +871,7 @@ mod tests {
         assert_eq!(
             tracker.focus_source(),
             Some(second_source),
-            "K2 应跟随最后一次播报"
+            "K2 should follow the latest announcement"
         );
     }
 
@@ -905,7 +905,7 @@ mod tests {
         assert_eq!(
             tracker.focus_source(),
             Some(finished_source),
-            "只有下一次播报能换掉落点"
+            "only the next announcement may change the target"
         );
     }
 
@@ -935,7 +935,7 @@ mod tests {
         assert_eq!(
             tracker.focus_source(),
             Some(waiting_source),
-            "有人在等回答时，K2 先去那里"
+            "when someone is waiting for an answer, K2 goes there first"
         );
     }
 
@@ -960,7 +960,7 @@ mod tests {
         assert_eq!(
             restored.focus_source(),
             Some(source),
-            "daemon 重启不应让 K2 忘记最近会话"
+            "a daemon restart should not make K2 forget the latest session"
         );
     }
 
@@ -973,12 +973,12 @@ mod tests {
             tracker
                 .sweep_expired_at(Instant::now() + WORKING_TTL / 2)
                 .is_none(),
-            "未超时的工作任务不应被清除"
+            "a working task that has not timed out should not be cleared"
         );
 
         let expired = tracker
             .sweep_expired_at(Instant::now() + WORKING_TTL + Duration::from_secs(1))
-            .expect("超时的工作任务应清空画面");
+            .expect("a timed-out working task should clear the screen");
         assert_eq!(expired.event, "agent.idle");
         assert_eq!(expired.title.as_deref(), Some("TIMED OUT"));
     }
@@ -992,12 +992,12 @@ mod tests {
             tracker
                 .sweep_expired_at(Instant::now() + WORKING_TTL + Duration::from_secs(1))
                 .is_none(),
-            "用户可能离开很久，等待确认不能按工作中的时限清除"
+            "the user may be away for long; an input-required task must not be cleared on the working timeout"
         );
 
         let expired = tracker
             .sweep_expired_at(Instant::now() + INPUT_REQUIRED_TTL + Duration::from_secs(1))
-            .expect("超过等待时限后应释放状态");
+            .expect("state should be released after the waiting timeout");
         assert_eq!(expired.event, "agent.idle");
     }
 
@@ -1009,14 +1009,14 @@ mod tests {
         tracker
             .activities
             .get_mut("fresh:1")
-            .expect("活动应存在")
+            .expect("activity should exist")
             .updated_at = Instant::now() + WORKING_TTL - Duration::from_secs(60);
 
         let refreshed = tracker
             .sweep_expired_at(Instant::now() + WORKING_TTL + Duration::from_secs(1))
-            .expect("清除过期任务后应刷新卡片栈");
+            .expect("clearing expired tasks should refresh the card stack");
         assert_eq!(refreshed.event, "task.start");
-        let tasks = refreshed.extra["tasks"].as_array().expect("tasks 应为数组");
+        let tasks = refreshed.extra["tasks"].as_array().expect("tasks should be an array");
         assert_eq!(tasks.len(), 1);
         assert_eq!(tasks[0]["title"], "FRESH");
     }
@@ -1031,7 +1031,7 @@ mod tests {
         let emitted = tracker.discard_session("other", "ALL QUIET");
         assert!(
             emitted.is_none(),
-            "仍有活动时不得报告空闲，实际发出了 {emitted:?}"
+            "must not report idle while activities remain, but emitted {emitted:?}"
         );
     }
 
@@ -1043,8 +1043,8 @@ mod tests {
         tracker.observe(&other, "BETA", ActivityStatus::Working);
         // Make BETA the current visible state, then drop it, forcing the remaining snapshot to differ from the last one.
         let emitted = tracker.discard(&other, "INTERRUPTED");
-        let emitted = emitted.expect("丢弃后应刷新为剩余活动");
-        assert_eq!(emitted.event, "task.start", "仍有活动时不得报告空闲");
+        let emitted = emitted.expect("after dropping, should refresh to the remaining activities");
+        assert_eq!(emitted.event, "task.start", "must not report idle while activities remain");
     }
 
     #[test]
@@ -1055,16 +1055,16 @@ mod tests {
         tracker
             .activities
             .get_mut("s:1")
-            .expect("活动应存在")
+            .expect("activity should exist")
             .status_since = Instant::now() - Duration::from_secs(600);
 
-        let mut snapshot = tracker.activity_snapshot().expect("应有可见活动");
+        let mut snapshot = tracker.activity_snapshot().expect("there should be a visible activity");
         tracker.stamp_live_fields(&mut snapshot);
 
         assert_eq!(
             snapshot.extra["tasks"][0]["elapsed_s"].as_u64(),
             Some(600),
-            "卡片要回答这个 turn 跑了多久，而不是上一个工具事件多久以前"
+            "the card should show how long this turn has run, not how long ago the last tool event was"
         );
     }
 
@@ -1076,14 +1076,14 @@ mod tests {
         tracker
             .activities
             .get_mut("s:1")
-            .expect("活动应存在")
+            .expect("activity should exist")
             .status_since = Instant::now() - Duration::from_secs(600);
 
         assert!(
             tracker
                 .observe(&turn, "ALPHA", ActivityStatus::Working)
                 .is_none(),
-            "计时不得绕过去重：每个工具事件都重绘会把工作中的动画打回第一帧"
+            "timing must not bypass dedup: redrawing on every tool event would reset the working animation to its first frame"
         );
     }
 
@@ -1093,7 +1093,7 @@ mod tests {
         let broken = id("ci", "ci:1");
         tracker.observe(&broken, "CI:ALPHA", ActivityStatus::Working);
 
-        let failed = tracker.fail(&broken, "CI:ALPHA").expect("失败应可见");
+        let failed = tracker.fail(&broken, "CI:ALPHA").expect("failure should be visible");
         assert_eq!(failed.event, "task.error");
         assert_eq!(failed.title.as_deref(), Some("CI:ALPHA"));
     }
@@ -1105,14 +1105,14 @@ mod tests {
         let broken = id("ci", "ci:1");
         tracker.observe(&broken, "CI:ALPHA", ActivityStatus::Working);
 
-        let failed = tracker.fail(&broken, "CI:ALPHA").expect("失败应可见");
+        let failed = tracker.fail(&broken, "CI:ALPHA").expect("failure should be visible");
         assert_eq!(
             failed
                 .extra
                 .get("announcement")
                 .and_then(|value| value.as_str()),
             Some("failed"),
-            "画面仍要显示别的任务，但失败不能被吞掉"
+            "the screen should still show other tasks, but the failure must not be swallowed"
         );
     }
 
@@ -1140,8 +1140,8 @@ mod tests {
     fn the_working_directory_reveals_the_project_without_being_configured() {
         let base = temp_tree("workspace");
         let repo = base.join("my-project");
-        std::fs::create_dir_all(repo.join(".git")).expect("创建 .git 目录");
-        std::fs::create_dir_all(repo.join("tools")).expect("创建子目录");
+        std::fs::create_dir_all(repo.join(".git")).expect("create .git directory");
+        std::fs::create_dir_all(repo.join("tools")).expect("create subdirectory");
 
         let mut tracker = ActivityTracker::default();
         tracker.note_workspace(repo.join("tools").to_str());
@@ -1149,7 +1149,7 @@ mod tests {
         let seen = tracker.recent_workspaces();
 
         let _ = std::fs::remove_dir_all(&base);
-        assert_eq!(seen, vec![repo], "子目录应归到项目根，非仓库路径应忽略");
+        assert_eq!(seen, vec![repo], "subdirectories should map to the project root, non-repo paths should be ignored");
     }
 
     #[test]
@@ -1192,7 +1192,7 @@ mod tests {
         tracker.note_project(&id, "VIBE-BUDDY");
         let event = tracker
             .observe(&id, "CC:POMODORO TIMER", ActivityStatus::Working)
-            .expect("首个活动应可见");
+            .expect("first activity should be visible");
         assert_eq!(event.extra["tasks"][0]["title"], "CC:POMODORO TIMER");
         assert_eq!(event.extra["tasks"][0]["project"], "VIBE-BUDDY");
     }
@@ -1218,12 +1218,12 @@ mod tests {
         let base = temp_tree("root");
         let repo = base.join("my-project");
         let nested = repo.join("tools");
-        std::fs::create_dir_all(&nested).expect("创建测试目录");
-        std::fs::create_dir_all(repo.join(".git")).expect("创建 .git 目录");
+        std::fs::create_dir_all(&nested).expect("create test directory");
+        std::fs::create_dir_all(repo.join(".git")).expect("create .git directory");
 
         let title = project_title("CC:", nested.to_str(), "CLAUDE");
         let _ = std::fs::remove_dir_all(&base);
-        assert_eq!(title, "CC:MY-PROJECT", "子目录不应成为任务卡标题");
+        assert_eq!(title, "CC:MY-PROJECT", "a subdirectory should not become the task card title");
     }
 
     #[test]
@@ -1231,17 +1231,17 @@ mod tests {
         let base = temp_tree("worktree");
         let repo = base.join("my-project");
         let worktree = repo.join(".claude").join("worktrees").join("branch-xyz");
-        std::fs::create_dir_all(&worktree).expect("创建 worktree 目录");
-        std::fs::create_dir_all(repo.join(".git")).expect("创建 .git 目录");
+        std::fs::create_dir_all(&worktree).expect("create worktree directory");
+        std::fs::create_dir_all(repo.join(".git")).expect("create .git directory");
         std::fs::write(
             worktree.join(".git"),
             format!("gitdir: {}/.git/worktrees/branch-xyz\n", repo.display()),
         )
-        .expect("写入 worktree 的 .git");
+        .expect("write the worktree's .git");
 
         let title = project_title("CC:", worktree.to_str(), "CLAUDE");
         let _ = std::fs::remove_dir_all(&base);
-        assert_eq!(title, "CC:MY-PROJECT", "worktree 应显示主仓库名");
+        assert_eq!(title, "CC:MY-PROJECT", "a worktree should show the main repo name");
     }
 
     #[test]
@@ -1249,7 +1249,7 @@ mod tests {
         let long = project_title("CC:", Some("/work/a-very-long-project-name-here"), "CLAUDE");
         assert!(
             long.chars().count() <= MAX_TITLE_CHARS,
-            "标题不得超过显示上限"
+            "title must not exceed the display limit"
         );
         assert!(long.starts_with("CC:"));
     }

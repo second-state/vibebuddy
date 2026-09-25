@@ -22,9 +22,9 @@ CLIP_NAMES = ["input_required", "done", "failed", "focus_done", "break_done"]
 def build(voice_id: str, clips: list[bytes]) -> bytes:
     encoded_id = voice_id.encode("ascii")
     if not encoded_id or len(encoded_id) > 31:
-        raise ValueError("音色 id 需为 1 到 31 个 ASCII 字符")
+        raise ValueError("voice id must be 1 to 31 ASCII characters")
     if len(clips) != 5 or any(len(clip) == 0 for clip in clips):
-        raise ValueError("需要五段非空的 PCM")
+        raise ValueError("need five non-empty PCM clips")
     payload = b"".join(clips)
     header = bytearray(HEADER_BYTES)
     header[0:4] = b"VBVP"
@@ -46,7 +46,7 @@ def main(argv: list[str]) -> None:
     clips = [(voice_dir / f"{name}.pcm").read_bytes() for name in CLIP_NAMES]
     pack = build(voice_id, clips)
     output.write_bytes(pack)
-    print(f"{output}: {len(pack)} 字节，音色 {voice_id}")
+    print(f"{output}: {len(pack)} bytes, voice {voice_id}")
 
 
 if __name__ == "__main__":

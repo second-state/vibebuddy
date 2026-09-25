@@ -121,7 +121,7 @@ async fn serial_worker(
                 continue;
             }
             Err(error) => {
-                warn!(%error, "串口发现失败，稍后重试");
+                warn!(%error, "serial port discovery failed, retrying later");
                 tokio::time::sleep(RECONNECT_DELAY).await;
                 continue;
             }
@@ -130,12 +130,12 @@ async fn serial_worker(
         let mut port = match open_port(&port_name) {
             Ok(port) => port,
             Err(error) => {
-                warn!(port = %port_name, %error, "打开串口失败，稍后重试");
+                warn!(port = %port_name, %error, "failed to open serial port, retrying later");
                 tokio::time::sleep(RECONNECT_DELAY).await;
                 continue;
             }
         };
-        info!(port = %port_name, paced, "串口已连接");
+        info!(port = %port_name, paced, "serial port connected");
         tokio::time::sleep(CONNECT_SETTLE_DELAY).await;
         let _ = device_event_sender
             .send(DeviceMessage::Connected { port: port_name.clone(), bridge: paced })
@@ -148,7 +148,7 @@ async fn serial_worker(
             if let Some(frame) = pending.pop_front() {
                 if let Err(error) = write_frame(&mut port, &frame, paced).await {
                     pending.push_front(frame);
-                    warn!(port = %port_name, %error, "串口写入失败，开始重连");
+                    warn!(port = %port_name, %error, "serial write failed, reconnecting");
                     break;
                 }
                 continue;
@@ -166,14 +166,14 @@ async fn serial_worker(
                         return;
                     }
                     if *suspend.borrow() {
-                        info!(port = %port_name, "串口让出给烧录");
+                        info!(port = %port_name, "serial port released for flashing");
                         break;
                     }
                 }
                 result = port.read(&mut read_buffer) => {
                     match result {
                         Ok(0) => {
-                            warn!(port = %port_name, "串口已关闭，开始重连");
+                            warn!(port = %port_name, "serial port closed, reconnecting");
                             break;
                         }
                         Ok(count) => process_device_bytes(
@@ -182,7 +182,7 @@ async fn serial_worker(
                             &device_event_sender,
                         ),
                         Err(error) => {
-                            warn!(port = %port_name, %error, "串口读取失败，开始重连");
+                            warn!(port = %port_name, %error, "serial read failed, reconnecting");
                             break;
                         }
                     }
@@ -323,7 +323,7 @@ fn process_device_bytes(
             line_buffer.push(*byte);
         } else {
             line_buffer.clear();
-            warn!("设备输出单行超过 4096 bytes，已丢弃");
+            warn!("device output line exceeded 4096 bytes, dropped");
         }
     }
 }
@@ -337,12 +337,12 @@ fn process_device_line(line: &[u8], event_sender: &mpsc::Sender<DeviceMessage>) 
             Ok(event) => match event.validate() {
                 Ok(()) => DeviceMessage::Event(event),
                 Err(error) => {
-                    warn!(%error, "设备事件无效");
+                    warn!(%error, "invalid device event");
                     return;
                 }
             },
             Err(error) => {
-                warn!(%error, "设备事件 JSON 无法解析");
+                warn!(%error, "cannot parse device event JSON");
                 return;
             }
         }
@@ -350,14 +350,14 @@ fn process_device_line(line: &[u8], event_sender: &mpsc::Sender<DeviceMessage>) 
         let line = String::from_utf8_lossy(line).into_owned();
         // Screenshot lines (hundreds of them) stay out of the log; other diagnostic lines are still logged.
         if !line.starts_with("SHOT ") && !line.starts_with("ECHO ") {
-            info!(message = %line, "设备消息");
+            info!(message = %line, "device message");
         }
         DeviceMessage::Line(line)
     };
     match event_sender.try_send(message) {
         Ok(()) => {}
-        Err(mpsc::error::TrySendError::Full(_)) => warn!("设备消息队列已满，已丢弃"),
-        Err(mpsc::error::TrySendError::Closed(_)) => warn!("设备消息接收器已关闭"),
+        Err(mpsc::error::TrySendError::Full(_)) => warn!("device message queue full, dropped"),
+        Err(mpsc::error::TrySendError::Closed(_)) => warn!("device message receiver closed"),
     }
 }
 
@@ -387,12 +387,12 @@ mod tests {
             &mut buffer,
             &sender,
         );
-        assert!(receiver.try_recv().is_err(), "半行不能提前成为事件");
+        assert!(receiver.try_recv().is_err(), "a partial line must not become an event early");
         process_device_bytes(b"2\",\"action\":\"press\"}\r\n", &mut buffer, &sender);
 
-        let DeviceMessage::Event(event) = receiver.try_recv().expect("完整行应进入事件队列")
+        let DeviceMessage::Event(event) = receiver.try_recv().expect("a complete line should enter the event queue")
         else {
-            panic!("JSON 行应成为事件");
+            panic!("a JSON line should become an event");
         };
         assert_eq!(event.event, "button");
         assert_eq!(event.extra["button"], "K2");
@@ -419,9 +419,9 @@ mod tests {
 
         process_device_bytes(b"DISPLAY READY\n", &mut buffer, &sender);
 
-        match receiver.try_recv().expect("诊断行也要送到 Mac 端") {
+        match receiver.try_recv().expect("diagnostic lines should reach the Mac too") {
             DeviceMessage::Line(line) => assert_eq!(line, "DISPLAY READY"),
-            other => panic!("诊断行不该是 {other:?}"),
+            other => panic!("a diagnostic line should not be {other:?}"),
         }
         assert!(buffer.is_empty());
     }

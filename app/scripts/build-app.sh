@@ -17,7 +17,7 @@ for arg in "$@"; do
     case "${arg}" in
         --debug) debug=1 ;;
         --install) install=1 ;;
-        *) echo "未知参数: ${arg}" >&2; exit 2 ;;
+        *) echo "unknown argument: ${arg}" >&2; exit 2 ;;
     esac
 done
 
@@ -42,7 +42,7 @@ if [[ -z "${SDKROOT:-}" && "$(xcode-select -p 2>/dev/null)" == "${clt}" \
       && ! -e "${clt}/usr/lib/swift/host/plugins/libSwiftUIMacros.dylib" \
       && -d "${clt}/SDKs/MacOSX26.sdk" ]]; then
     export SDKROOT="${clt}/SDKs/MacOSX26.sdk"
-    echo "命令行工具缺 SwiftUIMacros 插件，改用 ${SDKROOT}"
+    echo "Command Line Tools lack the SwiftUIMacros plugin; using ${SDKROOT}"
 fi
 if [[ ${debug} -eq 1 ]]; then
     swift build --package-path "${app_dir}" --product VibeBuddy
@@ -65,17 +65,17 @@ for lproj in "${app_dir}"/Localization/*.lproj; do
     cp -R "${lproj}" "${contents}/Resources/"
 done
 
-echo "== App 图标"
+echo "== App icon"
 # The menu bar pixel face is rendered into the app icon from the same source; the face is defined once, in PixelFace.swift.
 icon_tool="${app_dir}/.build/make-app-icon"
 swiftc -O "${app_dir}/Sources/VibeBuddy/PixelFace.swift" "${app_dir}/scripts/make-app-icon.swift" -o "${icon_tool}" 2>&1 | grep -v "warning:" || true
-[[ -x "${icon_tool}" ]] || { echo "图标生成器编译失败" >&2; exit 1; }
+[[ -x "${icon_tool}" ]] || { echo "failed to compile the icon generator" >&2; exit 1; }
 "${icon_tool}" "${app_dir}/build/AppIcon.iconset"
 iconutil -c icns "${app_dir}/build/AppIcon.iconset" -o "${contents}/Resources/AppIcon.icns"
 cp "${repo_root}/target/release/vibebuddyd" "${contents}/MacOS/vibebuddyd"
 cp "${repo_root}/target/release/vibebuddy-hook" "${contents}/MacOS/vibebuddy-hook"
 
-echo "== 固件"
+echo "== Firmware"
 fw="${repo_root}/firmware/build"
 if [[ -f "${fw}/bootloader/bootloader.bin" && -f "${fw}/partition_table/partition-table.bin" && -f "${fw}/vibebuddy-fw.bin" ]]; then
     cp "${fw}/bootloader/bootloader.bin" "${contents}/Resources/firmware/bootloader.bin"
@@ -90,21 +90,21 @@ build = Path(sys.argv[1])
 image = (build / "vibebuddy-fw.bin").read_bytes()
 # esp_app_desc_t sits at image offset 0x20: magic(4) secure_version(4) reserv1(8) version[32]
 magic, = struct.unpack_from("<I", image, 0x20)
-assert magic == 0xABCD5432, "找不到 esp_app_desc"
+assert magic == 0xABCD5432, "esp_app_desc not found"
 version = image[0x30:0x50].split(b"\0", 1)[0].decode()[:24]
 stamp_header = next(build.rglob("agent_build_stamp.h"))
 stamp = re.search(r'"([^"]+)"', stamp_header.read_text()).group(1)[:16]
 print(f"{version} {stamp}")
 PY
-    echo "附带固件 $(cat "${contents}/Resources/firmware/build.txt")"
+    echo "Bundled firmware $(cat "${contents}/Resources/firmware/build.txt")"
 elif [[ ${debug} -eq 1 ]]; then
-    echo "没有固件构建产物，Debug 构建不附带固件"
+    echo "No firmware build output; debug build ships without firmware"
 else
-    echo "Release 构建需要 firmware/build 里的三件套，先跑 idf.py -C firmware build" >&2
+    echo "A release build needs the three firmware images in firmware/build; run idf.py -C firmware build first" >&2
     exit 1
 fi
 
-echo "== 语音包"
+echo "== Voice packs"
 for dir in "${repo_root}"/voices/*/; do
     id="$(basename "${dir}")"
     if [[ -f "${dir}/done.pcm" ]]; then
@@ -119,13 +119,13 @@ done
 if [[ -n "${CODESIGN_IDENTITY:-}" ]]; then
     codesign --force --deep --options runtime --timestamp --sign "${CODESIGN_IDENTITY}" "${bundle}"
 else
-    codesign --force --deep --sign - "${bundle}" 2>/dev/null || echo "codesign 不可用，跳过签名"
+    codesign --force --deep --sign - "${bundle}" 2>/dev/null || echo "codesign unavailable, skipping signing"
 fi
-echo "== 完成: ${bundle} (${version}, ${build_number})"
+echo "== Done: ${bundle} (${version}, ${build_number})"
 
 if [[ ${install} -eq 1 ]]; then
     installed="/Applications/Vibe Buddy.app"
-    echo "== 安装到 ${installed}"
+    echo "== Installing to ${installed}"
     # Ask a running instance to quit first (which also stops its daemon), swap the bundle, then relaunch.
     if pgrep -xq VibeBuddy; then
         osascript -e 'quit app id "com.vibebuddy.app"' >/dev/null 2>&1 || true
@@ -134,5 +134,5 @@ if [[ ${install} -eq 1 ]]; then
     rm -rf "${installed}"
     ditto "${bundle}" "${installed}"
     open "${installed}"
-    echo "== 已启动 ${installed}"
+    echo "== Launched ${installed}"
 fi

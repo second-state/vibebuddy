@@ -54,7 +54,7 @@ pub fn apply(
         tracing::info!(
             session = %hook.session_id,
             event = %hook.hook_event_name,
-            "忽略没有线程的 Codex 后台会话"
+            "ignoring Codex background session without a thread"
         );
         return None;
     }
@@ -161,7 +161,7 @@ mod tests {
             surface: None,
             host_bundle_id: None,
         };
-        let event = apply(&mut tracker, &mut titles, known).expect("已知线程应可见");
+        let event = apply(&mut tracker, &mut titles, known).expect("known thread should be visible");
         assert_eq!(event.title.as_deref(), Some("CX:REVIEW"));
     }
 
@@ -192,7 +192,7 @@ mod tests {
             "hook_event_name": "UserPromptSubmit",
             "cwd": "/work/memories"
         }))
-        .expect("带可导航线程的 Hook 应可解析");
+        .expect("hook with a navigable thread should parse");
 
         apply(&mut tracker, &mut SessionTitles::disabled(), hook);
 
@@ -214,7 +214,7 @@ mod tests {
             &mut SessionTitles::disabled(),
             hook("session-a", "UserPromptSubmit", "/work/vibe-buddy"),
         )
-        .expect("开始事件应可见");
+        .expect("start event should be visible");
         assert_eq!(working.event, "task.start");
         assert_eq!(working.title.as_deref(), Some("CX:VIBE-BUDDY"));
 
@@ -223,7 +223,7 @@ mod tests {
             &mut SessionTitles::disabled(),
             hook("session-a", "PermissionRequest", "/work/vibe-buddy"),
         )
-        .expect("审批事件应可见");
+        .expect("approval event should be visible");
         assert_eq!(waiting.event, "agent.input_required");
 
         let resumed = apply(
@@ -231,7 +231,7 @@ mod tests {
             &mut SessionTitles::disabled(),
             hook("session-a", "PostToolUse", "/work/vibe-buddy"),
         )
-        .expect("工具完成后应恢复工作中");
+        .expect("should return to working after the tool finishes");
         assert_eq!(resumed.event, "task.start");
 
         let done = apply(
@@ -239,7 +239,7 @@ mod tests {
             &mut SessionTitles::disabled(),
             hook("session-a", "Stop", "/work/vibe-buddy"),
         )
-        .expect("停止事件应可见");
+        .expect("stop event should be visible");
         assert_eq!(done.event, "task.done");
     }
 
@@ -258,9 +258,9 @@ mod tests {
             "cwd": "/work/vibe-buddy",
             "response_kind": "input_required"
         }))
-        .expect("等待回答的 Stop 载荷应可解析");
+        .expect("Stop payload awaiting an answer should parse");
 
-        let waiting = apply(&mut tracker, &mut SessionTitles::disabled(), stop).expect("等待回答应产生可见事件");
+        let waiting = apply(&mut tracker, &mut SessionTitles::disabled(), stop).expect("awaiting an answer should produce a visible event");
         assert_eq!(waiting.event, "agent.input_required");
         assert!(!waiting.extra.contains_key("announcement"));
     }
@@ -284,19 +284,19 @@ mod tests {
             &mut SessionTitles::disabled(),
             hook("waiting", "PermissionRequest", "/work/beta"),
         )
-        .expect("需要输入应成为可见状态");
+        .expect("input required should become a visible state");
         assert_eq!(waiting.event, "agent.input_required");
         assert_eq!(waiting.title.as_deref(), Some("CX:BETA"));
 
         // The finish announcement says who finished, so the screen shows that one; alpha is still running and
         // its later events will bring the screen back.
         let done =
-            apply(&mut tracker, &mut SessionTitles::disabled(), hook("waiting", "Stop", "/work/beta")).expect("结束应产生播报");
+            apply(&mut tracker, &mut SessionTitles::disabled(), hook("waiting", "Stop", "/work/beta")).expect("stop should produce an announcement");
         assert_eq!(done.event, "task.done");
         assert_eq!(done.title.as_deref(), Some("CX:BETA"));
 
         let back = apply(&mut tracker, &mut SessionTitles::disabled(), hook("working", "PostToolUse", "/work/alpha"))
-            .expect("下一个事件应把屏幕交还给还在跑的任务");
+            .expect("the next event should hand the screen back to the still-running task");
         assert_eq!(back.event, "task.start");
         assert_eq!(back.title.as_deref(), Some("CX:ALPHA"));
     }
@@ -323,18 +323,18 @@ mod tests {
         );
 
         let done =
-            apply(&mut tracker, &mut SessionTitles::disabled(), hook("finishing", "Stop", "/work/alpha")).expect("结束应产生播报");
+            apply(&mut tracker, &mut SessionTitles::disabled(), hook("finishing", "Stop", "/work/alpha")).expect("stop should produce an announcement");
 
         assert_eq!(
             done.extra.get("announcement").and_then(|v| v.as_str()),
             Some("done"),
-            "完成仍然要播报"
+            "completion must still be announced"
         );
         assert_eq!(done.event, "agent.input_required");
         assert_eq!(
             done.title.as_deref(),
             Some("CX:BETA"),
-            "屏幕该留给等人回答的那个"
+            "the screen should stay on the one waiting for an answer"
         );
     }
 
@@ -351,7 +351,7 @@ mod tests {
             &mut SessionTitles::disabled(),
             hook("waiting", "PermissionRequest", "/work/waiting"),
         )
-        .expect("首次等待输入应可见");
+        .expect("first input wait should be visible");
         assert!(!first.extra.contains_key("suppress_audio"));
 
         let refreshed = apply(
@@ -359,7 +359,7 @@ mod tests {
             &mut SessionTitles::disabled(),
             hook("working", "UserPromptSubmit", "/work/working"),
         )
-        .expect("后台任务变化应刷新卡片");
+        .expect("background task change should refresh the cards");
         assert_eq!(refreshed.event, "agent.input_required");
         assert_eq!(refreshed.extra["suppress_audio"], true);
     }
@@ -375,9 +375,9 @@ mod tests {
             hook("three", "UserPromptSubmit", "/work/three"),
         );
         let latest = apply(&mut tracker, &mut SessionTitles::disabled(), hook("four", "UserPromptSubmit", "/work/four"))
-            .expect("新任务应刷新卡片栈");
+            .expect("new task should refresh the card stack");
 
-        let tasks = latest.extra["tasks"].as_array().expect("tasks 应为数组");
+        let tasks = latest.extra["tasks"].as_array().expect("tasks should be an array");
         assert_eq!(tasks.len(), 3);
         assert_eq!(tasks[0]["title"], "CX:FOUR");
         assert_eq!(tasks[1]["title"], "CX:THREE");
@@ -391,8 +391,8 @@ mod tests {
         apply(&mut tracker, &mut SessionTitles::disabled(), hook("new", "UserPromptSubmit", "/work/new"));
 
         let refreshed = apply(&mut tracker, &mut SessionTitles::disabled(), hook("old", "Stop", "/work/old"))
-            .expect("后台任务结束也应刷新卡片栈");
-        let tasks = refreshed.extra["tasks"].as_array().expect("tasks 应为数组");
+            .expect("background task ending should also refresh the card stack");
+        let tasks = refreshed.extra["tasks"].as_array().expect("tasks should be an array");
         assert_eq!(tasks.len(), 1);
         assert_eq!(tasks[0]["title"], "CX:NEW");
     }
@@ -431,9 +431,9 @@ mod tests {
             "cwd": "/work/alpha",
             "response_kind": "input_required"
         }))
-        .expect("等待回答的 Stop 载荷应可解析");
+        .expect("Stop payload awaiting an answer should parse");
         assert_eq!(
-            apply(&mut tracker, &mut SessionTitles::disabled(), waiting).expect("提问应等待回答").event,
+            apply(&mut tracker, &mut SessionTitles::disabled(), waiting).expect("a question should wait for an answer").event,
             "agent.input_required"
         );
 
@@ -442,7 +442,7 @@ mod tests {
             &mut SessionTitles::disabled(),
             hook_with_turn("session-a", "turn-b", "UserPromptSubmit", "/work/beta"),
         )
-        .expect("用户回答后应开始新 turn");
+        .expect("a new turn should start after the user answers");
         assert_eq!(resumed.event, "task.start");
         assert_eq!(resumed.title.as_deref(), Some("CX:BETA"));
 
@@ -451,14 +451,14 @@ mod tests {
             &mut SessionTitles::disabled(),
             hook_with_turn("session-a", "turn-a", "Stop", "/work/alpha"),
         );
-        assert!(replay.is_none(), "旧 turn 的重复 Stop 不应改变新 turn");
+        assert!(replay.is_none(), "a repeated Stop from the old turn must not change the new turn");
 
         let second = apply(
             &mut tracker,
             &mut SessionTitles::disabled(),
             hook_with_turn("session-a", "turn-b", "Stop", "/work/beta"),
         )
-        .expect("第二个 turn 应产生完成通知");
+        .expect("the second turn should produce a completion notice");
         assert_eq!(second.event, "task.done");
     }
 
@@ -472,7 +472,7 @@ mod tests {
         );
 
         let interrupted = apply(&mut tracker, &mut SessionTitles::disabled(), hook("session-a", "Interrupt", "/work/alpha"))
-            .expect("中断应回到空闲状态");
+            .expect("interrupt should return to idle");
         assert_eq!(interrupted.event, "agent.idle");
         assert_eq!(interrupted.title.as_deref(), Some("INTERRUPTED"));
     }
@@ -492,7 +492,7 @@ mod tests {
             .into_iter()
             .filter(|session| {
                 let event = apply(&mut tracker, &mut SessionTitles::disabled(), hook(session, "Stop", "/work/project"))
-                    .expect("每个活动会话结束都应产生事件");
+                    .expect("every active session ending should produce an event");
                 event.event == "task.done"
                     || event
                         .extra
@@ -502,6 +502,6 @@ mod tests {
             })
             .count();
 
-        assert_eq!(announcements, 3, "三个会话应分别触发三次完成播报");
+        assert_eq!(announcements, 3, "three sessions should trigger three completion announcements");
     }
 }

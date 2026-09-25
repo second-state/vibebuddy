@@ -16,7 +16,7 @@ esp_err_t agent_tally_init(void) {
   if (result == ESP_ERR_NVS_NO_FREE_PAGES ||
       result == ESP_ERR_NVS_NEW_VERSION_FOUND) {
     // If the partition format is stale, erase and start over: it only holds one day's counts, no great loss.
-    ESP_RETURN_ON_ERROR(nvs_flash_erase(), TAG, "擦除 NVS 失败");
+    ESP_RETURN_ON_ERROR(nvs_flash_erase(), TAG, "failed to erase NVS");
     result = nvs_flash_init();
   }
   return result;
@@ -52,7 +52,7 @@ esp_err_t agent_tally_load(agent_pomodoro_tally_t *tally) {
 esp_err_t agent_tally_save(const agent_pomodoro_tally_t *tally) {
   nvs_handle_t handle;
   ESP_RETURN_ON_ERROR(nvs_open(TALLY_NAMESPACE, NVS_READWRITE, &handle), TAG,
-                      "打开 NVS 失败");
+                      "failed to open NVS");
   esp_err_t result = nvs_set_u32(handle, KEY_DAY, tally->day);
   if (result == ESP_OK) {
     result = nvs_set_u32(handle, KEY_COMPLETED, (uint32_t)tally->completed);

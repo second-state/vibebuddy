@@ -37,13 +37,13 @@ pub async fn open(source: ActivitySource) -> Result<String, String> {
         Command::new(spec.program).args(&spec.args).output(),
     )
     .await
-    .map_err(|_| "打开来源超时".to_owned())?
-    .map_err(|error| format!("无法启动打开命令：{error}"))?;
+    .map_err(|_| "opening the source timed out".to_owned())?
+    .map_err(|error| format!("cannot start the open command: {error}"))?;
     if output.status.success() {
         return Ok(link);
     }
     let stderr = String::from_utf8_lossy(&output.stderr);
-    Err(format!("打开来源失败：{}", stderr.trim()))
+    Err(format!("failed to open the source: {}", stderr.trim()))
 }
 
 fn command_for(source: &ActivitySource, desktop: Option<&str>) -> Result<CommandSpec, String> {
@@ -51,13 +51,13 @@ fn command_for(source: &ActivitySource, desktop: Option<&str>) -> Result<Command
     // it would import a terminal session into the app as a copy.
     match surface_of(source) {
         Some(Surface::Host { bundle_id }) => return activate(bundle_id),
-        Some(Surface::Headless) => return Err("会话没有宿主窗口（SSH 或后台进程）".to_owned()),
+        Some(Surface::Headless) => return Err("session has no host window (SSH or background process)".to_owned()),
         _ => {}
     }
     match source {
         ActivitySource::Codex { thread_id, .. } => {
             if !valid_identifier(thread_id) {
-                return Err("Codex thread id 含有非法字符".to_owned());
+                return Err("Codex thread id contains invalid characters".to_owned());
             }
             Ok(CommandSpec {
                 program: "/usr/bin/open",
@@ -76,14 +76,14 @@ fn command_for(source: &ActivitySource, desktop: Option<&str>) -> Result<Command
             let link = match desktop {
                 Some(desktop) => {
                     if !valid_desktop_id(desktop) {
-                        return Err("桌面会话 id 格式无效".to_owned());
+                        return Err("invalid desktop session id".to_owned());
                     }
                     format!("claude://code/continue?session={desktop}")
                 }
                 // CLI sessions running in a terminal have no matching window; importing is the only way to open them.
                 None => {
                     if !valid_identifier(session_id) {
-                        return Err("Claude session id 含有非法字符".to_owned());
+                        return Err("Claude session id contains invalid characters".to_owned());
                     }
                     format!("claude://resume?session={session_id}")
                 }
@@ -95,7 +95,7 @@ fn command_for(source: &ActivitySource, desktop: Option<&str>) -> Result<Command
         }
         ActivitySource::GitHubActions { repo, run_id } => {
             if !valid_repo(repo) {
-                return Err("GitHub repo 格式无效".to_owned());
+                return Err("invalid GitHub repo".to_owned());
             }
             Ok(CommandSpec {
                 program: "/usr/bin/open",
@@ -135,7 +135,7 @@ fn surface_of(source: &ActivitySource) -> Option<&Surface> {
 /// narrowed to a safe character set as untrusted input.
 fn activate(bundle_id: &str) -> Result<CommandSpec, String> {
     if !valid_bundle_id(bundle_id) {
-        return Err("宿主 bundle id 格式无效".to_owned());
+        return Err("invalid host bundle id".to_owned());
     }
     Ok(CommandSpec {
         program: "/usr/bin/open",
@@ -294,7 +294,7 @@ mod tests {
             },
             None,
         )
-        .expect("宿主应可激活");
+        .expect("host should be activatable");
 
         assert_eq!(spec.program, "/usr/bin/open");
         assert_eq!(spec.args, ["-b", "com.mitchellh.ghostty"]);
@@ -310,7 +310,7 @@ mod tests {
             },
             None,
         )
-        .expect("未知宿主也该激活");
+        .expect("an unknown host should still be activated");
 
         assert_eq!(spec.args, ["-b", "net.example.SomeNewTerminal"]);
     }
@@ -342,7 +342,7 @@ mod tests {
                     None,
                 )
                 .is_err(),
-                "{bogus} 不该被接受"
+                "{bogus} should not be accepted"
             );
         }
     }
@@ -369,7 +369,7 @@ mod tests {
             },
             None,
         )
-        .expect("UUID 应可打开");
+        .expect("UUID should open");
 
         assert_eq!(spec.program, "/usr/bin/open");
         assert_eq!(spec.args[0..2], ["-b", CODEX_BUNDLE_ID]);
@@ -389,7 +389,7 @@ mod tests {
             },
             Some("local_b65a60de-9adb-48b0-85c6-f9a178971322"),
         )
-        .expect("已知窗口应可打开");
+        .expect("known window should open");
 
         assert_eq!(spec.program, "/usr/bin/open");
         assert_eq!(spec.args[0..2], ["-b", CLAUDE_BUNDLE_ID]);
@@ -409,7 +409,7 @@ mod tests {
             },
             None,
         )
-        .expect("终端里的会话仍应可打开");
+        .expect("a session in a terminal should still open");
 
         assert_eq!(
             spec.args[2],
@@ -440,7 +440,7 @@ mod tests {
                 Some("19b63622-e3e0-4cd0-a37e-dc8d71253155"),
             )
             .is_err(),
-            "缺少 local_ 前缀的 id 不是桌面会话"
+            "an id without the local_ prefix is not a desktop session"
         );
     }
 
@@ -490,7 +490,7 @@ mod tests {
         let record = format!(
             r#"{{"sessionId":"{id}","cliSessionId":"{cli}","cwd":"{cwd}","isArchived":{archived},"lastActivityAt":{activity}}}"#
         );
-        std::fs::write(dir.join(format!("{id}.json")), record).expect("写入会话记录");
+        std::fs::write(dir.join(format!("{id}.json")), record).expect("write session record");
     }
 
     /// A session whose worktree was deleted leaves two records with the same `cliSessionId` in the index:
@@ -500,7 +500,7 @@ mod tests {
     fn the_working_directory_picks_the_live_window() {
         let root = temp_dir("split");
         let dir = root.join("account").join("org");
-        std::fs::create_dir_all(&dir).expect("创建测试目录");
+        std::fs::create_dir_all(&dir).expect("create test dir");
         let cli = "19b63622-e3e0-4cd0-a37e-dc8d71253155";
         // The shadow has the later activity time, since importing itself refreshes it, so "take the newest" isn't enough.
         write_session(
@@ -530,7 +530,7 @@ mod tests {
         assert_eq!(
             picked.as_deref(),
             Some("local_b65a60de-9adb-48b0-85c6-f9a178971322"),
-            "K2 应回到正在这个目录里干活的窗口"
+            "K2 should return to the window working in this directory"
         );
     }
 
@@ -538,7 +538,7 @@ mod tests {
     fn an_archived_window_is_never_reopened() {
         let root = temp_dir("archived");
         let dir = root.join("account").join("org");
-        std::fs::create_dir_all(&dir).expect("创建测试目录");
+        std::fs::create_dir_all(&dir).expect("create test dir");
         write_session(
             &dir,
             "local_aaaaaaaa-0000-0000-0000-000000000000",
@@ -551,7 +551,7 @@ mod tests {
         let picked = desktop_session_by_cli(&root, "cli-a", Some("/work/alpha"));
         let _ = std::fs::remove_dir_all(&root);
 
-        assert_eq!(picked, None, "归档的会话不该被 K2 拉回来");
+        assert_eq!(picked, None, "K2 should not bring back an archived session");
     }
 
     /// When a CLI session maps to a single window, a cwd mismatch still mustn't fall back to importing.
@@ -559,7 +559,7 @@ mod tests {
     fn a_single_window_wins_even_when_the_directory_moved() {
         let root = temp_dir("moved");
         let dir = root.join("account").join("org");
-        std::fs::create_dir_all(&dir).expect("创建测试目录");
+        std::fs::create_dir_all(&dir).expect("create test dir");
         write_session(
             &dir,
             "local_cccccccc-0000-0000-0000-000000000000",
@@ -587,7 +587,7 @@ mod tests {
             },
             None,
         )
-        .expect("规范仓库名应可打开");
+        .expect("canonical repo name should open");
 
         assert_eq!(
             spec.args,
