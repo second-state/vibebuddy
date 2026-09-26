@@ -13,6 +13,9 @@ on:
       - "hook/**"
       - "protocol/**"
       - "firmware/**"
+      - "firmware-rs/**"
+      - "tools/build-firmware.sh"
+      - "tools/make-partition-table.py"
       - "voices/**"
       - "tools/make_voice_pack.py"
       - "Cargo.toml"
@@ -30,26 +33,34 @@ permissions:
 
 jobs:
   firmware:
-    # ESP-IDF 官方只给 Linux 的 docker 镜像；三件套与架构无关，在这里构建后交给 macOS job。
+    # Rust 固件（esp-hal + embassy）用 Xtensa 工具链构建；三件套与架构无关，
+    # 在 Linux 上构建后交给 macOS job。
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: espressif/esp-idf-ci-action@v1
         with:
-          # 与 firmware/dependencies.lock 里的 idf 版本一致。
-          esp_idf_version: v5.5.3
-          target: esp32s3
-          path: firmware
+          # build.rs 用 git describe --tags 做固件的构建标识，要能看到标签。
+          fetch-depth: 0
+      - uses: esp-rs/xtensa-toolchain@v1.7
+        with:
+          default: true
+          buildtargets: esp32s3
+          ldproxy: false
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: espflash@4.6.0
+      - name: 构建
+        run: tools/build-firmware.sh
       - uses: actions/upload-artifact@v4
         with:
           name: firmware
           retention-days: 1
-          # build-app.sh 要三件套，外加页脚构建标识用的时刻头文件。
+          # build-app.sh 要三件套，外加与盒子页脚逐字相同的构建标识。
           path: |
-            firmware/build/bootloader/bootloader.bin
-            firmware/build/partition_table/partition-table.bin
-            firmware/build/vibebuddy-fw.bin
-            firmware/build/esp-idf/main/agent_build_stamp.h
+            firmware-rs/device/build/bootloader.bin
+            firmware-rs/device/build/partition-table.bin
+            firmware-rs/device/build/vibebuddy-fw.bin
+            firmware-rs/device/build/build.txt
 
   app:
     needs: firmware
@@ -69,7 +80,7 @@ jobs:
       - uses: actions/download-artifact@v4
         with:
           name: firmware
-          path: firmware/build
+          path: firmware-rs/device/build
       - name: 定版本号
         id: version
         run: |

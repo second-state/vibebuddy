@@ -1,5 +1,17 @@
-use std::collections::BTreeMap;
-use std::fmt;
+//! Mac 与设备之间的消息信封。daemon 用它编码，固件用它解码：同一份类型，
+//! 两端各编译一次，字段对不上就编译不过。固件那边没有 std，所以这里只用
+//! `core` 与 `alloc`；`std` 特性只多给一个 `std::error::Error` 实现。
+#![no_std]
+
+extern crate alloc;
+#[cfg(any(feature = "std", test))]
+extern crate std;
+
+use alloc::borrow::ToOwned;
+use alloc::collections::BTreeMap;
+use alloc::string::String;
+use alloc::vec::Vec;
+use core::fmt;
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -82,6 +94,7 @@ impl fmt::Display for ProtocolError {
     }
 }
 
+#[cfg(feature = "std")]
 impl std::error::Error for ProtocolError {}
 
 #[cfg(test)]

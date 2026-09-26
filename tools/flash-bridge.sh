@@ -5,12 +5,24 @@
 # 先单独写分区表试路，再写 app；bootloader 只在明确要求时才写。
 #
 # 用法: tools/flash-bridge.sh /dev/cu.usbmodemXXXX partition|app|bootloader ...
-# 默认烧 firmware/build；设 BUILD_DIR 可以烧别的构建目录，例如验收用的
-# firmware/build-fast。
+# 默认烧 Rust 固件的三件套（firmware-rs/device/build，先跑 tools/build-firmware.sh）；
+# 设 C_FIRMWARE=1 烧 C 固件的 firmware/build，BUILD_DIR 可以另指构建目录。
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-build_dir="${BUILD_DIR:-${repo_root}/firmware/build}"
+if [[ "${C_FIRMWARE:-0}" == "1" ]]; then
+    build_dir="${BUILD_DIR:-${repo_root}/firmware/build}"
+    partition_bin="${build_dir}/partition_table/partition-table.bin"
+    bootloader_bin="${build_dir}/bootloader/bootloader.bin"
+    # flash_mode / flash_size / flash_freq 取自构建产物，不在这里手抄。
+    read -r -a flash_args <<< "$(head -n 1 "${build_dir}/flash_args")"
+else
+    build_dir="${BUILD_DIR:-${repo_root}/firmware-rs/device/build}"
+    partition_bin="${build_dir}/partition-table.bin"
+    bootloader_bin="${build_dir}/bootloader.bin"
+    # Rust 固件的 bootloader 头里已经写好了 16 MB，原样写入，不让 esptool 改。
+    flash_args=(--flash_mode keep --flash_freq keep --flash_size keep)
+fi
 serial_port="${1:?用法: flash-bridge.sh <串口> partition|app|bootloader ...}"
 shift
 if [[ $# -eq 0 ]]; then
@@ -31,15 +43,12 @@ done < <("${activation_script}" -e)
 segments=()
 for target in "$@"; do
     case "${target}" in
-        partition) segments+=(0x8000 "${build_dir}/partition_table/partition-table.bin") ;;
+        partition) segments+=(0x8000 "${partition_bin}") ;;
         app) segments+=(0x10000 "${build_dir}/vibebuddy-fw.bin") ;;
-        bootloader) segments+=(0x0 "${build_dir}/bootloader/bootloader.bin") ;;
+        bootloader) segments+=(0x0 "${bootloader_bin}") ;;
         *) echo "未知目标: ${target}" >&2; exit 1 ;;
     esac
 done
-
-# flash_mode / flash_size / flash_freq 取自构建产物，不在这里手抄。
-read -r -a flash_args <<< "$(head -n 1 "${build_dir}/flash_args")"
 
 "${IDF_PYTHON_ENV_PATH}/bin/python" - --no-stub --chip esp32s3 --port "${serial_port}" \
     --baud 115200 --before default_reset --after hard_reset \

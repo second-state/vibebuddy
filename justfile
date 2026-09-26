@@ -10,31 +10,28 @@ test:
     cargo test --workspace
     swift run --package-path app SelfTest
 
-# 固件里不依赖硬件的部分：番茄钟、休闲、语音包
+# 固件不依赖硬件的部分（firmware-core）的测试，再逐像素比对 Rust 与 C 两份固件的画面
 test-firmware:
+    cargo test -p vibebuddy-firmware-core
+    tools/compare-display.sh
+
+# 构建 Rust 固件三件套到 firmware-rs/device/build（Release 装包要用）；FAST_CLOCK=1 出验收版
+firmware:
+    tools/build-firmware.sh
+
+# 烧录 Rust 固件（原生 USB 口；只接 UART 桥时用 tools/flash-bridge.sh）
+flash port:
+    tools/flash.sh {{port}}
+
+# 退回 C 固件：ESP-IDF 构建并烧录（Rust 版出问题时用）
+flash-c port:
+    tools/flash-c.sh {{port}}
+
+# C 固件自己的主机测试：番茄钟、休闲、语音包
+test-firmware-c:
     tools/test-pomodoro.sh
     tools/test-leisure.sh
     tools/test-voice-pack.sh
-
-# 构建固件三件套到 firmware/build（Release 装包要用）
-firmware:
-    #!/usr/bin/env bash
-    set -euo pipefail
-    if ! command -v idf.py >/dev/null; then
-        # 激活脚本不能 source（见 LESSONS.md），用 -e 读环境变量。
-        while IFS='=' read -r key value; do
-            [[ "${key}" == "PATH" ]] && export PATH="${value}:${PATH}"
-            [[ "${key}" != "PATH" && "${key}" != "SYSTEM_PATH" ]] && export "${key}=${value}"
-        done < <("${HOME}/.espressif/tools/activate_idf_v5.5.3.sh" -e)
-        idf() { "${IDF_PYTHON_ENV_PATH}/bin/python" "${IDF_PATH}/tools/idf.py" "$@"; }
-    else
-        idf() { idf.py "$@"; }
-    fi
-    idf -C firmware build
-
-# 烧录固件（原生 USB 口；只接 UART 桥时用 tools/flash-bridge.sh）
-flash port:
-    tools/flash.sh {{port}}
 
 # 装出 app/build/Vibe Buddy.app（要先有固件三件套）
 app:

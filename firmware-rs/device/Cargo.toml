@@ -1,0 +1,51 @@
+[package]
+name = "vibebuddy-firmware"
+version = "0.2.1"
+edition = "2024"
+license = "MIT"
+rust-version = "1.95"
+publish = false
+
+# 盒子（ATK-DNESP32S3-BOX，ESP32-S3）上跑的固件：esp-hal + embassy，no_std。
+# 这里只有硬件胶水，逻辑都在 ../core。用 Xtensa 工具链单独构建：
+#   . ~/export-esp.sh && cargo build --release
+# 或者直接 tools/build-firmware.sh，它还会打出烧录用的三件套。
+# 独立的 workspace：目标与工具链都和上层的 Mac 端 crate 不一样。
+[workspace]
+
+[[bin]]
+name = "vibebuddy-firmware"
+path = "src/main.rs"
+test = false
+bench = false
+
+[features]
+# 实机验收用：休闲的五分钟压成五秒、番茄钟的 25 分钟压成 25 秒。
+fast-clock = ["vibebuddy-firmware-core/fast-clock"]
+
+[dependencies]
+vibebuddy-firmware-core = { path = "../core" }
+
+esp-hal = { version = "~1.2.2", features = ["esp32s3", "unstable"] }
+esp-rtos = { version = "0.4.0", features = ["embassy", "esp-alloc", "esp32s3"] }
+esp-bootloader-esp-idf = { version = "0.6.0", features = ["esp32s3"] }
+esp-alloc = { version = "0.11.0", features = ["esp32s3"] }
+esp-backtrace = { version = "0.20.0", features = ["esp32s3", "panic-handler", "println", "custom-halt"] }
+esp-println = { version = "0.18.0", features = ["esp32s3"] }
+esp-storage = { version = "0.10.0", features = ["esp32s3"] }
+
+embassy-executor = "0.10.0"
+embassy-time = "0.5.0"
+embassy-sync = "0.7"
+critical-section = "1.2.0"
+embedded-io-async = "0.7"
+static_cell = "2.1.1"
+
+[profile.dev]
+opt-level = "s"
+
+[profile.release]
+codegen-units = 1
+debug = 2
+lto = "fat"
+opt-level = "s"

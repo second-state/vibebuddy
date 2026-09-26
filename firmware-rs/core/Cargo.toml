@@ -1,0 +1,16 @@
+[package]
+name = "vibebuddy-firmware-core"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+# 固件里与硬件无关的一切：状态机、绘制、协议处理、存储格式、芯片寄存器序列。
+# no_std，设备与 Mac 各编译一次；在 Mac 上 `cargo test` 就能跑整条链。
+[features]
+# 实机验收用：把休闲的五分钟压成五秒、番茄钟的 25 分钟压成 25 秒。
+fast-clock = []
+
+[dependencies]
+libm = "0.2"
+serde_json = { version = "1", default-features = false, features = ["alloc"] }
+vibebuddy-protocol = { path = "../../protocol", default-features = false }

@@ -4,7 +4,12 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 
-[dependencies]
-serde.workspace = true
-serde_json.workspace = true
+# 固件（no_std）也依赖这个 crate，所以 serde 与 serde_json 不走 workspace
+# 依赖：那边开着默认特性，会把 std 带进固件。
+[features]
+default = ["std"]
+std = ["serde/std", "serde_json/std"]
 
+[dependencies]
+serde = { version = "1", default-features = false, features = ["alloc", "derive"] }
+serde_json = { version = "1", default-features = false, features = ["alloc"] }

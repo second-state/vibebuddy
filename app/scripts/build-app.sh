@@ -6,7 +6,7 @@
 #   --install  装完拷到 /Applications 并从那里启动。日常使用的 App 必须装在这里：
 #              worktree 里的 build 目录随时会被删，登录项与 Hook 绑在那上面，
 #              下次开机就什么都不剩（2026-09-17 出过一次）。
-# Release 构建要求 firmware/build 里有三件套，缺了就失败并提示先构建固件。
+# Release 构建要求 firmware-rs/device/build 里有三件套，缺了就失败并提示先构建固件。
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
@@ -67,31 +67,18 @@ cp "${repo_root}/target/release/vibebuddyd" "${contents}/MacOS/vibebuddyd"
 cp "${repo_root}/target/release/vibebuddy-hook" "${contents}/MacOS/vibebuddy-hook"
 
 echo "== 固件"
-fw="${repo_root}/firmware/build"
-if [[ -f "${fw}/bootloader/bootloader.bin" && -f "${fw}/partition_table/partition-table.bin" && -f "${fw}/vibebuddy-fw.bin" ]]; then
-    cp "${fw}/bootloader/bootloader.bin" "${contents}/Resources/firmware/bootloader.bin"
-    cp "${fw}/partition_table/partition-table.bin" "${contents}/Resources/firmware/partition-table.bin"
-    cp "${fw}/vibebuddy-fw.bin" "${contents}/Resources/firmware/vibebuddy-fw.bin"
-    # 构建标识要和盒子页脚报的一模一样：镜像里 esp_app_desc 的 version 加上
-    # 本次构建的时刻戳，格式与固件 describe_firmware_build 一致。
-    python3 - "${fw}" > "${contents}/Resources/firmware/build.txt" <<'PY'
-import re, struct, sys
-from pathlib import Path
-build = Path(sys.argv[1])
-image = (build / "vibebuddy-fw.bin").read_bytes()
-# esp_app_desc_t 在镜像偏移 0x20：magic(4) secure_version(4) reserv1(8) version[32]
-magic, = struct.unpack_from("<I", image, 0x20)
-assert magic == 0xABCD5432, "找不到 esp_app_desc"
-version = image[0x30:0x50].split(b"\0", 1)[0].decode()[:24]
-stamp_header = next(build.rglob("agent_build_stamp.h"))
-stamp = re.search(r'"([^"]+)"', stamp_header.read_text()).group(1)[:16]
-print(f"{version} {stamp}")
-PY
+# Rust 固件的三件套与构建标识，由 tools/build-firmware.sh 打到这里。build.txt
+# 与盒子页脚、DISPLAY READY BUILD 那一行逐字相同，App 靠它判断要不要更新。
+fw="${repo_root}/firmware-rs/device/build"
+if [[ -f "${fw}/bootloader.bin" && -f "${fw}/partition-table.bin" && -f "${fw}/vibebuddy-fw.bin" && -f "${fw}/build.txt" ]]; then
+    for file in bootloader.bin partition-table.bin vibebuddy-fw.bin build.txt; do
+        cp "${fw}/${file}" "${contents}/Resources/firmware/${file}"
+    done
     echo "附带固件 $(cat "${contents}/Resources/firmware/build.txt")"
 elif [[ ${debug} -eq 1 ]]; then
     echo "没有固件构建产物，Debug 构建不附带固件"
 else
-    echo "Release 构建需要 firmware/build 里的三件套，先跑 idf.py -C firmware build" >&2
+    echo "Release 构建需要 firmware-rs/device/build 里的三件套，先跑 tools/build-firmware.sh" >&2
     exit 1
 fi
 
