@@ -1,7 +1,7 @@
-//! 把聚合活动定位回 Mac 上的来源窗口。
+//! Navigates from an aggregated activity back to its source window on the Mac.
 //!
-//! 所有参数都直接交给进程 API，不经过 shell。来源数据来自 Hook，仍按不可信
-//! 输入处理：Codex thread id、Claude session id 与 GitHub repo 都先收窄字符集。
+//! All arguments go straight to the process API, never through a shell. Source data comes from hooks and is still treated
+//! as untrusted input: Codex thread ids, Claude session ids and GitHub repos are narrowed to a safe character set first.
 
 use std::path::{Path, PathBuf};
 use std::time::Duration;
@@ -14,9 +14,9 @@ use crate::activity::{ActivitySource, Surface};
 const OPEN_TIMEOUT: Duration = Duration::from_secs(5);
 const CODEX_BUNDLE_ID: &str = "com.openai.codex";
 const CLAUDE_BUNDLE_ID: &str = "com.anthropic.claudefordesktop";
-/// Claude App 记录每个 Code 会话的地方，一个账号一个子目录。
+/// Where Claude App keeps a record of each Code session, one subdirectory per account.
 const DESKTOP_SESSIONS_DIR: &str = "Library/Application Support/Claude/claude-code-sessions";
-/// 桌面会话 id 的前缀，deep link 只认这种形态。
+/// Prefix of desktop session ids; the deep link only accepts this form.
 const DESKTOP_ID_PREFIX: &str = "local_";
 
 #[derive(Debug, PartialEq, Eq)]
@@ -25,7 +25,7 @@ struct CommandSpec {
     args: Vec<String>,
 }
 
-/// 成功时返回实际打开的链接，方便日志说明 K2 到底跳去了哪里。
+/// On success returns the link actually opened, so the log can say where K2 went.
 pub async fn open(source: ActivitySource) -> Result<String, String> {
     let desktop = reported_desktop_session(&source)
         .map(str::to_owned)
@@ -37,27 +37,27 @@ pub async fn open(source: ActivitySource) -> Result<String, String> {
         Command::new(spec.program).args(&spec.args).output(),
     )
     .await
-    .map_err(|_| "打开来源超时".to_owned())?
-    .map_err(|error| format!("无法启动打开命令：{error}"))?;
+    .map_err(|_| "opening the source timed out".to_owned())?
+    .map_err(|error| format!("cannot start the open command: {error}"))?;
     if output.status.success() {
         return Ok(link);
     }
     let stderr = String::from_utf8_lossy(&output.stderr);
-    Err(format!("打开来源失败：{}", stderr.trim()))
+    Err(format!("failed to open the source: {}", stderr.trim()))
 }
 
 fn command_for(source: &ActivitySource, desktop: Option<&str>) -> Result<CommandSpec, String> {
-    // 运行处先答一件事：人在不在这个 Agent 的 App 里。不在就别用 deeplink，
-    // 那会把终端里的会话导入成 App 里的一份副本。
+    // First answer one question: is the user inside this agent's app? If not, don't use the deeplink;
+    // it would import a terminal session into the app as a copy.
     match surface_of(source) {
         Some(Surface::Host { bundle_id }) => return activate(bundle_id),
-        Some(Surface::Headless) => return Err("会话没有宿主窗口（SSH 或后台进程）".to_owned()),
+        Some(Surface::Headless) => return Err("session has no host window (SSH or background process)".to_owned()),
         _ => {}
     }
     match source {
         ActivitySource::Codex { thread_id, .. } => {
             if !valid_identifier(thread_id) {
-                return Err("Codex thread id 含有非法字符".to_owned());
+                return Err("Codex thread id contains invalid characters".to_owned());
             }
             Ok(CommandSpec {
                 program: "/usr/bin/open",
@@ -69,21 +69,21 @@ fn command_for(source: &ActivitySource, desktop: Option<&str>) -> Result<Command
             })
         }
         ActivitySource::ClaudeCode { session_id, .. } => {
-            // 已经知道是哪个窗口时直接聚焦它。`claude://resume` 走的是另一条
-            // 路：按 CLI session id 去磁盘上认领一份 transcript。同一个 id 在多
-            // 个项目目录下各有一份时它只能挑一个，挑错了就打开一个内容陈旧的
-            // 影子会话，而且每按一次都把整份 transcript 重新导入一遍。
+            // When we already know the window, focus it directly. `claude://resume` takes a different
+            // route: it claims a transcript on disk by CLI session id. When the same id has a copy in several
+            // project directories it can only pick one, and picking wrong opens a stale
+            // shadow session, re-importing the whole transcript on every press.
             let link = match desktop {
                 Some(desktop) => {
                     if !valid_desktop_id(desktop) {
-                        return Err("桌面会话 id 格式无效".to_owned());
+                        return Err("invalid desktop session id".to_owned());
                     }
                     format!("claude://code/continue?session={desktop}")
                 }
-                // 终端里跑的 CLI 会话没有对应窗口，导入是唯一的打开方式。
+                // CLI sessions running in a terminal have no matching window; importing is the only way to open them.
                 None => {
                     if !valid_identifier(session_id) {
-                        return Err("Claude session id 含有非法字符".to_owned());
+                        return Err("Claude session id contains invalid characters".to_owned());
                     }
                     format!("claude://resume?session={session_id}")
                 }
@@ -95,7 +95,7 @@ fn command_for(source: &ActivitySource, desktop: Option<&str>) -> Result<Command
         }
         ActivitySource::GitHubActions { repo, run_id } => {
             if !valid_repo(repo) {
-                return Err("GitHub repo 格式无效".to_owned());
+                return Err("invalid GitHub repo".to_owned());
             }
             Ok(CommandSpec {
                 program: "/usr/bin/open",
@@ -105,9 +105,9 @@ fn command_for(source: &ActivitySource, desktop: Option<&str>) -> Result<Command
     }
 }
 
-/// Claude App 起的 Code 会话把桌面会话 id 放在进程环境里，Hook 原样上报。
-/// 它是 App 自己给的身份，直接可用——不必再拿 CLI session id 去磁盘上认领
-/// transcript，那条路一对多，会打开一个内容陈旧的影子会话（见 LESSONS.md）。
+/// Code sessions started by Claude App put the desktop session id in the process environment, and the hook reports it verbatim.
+/// It's an identity the app itself assigned and can be used directly, with no need to claim a
+/// transcript on disk by CLI session id, which is one-to-many and opens a stale shadow session (see LESSONS.md).
 fn reported_desktop_session(source: &ActivitySource) -> Option<&str> {
     match source {
         ActivitySource::ClaudeCode { surface: Surface::App { desktop_session_id }, .. } => desktop_session_id.as_deref(),
@@ -115,7 +115,7 @@ fn reported_desktop_session(source: &ActivitySource) -> Option<&str> {
     }
 }
 
-/// 旧 Hook 与旧状态文件不报桌面会话 id，只能按 cwd 在会话索引里消歧。
+/// Old hooks and old state files don't report the desktop session id, so disambiguate by cwd in the session index.
 fn fallback_desktop_session(source: &ActivitySource) -> Option<String> {
     let ActivitySource::ClaudeCode { session_id, cwd, surface: Surface::App { desktop_session_id: None } } = source else {
         return None;
@@ -130,12 +130,12 @@ fn surface_of(source: &ActivitySource) -> Option<&Surface> {
     }
 }
 
-/// 把宿主 App 拉到前台。认不认识这个 bundle id 无所谓——没见过的终端走的
-/// 也是这一条路，所以支持新终端不需要改代码。值来自 Hook，仍按不可信输入
-/// 收窄字符集。
+/// Brings the host app to the front. Whether we recognise the bundle id doesn't matter: unfamiliar terminals take
+/// this same path, so supporting a new terminal needs no code change. The value comes from the hook and is still
+/// narrowed to a safe character set as untrusted input.
 fn activate(bundle_id: &str) -> Result<CommandSpec, String> {
     if !valid_bundle_id(bundle_id) {
-        return Err("宿主 bundle id 格式无效".to_owned());
+        return Err("invalid host bundle id".to_owned());
     }
     Ok(CommandSpec {
         program: "/usr/bin/open",
@@ -143,7 +143,7 @@ fn activate(bundle_id: &str) -> Result<CommandSpec, String> {
     })
 }
 
-/// Claude App 为每个 Code 会话存一份记录。这里只读定位需要的字段。
+/// Claude App stores one record per Code session. Only the fields needed for navigation are read here.
 #[derive(Debug, Deserialize)]
 struct DesktopSession {
     #[serde(rename = "sessionId")]
@@ -155,7 +155,7 @@ struct DesktopSession {
     is_archived: bool,
     #[serde(default, rename = "lastActivityAt")]
     last_activity_at: i64,
-    /// App 自动起的会话标题，任务卡第一行用它。
+    /// The session title the app generated; the task card's first line uses it.
     #[serde(default)]
     title: Option<String>,
 }
@@ -164,16 +164,16 @@ fn desktop_sessions_dir() -> Option<PathBuf> {
     Some(PathBuf::from(std::env::var_os("HOME")?).join(DESKTOP_SESSIONS_DIR))
 }
 
-/// 找出这个 CLI 会话此刻属于哪个桌面窗口。
+/// Finds which desktop window this CLI session belongs to right now.
 ///
-/// `cliSessionId` 不是唯一键：worktree 被删除后会话迁回主仓库、fork，或者
-/// 一次 `claude://resume` 导入，都会让同一个 CLI 会话对应多条记录。工作目录
-/// 能把真身和影子分开——Hook 报的 cwd 就是那个进程实际待的地方。
+/// `cliSessionId` isn't a unique key: a session moving back to the main repository after its worktree is deleted, a fork, or
+/// a `claude://resume` import all give one CLI session several records. The working directory
+/// tells the real one from the shadows: the cwd the hook reports is where that process actually is.
 fn desktop_session_by_cli(dir: &Path, cli_session_id: &str, cwd: Option<&str>) -> Option<String> {
     desktop_session(dir, cli_session_id, cwd).map(|session| session.session_id)
 }
 
-/// 这个 CLI 会话在 Claude App 里的标题。选记录的规则与打开窗口时相同。
+/// This CLI session's title in Claude App. Records are picked by the same rule as when opening the window.
 pub(crate) fn desktop_session_title(cli_session_id: &str, cwd: Option<&str>) -> Option<String> {
     let dir = desktop_sessions_dir()?;
     desktop_session(&dir, cli_session_id, cwd)
@@ -198,7 +198,7 @@ fn desktop_session(dir: &Path, cli_session_id: &str, cwd: Option<&str>) -> Optio
     candidates.pop()
 }
 
-/// 记录按 `<账号>/<组织>/local_*.json` 分层存放，层数不深，逐层读下去即可。
+/// Records are stored as `<account>/<org>/local_*.json`; the tree is shallow, so read it level by level.
 fn collect_desktop_sessions(dir: &Path, depth: u32, out: &mut Vec<DesktopSession>) {
     if depth > 3 {
         return;
@@ -224,7 +224,7 @@ fn collect_desktop_sessions(dir: &Path, depth: u32, out: &mut Vec<DesktopSession
     }
 }
 
-/// bundle id 的合法字符与会话 id 相同，但必须是点分的，不含路径与空白。
+/// Bundle ids allow the same characters as session ids, but must be dotted, with no paths or whitespace.
 fn valid_bundle_id(value: &str) -> bool {
     valid_identifier(value) && value.contains('.')
 }
@@ -257,7 +257,7 @@ mod tests {
 
     #[test]
     fn a_reported_desktop_session_skips_the_disk_lookup() {
-        // App 自己给的身份优先，不再拿 CLI session id 去磁盘上认领 transcript。
+        // The app's own identity wins; no more claiming transcripts on disk by CLI session id.
         let source = ActivitySource::ClaudeCode {
             session_id: "19b63622-e3e0-4cd0-a37e-dc8d71253155".to_owned(),
             cwd: Some("/work/vibe-buddy".to_owned()),
@@ -284,8 +284,8 @@ mod tests {
 
     #[test]
     fn a_terminal_session_activates_its_host_instead_of_importing() {
-        // 人在 Ghostty 里跑 claude：deeplink 会把会话导入成 App 里的副本，
-        // 该做的是把那个终端拉到前台。
+        // The user runs claude in Ghostty: the deeplink would import the session into the app as a copy;
+        // the right move is to bring that terminal to the front.
         let spec = command_for(
             &ActivitySource::ClaudeCode {
                 session_id: "19b63622-e3e0-4cd0-a37e-dc8d71253155".to_owned(),
@@ -294,7 +294,7 @@ mod tests {
             },
             None,
         )
-        .expect("宿主应可激活");
+        .expect("host should be activatable");
 
         assert_eq!(spec.program, "/usr/bin/open");
         assert_eq!(spec.args, ["-b", "com.mitchellh.ghostty"]);
@@ -302,7 +302,7 @@ mod tests {
 
     #[test]
     fn an_unknown_host_needs_no_code_change() {
-        // 没见过的终端和见过的走同一条路，所以换终端不必改代码。
+        // Unfamiliar terminals take the same path as known ones, so switching terminals needs no code change.
         let spec = command_for(
             &ActivitySource::Codex {
                 thread_id: "019c6e27-e55b-73d1-87d8-4e01f1f75043".to_owned(),
@@ -310,14 +310,14 @@ mod tests {
             },
             None,
         )
-        .expect("未知宿主也该激活");
+        .expect("an unknown host should still be activated");
 
         assert_eq!(spec.args, ["-b", "net.example.SomeNewTerminal"]);
     }
 
     #[test]
     fn a_headless_session_is_skipped_rather_than_opened_wrong() {
-        // SSH 或守护进程起的会话没有任何窗口；返回错误让 K2 试下一个候选。
+        // Sessions started over SSH or by a daemon have no window at all; return an error so K2 tries the next candidate.
         let spec = command_for(
             &ActivitySource::Codex {
                 thread_id: "019c6e27-e55b-73d1-87d8-4e01f1f75043".to_owned(),
@@ -331,7 +331,7 @@ mod tests {
 
     #[test]
     fn a_host_id_that_is_not_a_bundle_id_is_refused() {
-        // bundle id 来自 Hook，按不可信输入处理。
+        // The bundle id comes from the hook and is treated as untrusted input.
         for bogus in ["../../evil", "com.example.a b", "no-dots", ""] {
             assert!(
                 command_for(
@@ -342,20 +342,20 @@ mod tests {
                     None,
                 )
                 .is_err(),
-                "{bogus} 不该被接受"
+                "{bogus} should not be accepted"
             );
         }
     }
 
     #[test]
     fn a_host_without_a_bundle_id_has_nowhere_to_go() {
-        // Hook 说是宿主却没给落点：跳过，不能退回 App 把会话导入进去。
+        // The hook says there's a host but gave no target: skip it, rather than fall back to importing the session into the app.
         assert_eq!(Surface::from_hook(Some("host"), None, None), Surface::Headless);
     }
 
     #[test]
     fn an_older_hook_keeps_the_desktop_behaviour() {
-        // 旧 Hook 与旧状态文件都不报运行处，那时只支持桌面 App。
+        // Old hooks and old state files report no surface; back then only the desktop app was supported.
         assert_eq!(Surface::from_hook(None, None, None), Surface::default());
         assert!(matches!(Surface::default(), Surface::App { .. }));
     }
@@ -369,7 +369,7 @@ mod tests {
             },
             None,
         )
-        .expect("UUID 应可打开");
+        .expect("UUID should open");
 
         assert_eq!(spec.program, "/usr/bin/open");
         assert_eq!(spec.args[0..2], ["-b", CODEX_BUNDLE_ID]);
@@ -389,7 +389,7 @@ mod tests {
             },
             Some("local_b65a60de-9adb-48b0-85c6-f9a178971322"),
         )
-        .expect("已知窗口应可打开");
+        .expect("known window should open");
 
         assert_eq!(spec.program, "/usr/bin/open");
         assert_eq!(spec.args[0..2], ["-b", CLAUDE_BUNDLE_ID]);
@@ -409,7 +409,7 @@ mod tests {
             },
             None,
         )
-        .expect("终端里的会话仍应可打开");
+        .expect("a session in a terminal should still open");
 
         assert_eq!(
             spec.args[2],
@@ -440,7 +440,7 @@ mod tests {
                 Some("19b63622-e3e0-4cd0-a37e-dc8d71253155"),
             )
             .is_err(),
-            "缺少 local_ 前缀的 id 不是桌面会话"
+            "an id without the local_ prefix is not a desktop session"
         );
     }
 
@@ -490,19 +490,19 @@ mod tests {
         let record = format!(
             r#"{{"sessionId":"{id}","cliSessionId":"{cli}","cwd":"{cwd}","isArchived":{archived},"lastActivityAt":{activity}}}"#
         );
-        std::fs::write(dir.join(format!("{id}.json")), record).expect("写入会话记录");
+        std::fs::write(dir.join(format!("{id}.json")), record).expect("write session record");
     }
 
-    /// 一个 worktree 被删掉的会话会在索引里留下两条同 `cliSessionId` 的记录：
-    /// 迁回主仓库的那条，和之前 K2 导入出来的影子。cwd 必须选中真身，否则 K2
-    /// 打开的是一份内容停在昨天的陈旧会话。
+    /// A session whose worktree was deleted leaves two records with the same `cliSessionId` in the index:
+    /// the one moved back to the main repository, and the shadow an earlier K2 imported. cwd must pick the real one, or K2
+    /// opens a stale session whose content stopped yesterday.
     #[test]
     fn the_working_directory_picks_the_live_window() {
         let root = temp_dir("split");
         let dir = root.join("account").join("org");
-        std::fs::create_dir_all(&dir).expect("创建测试目录");
+        std::fs::create_dir_all(&dir).expect("create test dir");
         let cli = "19b63622-e3e0-4cd0-a37e-dc8d71253155";
-        // 影子的活动时间更晚——导入本身就会刷新它，所以“取最新”是不够的。
+        // The shadow has the later activity time, since importing itself refreshes it, so "take the newest" isn't enough.
         write_session(
             &dir,
             "local_19b63622-e3e0-4cd0-a37e-dc8d71253155",
@@ -530,7 +530,7 @@ mod tests {
         assert_eq!(
             picked.as_deref(),
             Some("local_b65a60de-9adb-48b0-85c6-f9a178971322"),
-            "K2 应回到正在这个目录里干活的窗口"
+            "K2 should return to the window working in this directory"
         );
     }
 
@@ -538,7 +538,7 @@ mod tests {
     fn an_archived_window_is_never_reopened() {
         let root = temp_dir("archived");
         let dir = root.join("account").join("org");
-        std::fs::create_dir_all(&dir).expect("创建测试目录");
+        std::fs::create_dir_all(&dir).expect("create test dir");
         write_session(
             &dir,
             "local_aaaaaaaa-0000-0000-0000-000000000000",
@@ -551,15 +551,15 @@ mod tests {
         let picked = desktop_session_by_cli(&root, "cli-a", Some("/work/alpha"));
         let _ = std::fs::remove_dir_all(&root);
 
-        assert_eq!(picked, None, "归档的会话不该被 K2 拉回来");
+        assert_eq!(picked, None, "K2 should not bring back an archived session");
     }
 
-    /// 同一个 CLI 会话只对应一个窗口时，cwd 对不上也不该退回导入。
+    /// When a CLI session maps to a single window, a cwd mismatch still mustn't fall back to importing.
     #[test]
     fn a_single_window_wins_even_when_the_directory_moved() {
         let root = temp_dir("moved");
         let dir = root.join("account").join("org");
-        std::fs::create_dir_all(&dir).expect("创建测试目录");
+        std::fs::create_dir_all(&dir).expect("create test dir");
         write_session(
             &dir,
             "local_cccccccc-0000-0000-0000-000000000000",
@@ -587,7 +587,7 @@ mod tests {
             },
             None,
         )
-        .expect("规范仓库名应可打开");
+        .expect("canonical repo name should open");
 
         assert_eq!(
             spec.args,

@@ -1,6 +1,6 @@
 import Foundation
 
-/// daemon `GET /v1/status` 与状态流推的快照，字段与 daemon/src/status.rs 一致。
+/// The snapshot from the daemon's `GET /v1/status` and status stream; fields match daemon/src/status.rs.
 public struct Status: Codable, Equatable {
     public var daemon: DaemonInfo
     public var device: DeviceState
@@ -33,7 +33,7 @@ public struct DeviceState: Codable, Equatable {
     public var mode: String?
     public var firmwareBuild: String?
     public var voice: String?
-    /// 扬声器音量（20 到 100），盒子报回来的值；App 只是遥控。
+    /// Speaker volume (20 to 100) as reported by the box; the app is just a remote control.
     public var volume: Int?
     enum CodingKeys: String, CodingKey { case connected, port, bridge, mode, firmwareBuild = "firmware_build", voice, volume }
     public init(connected: Bool, port: String? = nil, bridge: Bool = false, mode: String? = nil, firmwareBuild: String? = nil, voice: String? = nil, volume: Int? = nil) {
@@ -55,7 +55,7 @@ public struct HooksSeen: Codable, Equatable {
     public init(codex: Date? = nil, claude: Date? = nil) { self.codex = codex; self.claude = claude }
 }
 
-/// 叫 DeviceOperation 而不是 Operation：后者和 Foundation 的撞名。
+/// Named DeviceOperation rather than Operation, which clashes with Foundation's.
 public struct DeviceOperation: Codable, Equatable {
     public enum Kind: String, Codable { case voicePack = "voice_pack", firmware }
     public enum State: String, Codable { case running, done, failed }
@@ -74,8 +74,8 @@ public struct DaemonConfig: Codable, Equatable {
 }
 
 public enum StatusCoding {
-    /// daemon 用 chrono 的 RFC 3339 带微秒与时区偏移；Foundation 的 ISO8601 解码
-    /// 器要显式开小数秒，这里两种都试。
+    /// The daemon writes chrono's RFC 3339 with microseconds and a UTC offset; Foundation's ISO8601
+    /// decoder needs fractional seconds enabled explicitly, so try both forms.
     public static func decoder() -> JSONDecoder {
         let decoder = JSONDecoder()
         let fractional = ISO8601DateFormatter()
@@ -85,7 +85,7 @@ public enum StatusCoding {
         decoder.dateDecodingStrategy = .custom { decoder in
             let text = try decoder.singleValueContainer().decode(String.self)
             if let date = fractional.date(from: text) ?? plain.date(from: text) { return date }
-            throw DecodingError.dataCorrupted(.init(codingPath: decoder.codingPath, debugDescription: "坏的时间：\(text)"))
+            throw DecodingError.dataCorrupted(.init(codingPath: decoder.codingPath, debugDescription: "bad timestamp: \(text)"))
         }
         return decoder
     }

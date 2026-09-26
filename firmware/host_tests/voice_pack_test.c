@@ -1,4 +1,4 @@
-// 语音包格式的主机测试：Mac 打出来的包，固件必须按同一套字节布局认出来。
+// Host tests for the voice pack format: the firmware must read packs built on the Mac with the same byte layout.
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -11,7 +11,7 @@ static int failures;
   do {                                                                    \
     if (!(condition)) {                                                   \
       failures++;                                                         \
-      fprintf(stderr, "%s:%d: 失败: %s\n", __FILE__, __LINE__, #condition); \
+      fprintf(stderr, "%s:%d: failed: %s\n", __FILE__, __LINE__, #condition); \
     }                                                                     \
   } while (0)
 
@@ -22,7 +22,7 @@ static void put_u32(uint8_t *at, uint32_t value) {
   at[3] = (uint8_t)(value >> 24);
 }
 
-/// 手工按规格摆一个包头：五段紧挨着排在包头之后。
+/// Lays out a header by hand per the spec: the five clips sit right after the header.
 static void build_header(uint8_t *header, const char *voice_id,
                          const uint32_t *lengths, uint32_t payload_crc) {
   memset(header, 0, AGENT_VOICE_PACK_HEADER_BYTES);
@@ -61,10 +61,10 @@ static void a_well_formed_header_parses(void) {
 }
 
 static void crc32_matches_zlib(void) {
-  // 标准校验向量，与 Python 的 zlib.crc32 一致。
+  // Standard check vector, matching Python's zlib.crc32.
   CHECK(agent_voice_pack_crc32(0, (const uint8_t *)"123456789", 9) ==
         0xCBF43926u);
-  // 分两段累计得到同一个值。
+  // Accumulating in two parts gives the same value.
   uint32_t first = agent_voice_pack_crc32(0, (const uint8_t *)"1234", 4);
   CHECK(agent_voice_pack_crc32(first, (const uint8_t *)"56789", 5) ==
         0xCBF43926u);
@@ -89,7 +89,7 @@ static void a_corrupted_header_is_rejected(void) {
   uint8_t header[AGENT_VOICE_PACK_HEADER_BYTES];
   const uint32_t lengths[5] = {10, 10, 10, 10, 10};
   build_header(header, "x", lengths, 0);
-  header[20] ^= 0x01;  // 改动音色 id 里的一个字节，包头 CRC 不再对得上
+  header[20] ^= 0x01;  // flip one byte of the voice id so the header CRC no longer matches
   agent_voice_pack_t pack;
   CHECK(!agent_voice_pack_parse(header, 4096, &pack));
 }
@@ -99,17 +99,17 @@ static void a_clip_outside_the_pack_is_rejected(void) {
   const uint32_t lengths[5] = {10, 10, 10, 10, 10};
   agent_voice_pack_t pack;
 
-  // 载荷比存放区还大。
+  // Payload larger than the storage area.
   build_header(header, "x", lengths, 0);
   CHECK(!agent_voice_pack_parse(header, 300, &pack));
 
-  // 某一句伸到了载荷之外。
+  // A clip extends past the payload.
   build_header(header, "x", lengths, 0);
   put_u32(header + 68 + 4 * 4, 11);
   put_u32(header + 88, agent_voice_pack_crc32(0, header, 88));
   CHECK(!agent_voice_pack_parse(header, 4096, &pack));
 
-  // 某一句伸进了包头。
+  // A clip extends into the header.
   build_header(header, "x", lengths, 0);
   put_u32(header + 48, 100);
   put_u32(header + 88, agent_voice_pack_crc32(0, header, 88));
@@ -123,9 +123,9 @@ int main(void) {
   a_corrupted_header_is_rejected();
   a_clip_outside_the_pack_is_rejected();
   if (failures != 0) {
-    fprintf(stderr, "%d 处失败\n", failures);
+    fprintf(stderr, "%d failure(s)\n", failures);
     return EXIT_FAILURE;
   }
-  printf("语音包格式测试通过\n");
+  printf("voice pack format tests passed\n");
   return EXIT_SUCCESS;
 }

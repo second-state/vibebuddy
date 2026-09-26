@@ -6,11 +6,11 @@ struct SettingsView: View {
 
     var body: some View {
         TabView {
-            GeneralView(model: model).tabItem { Label("通用", systemImage: "gearshape") }
-            VoicesView(model: model).tabItem { Label("声音", systemImage: "speaker.wave.2") }
-            HooksView(model: model).tabItem { Label("接入", systemImage: "link") }
-            DeviceView(model: model).tabItem { Label("设备", systemImage: "cpu") }
-            AdvancedView(model: model).tabItem { Label("高级", systemImage: "wrench.and.screwdriver") }
+            GeneralView(model: model).tabItem { Label("General", systemImage: "gearshape") }
+            VoicesView(model: model).tabItem { Label("Sound", systemImage: "speaker.wave.2") }
+            HooksView(model: model).tabItem { Label("Agents", systemImage: "link") }
+            DeviceView(model: model).tabItem { Label("Device", systemImage: "cpu") }
+            AdvancedView(model: model).tabItem { Label("Advanced", systemImage: "wrench.and.screwdriver") }
         }
         .padding(20)
         .frame(width: 640, height: 480)
@@ -22,20 +22,20 @@ struct GeneralView: View {
 
     var body: some View {
         Form {
-            Toggle("登录时启动", isOn: Binding(get: { model.launchAtLogin }, set: { model.setLaunchAtLogin($0) }))
-            Toggle("盒子断开或 daemon 异常时通知我", isOn: Binding(get: { model.status?.config.notifyLink ?? true }, set: { model.setNotifyLink($0) }))
+            Toggle("Launch at login", isOn: Binding(get: { model.launchAtLogin }, set: { model.setLaunchAtLogin($0) }))
+            Toggle("Notify me when the box disconnects or the daemon fails", isOn: Binding(get: { model.status?.config.notifyLink ?? true }, set: { model.setNotifyLink($0) }))
                 .disabled(model.status == nil)
             Section {
                 LabeledContent("App", value: Resources.displayVersion)
-                LabeledContent("daemon", value: model.status?.daemon.build ?? "未连接")
+                LabeledContent("daemon", value: model.status?.daemon.build ?? String(localized: "Not connected"))
             }
         }
         .formStyle(.grouped)
     }
 }
 
-/// 音量滑块：值来自盒子的状态，松手才发；拖动中不让状态流把滑块拽回去。
-/// 下限 20：能存下来的零音量就是持久静音，而静音有意只在盒子上、不持久化。
+/// Volume slider: the value comes from the box's status and is sent on release; while dragging, the status stream can't yank it back.
+/// Floor of 20: a saved zero volume would be a persistent mute, and muting is deliberately box-only and not persisted.
 struct VolumeRow: View {
     @ObservedObject var model: AppModel
     @State private var level: Double = 65
@@ -44,7 +44,7 @@ struct VolumeRow: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
             HStack {
-                Text("音量").font(.headline)
+                Text("Volume").font(.headline)
                 Spacer()
                 Text("\(Int(level))").monospacedDigit().foregroundStyle(.secondary)
             }
@@ -53,10 +53,10 @@ struct VolumeRow: View {
                     editing = isEditing
                     if !isEditing { model.setVolume(Int(level)) }
                 }
-                Button("在盒子上试一句") { model.setVolume(Int(level), preview: true) }
+                Button("Play a line on the box") { model.setVolume(Int(level), preview: true) }
             }
             .disabled(!connected || model.operationRunning)
-            Text("存在盒子里，重启不丢。Mac 上的试听不受它影响；静音只在盒子上长按 K2。")
+            Text("Saved on the box and kept across restarts. Previews on this Mac aren't affected; to mute, long-press K2 on the box.")
                 .font(.caption).foregroundStyle(.secondary)
         }
         .onAppear(perform: sync)
@@ -78,12 +78,12 @@ struct VoicesView: View {
         VStack(alignment: .leading, spacing: 12) {
             VolumeRow(model: model)
             Divider()
-            Text("播报音色").font(.headline)
-            Text("盒子现在用的是「\(currentVoiceName)」。挑一个试听，点「使用」写进盒子；不用刷固件。UART 口上要写几分钟，写完盒子会用新音色说一句。")
+            Text("Announcement voice").font(.headline)
+            Text("The box is using “\(currentVoiceName)”. Preview a voice, then click Use to write it to the box — no firmware flash needed. Over the UART port this takes a few minutes; when it's done the box says a line in the new voice.")
                 .font(.callout).foregroundStyle(.secondary)
             ScrollView {
                 VStack(spacing: 8) {
-                    ForEach(VoiceCatalogEntry.all) { entry in
+                    ForEach(Resources.bundledVoices) { entry in
                         VoiceCard(model: model, entry: entry)
                     }
                 }
@@ -91,7 +91,7 @@ struct VoicesView: View {
             if let operation = model.operation, operation.kind == .voicePack {
                 OperationRow(operation: operation)
                 if operation.state == .failed {
-                    Text("没写完，盒子先用内置音色；插好线后重新点「使用」。").font(.caption).foregroundStyle(.secondary)
+                    Text("Didn't finish, so the box keeps its built-in voice. Reconnect the cable and click Use again.").font(.caption).foregroundStyle(.secondary)
                 }
             }
         }
@@ -99,7 +99,7 @@ struct VoicesView: View {
 
     private var currentVoiceName: String {
         let id = model.status?.device.voice ?? "builtin"
-        if id == "builtin" { return "内置音色（湾湾小何）" }
+        if id == "builtin" { return String(localized: "Built-in voice (Wanwan Xiaohe)") }
         return VoiceCatalogEntry.all.first { $0.id == id }?.name ?? id
     }
 }
@@ -108,7 +108,6 @@ struct VoiceCard: View {
     @ObservedObject var model: AppModel
     let entry: VoiceCatalogEntry
 
-    private var bundled: Bool { Resources.voicePack(entry.id) != nil }
     private var inUse: Bool { model.status?.device.voice == entry.id }
 
     var body: some View {
@@ -116,17 +115,17 @@ struct VoiceCard: View {
             Button { model.togglePreview(entry.id) } label: {
                 Image(systemName: model.previewingVoice == entry.id ? "stop.fill" : "play.fill")
             }
-            .disabled(!bundled || model.operationRunning)
+            .disabled(model.operationRunning)
             VStack(alignment: .leading) {
                 Text(entry.name).font(.body.weight(.semibold))
                 Text(entry.tag).font(.caption).foregroundStyle(.secondary)
             }
             Spacer()
             if inUse {
-                Label("已写入", systemImage: "checkmark.circle.fill").foregroundStyle(.green)
+                Label("In use", systemImage: "checkmark.circle.fill").foregroundStyle(.green)
             } else {
-                Button("使用") { model.writeVoice(entry.id) }
-                    .disabled(!bundled || model.operationRunning || !(model.status?.device.connected ?? false))
+                Button("Use") { model.writeVoice(entry.id) }
+                    .disabled(model.operationRunning || !(model.status?.device.connected ?? false))
             }
         }
         .padding(10)
@@ -144,7 +143,21 @@ struct OperationRow: View {
             case .done: Image(systemName: "checkmark.circle.fill").foregroundStyle(.green)
             case .failed: Image(systemName: "xmark.octagon.fill").foregroundStyle(.red)
             }
-            Text(operation.message).font(.callout).lineLimit(1)
+            Text(summary).font(.callout).lineLimit(1)
+                .help(operation.state == .failed ? operation.message : "")
+        }
+    }
+
+    /// The daemon's progress text is technical detail in English; the row says what is
+    /// happening in the UI language and only quotes the daemon's detail on failure.
+    private var summary: String {
+        let percent = operation.progress.formatted(.percent.precision(.fractionLength(0)))
+        switch (operation.kind, operation.state) {
+        case (.voicePack, .running): return String(localized: "Writing voice pack… \(percent)")
+        case (.voicePack, .done): return String(localized: "Voice pack written")
+        case (.firmware, .running): return String(localized: "Flashing firmware… \(percent)")
+        case (.firmware, .done): return String(localized: "Firmware flashed, the box is restarting")
+        case (_, .failed): return String(localized: "Failed: \(operation.message)")
         }
     }
 }
@@ -155,9 +168,9 @@ struct HooksView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text("接入 Agent").font(.headline)
-            Text("Vibe Buddy 只转发会话标识、事件名和工作目录，不转发 prompt 与回复。").font(.callout).foregroundStyle(.secondary)
-            Text("写的是用户级配置，装一次两处都算数：桌面应用里的会话，和终端里跑的同一个 Agent。").font(.callout).foregroundStyle(.secondary)
+            Text("Connect agents").font(.headline)
+            Text("Vibe Buddy only forwards session IDs, event names and working directories — never prompts or replies.").font(.callout).foregroundStyle(.secondary)
+            Text("This writes user-level config, so one install covers both the desktop app's sessions and the same agent running in a terminal.").font(.callout).foregroundStyle(.secondary)
             ForEach(HookAgent.allCases, id: \.rawValue) { agent in
                 HookRow(model: model, agent: agent, pendingPlan: $pendingPlan)
             }
@@ -182,7 +195,7 @@ struct HookRow: View {
     private var present: Bool { model.hookPresent(agent) }
     private var installed: Bool { model.hookInstalled[agent] ?? false }
     private var lastEvent: Date? { agent == .codex ? model.status?.hooks.codex : model.status?.hooks.claude }
-    /// 只有 Codex 有信任这一关；Claude Code 改完配置下个会话就生效。
+    /// Only Codex has a trust step; Claude Code picks up config changes in its next session.
     private var codexHint: CodexTrustHint? {
         guard agent == .codex, installed else { return nil }
         return HookConfig.codexTrustHint(configModifiedAt: model.hookConfigModifiedAt(agent), lastEvent: lastEvent)
@@ -202,10 +215,10 @@ struct HookRow: View {
             }
             Spacer()
             if installed {
-                Button("修复") { pendingPlan = model.hookInstallPlan(agent) }
-                Button("移除") { pendingPlan = model.hookRemovePlan(agent) }
+                Button("Repair") { pendingPlan = model.hookInstallPlan(agent) }
+                Button("Remove") { pendingPlan = model.hookRemovePlan(agent) }
             } else {
-                Button("接入") { pendingPlan = model.hookInstallPlan(agent) }.disabled(!present)
+                Button("Connect") { pendingPlan = model.hookInstallPlan(agent) }.disabled(!present)
             }
         }
         .padding(10)
@@ -213,13 +226,15 @@ struct HookRow: View {
     }
 
     private var statusText: String {
-        if !present { return "这台 Mac 上没找到 \(agent.displayName)" }
-        if !installed { return "未接入" }
+        if !present { return String(localized: "\(agent.displayName) wasn't found on this Mac") }
+        if !installed { return String(localized: "Not set up") }
         if case .changedSinceLastEvent(let changed)? = codexHint {
-            return "配置在 \(changed.formatted(date: .abbreviated, time: .shortened)) 改过，之后没收到过 Codex 事件。Codex 会静默停用改过的 hook：在 Codex 里输入 /hooks，把 Vibe Buddy 的六条重新信任。"
+            return String(localized: "The config changed at \(changed.formatted(date: .abbreviated, time: .shortened)) and no Codex event has arrived since. Codex silently disables hooks that change: type /hooks in Codex and re-trust Vibe Buddy's six hooks.")
         }
-        if let lastEvent { return "最近一次事件 \(lastEvent.formatted(date: .abbreviated, time: .shortened))" }
-        return agent == .codex ? "等待第一次事件…（Codex 要先在 /hooks 里信任这份配置才会运行它）" : "等待第一次事件…"
+        if let lastEvent { return String(localized: "Last event \(lastEvent.formatted(date: .abbreviated, time: .shortened))") }
+        return agent == .codex
+            ? String(localized: "Waiting for the first event… (Codex only runs this config after you trust it in /hooks)")
+            : String(localized: "Waiting for the first event…")
     }
 }
 
@@ -230,9 +245,9 @@ struct PlanSheet: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text("将改动 \(plan.configURL.path)").font(.headline)
+            Text("Will change \(plan.configURL.path)").font(.headline)
             if plan.diff.isEmpty {
-                Text("没有需要改的地方。").foregroundStyle(.secondary)
+                Text("Nothing to change.").foregroundStyle(.secondary)
             } else {
                 ScrollView {
                     VStack(alignment: .leading, spacing: 2) {
@@ -245,12 +260,12 @@ struct PlanSheet: View {
                 .frame(maxHeight: 200)
             }
             if plan.agent == .codex {
-                Text("写入后还要在 Codex 里打开 /hooks 核对并信任这份配置，App 替不了你。").font(.caption).foregroundStyle(.secondary)
+                Text("After writing, open /hooks in Codex to review and trust this config — the app can't do that for you.").font(.caption).foregroundStyle(.secondary)
             }
             HStack {
                 Spacer()
-                Button("取消", action: cancel).keyboardShortcut(.cancelAction)
-                Button("写入", action: confirm).keyboardShortcut(.defaultAction).disabled(plan.diff.isEmpty)
+                Button("Cancel", action: cancel).keyboardShortcut(.cancelAction)
+                Button("Write", action: confirm).keyboardShortcut(.defaultAction).disabled(plan.diff.isEmpty)
             }
         }
         .padding(20)
@@ -264,35 +279,35 @@ struct DeviceView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             Form {
-                LabeledContent("链路", value: connectionText)
-                LabeledContent("盒子固件", value: model.status?.device.firmwareBuild ?? "—")
-                LabeledContent("App 附带", value: model.bundledFirmwareBuild ?? "这个构建没有附带固件")
+                LabeledContent("Link", value: connectionText)
+                LabeledContent("Box firmware", value: model.status?.device.firmwareBuild ?? "—")
+                LabeledContent("Bundled with app", value: model.bundledFirmwareBuild ?? String(localized: "This build has no bundled firmware"))
                 if model.firmwareUpdateAvailable {
-                    Button("更新到 App 附带版本") { confirmUpdate() }
+                    Button("Update to bundled version") { confirmUpdate() }
                         .disabled(model.operationRunning || !(model.status?.device.connected ?? false))
                 } else if model.foreignFirmware, model.bundledFirmwareBuild != nil {
-                    Text("盒子跑的不是 Vibe Buddy 固件。").foregroundStyle(.orange)
-                    Button("刷入 Vibe Buddy 固件") { FlashConfirm.foreign(then: model.updateFirmware) }
+                    Text("The box isn't running Vibe Buddy firmware.").foregroundStyle(.orange)
+                    Button("Flash Vibe Buddy firmware") { FlashConfirm.foreign(then: model.updateFirmware) }
                         .disabled(model.operationRunning)
                 }
                 if let operation = model.operation, operation.kind == .firmware {
                     OperationRow(operation: operation)
                     if operation.state == .failed {
-                        Text("重试前可以按住盒子的 K0 再插一次线，让它进入下载模式。").font(.caption).foregroundStyle(.secondary)
-                        Button("重试") { model.updateFirmware() }.disabled(!(model.status?.device.connected ?? false))
+                        Text("Before retrying, hold K0 on the box and replug the cable to put it in download mode.").font(.caption).foregroundStyle(.secondary)
+                        Button("Retry") { model.updateFirmware() }.disabled(!(model.status?.device.connected ?? false))
                     }
                 }
-                // 单独分发的固件（Release 上的 VibeBuddy-firmware-*.zip）从这里进来。
-                Button("从文件刷入…") { flashFromFile() }
+                // Separately distributed firmware (VibeBuddy-firmware-*.zip on Releases) comes in here.
+                Button("Flash from file…") { flashFromFile() }
                     .disabled(model.operationRunning || !(model.status?.device.connected ?? false))
-                Button("让盒子眨眼") { model.identify() }.disabled(model.operationRunning || !(model.status?.device.connected ?? false))
+                Button("Make the box blink") { model.identify() }.disabled(model.operationRunning || !(model.status?.device.connected ?? false))
             }
             .formStyle(.grouped)
             HStack {
-                Text("盒子画面").font(.headline)
+                Text("Box screen").font(.headline)
                 Spacer()
-                Button("刷新") { model.takeScreenshot() }.disabled(model.screenshotBusy || model.operationRunning || !(model.status?.device.connected ?? false))
-                Button("保存图片") { model.saveScreenshot() }.disabled(model.screenshot == nil)
+                Button("Refresh") { model.takeScreenshot() }.disabled(model.screenshotBusy || model.operationRunning || !(model.status?.device.connected ?? false))
+                Button("Save image") { model.saveScreenshot() }.disabled(model.screenshot == nil)
             }
             ZStack {
                 RoundedRectangle(cornerRadius: 6).fill(Color.black.opacity(0.85))
@@ -301,7 +316,7 @@ struct DeviceView: View {
                 } else if model.screenshotBusy {
                     ProgressView()
                 } else {
-                    Text("点「刷新」看看盒子在干什么").foregroundStyle(.secondary)
+                    Text("Click Refresh to see what the box is showing").foregroundStyle(.secondary)
                 }
             }
             .frame(height: 180)
@@ -309,14 +324,14 @@ struct DeviceView: View {
     }
 
     private var connectionText: String {
-        guard let device = model.status?.device else { return "daemon 没起来" }
-        guard device.connected else { return "未找到盒子" }
-        return "\(device.port ?? "") · \(device.bridge ? "UART 桥" : "原生 USB")"
+        guard let device = model.status?.device else { return String(localized: "daemon isn't running") }
+        guard device.connected else { return String(localized: "Box not found") }
+        return "\(device.port ?? "") · \(device.bridge ? String(localized: "UART bridge") : String(localized: "native USB"))"
     }
 
     private func flashFromFile() {
         let panel = NSOpenPanel()
-        panel.title = "选择固件包"
+        panel.title = String(localized: "Choose a firmware package")
         panel.allowedContentTypes = [.zip]
         panel.allowsMultipleSelection = false
         guard panel.runModal() == .OK, let zip = panel.url else { return }
@@ -328,37 +343,34 @@ struct DeviceView: View {
             return
         }
         let alert = NSAlert()
-        alert.messageText = "刷入这份固件？"
-        alert.informativeText = """
-        固件包：\(package.build)
-        盒子现在：\(model.status?.device.firmwareBuild ?? "未知")
-        盒子会重启一次，语音包和当日战绩都保留。UART 桥上大约要几分钟。
-        """
-        alert.addButton(withTitle: "刷入")
-        alert.addButton(withTitle: "取消")
+        alert.messageText = String(localized: "Flash this firmware?")
+        let current = model.status?.device.firmwareBuild ?? String(localized: "unknown")
+        alert.informativeText = String(localized: "Firmware package: \(package.build)\nBox now: \(current)\nThe box restarts once; its voice pack and today's stats are kept. Over the UART bridge this takes a few minutes.")
+        alert.addButton(withTitle: String(localized: "Flash"))
+        alert.addButton(withTitle: String(localized: "Cancel"))
         if alert.runModal() == .alertFirstButtonReturn { model.flashFirmware(package) }
     }
 
     private func confirmUpdate() {
         let alert = NSAlert()
-        alert.messageText = "更新盒子固件？"
-        alert.informativeText = "盒子会重启一次，语音包和当日战绩都保留。UART 桥上大约要几分钟。"
-        alert.addButton(withTitle: "更新")
-        alert.addButton(withTitle: "取消")
+        alert.messageText = String(localized: "Update the box firmware?")
+        alert.informativeText = String(localized: "The box restarts once; its voice pack and today's stats are kept. Over the UART bridge this takes a few minutes.")
+        alert.addButton(withTitle: String(localized: "Update"))
+        alert.addButton(withTitle: String(localized: "Cancel"))
         if alert.runModal() == .alertFirstButtonReturn { model.updateFirmware() }
     }
 }
 
-/// 往出厂机上刷固件的确认：引导页和设备页共用一段话。
+/// Confirmation for flashing a factory box: shared by onboarding and the Device tab.
 enum FlashConfirm {
     @MainActor
     static func foreign(then flash: () -> Void) {
         let alert = NSAlert()
-        alert.messageText = "把盒子刷成 Vibe Buddy？"
-        alert.informativeText = "盒子里现有的固件和数据会被清掉，无法恢复。刷完盒子自动重启，UART 口上大约要几分钟。"
+        alert.messageText = String(localized: "Flash the box with Vibe Buddy?")
+        alert.informativeText = String(localized: "The box's current firmware and data will be erased and can't be recovered. It restarts on its own when done; over the UART port this takes a few minutes.")
         alert.alertStyle = .warning
-        alert.addButton(withTitle: "刷入")
-        alert.addButton(withTitle: "取消")
+        alert.addButton(withTitle: String(localized: "Flash"))
+        alert.addButton(withTitle: String(localized: "Cancel"))
         if alert.runModal() == .alertFirstButtonReturn { flash() }
     }
 }
@@ -368,23 +380,23 @@ struct AdvancedView: View {
 
     var body: some View {
         Form {
-            // 菜单栏 App 没有 Dock 图标，Finder 窗口和保存面板都可能开在别人窗口后面，
-            // 看起来像"点了没反应"（2026-09-22 同事机器上如此）。开文件夹显式把
-            // Finder 拉到前台；保存面板挂成设置窗的 sheet，躲不到后面去。
-            Button("打开日志文件夹") {
+            // A menu bar app has no Dock icon, so Finder windows and save panels can open behind other windows
+            // and look like "clicking did nothing" (seen on a colleague's machine on 2026-09-22). Opening the folder explicitly
+            // brings Finder to the front; the save panel is a sheet on the Settings window so it can't hide behind.
+            Button("Open logs folder") {
                 NSWorkspace.shared.activateFileViewerSelecting([Resources.logsDirectory.appendingPathComponent("vibebuddyd.log")])
             }
-            LabeledContent("daemon", value: model.daemonAlive ? "运行中 · \(model.status?.daemon.build ?? "")" : "未运行")
-            Button("重启 daemon") { model.restartDaemon() }
-            Button("导出诊断…") { exportDiagnostics() }
+            LabeledContent("daemon", value: model.daemonAlive ? String(localized: "Running · \(model.status?.daemon.build ?? "")") : String(localized: "Not running"))
+            Button("Restart daemon") { model.restartDaemon() }
+            Button("Export diagnostics…") { exportDiagnostics() }
             Section {
-                Text("配置文件：\(Resources.applicationSupport.appendingPathComponent("config.json").path)").font(.caption).foregroundStyle(.secondary)
+                Text("Config file: \(Resources.applicationSupport.appendingPathComponent("config.json").path)").font(.caption).foregroundStyle(.secondary)
             }
         }
         .formStyle(.grouped)
     }
 
-    /// 日志、配置、两边构建标识打成一个文件夹，不含任何 Hook 载荷。
+    /// Logs, config and both sides' build IDs in one folder, with no hook payloads.
     private func exportDiagnostics() {
         let panel = NSSavePanel()
         panel.nameFieldStringValue = "vibe-buddy-diagnostics"
@@ -408,13 +420,13 @@ struct AdvancedView: View {
             let source = Resources.logsDirectory.appendingPathComponent(name)
             if manager.fileExists(atPath: source.path) { try? manager.copyItem(at: source, to: target.appendingPathComponent(name)) }
         }
-        // 配置从 daemon 拿，不直接碰它的文件。
+        // Get the config from the daemon instead of touching its file.
         if let config = model.status?.config, let data = try? StatusCoding.encoder().encode(config) {
             try? data.write(to: target.appendingPathComponent("config.json"))
         }
         let summary = """
         App \(Resources.displayVersion)
-        daemon \(model.status?.daemon.build ?? "未连接")
+        daemon \(model.status?.daemon.build ?? "not connected")
         firmware \(model.status?.device.firmwareBuild ?? "—")
         bundled firmware \(model.bundledFirmwareBuild ?? "—")
         voice \(model.status?.device.voice ?? "—")

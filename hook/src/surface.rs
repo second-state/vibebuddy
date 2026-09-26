@@ -1,11 +1,11 @@
-//! 判定 Agent 进程的运行处：跑在自己的桌面 App 里，跑在别的 App（终端、
-//! 编辑器）里，还是没有宿主。
+//! Decides where the agent process runs: in its own desktop app, inside another app (terminal,
+//! editor), or with no host at all.
 //!
-//! 依据只有 `__CFBundleIdentifier`——LaunchServices 启动 App 时注入，沿进程
-//! 链继承到 Hook。不看 `TERM_PROGRAM`：那要维护一张终端名到 bundle id 的
-//! 映射表，用户换个没见过的终端就断。也不看 tty：Agent 执行工具命令用的是
-//! 非交互子进程，即使宿主是终端也报 not a tty（2026-09-21 在 Ghostty 里实
-//! 测 codex 确认）。
+//! The only evidence is `__CFBundleIdentifier`, injected by LaunchServices when it launches an app and inherited down the
+//! process chain to the hook. `TERM_PROGRAM` isn't used: it would need a table mapping terminal names to bundle ids,
+//! which breaks as soon as the user switches to an unfamiliar terminal. Nor the tty: agents run tool commands in
+//! non-interactive child processes that report not a tty even when the host is a terminal (verified by running
+//! codex in Ghostty on 2026-09-21).
 
 use serde_json::{Map, Value};
 
@@ -13,12 +13,12 @@ const BUNDLE_ID: &str = "__CFBundleIdentifier";
 
 #[derive(Debug, PartialEq, Eq)]
 pub enum Surface {
-    /// 跑在 Agent 自己的桌面 App 里，K2 用该 Agent 的 deeplink。
+    /// Runs in the agent's own desktop app; K2 uses that agent's deeplink.
     App,
-    /// 跑在别的 App 里，这个 bundle id 就是 K2 的落点。未知的 App 一律按
-    /// 宿主处理，所以没见过的终端也能跳对。
+    /// Runs inside another app, and this bundle id is where K2 goes. Unknown apps are all treated
+    /// as hosts, so even unfamiliar terminals are reached correctly.
     Host(String),
-    /// 没有宿主 App：SSH、守护进程、launchd 起的会话。K2 无处可去。
+    /// No host app: sessions started over SSH, by a daemon, or by launchd. K2 has nowhere to go.
     Headless,
 }
 
@@ -65,7 +65,7 @@ mod tests {
 
     #[test]
     fn an_unknown_terminal_needs_no_code_change() {
-        // 没见过的终端与见过的走同一条路：读到什么就跳到什么。
+        // Unfamiliar terminals take the same path as known ones: jump to whatever we read.
         assert_eq!(
             from_bundle_id(Some("net.example.SomeNewTerminal"), "com.openai.codex"),
             Surface::Host("net.example.SomeNewTerminal".to_owned())
@@ -74,7 +74,7 @@ mod tests {
 
     #[test]
     fn no_bundle_id_means_nowhere_to_go() {
-        // SSH、launchd、守护进程起的 CLI 都落在这里。
+        // CLIs started over SSH, by launchd or by a daemon all end up here.
         assert_eq!(from_bundle_id(None, "com.openai.codex"), Surface::Headless);
         assert_eq!(from_bundle_id(Some(""), "com.openai.codex"), Surface::Headless);
     }

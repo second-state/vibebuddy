@@ -1,8 +1,8 @@
 import Foundation
 
-/// 两个 Agent 的 Hook 配置：只增删 Vibe Buddy 自己的条目，不动别人的 Hook。
-/// Claude Code 的用户级 settings.json 与 Codex 的 hooks.json 结构相同：
-/// `hooks.<事件>: [ { hooks: [ { type: "command", command, timeout } ] } ]`。
+/// Hook config for both agents: only adds or removes Vibe Buddy's own entries, never anyone else's hooks.
+/// Claude Code's user-level settings.json and Codex's hooks.json share one shape:
+/// `hooks.<event>: [ { hooks: [ { type: "command", command, timeout } ] } ]`.
 public enum HookAgent: String, CaseIterable {
     case codex, claude
 
@@ -21,16 +21,16 @@ public enum HookAgent: String, CaseIterable {
     }
 }
 
-/// Codex 对 hooks.json 里每条 hook 在 config.toml 的 `[hooks.state]` 记着一份
-/// trusted_hash；文件一改，改过的条目就被判为"待审核"，静默不再运行，直到人在
-/// Codex 里用 /hooks 重新信任。App 不去重算那个哈希（那是 Codex 的内部格式，
-/// 跟着它的版本变），只看一件可观测的事实：配置写入之后，还收到过 Codex 事件没有。
+/// For every hook in hooks.json, Codex keeps a trusted_hash under `[hooks.state]` in config.toml.
+/// Once the file changes, the changed entries are marked "pending review" and silently stop running until someone
+/// re-trusts them with /hooks in Codex. The app doesn't recompute that hash (it's Codex's internal format
+/// and changes with its versions); it only looks at one observable fact: has any Codex event arrived since the config was written?
 public enum CodexTrustHint: Equatable {
-    /// 还没收到过任何事件：可能是没信任，也可能只是今天还没用 Codex，不下结论。
+    /// No event received yet: maybe it isn't trusted, maybe Codex just hasn't been used today. No verdict.
     case waitingFirstEvent
-    /// 配置在最近一次事件之后改过，之后 Codex 一次都没调用过：几乎可以肯定是没信任。
+    /// The config changed after the last event and Codex hasn't called it since: almost certainly not trusted.
     case changedSinceLastEvent(Date)
-    /// 配置写入之后收到过事件，说明 Codex 已经在跑它。
+    /// An event arrived after the config was written, so Codex is running it.
     case trusted
 }
 
@@ -41,19 +41,19 @@ public enum HookConfig {
         return .trusted
     }
 
-    /// 判断一条 command 是不是我们的：旧的 Python 脚本也算，升级时一并替换。
+    /// Whether a command is ours: the old Python scripts count too, and get replaced on upgrade.
     public static func isOurs(_ command: String) -> Bool {
-        // 旧名 beacon-hook 与更早的两个 Python 脚本也算，升级时一并替换。
+        // The old name beacon-hook and the two earlier Python scripts count too, and get replaced on upgrade.
         command.contains("vibebuddy-hook") || command.contains("beacon-hook")
             || command.contains("codex-hook.py") || command.contains("claude-hook.py")
     }
 
-    /// 我们要写进去的那条命令。
+    /// The command we write.
     public static func command(binary: String, agent: HookAgent) -> String {
         "\"\(binary)\" \(agent.rawValue)"
     }
 
-    /// 把 Vibe Buddy 的 Hook 合并进配置。返回新配置。
+    /// Merges Vibe Buddy's hooks into the config and returns the new config.
     public static func install(into root: [String: Any], agent: HookAgent, binary: String) -> [String: Any] {
         var root = removed(from: root)
         var hooks = root["hooks"] as? [String: Any] ?? [:]
@@ -67,7 +67,7 @@ public enum HookConfig {
         return root
     }
 
-    /// 去掉 Vibe Buddy 的条目；空掉的事件与空掉的 hooks 也一并删。
+    /// Removes Vibe Buddy's entries, along with any events and hooks objects left empty.
     public static func removed(from root: [String: Any]) -> [String: Any] {
         var root = root
         guard var hooks = root["hooks"] as? [String: Any] else { return root }
@@ -88,7 +88,7 @@ public enum HookConfig {
         return root
     }
 
-    /// 配置里是否已经装了指向这个二进制的 Hook（所有事件都在才算装好）。
+    /// Whether the config already has hooks pointing at this binary (installed only if every event is present).
     public static func isInstalled(in root: [String: Any], agent: HookAgent, binary: String) -> Bool {
         guard let hooks = root["hooks"] as? [String: Any] else { return false }
         let wanted = command(binary: binary, agent: agent)
@@ -100,7 +100,7 @@ public enum HookConfig {
         }
     }
 
-    /// 写前给用户看的差异：逐事件说明加了什么、去了什么。
+    /// The diff shown to the user before writing: what gets added and removed, event by event.
     public static func describeChange(from before: [String: Any], to after: [String: Any], agent: HookAgent) -> [String] {
         var lines: [String] = []
         let beforeHooks = before["hooks"] as? [String: Any] ?? [:]

@@ -14,7 +14,10 @@ App 是 Vibe Buddy 在 Mac 上的图形界面：一个菜单栏图标加一扇�
 
 - SwiftUI 界面，菜单栏用 AppKit 的 `NSStatusItem` 加标准 `NSMenu`；daemon 与 Hook 仍是 Rust。
 - `app/` 目录放 Xcode 工程，`.xcodeproj` 直接入库，不用生成器。一个 Build Phase 跑 `cargo build --release -p vibebuddyd -p vibebuddy-hook`，把两个二进制拷进 App 包。
-- 最低 macOS 14。界面第一版只做中文，字符串集中存放以便日后加英文。
+- 最低 macOS 14。界面中英双语，跟随系统语言：系统首选简体或繁体中文都显示中文（繁体系统暂用简体译文，装包时把 `zh-Hans.lproj` 复制成 `zh-Hant.lproj`），其余一律英文。
+- 文案以英文为 key 写在 Swift 源码里（SwiftUI 字面量与 `String(localized:)`），中文译文在 `app/Localization/zh-Hans.lproj/Localizable.strings`；英文不需要表，`en.lproj` 只是声明 App 支持英文。装包时两个 lproj 拷进 `Contents/Resources`，`Info.plist` 的开发语言是 `en`。
+- `tools/check-localization.py` 从源码抽出全部 key 与中文表对账：缺译、多余条目、译文与 key 的占位符类型或参数顺序不一致都会让 `build-app.sh` 失败（类型不一致时运行时查不到译文，会悄悄显示英文）。新增或改动文案后先跑它。插值是 Int 的在表里写 `%lld`，其余写 `%@`，多个占位符的译文用 `%1$@` 这类位置写法。
+- daemon 回给 App 的提示（操作进度、失败原因、HTTP 拒绝理由）统一英文。设置页的进度行由 App 按操作类型和状态自己出界面语言的一句，失败时才附上 daemon 的原文（悬停提示也只在失败时出现）。daemon 与固件的日志、报错同样是英文。
 - 显示名 `Vibe Buddy`，包名 `Vibe Buddy.app`，bundle id `com.vibebuddy.app`，helper 叫 `vibebuddyd`。与"显示名改、内部名不改"的约定一致。
 - App 自身不做更新检查（没有 Sparkle），关于页只显示版本号。
 
@@ -78,6 +81,8 @@ App 是 Vibe Buddy 在 Mac 上的图形界面：一个菜单栏图标加一扇�
 写入走现有串口协议：Mac 分块 base64 发，固件自己写分区并校验回报，不复位、不抢串口，两种接法行为一样；桥接 115200 波特下 1.5 MB 约三分钟，原生 USB 口几秒。esptool 路径只留给固件升级。
 
 五个语音包不入库，构建时由脚本从 `voices/*/` 打出，随 App 分发，约 7.5 MB。
+
+音色目录 `VoiceCatalogEntry.all` 给每个音色标了台词语言（`VoiceLanguage.zh` / `.en`）。选音色的列表只列本次构建真正带了包的音色（启动时按文件是否存在算一次），并把与界面语言一致的排在前面。目录里预留了两个英文音色 `jenny`、`guy`，`voices/` 下还没有它们的 PCM，所以暂时不显示；按 `voices/README.md` 生成之后重新装包就会出现。固件内置音色仍是中文的湾湾小何，英文界面的引导页会提示用户挑一个英文音色。
 
 设备协议要新增的事件（草案，实现时写进 `protocol.md`）：`device.identify`（眨眼）、`voice.begin` / `voice.chunk` / `voice.end`、设备回报 `voice.written` 与校验结果。
 

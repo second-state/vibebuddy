@@ -1,4 +1,4 @@
-// 主机预览用的最小桩：只提供 agent_display.c 编译所需的声明。
+// Minimal stub for the host preview: only the declarations agent_display.c needs to compile.
 #pragma once
 typedef int esp_err_t;
 #define ESP_OK 0

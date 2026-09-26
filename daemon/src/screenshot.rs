@@ -1,5 +1,5 @@
-//! 设备截图：发 `device.screenshot`，收行程编码的帧缓冲（`SHOT BEGIN` /
-//! 若干 `SHOT` 行 / `SHOT END`），转成 PNG。格式与 tools/device-screenshot.py 一致。
+//! Device screenshots: sends `device.screenshot`, receives the run-length-encoded framebuffer (`SHOT BEGIN` /
+//! a number of `SHOT` lines / `SHOT END`) and turns it into a PNG. Same format as tools/device-screenshot.py.
 
 use std::sync::Arc;
 use std::time::Duration;
@@ -11,11 +11,11 @@ use crate::serial_transport::{DeviceMessage, Transport};
 
 pub const WIDTH: usize = 320;
 pub const HEIGHT: usize = 240;
-/// 桥接下一帧要走十几秒；再留些余量给设备当时正在忙的事。
+/// Over the bridge one frame takes over ten seconds; leave some headroom for whatever the device is busy with.
 const TIMEOUT: Duration = Duration::from_secs(60);
 
 pub struct Frame {
-    /// RGB888，按行。
+    /// RGB888, row by row.
     pub pixels: Vec<u8>,
     pub backlight_on: bool,
 }
@@ -31,20 +31,20 @@ fn rgb565_to_rgb(color: u16) -> [u8; 3] {
     ]
 }
 
-/// 把 `SHOT` 行里的 `rgb565:长度` 段展开进像素缓冲。
+/// Expands the `rgb565:length` runs of a `SHOT` line into the pixel buffer.
 pub fn decode_runs(line: &str, pixels: &mut Vec<u8>) -> Result<(), String> {
     for run in line.split_whitespace() {
         let (color, count) = run
             .split_once(':')
-            .ok_or_else(|| format!("坏的行程段：{run}"))?;
-        let color = u16::from_str_radix(color, 16).map_err(|_| format!("坏的颜色：{color}"))?;
-        let count: usize = count.parse().map_err(|_| format!("坏的长度：{count}"))?;
+            .ok_or_else(|| format!("bad run: {run}"))?;
+        let color = u16::from_str_radix(color, 16).map_err(|_| format!("bad color: {color}"))?;
+        let count: usize = count.parse().map_err(|_| format!("bad length: {count}"))?;
         let rgb = rgb565_to_rgb(color);
         for _ in 0..count {
             pixels.extend_from_slice(&rgb);
         }
         if pixels.len() > WIDTH * HEIGHT * 3 {
-            return Err("像素多于一屏".to_owned());
+            return Err("more pixels than one screen".to_owned());
         }
     }
     Ok(())
@@ -60,7 +60,7 @@ pub fn encode_png(frame: &Frame) -> Result<Vec<u8>, String> {
         let pixels = if frame.backlight_on {
             frame.pixels.clone()
         } else {
-            // 背光关着时画面本来就看不见；压暗成一张"熄灯"的图，而不是假装亮着。
+            // With the backlight off the picture can't be seen anyway; dim it into a "lights out" image rather than pretend it's lit.
             frame.pixels.iter().map(|value| value / 4).collect()
         };
         writer.write_image_data(&pixels).map_err(|error| error.to_string())?;
@@ -68,7 +68,7 @@ pub fn encode_png(frame: &Frame) -> Result<Vec<u8>, String> {
     Ok(output)
 }
 
-/// 抓一帧。要求调用方已经订阅了设备消息，免得错过第一行。
+/// Grabs one frame. The caller must already be subscribed to device messages so the first line isn't missed.
 pub async fn capture(
     transport: Arc<dyn Transport>,
     mut bus: broadcast::Receiver<DeviceMessage>,
@@ -85,13 +85,13 @@ pub async fn capture(
     loop {
         let message = match tokio::time::timeout_at(deadline, bus.recv()).await {
             Ok(Ok(message)) => message,
-            Ok(Err(broadcast::error::RecvError::Lagged(_))) => return Err("设备消息积压，截图行丢失".to_owned()),
-            Ok(Err(broadcast::error::RecvError::Closed)) => return Err("设备消息通道已关闭".to_owned()),
-            Err(_) => return Err("等待截图超时".to_owned()),
+            Ok(Err(broadcast::error::RecvError::Lagged(_))) => return Err("device messages backed up, screenshot rows lost".to_owned()),
+            Ok(Err(broadcast::error::RecvError::Closed)) => return Err("device message channel closed".to_owned()),
+            Err(_) => return Err("timed out waiting for the screenshot".to_owned()),
         };
         let line = match message {
             DeviceMessage::Line(line) => line,
-            DeviceMessage::Disconnected => return Err("链路断开".to_owned()),
+            DeviceMessage::Disconnected => return Err("link lost".to_owned()),
             _ => continue,
         };
         if let Some(header) = line.strip_prefix("SHOT BEGIN") {
@@ -105,7 +105,7 @@ pub async fn capture(
                 continue;
             }
             if pixels.len() != WIDTH * HEIGHT * 3 {
-                return Err(format!("帧不完整：{} 像素", pixels.len() / 3));
+                return Err(format!("incomplete frame: {} pixels", pixels.len() / 3));
             }
             return Ok(Frame { pixels, backlight_on });
         }
@@ -122,7 +122,7 @@ mod tests {
     #[test]
     fn runs_expand_to_rgb_pixels() {
         let mut pixels = Vec::new();
-        decode_runs("f800:2 07e0:1", &mut pixels).expect("合法的行程");
+        decode_runs("f800:2 07e0:1", &mut pixels).expect("valid runs");
         assert_eq!(pixels, vec![255, 0, 0, 255, 0, 0, 0, 255, 0]);
         assert!(decode_runs("zz:1", &mut pixels).is_err());
         assert!(decode_runs("ffff", &mut pixels).is_err());
@@ -131,7 +131,7 @@ mod tests {
     #[test]
     fn a_full_frame_encodes_as_png() {
         let frame = Frame { pixels: vec![0x80; WIDTH * HEIGHT * 3], backlight_on: true };
-        let png = encode_png(&frame).expect("编码 PNG");
+        let png = encode_png(&frame).expect("encode PNG");
         assert_eq!(&png[..8], b"\x89PNG\r\n\x1a\n");
     }
 }

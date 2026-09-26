@@ -1,8 +1,8 @@
 import Foundation
 import UserNotifications
 
-/// 只在链路异常时出声：盒子断开超过 30 秒、daemon 三次重启失败。
-/// 权限在第一次需要弹的时候才申请。
+/// Speaks up only about link trouble: the box gone for over 30 seconds, or the daemon failing to restart three times.
+/// Permission is requested the first time a notification is needed.
 enum Notifier {
     static func notify(title: String, body: String) {
         let center = UNUserNotificationCenter.current()

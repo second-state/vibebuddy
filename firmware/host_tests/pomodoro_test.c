@@ -1,4 +1,4 @@
-// 番茄钟状态机的主机端测试。由 tools/test-pomodoro.sh 编译运行。
+// Host tests for the pomodoro state machine. Built and run by tools/test-pomodoro.sh.
 #include <stdio.h>
 #include <stdlib.h>
 
@@ -10,7 +10,7 @@ static int failures;
   do {                                                                      \
     if (!(condition)) {                                                     \
       failures++;                                                           \
-      fprintf(stderr, "%s:%d: 断言失败: %s\n", __FILE__, __LINE__,          \
+      fprintf(stderr, "%s:%d: assertion failed: %s\n", __FILE__, __LINE__,          \
               #condition);                                                  \
     }                                                                       \
   } while (0)
@@ -56,13 +56,13 @@ static void focus_end_waits_for_the_user_to_start_the_break(void) {
   agent_pomodoro_toggle(0);
   CHECK(agent_pomodoro_tick(AGENT_POMODORO_FOCUS_MS - 1) ==
         AGENT_POMODORO_NOTHING);
-  // 晚到 40 ms 的 tick 仍然只报一次结束。
+  // A tick arriving 40 ms late still reports the end only once.
   CHECK(agent_pomodoro_tick(AGENT_POMODORO_FOCUS_MS + 40) ==
         AGENT_POMODORO_FOCUS_ENDED);
   CHECK(agent_pomodoro_tick(AGENT_POMODORO_FOCUS_MS + 80) ==
         AGENT_POMODORO_NOTHING);
 
-  // 休息不自动开始：停在待开始，时间不走。
+  // The break doesn't start on its own: it waits to start and the clock doesn't run.
   agent_pomodoro_view_t view = view_at(AGENT_POMODORO_FOCUS_MS + 60000);
   CHECK(view.phase == AGENT_POMODORO_BREAK);
   CHECK(view.run == AGENT_POMODORO_PENDING);
@@ -73,7 +73,7 @@ static void focus_end_waits_for_the_user_to_start_the_break(void) {
   CHECK(agent_pomodoro_tick(AGENT_POMODORO_FOCUS_MS + 3600000) ==
         AGENT_POMODORO_NOTHING);
 
-  // 用户按键才开始休息，从按键时刻起算。
+  // The break starts when the user presses the key, timed from the press.
   uint32_t break_start = AGENT_POMODORO_FOCUS_MS + 90000;
   agent_pomodoro_toggle(break_start);
   view = view_at(break_start + 1000);
@@ -100,7 +100,7 @@ static void stop_abandons_without_counting(void) {
   CHECK(agent_pomodoro_tick(AGENT_POMODORO_FOCUS_MS + 1) ==
         AGENT_POMODORO_NOTHING);
 
-  // 暂停后再放弃，恢复的旧剩余时间不能泄漏到下一次专注里。
+  // Abandoning after a pause must not leak the old remaining time into the next focus.
   agent_pomodoro_toggle(0);
   agent_pomodoro_toggle(1000);
   agent_pomodoro_stop();
@@ -119,7 +119,7 @@ static void stop_skips_a_pending_break(void) {
   agent_pomodoro_stop();
   agent_pomodoro_view_t view = view_at(AGENT_POMODORO_FOCUS_MS + 1);
   CHECK(agent_pomodoro_is_idle(&view));
-  // 跳过休息不抹掉已经完成的那一次专注。
+  // Skipping the break doesn't erase the focus session already completed.
   CHECK(view.completed == 1);
 }
 
@@ -131,7 +131,7 @@ static void tally_counts_completed_focus_and_resets_by_day(void) {
 
   agent_pomodoro_toggle(0);
   (void)agent_pomodoro_tick(AGENT_POMODORO_FOCUS_MS);
-  agent_pomodoro_toggle(AGENT_POMODORO_FOCUS_MS);  // 开始休息
+  agent_pomodoro_toggle(AGENT_POMODORO_FOCUS_MS);  // start the break
   (void)agent_pomodoro_tick(AGENT_POMODORO_FOCUS_MS + AGENT_POMODORO_BREAK_MS);
   agent_pomodoro_toggle(AGENT_POMODORO_FOCUS_MS + AGENT_POMODORO_BREAK_MS);
   (void)agent_pomodoro_tick(2 * AGENT_POMODORO_FOCUS_MS +
@@ -141,7 +141,7 @@ static void tally_counts_completed_focus_and_resets_by_day(void) {
   CHECK(view.completed == 2);
   CHECK(view.focus_s == 2 * AGENT_POMODORO_FOCUS_MS / 1000u);
 
-  // 放弃的不算。
+  // Abandoned sessions don't count.
   agent_pomodoro_stop();
   agent_pomodoro_toggle(0);
   agent_pomodoro_stop();
@@ -150,14 +150,14 @@ static void tally_counts_completed_focus_and_resets_by_day(void) {
   CHECK(tally.completed == 2);
   CHECK(tally.day == 20260915);
 
-  // 换日清零，日期同样时不清。
+  // Reset on a new day; not when the date is the same.
   CHECK(agent_pomodoro_set_day(20260916));
   agent_pomodoro_tally(&tally);
   CHECK(tally.completed == 0);
   CHECK(tally.focus_s == 0);
   CHECK(tally.day == 20260916);
 
-  // 重启后恢复昨天的记录，心跳带来今天的日期才归零。
+  // After a restart yesterday's record is restored; it resets only when a heartbeat brings today's date.
   agent_pomodoro_init();
   agent_pomodoro_tally_t restored = {20260916, 3, 4500};
   agent_pomodoro_restore_tally(&restored);
@@ -174,7 +174,7 @@ static void millisecond_counter_may_wrap(void) {
   agent_pomodoro_init();
   uint32_t start = UINT32_MAX - 1000;
   agent_pomodoro_toggle(start);
-  uint32_t wrapped = start + 5000;  // 回绕到 3999
+  uint32_t wrapped = start + 5000;  // wraps around to 3999
   CHECK(wrapped == 3999);
   agent_pomodoro_view_t view = view_at(wrapped);
   CHECK(view.remaining_ms == AGENT_POMODORO_FOCUS_MS - 5000);
@@ -192,9 +192,9 @@ int main(void) {
   tally_counts_completed_focus_and_resets_by_day();
   millisecond_counter_may_wrap();
   if (failures != 0) {
-    fprintf(stderr, "%d 处失败\n", failures);
+    fprintf(stderr, "%d failure(s)\n", failures);
     return EXIT_FAILURE;
   }
-  puts("pomodoro: 全部通过");
+  puts("pomodoro: all passed");
   return EXIT_SUCCESS;
 }

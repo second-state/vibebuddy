@@ -1,5 +1,5 @@
-//! 把语音包经串口协议写进设备：停等流控，每块带 CRC，设备每回一条才发下一块。
-//! 协议见 docs/protocol.md「设备维护」。
+//! Writes a voice pack to the device over the serial protocol: stop-and-wait flow control, a CRC per block, the next block only after each receipt.
+//! Protocol in docs/protocol.md, "Device maintenance".
 
 use std::sync::Arc;
 use std::time::Duration;
@@ -10,13 +10,13 @@ use tokio::sync::broadcast;
 
 use crate::serial_transport::{DeviceMessage, Transport, TransportError};
 
-/// 每块原始字节数：base64 后加上 JSON 外壳仍在 1024 字节的一行上限内。
+/// Raw bytes per block: after base64 plus the JSON envelope it still fits the 1024-byte line limit.
 pub const CHUNK_BYTES: usize = 672;
 const HEADER_BYTES: usize = 256;
-/// 等设备回执的上限。擦除 2 MB 分区要两三秒，最后回读校验也要一会儿。
+/// Upper bound for waiting on a device receipt. Erasing the 2 MB partition takes two or three seconds, and the final read-back check takes a while too.
 const STEP_TIMEOUT: Duration = Duration::from_secs(20);
 
-/// 从包头读音色 id；不是语音包就 None。
+/// Reads the voice id from the header; None if it isn't a voice pack.
 pub fn voice_id_of(pack: &[u8]) -> Option<String> {
     if pack.len() <= HEADER_BYTES || &pack[0..4] != b"VBVP" {
         return None;
@@ -60,18 +60,18 @@ pub fn end_event() -> Event {
 
 async fn send(transport: &Arc<dyn Transport>, event: Event) -> Result<(), String> {
     let frame = event.to_ndjson().map_err(|error| error.to_string())?;
-    // 队列满只是设备还没消化完，等一等再塞。
+    // A full queue just means the device hasn't caught up yet; wait a bit and push again.
     for _ in 0..200 {
         match transport.send(frame.clone()) {
             Ok(()) => return Ok(()),
             Err(TransportError::QueueFull) => tokio::time::sleep(Duration::from_millis(50)).await,
-            Err(TransportError::Closed) => return Err("串口 worker 已停止".to_owned()),
+            Err(TransportError::Closed) => return Err("serial worker has stopped".to_owned()),
         }
     }
-    Err("设备发送队列一直满着".to_owned())
+    Err("device send queue stayed full".to_owned())
 }
 
-/// 等一条指定的设备回执。`voice.error` 与链路断开都算失败。
+/// Waits for one specific device receipt. `voice.error` and a dropped link both count as failure.
 async fn wait_for(
     bus: &mut broadcast::Receiver<DeviceMessage>,
     wanted: &str,
@@ -82,15 +82,15 @@ async fn wait_for(
         let message = match tokio::time::timeout_at(deadline, bus.recv()).await {
             Ok(Ok(message)) => message,
             Ok(Err(broadcast::error::RecvError::Lagged(_))) => continue,
-            Ok(Err(broadcast::error::RecvError::Closed)) => return Err("设备消息通道已关闭".to_owned()),
-            Err(_) => return Err(format!("等待 {wanted} 超时")),
+            Ok(Err(broadcast::error::RecvError::Closed)) => return Err("device message channel closed".to_owned()),
+            Err(_) => return Err(format!("timed out waiting for {wanted}")),
         };
         match message {
-            DeviceMessage::Disconnected => return Err("链路断开".to_owned()),
+            DeviceMessage::Disconnected => return Err("link lost".to_owned()),
             DeviceMessage::Event(event) if event.event == "voice.error" => {
-                // `message` 是协议信封里的正式字段，不在 extra 里。
-                let detail = event.message.as_deref().unwrap_or("未知错误");
-                return Err(format!("设备拒绝：{detail}"));
+                // `message` is a proper field of the protocol envelope, not part of extra.
+                let detail = event.message.as_deref().unwrap_or("unknown error");
+                return Err(format!("device refused: {detail}"));
             }
             DeviceMessage::Event(event) if event.event == wanted => {
                 let matches = seq.is_none_or(|seq| {
@@ -105,14 +105,14 @@ async fn wait_for(
     }
 }
 
-/// 写整个包；成功返回设备报的音色 id。`progress` 收 0 到 1。
+/// Writes the whole pack; on success returns the voice id the device reports. `progress` receives 0 to 1.
 pub async fn write_pack(
     transport: Arc<dyn Transport>,
     mut bus: broadcast::Receiver<DeviceMessage>,
     pack: Vec<u8>,
     progress: impl Fn(f32),
 ) -> Result<String, String> {
-    voice_id_of(&pack).ok_or_else(|| "不是语音包".to_owned())?;
+    voice_id_of(&pack).ok_or_else(|| "not a voice pack".to_owned())?;
     send(&transport, begin_event(pack.len())).await?;
     wait_for(&mut bus, "voice.ready", None).await?;
     let total = pack.len().div_ceil(CHUNK_BYTES);
@@ -128,7 +128,7 @@ pub async fn write_pack(
         .get("voice")
         .and_then(|value| value.as_str())
         .map(str::to_owned)
-        .ok_or_else(|| "设备没有报告音色 id".to_owned())
+        .ok_or_else(|| "device did not report a voice id".to_owned())
 }
 
 #[cfg(test)]
@@ -153,7 +153,7 @@ mod tests {
         assert_eq!(event.extra["seq"], 7);
         assert_eq!(event.extra["crc"], crc32fast::hash(&piece));
         assert_eq!(event.extra["data"].as_str().map(str::len), Some(896));
-        let frame = event.to_ndjson().expect("一块要能装进一行");
-        assert!(frame.len() <= 1024, "{} 字节", frame.len());
+        let frame = event.to_ndjson().expect("a chunk must fit in one line");
+        assert!(frame.len() <= 1024, "{} bytes", frame.len());
     }
 }

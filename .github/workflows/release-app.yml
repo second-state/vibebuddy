@@ -1,6 +1,6 @@
-# Apple 芯片的 DMG。打 vX.Y.Z 标签才公证并发 GitHub Release；main 上动到装包内容的
-# 提交只构建、测试、签名，DMG 留作 7 天的 artifact 供自测。
-# 固件随 App 一起发（设备页的「更新」用的就是包里那份），所以 firmware/ 也算触发路径。
+# Apple-silicon DMG. Only a vX.Y.Z tag notarizes and publishes a GitHub Release; commits
+# to main that touch packaged content only build, test and sign, keeping the DMG as a 7-day artifact for self-testing.
+# Firmware ships with the app (the Device tab's Update uses the copy in the bundle), so firmware/ is a trigger path too.
 name: release-app
 
 on:
@@ -15,12 +15,13 @@ on:
       - "firmware/**"
       - "voices/**"
       - "tools/make_voice_pack.py"
+      - "tools/check-localization.py"
       - "Cargo.toml"
       - "Cargo.lock"
       - ".github/workflows/release-app.yml"
   workflow_dispatch:
 
-# 标签发布不能被后来的推送取消；main 上连续推送只保留最新一次。
+# Tag releases must not be cancelled by later pushes; consecutive pushes to main keep only the latest run.
 concurrency:
   group: release-app-${{ github.ref }}
   cancel-in-progress: ${{ !startsWith(github.ref, 'refs/tags/') }}
@@ -30,13 +31,13 @@ permissions:
 
 jobs:
   firmware:
-    # ESP-IDF 官方只给 Linux 的 docker 镜像；三件套与架构无关，在这里构建后交给 macOS job。
+    # ESP-IDF only ships official Docker images for Linux; the three images are architecture-independent, so build here and hand them to the macOS job.
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: espressif/esp-idf-ci-action@v1
         with:
-          # 与 firmware/dependencies.lock 里的 idf 版本一致。
+          # Must match the idf version in firmware/dependencies.lock.
           esp_idf_version: v5.5.3
           target: esp32s3
           path: firmware
@@ -44,7 +45,7 @@ jobs:
         with:
           name: firmware
           retention-days: 1
-          # build-app.sh 要三件套，外加页脚构建标识用的时刻头文件。
+          # build-app.sh needs the three images, plus the timestamp header used for the footer build ID.
           path: |
             firmware/build/bootloader/bootloader.bin
             firmware/build/partition_table/partition-table.bin
@@ -53,48 +54,48 @@ jobs:
 
   app:
     needs: firmware
-    # macos-15 是 Apple 芯片 runner，产物即 arm64；暂不出 Intel 版。
+    # macos-15 is an Apple-silicon runner, so the output is arm64; no Intel build yet.
     runs-on: macos-15
     env:
-      # 五个签名 secrets 配齐才走 Developer ID 签名加公证，否则退回 ad-hoc。
-      # 配置方法见 tools/setup-release-signing.sh。
-      # secrets 在 run 创建那一刻快照；run 排队期间新写入的看不到，要再触发一次。
+      # Developer ID signing plus notarization only runs when all five signing secrets are set; otherwise fall back to ad-hoc.
+      # See tools/setup-release-signing.sh for how to configure them.
+      # Secrets are snapshotted when the run is created; ones written while the run is queued aren't seen, so trigger again.
       SIGNED: ${{ secrets.MACOS_CERT_P12 != '' && secrets.APPLE_APP_PASSWORD != '' }}
       RELEASE: ${{ startsWith(github.ref, 'refs/tags/') }}
     steps:
       - uses: actions/checkout@v4
         with:
-          # build.rs 和 Info.plist 都用 git describe --tags 做构建号，要能看到标签。
+          # build.rs and Info.plist both use git describe --tags for the build number, so tags must be visible.
           fetch-depth: 0
       - uses: actions/download-artifact@v4
         with:
           name: firmware
           path: firmware/build
-      - name: 定版本号
+      - name: Determine version
         id: version
         run: |
           version="$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -n 1)"
           if [[ "${RELEASE}" == "true" ]]; then
-            # 标签就是版本；Cargo.toml 没跟上就停下，不发一个版本号说谎的包。
+            # The tag is the version; if Cargo.toml hasn't caught up, stop rather than ship a package whose version lies.
             [[ "${GITHUB_REF_NAME}" == "v${version}" ]] || {
-              echo "标签 ${GITHUB_REF_NAME} 与 Cargo.toml 的 version ${version} 不一致" >&2; exit 1; }
+              echo "tag ${GITHUB_REF_NAME} does not match Cargo.toml version ${version}" >&2; exit 1; }
             label="${GITHUB_REF_NAME}"
           else
             label="$(git describe --tags --always)"
           fi
           echo "label=${label}" >> "${GITHUB_OUTPUT}"
-      - name: 测试
+      - name: Test
         run: |
           rustup update stable --no-self-update
           cargo test --workspace
           swift run --package-path app SelfTest
-      - name: 导入签名证书
+      - name: Import signing certificate
         if: env.SIGNED == 'true'
         env:
           MACOS_CERT_P12: ${{ secrets.MACOS_CERT_P12 }}
           MACOS_CERT_PASSWORD: ${{ secrets.MACOS_CERT_PASSWORD }}
         run: |
-          # 证书放进只活在这个 job 里的临时钥匙串，密码随机，用完随 runner 销毁。
+          # The certificate goes into a temporary keychain that lives only in this job, with a random password; it dies with the runner.
           keychain="${RUNNER_TEMP}/signing.keychain-db"
           keychain_password="$(uuidgen)"
           security create-keychain -p "${keychain_password}" "${keychain}"
@@ -106,16 +107,16 @@ jobs:
           security set-key-partition-list -S apple-tool:,apple: -k "${keychain_password}" "${keychain}" >/dev/null
           security list-keychains -d user -s "${keychain}" login.keychain
           identity="$(security find-identity -v -p codesigning "${keychain}" | sed -n 's/.*"\(Developer ID Application: .*\)"/\1/p' | head -n 1)"
-          [[ -n "${identity}" ]] || { echo "p12 里没有 Developer ID Application 证书" >&2; exit 1; }
+          [[ -n "${identity}" ]] || { echo "no Developer ID Application certificate in the p12" >&2; exit 1; }
           echo "CODESIGN_IDENTITY=${identity}" >> "${GITHUB_ENV}"
-      - name: 装包
+      - name: Build app bundle
         run: |
           app/scripts/build-app.sh
           app/scripts/make-dmg.sh "VibeBuddy-${{ steps.version.outputs.label }}-arm64.dmg"
-          # 固件也单独分发：三件套加 build.txt，用户在设备页「从文件刷入…」选它。
+          # Firmware is also distributed on its own: the three images plus build.txt, which users pick via Flash from file… on the Device tab.
           ditto -c -k --norsrc "app/build/Vibe Buddy.app/Contents/Resources/firmware" \
             "VibeBuddy-firmware-${{ steps.version.outputs.label }}.zip"
-      - name: 留存自测包
+      - name: Keep self-test build
         if: env.RELEASE != 'true'
         uses: actions/upload-artifact@v4
         with:
@@ -124,7 +125,7 @@ jobs:
             VibeBuddy-${{ steps.version.outputs.label }}-arm64.dmg
             VibeBuddy-firmware-${{ steps.version.outputs.label }}.zip
           retention-days: 7
-      - name: 公证
+      - name: Notarize
         if: env.RELEASE == 'true' && env.SIGNED == 'true'
         env:
           APPLE_ID: ${{ secrets.APPLE_ID }}
@@ -135,23 +136,23 @@ jobs:
           codesign --force --timestamp --sign "${CODESIGN_IDENTITY}" "${dmg}"
           xcrun notarytool submit "${dmg}" --wait \
             --apple-id "${APPLE_ID}" --team-id "${APPLE_TEAM_ID}" --password "${APPLE_APP_PASSWORD}"
-          # 公证没过时 notarytool 未必报非零，staple 拿不到票据会失败，由它把关；
-          # 再用 Gatekeeper 自己的判定确认一遍，没过就不发。
+          # notarytool doesn't always exit non-zero when notarization fails, but staple fails without a ticket, so it is the gate;
+          # then confirm once more with Gatekeeper's own assessment, and don't publish if it fails.
           xcrun stapler staple "${dmg}"
           spctl --assess --type open --context context:primary-signature --verbose "${dmg}"
-      - name: 发布
+      - name: Publish
         if: env.RELEASE == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          echo "仅支持 Apple 芯片的 Mac（macOS 14 及以上）。打开 DMG，把 Vibe Buddy 拖进「应用程序」。" > notes.md
+          echo "Apple silicon Macs only (macOS 14 or later). Open the DMG and drag Vibe Buddy into Applications." > notes.md
           if [[ "${SIGNED}" != "true" ]]; then
             cat >> notes.md <<'NOTES'
 
-          这一版没有 Apple 开发者签名与公证，首次打开会被 Gatekeeper 拦下。任选其一放行：
+          This build isn't signed with an Apple Developer ID or notarized, so Gatekeeper blocks the first launch. Allow it either way:
 
-          - 系统设置 → 隐私与安全性 → 找到 Vibe Buddy 的提示，点「仍要打开」；
-          - 或在终端执行 `xattr -dr com.apple.quarantine "/Applications/Vibe Buddy.app"`。
+          - System Settings → Privacy & Security → find the Vibe Buddy notice and click Open Anyway;
+          - or run `xattr -dr com.apple.quarantine "/Applications/Vibe Buddy.app"` in Terminal.
           NOTES
           fi
           gh release create "${{ steps.version.outputs.label }}" \

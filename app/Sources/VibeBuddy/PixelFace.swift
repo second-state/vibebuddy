@@ -1,6 +1,6 @@
 import AppKit
 
-/// 菜单栏里的氛围小助手：18 点的像素脸，模板图适应深浅色。闭眼版给链路断开。
+/// The buddy in the menu bar: an 18-point pixel face as a template image, so it adapts to light and dark. The closed-eye version means the link is down.
 enum PixelFace {
     static func image(eyesClosed: Bool) -> NSImage {
         let size = NSSize(width: 18, height: 18)
@@ -9,19 +9,19 @@ enum PixelFace {
             func px(_ x: Int, _ y: Int, _ w: Int = 1, _ h: Int = 1) {
                 NSRect(x: x, y: y, width: w, height: h).fill()
             }
-            // 天线
+            // Antenna
             px(8, 0, 2, 2); px(8, 2, 2, 1)
-            // 头（圆角矩形轮廓）
+            // Head (rounded rectangle outline)
             px(3, 4, 12, 1); px(2, 5, 1, 9); px(15, 5, 1, 9); px(3, 14, 12, 1)
-            // 眼睛
+            // Eyes
             if eyesClosed {
                 px(5, 9, 3, 1); px(10, 9, 3, 1)
             } else {
                 px(5, 7, 3, 3); px(10, 7, 3, 3)
             }
-            // 嘴
+            // Mouth
             if eyesClosed { px(7, 12, 4, 1) } else { px(6, 12, 1, 1); px(7, 13, 4, 1); px(11, 12, 1, 1) }
-            // 腿
+            // Legs
             px(5, 15, 2, 2); px(11, 15, 2, 2)
             return true
         }
@@ -29,7 +29,7 @@ enum PixelFace {
         return image
     }
 
-    /// 引导页与关于页里的大号版本。
+    /// The large version for onboarding and About.
     static func largeImage() -> NSImage {
         let base = image(eyesClosed: false)
         base.isTemplate = false

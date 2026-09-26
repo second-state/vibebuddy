@@ -1,7 +1,7 @@
-//! GitHub Actions 状态回流。
+//! Feeds GitHub Actions status back to the box.
 //!
-//! CI 出结果的时候用户通常早就切走了，而这个盒子一直在视野边缘。这是设备
-//! 真正比笔记本屏幕有用的场景，因此 CI 与 Agent 共用同一套任务卡和播报。
+//! By the time CI finishes the user has usually moved on, while the box sits at the edge of view. This is
+//! where the device beats the laptop screen, so CI shares the agents' task cards and announcements.
 
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
@@ -13,13 +13,13 @@ use tracing::{info, warn};
 
 use crate::activity::{ActivityId, ActivitySource, ActivityStatus, ActivityTracker, display_title};
 
-/// 任务卡上区分来源的前缀。
+/// Prefix on task cards that tells sources apart.
 const PREFIX: &str = "CI:";
-/// 仓库名里没有可显示字符时的标题。
+/// Title used when the repository name has no displayable characters.
 const FALLBACK_TITLE: &str = "CI";
-/// 轮询间隔。CI 以分钟计，30 秒足够，也不至于把 GitHub API 配额用光。
+/// Poll interval. CI runs take minutes; 30 seconds is plenty and won't burn through the GitHub API quota.
 pub const POLL_INTERVAL: Duration = Duration::from_secs(30);
-/// 单次 `gh` 调用的上限，避免网络卡住时把轮询任务永久挂起。
+/// Upper bound for one `gh` call, so a stuck network can't hang the poll task forever.
 const COMMAND_TIMEOUT: Duration = Duration::from_secs(20);
 
 #[derive(Clone, Debug, Deserialize)]
@@ -33,16 +33,16 @@ pub struct Run {
 
 #[derive(Default)]
 pub struct CiWatcher {
-    /// 每个仓库当前正在跑、且已经被画上屏幕的 run。
+    /// Per repository, the run currently in progress that has already been drawn on screen.
     running: HashMap<String, u64>,
-    /// 已经报过错的仓库。错误持续存在时不再重复刷日志。
+    /// Repositories that already reported an error. A persisting error isn't logged again.
     quiet: HashSet<String>,
-    /// 已经记过一行日志的仓库。
+    /// Repositories that already got their one log line.
     announced: HashSet<String>,
 }
 
 impl CiWatcher {
-    /// 取回各仓库最近一次 run。不持有聚合器的锁，因为 `gh` 可能要跑上几秒。
+    /// Fetches each repository's latest run. Doesn't hold the aggregator lock, since `gh` may take seconds.
     pub async fn fetch(&mut self, workspaces: &[PathBuf]) -> Vec<(String, Run)> {
         let repos = watched_repos(workspaces);
         if repos.is_empty() {
@@ -51,14 +51,14 @@ impl CiWatcher {
         let program = gh_program();
         let mut fetched = Vec::new();
         for repo in repos {
-            // 第一次关注某个仓库时记一行，否则「CI 怎么没显示」无从查起。
+            // Log one line the first time a repository is watched, or "why isn't CI showing" can't be answered.
             if self.announced.insert(repo.clone()) {
-                info!(%repo, "开始关注 CI");
+                info!(%repo, "watching CI");
             }
             match latest_run(&program, &repo).await {
                 Ok(Some(run)) => {
                     if self.quiet.remove(&repo) {
-                        info!(%repo, "CI 状态已恢复");
+                        info!(%repo, "CI status recovered");
                     }
                     fetched.push((repo, run));
                 }
@@ -66,9 +66,9 @@ impl CiWatcher {
                     self.quiet.remove(&repo);
                 }
                 Err(error) => {
-                    // 一个持续的错误每 30 秒记一行，一天就是几千行。只记第一次。
+                    // A persisting error logged every 30 seconds is thousands of lines a day. Log only the first.
                     if self.quiet.insert(repo.clone()) {
-                        warn!(%repo, %error, "读取 CI 状态失败");
+                        warn!(%repo, %error, "failed to read CI status");
                     }
                 }
             }
@@ -108,24 +108,24 @@ impl CiWatcher {
             return event;
         }
 
-        // 只报告亲眼看着跑起来的 run。否则 daemon 每次重启都会把仓库里
-        // 最近一次历史结果重新播报一遍。
+        // Only report runs we actually watched start. Otherwise every daemon restart would re-announce
+        // the repository's latest historical result.
         if self.running.remove(repo) != Some(run.database_id) {
             return None;
         }
         match run.conclusion.as_str() {
             "success" => tracker.finish(&id, &title),
-            // 取消和跳过都不是任务失败，安静收起卡片即可。
+            // Cancelled and skipped aren't task failures; just put the card away quietly.
             "cancelled" | "skipped" | "neutral" => tracker.discard(&id, "ALL QUIET"),
             _ => tracker.fail(&id, &title),
         }
     }
 }
 
-/// 关注哪些仓库：Agent 最近工作过的那些 GitHub 仓库。
+/// Which repositories to watch: the GitHub repositories the agents worked in recently.
 ///
-/// 不需要用户维护清单——daemon 已经知道你在哪儿干活，这个事实在解析任务卡
-/// 标题时就算出来了。`VIBEBUDDY_CI_REPOS` 可以覆盖，用于观察本机没有检出的仓库。
+/// No list for the user to maintain: the daemon already knows where you work, a fact computed while
+/// resolving task-card titles. `VIBEBUDDY_CI_REPOS` overrides it, for repositories not checked out here.
 fn watched_repos(workspaces: &[PathBuf]) -> Vec<String> {
     if let Ok(value) = std::env::var("VIBEBUDDY_CI_REPOS") {
         return value
@@ -144,7 +144,7 @@ fn watched_repos(workspaces: &[PathBuf]) -> Vec<String> {
     repos
 }
 
-/// 从项目根读出 GitHub 仓库名。只读 `.git/config`，不调用网络也不调用 git。
+/// Reads the GitHub repository name from the project root. Only reads `.git/config`; no network, no git.
 fn github_slug(root: &Path) -> Option<String> {
     let config = std::fs::read_to_string(root.join(".git").join("config")).ok()?;
     parse_slug(&origin_url(&config)?)
@@ -163,10 +163,10 @@ fn origin_url(config: &str) -> Option<String> {
     None
 }
 
-/// 支持 `https://`、`ssh://` 和 `git@host:` 三种远端写法。
+/// Supports `https://`, `ssh://` and `git@host:` remotes.
 fn parse_slug(url: &str) -> Option<String> {
     let rest = url.split_once("github.com")?.1;
-    // 分隔符必须紧跟在主机名之后，否则 `github.com.example.org` 也会被认成 GitHub。
+    // The separator must follow the host name directly, or `github.com.example.org` would pass as GitHub.
     if !rest.starts_with(':') && !rest.starts_with('/') {
         return None;
     }
@@ -178,8 +178,8 @@ fn parse_slug(url: &str) -> Option<String> {
     Some(format!("{owner}/{repo}"))
 }
 
-/// 找到 `gh`。launchd 只给四个系统目录的 `PATH`，`gh` 通常不在里面；
-/// 而让用户去改 plist 正是这个功能想省掉的那一步。
+/// Finds `gh`. launchd only puts four system directories on `PATH`, and `gh` usually isn't in them;
+/// making the user edit a plist is exactly the step this feature wants to spare them.
 fn gh_program() -> String {
     if let Ok(path) = std::env::var("VIBEBUDDY_GH") {
         return path;
@@ -212,14 +212,14 @@ async fn latest_run(program: &str, repo: &str) -> Result<Option<Run>, String> {
 
     let output = tokio::time::timeout(COMMAND_TIMEOUT, command)
         .await
-        .map_err(|_| "gh 超时".to_owned())?
-        .map_err(|error| format!("无法执行 gh：{error}"))?;
+        .map_err(|_| "gh timed out".to_owned())?
+        .map_err(|error| format!("cannot run gh: {error}"))?;
     if !output.status.success() {
         return Err(String::from_utf8_lossy(&output.stderr).trim().to_owned());
     }
 
     let runs: Vec<Run> = serde_json::from_slice(&output.stdout)
-        .map_err(|error| format!("gh 输出无法解析：{error}"))?;
+        .map_err(|error| format!("cannot parse gh output: {error}"))?;
     Ok(runs.into_iter().next())
 }
 
@@ -302,7 +302,7 @@ mod tests {
 
         assert!(
             events.is_empty(),
-            "daemon 每次重启都把仓库最近一次历史结果播一遍是不能接受的"
+            "the daemon must not re-announce the latest historical run on every restart"
         );
     }
 

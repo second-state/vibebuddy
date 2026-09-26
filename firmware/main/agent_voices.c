@@ -23,9 +23,9 @@ extern const uint8_t break_done_pcm_start[] asm("_binary_break_done_pcm_start");
 extern const uint8_t break_done_pcm_end[] asm("_binary_break_done_pcm_end");
 
 #define FLASH_SECTOR_BYTES 4096u
-/// 解码一块与回读校验共用的缓冲；一块最多 672 字节，校验按 1 KB 读。
+/// Buffer shared by chunk decoding and read-back verification; a chunk is at most 672 bytes, verification reads 1 KB at a time.
 #define CHUNK_BUFFER_BYTES 1024u
-/// begin 之前最多等这么久让正在播的一句放完；最长的一句不到 7 秒。
+/// How long begin waits at most for the line being played to finish; the longest line is under 7 seconds.
 #define AUDIO_DRAIN_MS 10000u
 
 static const char *TAG = "agent_voices";
@@ -36,9 +36,10 @@ static agent_voice_pack_t pack;
 static bool pack_loaded;
 static char current_id[AGENT_VOICE_PACK_ID_BYTES] = "builtin";
 
-/// 写入会话开始后就不再把映射区交给播放：播放任务先标记「在播」再取
-/// 指针，写入这边先立这个标记再等「在播」落下，两边各自看到对方的标记就
-/// 不会有人拿着已解除映射的地址去喂 I2S。
+/// Once a write session starts, the mapped region is no longer handed to playback. The
+/// playback task marks "playing" before taking the pointer; the writer raises this flag
+/// before waiting for "playing" to drop. Each side sees the other's flag, so nobody
+/// feeds I2S from an address that has been unmapped.
 static volatile bool pack_locked;
 static bool writing;
 static uint32_t expected_total;
@@ -56,14 +57,14 @@ static void unmap(void) {
   }
 }
 
-/// 映射分区并校验包头与载荷。校验不过就当分区为空。
+/// Maps the partition and verifies header and payload. A failed check treats the partition as empty.
 static bool map_and_validate(void) {
   unmap();
   const void *pointer;
   if (esp_partition_mmap(partition, 0, partition->size,
                          ESP_PARTITION_MMAP_DATA, &pointer,
                          &map_handle) != ESP_OK) {
-    ESP_LOGW(TAG, "映射 voices 分区失败");
+    ESP_LOGW(TAG, "failed to map voices partition");
     return false;
   }
   mapped = pointer;
@@ -75,7 +76,7 @@ static bool map_and_validate(void) {
   uint32_t crc = agent_voice_pack_crc32(
       0, mapped + AGENT_VOICE_PACK_HEADER_BYTES, parsed.payload_length);
   if (crc != parsed.payload_crc32) {
-    ESP_LOGW(TAG, "语音包载荷 CRC 不符");
+    ESP_LOGW(TAG, "voice pack payload CRC mismatch");
     unmap();
     return false;
   }
@@ -132,7 +133,7 @@ esp_err_t agent_voices_begin(uint32_t total_bytes) {
       total_bytes > partition->size) {
     return ESP_ERR_INVALID_SIZE;
   }
-  // 正在播的那一句可能就读着映射区：先锁住不再发新指针，再等它放完。
+  // The line being played may be reading the mapped region: stop handing out new pointers first, then wait for it to finish.
   pack_locked = true;
   __sync_synchronize();
   uint32_t waited = 0;
@@ -176,11 +177,11 @@ esp_err_t agent_voices_chunk(uint32_t seq, const char *base64,
   }
   uint32_t actual = agent_voice_pack_crc32(0, chunk_buffer, decoded);
   if (actual != crc32) {
-    ESP_LOGW(TAG, "第 %lu 块 CRC 收到 %08lx，应为 %08lx", (unsigned long)seq,
+    ESP_LOGW(TAG, "chunk %lu CRC got %08lx, expected %08lx", (unsigned long)seq,
              (unsigned long)actual, (unsigned long)crc32);
     return ESP_ERR_INVALID_CRC;
   }
-  // 包头那 256 字节留在内存里，最后校验通过才落盘。
+  // The 256 header bytes stay in memory and are written to flash only after the final check passes.
   size_t consumed = 0;
   while (consumed < decoded) {
     uint32_t offset = received + (uint32_t)consumed;
@@ -216,16 +217,16 @@ esp_err_t agent_voices_end(void) {
   }
   agent_voice_pack_t parsed;
   if (!agent_voice_pack_parse(header_buffer, partition->size, &parsed)) {
-    ESP_LOGW(TAG, "语音包包头无效");
+    ESP_LOGW(TAG, "invalid voice pack header");
     return ESP_ERR_INVALID_RESPONSE;
   }
   if (AGENT_VOICE_PACK_HEADER_BYTES + parsed.payload_length != expected_total) {
-    ESP_LOGW(TAG, "包头载荷长度 %lu 与收到的 %lu 不符",
+    ESP_LOGW(TAG, "header payload length %lu does not match received %lu",
              (unsigned long)parsed.payload_length,
              (unsigned long)(expected_total - AGENT_VOICE_PACK_HEADER_BYTES));
     return ESP_ERR_INVALID_SIZE;
   }
-  // 回读校验：写进 flash 的才算数，内存里的不算。
+  // Read-back verification: what is in flash counts, not what is in memory.
   uint32_t crc = 0;
   for (uint32_t offset = 0; offset < parsed.payload_length;) {
     uint32_t block = parsed.payload_length - offset;
@@ -241,7 +242,7 @@ esp_err_t agent_voices_end(void) {
     offset += block;
   }
   if (crc != parsed.payload_crc32) {
-    ESP_LOGW(TAG, "载荷 CRC 回读 %08lx，包头 %08lx", (unsigned long)crc,
+    ESP_LOGW(TAG, "payload CRC readback %08lx, header %08lx", (unsigned long)crc,
              (unsigned long)parsed.payload_crc32);
     return ESP_ERR_INVALID_CRC;
   }

@@ -3,7 +3,7 @@ name = "vibebuddy-hook"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
-description = "把 Codex 与 Claude Code 的 Hook 事件最小化后转发给本机 Vibe Buddy"
+description = "Minimizes Codex and Claude Code hook events and forwards them to the local Vibe Buddy daemon"
 
 [[bin]]
 name = "vibebuddy-hook"

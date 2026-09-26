@@ -1,8 +1,8 @@
 import Foundation
 import VibeBuddyCore
 
-/// 接入：把 vibebuddy-hook 复制到 Application Support，再把 Hook 条目合并进
-/// 用户级配置。只增删自己的条目（VibeBuddyCore.HookConfig）。
+/// Hook setup: copies vibebuddy-hook to Application Support, then merges the hook entries into
+/// the user-level config. Only our own entries are added or removed (VibeBuddyCore.HookConfig).
 struct HookInstaller {
     struct Plan {
         let agent: HookAgent
@@ -20,15 +20,15 @@ struct HookInstaller {
         }
     }
 
-    /// 这个 Agent 装在这台机器上吗：看它的用户目录在不在。
+    /// Whether this agent is installed on this machine: checks for its user directory.
     static func isPresent(_ agent: HookAgent) -> Bool {
         let home = FileManager.default.homeDirectoryForCurrentUser
         let directory = agent == .codex ? ".codex" : ".claude"
         return FileManager.default.fileExists(atPath: home.appendingPathComponent(directory).path)
     }
 
-    /// 配置文件最近一次被写的时间，和 daemon 报的最近一次事件时间比，就知道
-    /// Codex 有没有在跑这份配置（VibeBuddyCore.HookConfig.codexTrustHint）。
+    /// When the config file was last written; compared with the last event time the daemon reports, it tells
+    /// whether Codex is running this config (VibeBuddyCore.HookConfig.codexTrustHint).
     static func configModifiedAt(_ agent: HookAgent) -> Date? {
         (try? FileManager.default.attributesOfItem(atPath: configURL(for: agent).path))?[.modificationDate] as? Date
     }
@@ -43,11 +43,11 @@ struct HookInstaller {
         HookConfig.isInstalled(in: readConfig(configURL(for: agent)), agent: agent, binary: Resources.installedHookBinary.path)
     }
 
-    /// 把包里的二进制复制到固定位置；每次启动都做，App 升级后 Hook 也跟着新。
+    /// Copies the bundled binary to its fixed location; done on every launch so the hook updates with the app.
     static func deployBinary() throws {
         let destination = Resources.installedHookBinary
         try FileManager.default.createDirectory(at: destination.deletingLastPathComponent(), withIntermediateDirectories: true)
-        // 改名前的二进制跟着旧目录搬过来了，没人再引用它。
+        // The pre-rename binary came along with the old directory, and nothing references it any more.
         let legacy = destination.deletingLastPathComponent().appendingPathComponent("beacon-hook")
         if FileManager.default.fileExists(atPath: legacy.path) { try? FileManager.default.removeItem(at: legacy) }
         let source = Resources.hookBinary
@@ -59,9 +59,9 @@ struct HookInstaller {
         try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: destination.path)
     }
 
-    /// 改名后旧路径的条目没法再跑：是我们自己写的，就直接换成新路径，不用再问。
-    /// 但要告诉调用方改写了谁：Codex 对改过的 hook 一律停用到人重新信任为止，
-    /// 这一步 App 替不了，不说一声用户只会发现盒子对 Codex 没了反应。
+    /// After the rename, entries with the old path can't run: we wrote them, so switch them to the new path without asking.
+    /// But tell the caller which ones were rewritten: Codex disables any changed hook until someone re-trusts it,
+    /// which the app can't do for them; without a heads-up the user just finds the box ignoring Codex.
     @discardableResult
     static func migrateLegacyCommands() -> [HookAgent] {
         var rewritten: [HookAgent] = []
@@ -95,7 +95,7 @@ struct HookInstaller {
         return Plan(agent: agent, configURL: url, before: before, after: HookConfig.removed(from: before))
     }
 
-    /// 写前留一份 .bak，写入用临时文件替换。
+    /// Keeps a .bak before writing, and writes via a temp file swap.
     static func apply(_ plan: Plan) throws {
         let manager = FileManager.default
         try manager.createDirectory(at: plan.configURL.deletingLastPathComponent(), withIntermediateDirectories: true)
@@ -104,7 +104,7 @@ struct HookInstaller {
             if manager.fileExists(atPath: backup.path) { try manager.removeItem(at: backup) }
             try manager.copyItem(at: plan.configURL, to: backup)
         }
-        // 不转义斜杠：JSONSerialization 默认把 / 写成 \/，路径会难看得像被咬过。
+        // Don't escape slashes: JSONSerialization writes / as \/ by default, which leaves paths looking chewed.
         let data = try JSONSerialization.data(withJSONObject: plan.after, options: [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes])
         try data.write(to: plan.configURL, options: .atomic)
     }

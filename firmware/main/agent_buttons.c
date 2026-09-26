@@ -11,12 +11,12 @@
 #define XL9555_ADDRESS 0x20
 #define XL9555_INPUT_PORT0 0x00
 #define XL9555_CONFIG_PORT0 0x06
-// ATK-DNESP32S3-BOX V1.1 实体按压确认：K2 为 P0.3、K1 为 P0.4，均低电平有效。
+// Confirmed by pressing on a real ATK-DNESP32S3-BOX V1.1: K2 is P0.3, K1 is P0.4, both active low.
 #define XL9555_K2_MASK 0x08
 #define XL9555_K1_MASK 0x10
-// K0 是 ESP32-S3 的 BOOT 键，直连 GPIO0，低电平有效；PCB 丝印写作 B0。
+// K0 is the ESP32-S3 BOOT key, wired straight to GPIO0, active low; the PCB silkscreen says B0.
 #define K0_GPIO GPIO_NUM_0
-/// 一次翻转生效后，这么久之内不再接受第二次翻转。
+/// After a flip takes effect, no second flip is accepted for this long.
 #define DEBOUNCE_MS 40
 #define LONG_PRESS_MS 1000
 
@@ -24,7 +24,7 @@ typedef struct {
   bool pressed;
   TickType_t changed_at;
   TickType_t pressed_at;
-  /// 长按已经触发过，松开时就不再算一次短按。
+  /// The long press already fired, so the release no longer counts as a short press.
   bool long_fired;
 } button_t;
 
@@ -59,11 +59,12 @@ static void button_reset(button_t *button, bool pressed, TickType_t now) {
   button->long_fired = false;
 }
 
-/// 翻转立即生效，只在翻转后 DEBOUNCE_MS 内忽略再次翻转。机械抖动只有几毫秒，
-/// 而主循环每 20 ms 才采样一次；要求两次采样一致并不能多滤掉什么抖动，
-/// 却会把一次短促的轻点整个丢掉——第一次实机验收时 K1 有一半按了没反应。
+/// A flip takes effect immediately; only further flips within DEBOUNCE_MS are ignored.
+/// Mechanical bounce lasts a few milliseconds while the main loop samples every 20 ms;
+/// requiring two matching samples filters out hardly any bounce but drops a quick tap
+/// entirely: in the first on-device acceptance, half the K1 presses did nothing.
 ///
-/// 短按在松开时才算数：只有等到松开，才知道它不是一次长按的开头。
+/// A short press counts on release: only then do we know it wasn't the start of a long press.
 static press_t button_update(button_t *button, bool pressed, TickType_t now) {
   if (pressed != button->pressed) {
     if ((int32_t)(now - button->changed_at) <

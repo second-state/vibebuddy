@@ -1,0 +1,3 @@
+/* English is the development language: the keys in the Swift sources are the
+   English text, so this table is intentionally empty. Its lproj folder tells
+   macOS the app speaks English, which is what non-Chinese systems get. */

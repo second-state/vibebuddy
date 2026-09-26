@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# 在 Mac 上把固件的画面渲染成 PNG，休闲剧目渲染成 GIF（需要 ffmpeg），
-# 烧录前先看版式和动画。
+# Render the firmware's screens to PNG on the Mac, and the leisure skits to GIF (needs ffmpeg),
+# to check layout and animation before flashing.
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
