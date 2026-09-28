@@ -5,7 +5,7 @@
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-work="$(mktemp -d -t compare-display)"
+work="$(mktemp -d "${TMPDIR:-/tmp}/compare-display.XXXXXX")"
 trap 'rm -rf "${work}"' EXIT
 
 cc -std=gnu11 -O1 -Wno-unused-function -Wno-unused-parameter \
