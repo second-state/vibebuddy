@@ -1,6 +1,7 @@
-//! Mac 与设备之间的消息信封。daemon 用它编码，固件用它解码：同一份类型，
-//! 两端各编译一次，字段对不上就编译不过。固件那边没有 std，所以这里只用
-//! `core` 与 `alloc`；`std` 特性只多给一个 `std::error::Error` 实现。
+//! The message envelope between the Mac and the device. The daemon encodes it and the firmware
+//! decodes it: one type, compiled once on each side, so a field mismatch fails to compile. The
+//! firmware has no std, so this crate uses only `core` and `alloc`; the `std` feature adds nothing
+//! but a `std::error::Error` impl.
 #![no_std]
 
 extern crate alloc;
@@ -34,7 +35,7 @@ pub struct Event {
 }
 
 impl Event {
-    /// 只有事件名的信封；设备维护类的命令（hello、identify、screenshot）都长这样。
+    /// An envelope with only an event name; device maintenance commands (hello, identify, screenshot) all look like this.
     pub fn named(event: &str) -> Self {
         Self {
             version: VERSION,
@@ -79,16 +80,16 @@ pub enum ProtocolError {
 impl fmt::Display for ProtocolError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::EmptyEvent => write!(formatter, "event 不能为空"),
+            Self::EmptyEvent => write!(formatter, "event must not be empty"),
             Self::MessageTooLarge(size) => {
                 write!(
                     formatter,
-                    "消息为 {size} bytes，超过 {MAX_MESSAGE_BYTES} bytes 上限"
+                    "message is {size} bytes, over the {MAX_MESSAGE_BYTES}-byte limit"
                 )
             }
-            Self::Serialize(error) => write!(formatter, "JSON 编码失败：{error}"),
+            Self::Serialize(error) => write!(formatter, "JSON encoding failed: {error}"),
             Self::UnsupportedVersion(version) => {
-                write!(formatter, "不支持 Vibe Buddy Protocol version {version}")
+                write!(formatter, "unsupported Vibe Buddy Protocol version {version}")
             }
         }
     }
@@ -105,10 +106,10 @@ mod tests {
     fn hello_without_id_is_valid_ndjson() {
         let event: Event =
             serde_json::from_str(r#"{"version":1,"event":"task.done","title":"Hello"}"#)
-                .expect("hello 应可解析");
+                .expect("hello should parse");
 
         assert_eq!(
-            event.to_ndjson().expect("hello 应可编码"),
+            event.to_ndjson().expect("hello should encode"),
             b"{\"version\":1,\"event\":\"task.done\",\"title\":\"Hello\"}\n"
         );
     }
@@ -117,17 +118,17 @@ mod tests {
     fn unknown_fields_survive_encoding() {
         let event: Event =
             serde_json::from_str(r#"{"version":1,"event":"task.progress","progress":42}"#)
-                .expect("扩展字段应可解析");
+                .expect("extension fields should parse");
 
-        let encoded = String::from_utf8(event.to_ndjson().expect("扩展字段应可编码"))
-            .expect("编码必须是 UTF-8");
+        let encoded = String::from_utf8(event.to_ndjson().expect("extension fields should encode"))
+            .expect("encoding must be UTF-8");
         assert!(encoded.contains(r#""progress":42"#));
     }
 
     #[test]
     fn unsupported_version_is_rejected() {
         let event: Event =
-            serde_json::from_str(r#"{"version":2,"event":"task.done"}"#).expect("消息结构应可解析");
+            serde_json::from_str(r#"{"version":2,"event":"task.done"}"#).expect("message structure should parse");
 
         assert!(matches!(
             event.to_ndjson(),

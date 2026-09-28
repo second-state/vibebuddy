@@ -17,9 +17,10 @@ typedef enum {
   AGENT_DISPLAY_OFFLINE,
 } agent_display_state_t;
 
-/// 小灯灵同一时刻只处于一个模式，每个模式拥有整块画面。值班盯着 Agent，
-/// 番茄钟给用户计时，休闲是值班空闲够久之后自己去玩。Agent 状态在三个
-/// 模式里都继续更新，只是番茄钟模式只给它留一行摘要。
+/// The buddy is in exactly one mode at a time, and each mode owns the whole screen. Duty
+/// watches the agents, pomodoro times the user, and leisure is the buddy playing on its
+/// own after duty has been idle long enough. Agent state keeps updating in all three
+/// modes; pomodoro mode just gives it a one-line summary.
 typedef enum {
   AGENT_MODE_DUTY,
   AGENT_MODE_POMODORO,
@@ -29,10 +30,11 @@ typedef enum {
 typedef struct {
   const char *title;
   agent_display_state_t state;
-  /// 进入当前状态已经过去的秒数。设备收到后自行继续计时，因为可见状态
-  /// 不变时 Mac 端不会再发消息，卡片上的数字却必须一直走。
+  /// Seconds since entering the current state. The device keeps counting on its own,
+  /// because the Mac sends nothing while the visible state is unchanged, yet the number
+  /// on the card must keep moving.
   int elapsed_s;
-  /// 所属项目；标题是会话名时画在第二行，空或与标题重复则不画。
+  /// Owning project; drawn on the second line when the title is a session name, skipped when empty or the same as the title.
   const char *project;
 } agent_display_task_t;
 
@@ -46,35 +48,39 @@ void agent_display_tick(void);
 
 void agent_display_set_mode(agent_mode_t mode);
 agent_mode_t agent_display_mode(void);
-/// 立即重绘。按键改变了番茄钟之后不该再等下一帧动画。
+/// Redraws immediately. After a key press changes the pomodoro, don't wait for the next animation frame.
 void agent_display_refresh(void);
-/// Agent 那边是否无事可做：主状态空闲且没有任务卡。休闲模式的无聊度
-/// 按这个状态累计，而不是按多久没收到消息，因为长任务中途本来就没有消息。
+/// Whether the agents have nothing going on: main state idle and no task cards. Leisure
+/// boredom accumulates on this, not on time since the last message, because long tasks
+/// send no messages midway anyway.
 bool agent_display_agent_idle(void);
 
-/// 链路失联时覆盖显示：小灯灵闭眼，画面转灰。
-/// 底层状态与任务卡保留，因为它们是最后已知的事实，只是不再可信。
+/// Overlay while the link is lost: the buddy closes its eyes and the screen turns gray.
+/// The underlying state and task cards are kept: they are the last known facts, just no
+/// longer trustworthy.
 void agent_display_set_link_lost(bool lost);
 
-/// 眨眼确认：背光快闪约一秒，任何模式下都看得见。引导里用它认盒子。
+/// Blink to identify: the backlight flashes for about a second, visible in any mode. Onboarding uses it to find the box.
 void agent_display_identify(void);
 
-/// 番茄钟阶段结束的闹铃：圆环先抖两秒，再整圈脉动，到用户按键或切走
-/// 画面为止。静音时这是唯一的提醒。调用方随后要把番茄钟画面推到前面。
+/// Alarm at the end of a pomodoro phase: the ring shakes for two seconds, then the whole
+/// ring pulses until the user presses a key or leaves the screen. When muted this is the
+/// only reminder. The caller must then bring the pomodoro screen to the front.
 void agent_display_pomodoro_ended(void);
 
-/// 静音时左上角常驻一个 MUTE 标记：静音是会被忘掉的状态，得一直看得见。
+/// While muted, a MUTE badge stays in the top left: mute is easy to forget, so it must stay visible.
 void agent_display_set_muted(bool muted);
 
-/// 截图：把当前帧缓冲按行程编码逐行交给 `write_line`（不含换行）。
-/// 第一行 `SHOT BEGIN 320x240 BACKLIGHT ON|OFF`，中间每行若干段
-/// `rgb565:长度`，最后 `SHOT END`。
+/// Screenshot: run-length encodes the current framebuffer and hands it to `write_line`
+/// line by line (without newlines). The first line is `SHOT BEGIN 320x240 BACKLIGHT ON|OFF`,
+/// each middle line holds several `rgb565:length` runs, and the last is `SHOT END`.
 void agent_display_dump(void (*write_line)(const char *line));
 
-/// 记录当日战绩，空闲屏会轮播这几行。下一次绘制时生效。
+/// Records today's stats, which the idle screen rotates through. Takes effect on the next draw.
 void agent_display_set_stats(const char *const *lines, size_t count);
 
-/// 设置本机固件与 Mac 端的构建标识。设备会替用户比对两者：让人去读两串
-/// 哈希再自己对比并不可靠，而不一致本身正是要看见的信号。
+/// Sets the build stamps of this firmware and of the Mac side. The device compares them
+/// for the user: asking people to read two hashes and compare them isn't reliable, and a
+/// mismatch is exactly the signal they need to see.
 void agent_display_set_firmware_build(const char *build);
 void agent_display_set_daemon_build(const char *build);

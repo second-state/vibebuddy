@@ -2,7 +2,7 @@ import AVFoundation
 import Foundation
 import VibeBuddyCore
 
-/// 试听：语音包里的 PCM 是 24 kHz、16-bit、双声道，直接喂给 AVAudioEngine。
+/// Preview: voice pack PCM is 24 kHz, 16-bit stereo, fed straight to AVAudioEngine.
 @MainActor
 final class VoicePreview {
     private let engine = AVAudioEngine()

@@ -1,6 +1,6 @@
 import AppKit
 
-// AppKit 生命周期：菜单栏常驻、不上 Dock（Info.plist 里 LSUIElement 为真）。
+// AppKit lifecycle: lives in the menu bar, no Dock icon (LSUIElement is true in Info.plist).
 let application = NSApplication.shared
 let delegate = MainActor.assumeIsolated { AppDelegate() }
 application.delegate = delegate

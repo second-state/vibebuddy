@@ -1,6 +1,14 @@
 # Vibe Buddy
 
-领域词汇见 `CONTEXT.md`，实现边界见 `docs/architecture.md`，经验教训见 `LESSONS.md`。所有文档用中文。
+领域词汇见 `CONTEXT.md`，实现边界见 `docs/architecture.md`，经验教训见 `LESSONS.md`。
+
+## Language conventions
+
+项目在为开源转向英文：
+
+- 代码、注释、日志、报错信息、脚本输出、commit message 一律英文。
+- App 界面文案以英文为 key 写在源码里，中文译文放 `app/Localization/zh-Hans.lproj`，改文案后跑 `tools/check-localization.py`。界面里的英文说法以 `CONTEXT.md` 的「英文界面用语」为准。
+- 文档（`*.md`）目前仍是中文，之后整体迁移到英文；迁移前新文档沿用中文，迁移后改为英文。
 
 ## Agent skills
 

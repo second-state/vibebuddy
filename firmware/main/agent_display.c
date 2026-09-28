@@ -55,23 +55,23 @@
 #define COLOR_FAILED 0xf800
 #define COLOR_PET 0x3c9f
 #define COLOR_PET_HIGHLIGHT 0x7e5f
-/// 番茄钟：专注是番茄红，休息是绿色。
+/// Pomodoro: focus is tomato red, break is green.
 #define COLOR_FOCUS 0xfa8a
 #define COLOR_BREAK 0x4ecc
 
 #define TITLE_BYTES 64
-/// 构建标识：git 描述加上编译时刻。
+/// Build stamp: git description plus build time.
 #define BUILD_BYTES 48
 
-/// 空闲时每隔 IDLE_MOOD_PERIOD 帧做一个小动作，持续 IDLE_MOOD_FRAMES 帧。
+/// While idle, do a small move every IDLE_MOOD_PERIOD frames, lasting IDLE_MOOD_FRAMES frames.
 #define IDLE_MOOD_PERIOD 40
 #define IDLE_MOOD_FRAMES 8
-/// 空闲时标题与战绩的轮播间隔（帧）。空闲动画每 500 ms 一帧。
+/// Interval (frames) for rotating the title and stats while idle. The idle animation runs one frame per 500 ms.
 #define IDLE_ROTATE_FRAMES 6
 
-/// 番茄钟画面：左边是刻度圆环与倒计时，右边是阶段、按键提示与 Agent 摘要。
-/// 圆环仿 Focus To-Do：一圈刻度，走过的部分染成阶段色，一根更长的指针停在
-/// 当前位置；空闲时指针停在 12 点。
+/// Pomodoro screen: a tick ring and countdown on the left; phase, key hints and agent summary on the right.
+/// The ring mimics Focus To-Do: a ring of ticks, the elapsed part tinted in the phase color, and a longer hand
+/// at the current position; while idle the hand rests at 12 o'clock.
 #define RING_CENTER_X 118
 #define RING_CENTER_Y 122
 #define RING_TICKS 60
@@ -79,8 +79,8 @@
 #define RING_TICK_OUTER 79
 #define RING_HAND_INNER 64
 #define RING_HAND_OUTER 86
-/// 阶段结束的闹铃：头两秒圆环左右抖，每帧换一边；之后整圈按帧脉动，
-/// 到用户按键为止。静音时这是唯一的提醒。
+/// Alarm at a phase end: for the first two seconds the ring shakes side to side, switching every frame; then the
+/// whole ring pulses frame by frame until the user presses a key. When muted this is the only reminder.
 #define RING_ALARM_SHAKE_FRAMES 20
 #define RING_ALARM_SHAKE_FRAME_MS 100
 #define RING_ALARM_SHAKE_PX 3
@@ -145,8 +145,8 @@ static struct {
   char title[TITLE_BYTES];
   char project[TITLE_BYTES];
   agent_display_state_t state;
-  /// 收到这张卡时它已经持续了多久，以及收到的时刻。可见状态不变时 Mac
-  /// 端不会再发消息，卡片上的数字却必须继续走，所以由设备自己接着算。
+  /// How long the card had lasted when received, and when it was received. The Mac sends nothing while the
+  /// visible state is unchanged, yet the number on the card must keep moving, so the device keeps counting.
   int elapsed_base;
   TickType_t received_tick;
 } current_tasks[AGENT_DISPLAY_MAX_TASKS];
@@ -157,19 +157,19 @@ static char firmware_build[BUILD_BYTES];
 static char daemon_build[BUILD_BYTES];
 static uint32_t animation_frame;
 static TickType_t next_animation_at;
-/// 背光当前是否点亮。休闲模式夜里睡久了会关掉它，任何事情一来就点亮。
+/// Whether the backlight is on. Leisure mode turns it off after sleeping long at night; anything at all turns it back on.
 static bool backlight_on;
-/// 眨眼确认：背光快闪到这个时刻为止；0 表示没在闪。
+/// Blink to identify: the backlight flashes until this time; 0 means not flashing.
 static TickType_t identify_until;
 static TickType_t identify_next_toggle;
-/// 本帧提交前是否整体转暗：困倦期的画面。
+/// Whether to dim the whole frame before committing it: the sleepy look.
 static bool render_dim;
 static bool muted;
-/// 闹铃在响：阶段结束了、用户还没动手。记下结束时的阶段，视图一变
-/// （开始、放弃、跳过）就停；切走画面也停。
+/// The alarm is ringing: the phase ended and the user hasn't acted yet. Records the phase at the end; stops as
+/// soon as the view changes (start, abandon, skip) or the screen is switched away.
 static bool ring_alarm;
 static agent_pomodoro_phase_t ring_alarm_phase;
-/// 还要抖几帧；抖完转为脉动。
+/// Shake frames left; after shaking, switch to pulsing.
 static unsigned ring_alarm_shake_frames;
 
 static uint32_t clock_ms(void);
@@ -200,7 +200,7 @@ static esp_err_t xl9555_write(uint8_t reg, uint8_t value) {
 static esp_err_t set_backlight(bool enabled) {
   uint8_t output;
   ESP_RETURN_ON_ERROR(xl9555_read(XL9555_OUTPUT_PORT0, &output), TAG,
-                      "读取 XL9555 output 失败");
+                      "failed to read XL9555 output");
   if (enabled) {
     output |= XL9555_LCD_BACKLIGHT_MASK;
   } else {
@@ -316,13 +316,13 @@ typedef enum {
   IDLE_MOOD_STRETCH,
 } idle_mood_t;
 
-/// 小动作已经进行了几帧；负数表示当前没有小动作。
+/// How many frames the small move has run; negative means no small move right now.
 static int idle_mood_phase(uint32_t frame) {
   return (int)(frame % IDLE_MOOD_PERIOD) - (IDLE_MOOD_PERIOD - IDLE_MOOD_FRAMES);
 }
 
-/// 空闲时轮流做三个小动作。呼吸和眨眼之外还得有点别的，否则一台一直亮着
-/// 的设备看上去更像卡住了而不是在待命。
+/// Cycle through three small moves while idle. Breathing and blinking alone aren't enough: a device that is always
+/// lit would look stuck rather than on standby.
 static idle_mood_t idle_mood(uint32_t frame) {
   static const idle_mood_t cycle[] = {IDLE_MOOD_NAP, IDLE_MOOD_LOOK,
                                       IDLE_MOOD_STRETCH};
@@ -357,14 +357,14 @@ static void draw_pet_face(agent_display_state_t state, uint32_t frame,
     draw_line(180 + x_offset, face_y + 7, 167 + x_offset, face_y + 18, color);
     draw_line(153 + x_offset, face_y + 25, 167 + x_offset, face_y + 25, color);
   } else if (state == AGENT_DISPLAY_OFFLINE) {
-    // 闭眼与平直的嘴：睡着，而不是出错。
+    // Closed eyes and a flat mouth: asleep, not an error.
     fill_rect(143 + x_offset, face_y + 14, 8, 3, color);
     fill_rect(169 + x_offset, face_y + 14, 8, 3, color);
     draw_line(154 + x_offset, face_y + 25, 166 + x_offset, face_y + 25, color);
   } else {
     idle_mood_t mood = idle_mood(frame);
     if (mood == IDLE_MOOD_NAP) {
-      // 打盹：闭眼加一个飘起来的 Z。和失联的闭眼靠颜色与这个 Z 区分。
+      // Dozing: closed eyes plus a floating Z. The color and this Z tell it apart from the link-lost closed eyes.
       fill_rect(143 + x_offset, face_y + 14, 8, 3, color);
       fill_rect(169 + x_offset, face_y + 14, 8, 3, color);
       draw_line(154 + x_offset, face_y + 25, 166 + x_offset, face_y + 25,
@@ -373,7 +373,7 @@ static void draw_pet_face(agent_display_state_t state, uint32_t frame,
                 color, 1);
       return;
     }
-    // 左顾右盼：只平移眼睛，看上去像在打量房间。
+    // Looking around: only the eyes move sideways, as if sizing up the room.
     int gaze = mood == IDLE_MOOD_LOOK ? (frame % 4 < 2 ? -3 : 3) : 0;
     bool blinking = frame % 8 == 7;
     fill_rect(143 + x_offset + gaze, face_y + (blinking ? 14 : 8), 8,
@@ -385,8 +385,8 @@ static void draw_pet_face(agent_display_state_t state, uint32_t frame,
   }
 }
 
-/// 天线、身体、手臂和脸上的屏幕。x、y 是相对值班位置的偏移；手臂抬起用
-/// 正数。脸另外画，腿也另外画，因为它们各自还有别的姿势。
+/// Antenna, body, arms and the screen on the face. x and y are offsets from the duty position; raised arms use
+/// positive values. The face and legs are drawn separately, since each has other poses too.
 static void draw_pet_body(int x, int y, int antenna, uint16_t knob_color,
                           int left_arm, int right_arm) {
   fill_rect(157 + x, 48 + y - antenna, 6, 13 + antenna, COLOR_PET_HIGHLIGHT);
@@ -400,7 +400,7 @@ static void draw_pet_body(int x, int y, int antenna, uint16_t knob_color,
   fill_rect(132 + x, 79 + y, 56, 32, 0x10a4);
 }
 
-/// 下半身与两只脚；脚抬起用正数。
+/// Lower body and both feet; raised feet use positive values.
 static void draw_pet_legs(int x, int y, int left_foot, int right_foot) {
   fill_rect(139 + x, 121 + y, 42, 25, COLOR_PET);
   fill_rect(126 + x, 125 + y - left_foot, 13, 17, COLOR_PET_HIGHLIGHT);
@@ -422,7 +422,7 @@ static void draw_buddy(agent_display_state_t state, uint32_t frame,
     y_offset = 1;
   }
 
-  // 伸懒腰时只拉长天线、身体不动，才像伸展而不是整只跳一下。
+  // When stretching, only lengthen the antenna and keep the body still, so it reads as a stretch rather than a hop.
   int antenna = state == AGENT_DISPLAY_IDLE &&
                         idle_mood(frame) == IDLE_MOOD_STRETCH
                     ? 5
@@ -434,7 +434,7 @@ static void draw_buddy(agent_display_state_t state, uint32_t frame,
 
 static uint16_t state_color(agent_display_state_t state) {
   if (link_lost) {
-    // 失联期间所有颜色转灰：状态可能已经过时，不该继续用鲜艳色宣称它成立。
+    // Everything turns gray while the link is lost: the state may be stale and shouldn't keep claiming it in bright colors.
     return COLOR_MUTED;
   }
   if (state == AGENT_DISPLAY_WORKING) {
@@ -465,13 +465,13 @@ static const char *short_state_label(agent_display_state_t state) {
   return "RUN";
 }
 
-/// 收到卡片时的秒数加上设备自己走过的时间。
+/// Seconds at the time the card was received, plus the time the device has counted since.
 static int task_elapsed_seconds(size_t index) {
   TickType_t ticks = xTaskGetTickCount() - current_tasks[index].received_tick;
   return current_tasks[index].elapsed_base + (int)(pdTICKS_TO_MS(ticks) / 1000);
 }
 
-/// 卡片右下角只有三格宽，超过一小时就只报小时。
+/// The card's bottom-right corner is only three cells wide; past an hour, show hours only.
 static void format_elapsed(char *out, size_t size, int seconds) {
   if (seconds < 0) {
     seconds = 0;
@@ -498,7 +498,7 @@ static void draw_task_cards(void) {
     draw_text(x + 12, y + 5, current_tasks[index].title, 1, COLOR_TEXT, 26);
     draw_text(x + 12, y + 17, short_state_label(current_tasks[index].state), 1,
               color, 4);
-    // 第一行是会话名时，项目名挪到第二行；标题本身就是项目名就不重复。
+    // When the first line is a session name, the project name moves to the second line; if the title is the project name, don't repeat it.
     const char *project = current_tasks[index].project;
     if (project[0] != '\0' && strstr(current_tasks[index].title, project) == NULL) {
       draw_text(x + 42, y + 17, project, 1, COLOR_MUTED, 16);
@@ -507,7 +507,7 @@ static void draw_task_cards(void) {
     char elapsed[8];
     format_elapsed(elapsed, sizeof(elapsed), task_elapsed_seconds(index));
     int elapsed_width = (int)strlen(elapsed) * 6 - 1;
-    // 等待确认时把时长也点亮：这一栏回答的正是「等了多久」。
+    // While waiting for input, light up the duration too: this column answers exactly "how long has it waited".
     uint16_t elapsed_color =
         current_tasks[index].state == AGENT_DISPLAY_INPUT_REQUIRED ? color
                                                                    : COLOR_MUTED;
@@ -516,13 +516,13 @@ static void draw_task_cards(void) {
   }
 }
 
-/// 页脚显示两侧的构建标识：本机固件，以及心跳捎来的 Mac 端。
+/// The footer shows the build stamps of both sides: this firmware, and the Mac side carried by the heartbeat.
 ///
-/// 只显示，不判断。固件要插 USB、停 daemon 才能烧，daemon 改一行就重启，
-/// 两边大部分时间本来就不在同一个 commit 上；把「不一致」当成告警，几天内
-/// 就会被彻底无视。真正会出事的是协议能力不匹配，而那不是 commit 能回答的。
+/// Display only, no judgement. Flashing firmware means plugging in USB and stopping the daemon, while the daemon
+/// restarts after a one-line change, so most of the time the two sides aren't on the same commit; treating a mismatch as a
+/// warning would get it ignored within days. What actually breaks is a protocol capability mismatch, which a commit can't answer.
 ///
-/// 两行左对齐到同一列——逐字比对靠的是对齐，不是颜色。
+/// Both lines are left-aligned to the same column: verbatim comparison relies on alignment, not color.
 static void draw_build_footer(void) {
   char firmware_line[BUILD_BYTES + 8];
   char daemon_line[BUILD_BYTES + 8];
@@ -542,8 +542,8 @@ static void draw_build_footer(void) {
   draw_text(x, 228, daemon_line, 1, COLOR_MUTED, sizeof(daemon_line));
 }
 
-/// 空闲时在标题与战绩之间轮播。空闲屏出现得最频繁，只写一句固定的话太浪费。
-/// 番茄钟的当日记录是设备自己记的，也排进来。
+/// While idle, rotate between the title and stats. The idle screen shows up most often, so a single fixed sentence is a waste.
+/// The pomodoro's daily record is kept by the device itself and goes into the rotation too.
 static void draw_idle_line(void) {
   const char *lines[2 + AGENT_DISPLAY_MAX_STATS];
   size_t count = 0;
@@ -573,7 +573,7 @@ static void draw_idle_line(void) {
 
 static esp_err_t present(void) {
   if (render_dim) {
-    // 每个通道各减半：RGB565 整体右移一位再掩掉串到相邻通道的最低位。
+    // Halve each channel: shift the whole RGB565 value right by one, then mask off the low bits spilling into neighboring channels.
     for (size_t index = 0; index < DISPLAY_WIDTH * DISPLAY_HEIGHT; index++) {
       framebuffer[index] = (uint16_t)((framebuffer[index] >> 1) & 0x7bef);
     }
@@ -583,7 +583,7 @@ static esp_err_t present(void) {
   ESP_RETURN_ON_ERROR(esp_lcd_panel_draw_bitmap(panel_handle, 0, 0,
                                                 DISPLAY_WIDTH, DISPLAY_HEIGHT,
                                                 framebuffer),
-                      TAG, "提交 LCD framebuffer 失败");
+                      TAG, "failed to submit LCD framebuffer");
   if (xSemaphoreTake(transfer_done, pdMS_TO_TICKS(1000)) != pdTRUE) {
     return ESP_ERR_TIMEOUT;
   }
@@ -609,7 +609,7 @@ static const char *state_label(agent_display_state_t state) {
   return "READY";
 }
 
-/// 与主循环用同一种毫秒计数，番茄钟的截止时刻才对得上。
+/// Uses the same millisecond count as the main loop so the pomodoro deadline lines up.
 static uint32_t clock_ms(void) {
   return xTaskGetTickCount() * (uint32_t)portTICK_PERIOD_MS;
 }
@@ -621,8 +621,8 @@ static uint16_t phase_color(const agent_pomodoro_view_t *view) {
   return view->phase == AGENT_POMODORO_BREAK ? COLOR_BREAK : COLOR_FOCUS;
 }
 
-/// 从圆心向外画一段径向线。角度从 12 点起顺时针；shift 是整圈的横向偏移，
-/// 只有闹铃抖动时不为零。
+/// Draws a radial segment outward from the center. Angles run clockwise from 12 o'clock; shift is the whole ring's
+/// horizontal offset, nonzero only while the alarm shakes.
 static void draw_radial(float angle, int inner, int outer, int thickness,
                         uint16_t color, int shift) {
   float dx = sinf(angle);
@@ -635,11 +635,11 @@ static void draw_radial(float angle, int inner, int outer, int thickness,
   }
 }
 
-/// RGB565 各分量减半：脉动的暗拍。
+/// Halves each RGB565 component: the dim beat of the pulse.
 static uint16_t half_bright(uint16_t color) { return (color >> 1) & 0x7bef; }
 
-/// 闹铃是否还在响。结束后视图一变就是用户动过手了：开始下一阶段
-/// 变成运行中，放弃或跳过换了阶段。
+/// Whether the alarm is still ringing. After the end, any change of view means the user acted: starting the next
+/// phase makes it running, abandoning or skipping changes the phase.
 static bool ring_alarm_active(const agent_pomodoro_view_t *view) {
   if (ring_alarm && (view->run != AGENT_POMODORO_PENDING ||
                      view->phase != ring_alarm_phase)) {
@@ -653,7 +653,7 @@ static bool ring_alarm_shaking(void) {
   return ring_alarm && ring_alarm_shake_frames > 0;
 }
 
-/// 抖动时整圈的横向偏移：每帧换一边。
+/// The whole ring's horizontal offset while shaking: switches side every frame.
 static int ring_alarm_shift(void) {
   if (!ring_alarm_shaking()) {
     return 0;
@@ -666,8 +666,8 @@ static void draw_pomodoro_ring(const agent_pomodoro_view_t *view, bool alarm) {
   uint32_t elapsed = view->total_ms - view->remaining_ms;
   float sweep = TAU * (float)elapsed / (float)view->total_ms;
   int shift = ring_alarm_shift();
-  // 闹铃：整圈亮成下一阶段的颜色。抖完之后一帧亮一帧暗，像心跳，
-  // 不是灰与亮的硬闪。
+  // Alarm: the whole ring lights up in the next phase's color. After shaking, alternate a bright and a dim frame like a
+  // heartbeat, not a hard flash between gray and bright.
   if (alarm && !ring_alarm_shaking() && animation_frame % 2 == 1) {
     color = half_bright(color);
   }
@@ -681,7 +681,7 @@ static void draw_pomodoro_ring(const agent_pomodoro_view_t *view, bool alarm) {
   draw_radial(sweep, RING_HAND_INNER, RING_HAND_OUTER, 3, color, shift);
 }
 
-/// 当日记录的一行："3 FOCUS 1H15"。不到一小时只写分钟。
+/// One line of the daily record: "3 FOCUS 1H15". Under an hour, only minutes.
 static void format_tally(char *out, size_t size, unsigned completed,
                          uint32_t focus_s) {
   unsigned minutes = (unsigned)(focus_s / 60u);
@@ -693,15 +693,15 @@ static void format_tally(char *out, size_t size, unsigned completed,
   }
 }
 
-/// 向上取整到秒：刚开始显示 25:00，走到最后一毫秒仍是 00:01。
+/// Rounds up to the second: shows 25:00 at the start and still 00:01 in the last millisecond.
 static void format_countdown(char *out, size_t size, uint32_t remaining_ms) {
   uint32_t seconds = (remaining_ms + 999u) / 1000u;
   snprintf(out, size, "%02u:%02u", (unsigned)(seconds / 60u) % 100u,
            (unsigned)(seconds % 60u));
 }
 
-/// 番茄钟场景里 Agent 只剩右下角几行：它仍然回答“现在最需要我注意什么”，
-/// 语音也照常播，只是画面让给了倒计时。
+/// In the pomodoro scene the agents keep only a few lines at the bottom right: they still answer "what needs my attention most",
+/// and voice lines still play; the screen just goes to the countdown.
 static void draw_agent_summary(const char *label, uint16_t status_color) {
   draw_text(PANEL_X, 176, "AGENT", 1, COLOR_MUTED, 18);
   draw_text(PANEL_X, 188, label, 1, status_color, 18);
@@ -719,7 +719,7 @@ static void draw_pomodoro_scene(const char *label, uint16_t status_color) {
   bool alarm = ring_alarm_active(&view);
   draw_pomodoro_ring(&view, alarm);
 
-  // 暂停时数字闪烁：停表的老规矩。闹铃抖动时数字跟着圆环一起抖。
+  // While paused the digits blink, the old stopwatch rule. While the alarm shakes, the digits shake with the ring.
   if (!paused || animation_frame % 2 == 0) {
     char countdown[8];
     format_countdown(countdown, sizeof(countdown), view.remaining_ms);
@@ -727,8 +727,8 @@ static void draw_pomodoro_scene(const char *label, uint16_t status_color) {
               countdown, 4, COLOR_TEXT, 5);
   }
 
-  // 空闲写 READY；专注刚结束、休息还没开始时写 BREAK 配 05:00，
-  // 和空闲区分开：这一屏在等的是开始休息，不是开始专注。
+  // Idle shows READY; right after focus ends and before the break starts, show BREAK with 05:00
+  // to tell it apart from idle: this screen is waiting for the break to start, not for focus to start.
   const char *phase_label = agent_pomodoro_is_idle(&view)          ? "READY"
                             : view.phase == AGENT_POMODORO_BREAK ? "BREAK"
                                                                  : "FOCUS";
@@ -747,8 +747,8 @@ static void draw_pomodoro_scene(const char *label, uint16_t status_color) {
     draw_text(PANEL_X, 98, "PAUSED", 2, color, 9);
   }
 
-  // 当日记录：完成几次记几格，再一行写清次数与累计专注时长。按 Mac 端
-  // 的本地日期清零，重启不丢。
+  // Daily record: one cell per completed session, plus a line with the count and total focus time. Resets on the
+  // Mac's local date and survives restarts.
   draw_text(PANEL_X, 118, "TODAY", 1, COLOR_MUTED, 18);
   unsigned shown = view.completed > 8 ? 8 : view.completed;
   for (unsigned index = 0; index < shown; index++) {
@@ -767,7 +767,7 @@ static void draw_pomodoro_scene(const char *label, uint16_t status_color) {
   draw_agent_summary(label, status_color);
 }
 
-/// 小灯灵场景右上角的番茄钟小徽章：切回来看 Agent 时，倒计时不该消失。
+/// Small pomodoro badge at the top right of the buddy scene: switching back to watch the agents shouldn't hide the countdown.
 static void draw_pomodoro_badge(void) {
   agent_pomodoro_view_t view;
   agent_pomodoro_view(clock_ms(), &view);
@@ -784,8 +784,8 @@ static void draw_pomodoro_badge(void) {
             phase_color(&view), sizeof(badge));
 }
 
-/// 休闲模式：小灯灵离开值班的位置，在整块屏幕中间演小剧目。状态条和
-/// 页脚照旧，睡着的精灵就等于“没有事等你”。
+/// Leisure mode: the buddy leaves its duty spot and plays skits in the middle of the screen. The status bar and
+/// footer stay as usual; a sleeping buddy simply means "nothing is waiting for you".
 typedef enum {
   EYES_OPEN,
   EYES_CLOSED,
@@ -854,7 +854,7 @@ static void draw_pet_pose(const pet_pose_t *pose) {
   draw_pet_legs(pose->x, pose->y, pose->left_foot, pose->right_foot);
 }
 
-/// 睁眼微笑，每三秒眨一次。
+/// Eyes open and smiling, blinking every three seconds.
 static pet_pose_t resting_pose(uint32_t frame) {
   pet_pose_t pose = {0};
   pose.eyes = frame % 24 == 23 ? EYES_CLOSED : EYES_OPEN;
@@ -874,7 +874,7 @@ static void draw_sleeping_z(int x, int y, uint32_t frame) {
   draw_text(172 + x, 44 + y - (int)(frame % 16), "Z", 2, COLOR_READY, 1);
 }
 
-/// 剧目之间的普通空闲：站着，呼吸，眨眼。
+/// Plain idle between skits: standing, breathing, blinking.
 static void skit_rest(uint32_t frame) {
   pet_pose_t pose = resting_pose(frame);
   pose.y = (int)((frame / 8) % 2);
@@ -887,7 +887,7 @@ static void skit_sleep(uint32_t frame) {
   draw_sleeping_z(0, pose.y, frame);
 }
 
-/// 巡逻：走到右边，停下看你一眼，走到左边，再回来。
+/// Patrol: walk to the right, stop and glance at you, walk to the left, then come back.
 static void skit_patrol(uint32_t frame) {
   pet_pose_t pose = resting_pose(frame);
   bool walking = true;
@@ -920,14 +920,14 @@ static void draw_ball(int cx, int cy, uint32_t frame) {
   fill_rect(cx - 4, cy - 4, 8, 8, COLOR_INPUT);
   fill_rect(cx - 3, cy - 5, 6, 10, COLOR_INPUT);
   fill_rect(cx - 5, cy - 3, 10, 6, COLOR_INPUT);
-  // 一个绕着转的深色点，球才像在滚。
+  // A dark dot circling around makes the ball look like it's rolling.
   static const int8_t SPIN[4][2] = {{-2, -2}, {2, -2}, {2, 2}, {-2, 2}};
   fill_rect(cx + SPIN[frame % 4][0] - 1, cy + SPIN[frame % 4][1] - 1, 2, 2,
             COLOR_BACKGROUND);
 }
 
-/// 踢球：球从左边滚到脚边，一脚踢开，弹一下又滚回来，再一脚踢出画面。
-/// 球始终在身体左侧飞，不穿过身体。
+/// Ball: the ball rolls from the left to the feet, gets kicked away, bounces and rolls back, then is kicked off screen.
+/// The ball always flies on the left of the body and never passes through it.
 static void skit_ball(uint32_t frame) {
   const int ground = 149;
   const int at_foot = 116;
@@ -968,7 +968,7 @@ static void skit_ball(uint32_t frame) {
   draw_ball(ball_x, ball_y, frame);
 }
 
-/// 看书：举着一本书一行行扫，隔几秒翻一页，中间被剧情吓一跳。
+/// Reading: holds up a book and scans it line by line, turns a page every few seconds, and gets startled by the plot midway.
 static void skit_read(uint32_t frame) {
   pet_pose_t pose = resting_pose(frame);
   pose.left_arm = 10;
@@ -1000,7 +1000,7 @@ static void skit_read(uint32_t frame) {
   }
 }
 
-/// 数星星：仰头数到七，越数越慢，数着数着睡着了。
+/// Counting stars: looks up and counts to seven, slower and slower, and falls asleep counting.
 static void skit_stars(uint32_t frame) {
   static const uint16_t STARS[][2] = {
       {20, 36},  {48, 52},  {75, 40},  {100, 60}, {130, 34}, {200, 44},
@@ -1032,8 +1032,8 @@ static void skit_stars(uint32_t frame) {
   }
 }
 
-/// 躲猫猫：溜到屏幕右边缘外只剩一只手在晃，探出半个身子看一眼，再缩回去，
-/// 最后走回来。
+/// Hide and seek: slips past the right edge of the screen until only a waving hand shows, leans half out for a look, ducks back,
+/// and finally walks back.
 static void skit_hide(uint32_t frame) {
   pet_pose_t pose = resting_pose(frame);
   if (frame < 12) {
@@ -1056,7 +1056,7 @@ static void skit_hide(uint32_t frame) {
   draw_pet_pose(&pose);
 }
 
-/// 被自己吓醒：睡着，突然一个感叹号跳起来，左右张望，打个哈欠，接着睡。
+/// Startled awake: asleep, then an exclamation mark jumps up, it looks left and right, yawns, and goes back to sleep.
 static void skit_startle(uint32_t frame) {
   bool sleeping = frame < 24 || frame >= 56;
   pet_pose_t pose = sleeping ? sleeping_pose(frame) : resting_pose(frame);
@@ -1084,7 +1084,7 @@ static void skit_startle(uint32_t frame) {
   }
 }
 
-/// 梦话：睡着了，头顶冒出一串小泡泡，泡泡里是今天的战绩。
+/// Sleep talking: asleep, with a string of small bubbles overhead showing today's stats.
 static void skit_dream(uint32_t frame) {
   pet_pose_t pose = sleeping_pose(frame);
   draw_pet_pose(&pose);
@@ -1151,7 +1151,7 @@ static void draw_pet_scene(const char *label, uint16_t status_color) {
   if (current_task_count > 0) {
     draw_text_centered(195, "LATEST ON TOP", 1, COLOR_MUTED);
   } else if (current_state == AGENT_DISPLAY_IDLE && !link_lost) {
-    // 失联时不轮播：会动的画面看上去像还活着，正好与 NO LINK 相反。
+    // No rotation while the link is lost: a moving screen looks alive, the exact opposite of NO LINK.
     draw_idle_line();
   } else if (current_title[0] != '\0') {
     draw_text_centered(195, current_title, 2, COLOR_TEXT);
@@ -1177,7 +1177,7 @@ static esp_err_t render_current_state(void) {
   if (current_mode == AGENT_MODE_LEISURE) {
     agent_leisure_view(clock_ms(), &leisure);
     if (leisure.lights_out) {
-      // 夜里睡久了就关背光；没人看的画面也不必再画。
+      // After sleeping long at night, turn off the backlight; a screen nobody watches needn't be drawn.
       ensure_backlight(false);
       return ESP_OK;
     }
@@ -1207,7 +1207,7 @@ static TickType_t animation_period(agent_display_state_t state) {
     return pdMS_TO_TICKS(AGENT_LEISURE_FRAME_MS);
   }
   if (current_mode == AGENT_MODE_POMODORO) {
-    // 倒计时每秒变一次；暂停时的闪烁要每半秒一帧；闹铃抖动更快。
+    // The countdown changes every second; blinking while paused needs a frame every half second; the alarm shake is faster still.
     if (ring_alarm_shaking()) {
       return pdMS_TO_TICKS(RING_ALARM_SHAKE_FRAME_MS);
     }
@@ -1307,7 +1307,7 @@ void agent_display_set_stats(const char *const *lines, size_t count) {
   }
 }
 
-/// 心跳每 5 秒一次，标识没变就不能重画。
+/// The heartbeat comes every 5 seconds; don't redraw if the stamp hasn't changed.
 static void set_build(char *slot, const char *build) {
   const char *value = build == NULL ? "" : build;
   if (strncmp(slot, value, BUILD_BYTES - 1) == 0) {
@@ -1334,7 +1334,7 @@ void agent_display_pomodoro_ended(void) {
   ring_alarm = true;
   ring_alarm_phase = view.phase;
   ring_alarm_shake_frames = RING_ALARM_SHAKE_FRAMES;
-  // 调用方紧接着会重绘第一帧；这里只把后面的帧排到抖动的节奏上。
+  // The caller redraws the first frame right after; this only schedules the later frames on the shake rhythm.
   animation_frame = 0;
   next_animation_at =
       xTaskGetTickCount() + pdMS_TO_TICKS(RING_ALARM_SHAKE_FRAME_MS);
@@ -1362,7 +1362,7 @@ void agent_display_set_mode(agent_mode_t mode) {
   }
   current_mode = mode;
   animation_frame = 0;
-  // 把番茄钟画面切走就是看见了：闹铃不必再响。
+  // Switching away from the pomodoro screen means it was seen: the alarm can stop.
   if (mode != AGENT_MODE_POMODORO) {
     ring_alarm = false;
     ring_alarm_shake_frames = 0;
@@ -1437,7 +1437,7 @@ esp_err_t agent_display_init(void) {
   };
   i2c_master_bus_handle_t i2c_bus;
   ESP_RETURN_ON_ERROR(i2c_new_master_bus(&i2c_config, &i2c_bus), TAG,
-                      "初始化 I2C 失败");
+                      "failed to init I2C");
 
   i2c_device_config_t xl9555_config = {
       .dev_addr_length = I2C_ADDR_BIT_LEN_7,
@@ -1446,23 +1446,23 @@ esp_err_t agent_display_init(void) {
   };
   ESP_RETURN_ON_ERROR(
       i2c_master_bus_add_device(i2c_bus, &xl9555_config, &xl9555_handle), TAG,
-      "添加 XL9555 失败");
+      "failed to add XL9555");
 
   uint8_t direction;
   ESP_RETURN_ON_ERROR(xl9555_read(XL9555_CONFIG_PORT0, &direction), TAG,
-                      "探测 XL9555 失败");
+                      "failed to probe XL9555");
   direction &= (uint8_t)~XL9555_LCD_BACKLIGHT_MASK;
   ESP_RETURN_ON_ERROR(xl9555_write(XL9555_CONFIG_PORT0, direction), TAG,
-                      "配置 LCD 背光方向失败");
-  ESP_RETURN_ON_ERROR(set_backlight(false), TAG, "关闭 LCD 背光失败");
+                      "failed to configure LCD backlight direction");
+  ESP_RETURN_ON_ERROR(set_backlight(false), TAG, "failed to turn off LCD backlight");
 
   gpio_config_t read_pin_config = {
       .pin_bit_mask = 1ULL << LCD_NUM_RD,
       .mode = GPIO_MODE_INPUT_OUTPUT,
       .pull_up_en = GPIO_PULLUP_ENABLE,
   };
-  ESP_RETURN_ON_ERROR(gpio_config(&read_pin_config), TAG, "配置 LCD RD 失败");
-  ESP_RETURN_ON_ERROR(gpio_set_level(LCD_NUM_RD, 1), TAG, "拉高 LCD RD 失败");
+  ESP_RETURN_ON_ERROR(gpio_config(&read_pin_config), TAG, "failed to configure LCD RD");
+  ESP_RETURN_ON_ERROR(gpio_set_level(LCD_NUM_RD, 1), TAG, "failed to drive LCD RD high");
 
   esp_lcd_i80_bus_handle_t i80_bus;
   esp_lcd_i80_bus_config_t bus_config = {
@@ -1477,7 +1477,7 @@ esp_err_t agent_display_init(void) {
       .sram_trans_align = 4,
   };
   ESP_RETURN_ON_ERROR(esp_lcd_new_i80_bus(&bus_config, &i80_bus), TAG,
-                      "初始化 LCD i80 bus 失败");
+                      "failed to init LCD i80 bus");
 
   transfer_done = xSemaphoreCreateBinary();
   if (transfer_done == NULL) {
@@ -1503,7 +1503,7 @@ esp_err_t agent_display_init(void) {
   };
   esp_lcd_panel_io_handle_t panel_io;
   ESP_RETURN_ON_ERROR(esp_lcd_new_panel_io_i80(i80_bus, &io_config, &panel_io),
-                      TAG, "初始化 LCD panel IO 失败");
+                      TAG, "failed to init LCD panel IO");
 
   esp_lcd_panel_dev_config_t panel_config = {
       .reset_gpio_num = GPIO_NUM_NC,
@@ -1512,35 +1512,35 @@ esp_err_t agent_display_init(void) {
   };
   ESP_RETURN_ON_ERROR(
       esp_lcd_new_panel_st7789(panel_io, &panel_config, &panel_handle), TAG,
-      "初始化 ST7789 失败");
+      "failed to init ST7789");
   ESP_RETURN_ON_ERROR(esp_lcd_panel_reset(panel_handle), TAG,
-                      "复位 ST7789 失败");
+                      "failed to reset ST7789");
   ESP_RETURN_ON_ERROR(esp_lcd_panel_init(panel_handle), TAG,
-                      "配置 ST7789 失败");
+                      "failed to configure ST7789");
   ESP_RETURN_ON_ERROR(esp_lcd_panel_invert_color(panel_handle, true), TAG,
-                      "设置 LCD 颜色反转失败");
+                      "failed to set LCD color inversion");
   ESP_RETURN_ON_ERROR(esp_lcd_panel_set_gap(panel_handle, 0, 0), TAG,
-                      "设置 LCD offset 失败");
+                      "failed to set LCD offset");
 
   uint8_t memory_access = 0x00;
   uint8_t pixel_format = 0x65;
   ESP_RETURN_ON_ERROR(
       esp_lcd_panel_io_tx_param(panel_io, 0x36, &memory_access, 1), TAG,
-      "设置 LCD memory access 失败");
+      "failed to set LCD memory access");
   ESP_RETURN_ON_ERROR(
       esp_lcd_panel_io_tx_param(panel_io, 0x3a, &pixel_format, 1), TAG,
-      "设置 LCD pixel format 失败");
+      "failed to set LCD pixel format");
   ESP_RETURN_ON_ERROR(esp_lcd_panel_swap_xy(panel_handle, true), TAG,
-                      "设置 LCD 方向失败");
+                      "failed to set LCD orientation");
   ESP_RETURN_ON_ERROR(esp_lcd_panel_mirror(panel_handle, true, false), TAG,
-                      "设置 LCD 镜像失败");
+                      "failed to set LCD mirroring");
   ESP_RETURN_ON_ERROR(esp_lcd_panel_disp_on_off(panel_handle, true), TAG,
-                      "打开 LCD panel 失败");
+                      "failed to turn on LCD panel");
 
   display_ready = true;
   ESP_RETURN_ON_ERROR(agent_display_show(AGENT_DISPLAY_IDLE, NULL), TAG,
-                      "绘制初始页面失败");
-  ESP_RETURN_ON_ERROR(set_backlight(true), TAG, "打开 LCD 背光失败");
+                      "failed to draw initial screen");
+  ESP_RETURN_ON_ERROR(set_backlight(true), TAG, "failed to turn on LCD backlight");
   backlight_on = true;
   return ESP_OK;
 }

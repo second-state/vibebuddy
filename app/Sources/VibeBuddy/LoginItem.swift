@@ -1,7 +1,7 @@
 import Foundation
 import ServiceManagement
 
-/// 登录时启动：SMAppService，系统会提示「已添加后台项目」。
+/// Launch at login via SMAppService; macOS will show a "background item added" notice.
 enum LoginItem {
     static var isEnabled: Bool {
         SMAppService.mainApp.status == .enabled

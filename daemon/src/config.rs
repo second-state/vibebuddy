@@ -1,5 +1,5 @@
-//! daemon 持有的配置：App 通过接口读写，不直接碰文件；`cargo run` 单独跑时
-//! 也有配置可读。环境变量仍是开发时的覆盖手段，优先级高于文件。
+//! Config owned by the daemon: the app reads and writes it through the API, never the file; `cargo run`
+//! on its own still has config to read. Environment variables remain the dev override and beat the file.
 
 use std::path::{Path, PathBuf};
 
@@ -8,9 +8,9 @@ use serde::{Deserialize, Serialize};
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(default)]
 pub struct Config {
-    /// 最近一次写进设备的播报音色 id；None 表示还没写过，设备用内置音色。
+    /// Id of the announcement voice last written to the device; None means never written, so the built-in voice.
     pub voice: Option<String>,
-    /// 链路异常时 App 是否弹 macOS 通知。
+    /// Whether the app shows a macOS notification when the link has trouble.
     pub notify_link: bool,
 }
 
@@ -40,8 +40,8 @@ impl Config {
     }
 }
 
-/// 配置文件位置：环境变量 `VIBEBUDDY_CONFIG_FILE` 优先，否则放在 Application
-/// Support 里 `stats.json` 旁边。没有 `HOME` 时不落盘，配置只在内存里。
+/// Config file location: `VIBEBUDDY_CONFIG_FILE` wins, otherwise next to `stats.json` in Application
+/// Support. Without `HOME` nothing is written and config lives only in memory.
 pub fn config_file() -> Option<PathBuf> {
     if let Ok(path) = std::env::var("VIBEBUDDY_CONFIG_FILE") {
         return Some(PathBuf::from(path));
@@ -59,8 +59,8 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("beacon-config-{}", std::process::id()));
         let path = dir.join("config.json");
         assert_eq!(Config::load(&path), Config::default());
-        std::fs::create_dir_all(&dir).expect("建临时目录");
-        std::fs::write(&path, "not json").expect("写坏文件");
+        std::fs::create_dir_all(&dir).expect("create temp dir");
+        std::fs::write(&path, "not json").expect("write broken file");
         assert_eq!(Config::load(&path), Config::default());
         let _ = std::fs::remove_dir_all(dir);
     }
@@ -73,7 +73,7 @@ mod tests {
             voice: Some("wanwanxiaohe".to_owned()),
             notify_link: false,
         };
-        config.save(&path).expect("保存配置");
+        config.save(&path).expect("save config");
         assert_eq!(Config::load(&path), config);
         let _ = std::fs::remove_dir_all(dir);
     }

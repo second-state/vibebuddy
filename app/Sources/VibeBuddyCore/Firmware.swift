@@ -1,7 +1,7 @@
 import Foundation
 
-/// 固件只比哈希：盒子报的构建标识是"哈希 日期 时间"，App 附带的也是。
-/// 哈希不同就该显示「更新到 App 附带版本」，不判断新旧（docs/app.md「固件升级」）。
+/// Firmware is compared by hash only: the box reports its build ID as "hash date time", and so does the bundled copy.
+/// A different hash means offering "Update to bundled version", without judging which is newer (docs/app.md, firmware upgrades).
 public enum Firmware {
     public static func hash(of build: String?) -> String? {
         guard let build else { return nil }
@@ -9,14 +9,14 @@ public enum Firmware {
         return first.isEmpty ? nil : first
     }
 
-    /// 附带版本存在且与盒子不同时才可更新；盒子还没报构建号时不催。
+    /// An update is available only when a bundled version exists and differs from the box's; no nagging before the box reports its build.
     public static func updateAvailable(device: String?, bundled: String?) -> Bool {
         guard let deviceHash = hash(of: device), let bundledHash = hash(of: bundled) else { return false }
         return deviceHash != bundledHash
     }
 
-    /// 串口开了这么久还没报构建号，就当盒子跑的不是 Vibe Buddy 固件（出厂机）。
-    /// 我们的固件在 daemon 发 hello 后一秒内就会报，宽限取 5 秒。
+    /// If the serial port has been open this long without a build ID, assume the box isn't running Vibe Buddy firmware (a factory box).
+    /// Our firmware reports within a second of the daemon's hello, so the grace period is 5 seconds.
     public static let silenceGrace: TimeInterval = 5
 
     public static func foreign(connected: Bool, device: String?, connectedFor: TimeInterval) -> Bool {

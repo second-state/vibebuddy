@@ -1,7 +1,7 @@
 import Foundation
 import VibeBuddyCore
 
-/// 和 daemon 说话只走本机 HTTP；状态流是 SSE。
+/// Talks to the daemon over local HTTP only; the status stream is SSE.
 struct DaemonClient {
     let base = URL(string: "http://127.0.0.1:7331")!
 
@@ -19,7 +19,7 @@ struct DaemonClient {
         return try StatusCoding.decoder().decode(Status.self, from: data)
     }
 
-    /// 一直读状态流，每收到一份快照就回调；断了就抛错，调用方决定何时重连。
+    /// Reads the status stream, calling back with each snapshot; throws when it drops, and the caller decides when to reconnect.
     func stream(onStatus: @escaping (Status) -> Void) async throws {
         var request = self.request("/v1/status/stream")
         request.timeoutInterval = 3600 * 24
@@ -50,16 +50,16 @@ struct DaemonClient {
 
     func identify() async throws { try await post("/v1/device/identify") }
 
-    /// 盒子应用后回报 VOLUME 行，状态流里的音量才更新；preview 让它用新音量播一句。
+    /// The box reports a VOLUME line once applied, which is when the volume in the status stream updates; preview makes it play a line at the new volume.
     func setVolume(_ level: Int, preview: Bool) async throws {
         let body = try JSONSerialization.data(withJSONObject: ["level": level, "preview": preview])
         let (code, data) = try await post("/v1/device/volume", body: body, contentType: "application/json")
-        guard code == 202 else { throw DaemonError(message: DaemonClient.message(in: data) ?? "音量未被接受（\(code)）") }
+        guard code == 202 else { throw DaemonError(message: DaemonClient.message(in: data) ?? String(localized: "Volume change was rejected (\(code))")) }
     }
 
     func writeVoicePack(_ pack: Data) async throws {
         let (code, data) = try await post("/v1/device/voice-pack", body: pack, contentType: "application/octet-stream")
-        guard code == 202 else { throw DaemonError(message: DaemonClient.message(in: data) ?? "写入未被接受（\(code)）") }
+        guard code == 202 else { throw DaemonError(message: DaemonClient.message(in: data) ?? String(localized: "Voice pack write was rejected (\(code))")) }
     }
 
     func flashFirmware(bootloader: URL, partitionTable: URL, app: URL) async throws {
@@ -67,12 +67,12 @@ struct DaemonClient {
             "bootloader": bootloader.path, "partition_table": partitionTable.path, "app": app.path,
         ])
         let (code, data) = try await post("/v1/device/firmware", body: body, contentType: "application/json")
-        guard code == 202 else { throw DaemonError(message: DaemonClient.message(in: data) ?? "烧录未被接受（\(code)）") }
+        guard code == 202 else { throw DaemonError(message: DaemonClient.message(in: data) ?? String(localized: "Firmware flash was rejected (\(code))")) }
     }
 
     func screenshot() async throws -> Data {
         let (code, data) = try await post("/v1/device/screenshot")
-        guard code == 200 else { throw DaemonError(message: String(data: data, encoding: .utf8) ?? "截图失败（\(code)）") }
+        guard code == 200 else { throw DaemonError(message: String(data: data, encoding: .utf8) ?? String(localized: "Screenshot failed (\(code))")) }
         return data
     }
 

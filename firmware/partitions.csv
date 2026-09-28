@@ -1,6 +1,7 @@
-# 16 MB Flash，默认的 1 MB app 分区装不下语音资产。只留一个 factory app，
-# 没有 OTA：固件只经 USB 烧录。voices 放当前播报音色的语音包，换音色只写它，
-# 烧固件不碰它（ADR-0003）。
+# 16 MB flash; the default 1 MB app partition can't hold the voice assets. A single
+# factory app, no OTA: firmware is only flashed over USB. voices holds the current
+# announcement voice pack; changing voice writes only it, and flashing firmware
+# leaves it alone (ADR-0003).
 # Name,    Type, SubType, Offset,  Size
 nvs,       data, nvs,     0x9000,  0x6000
 phy_init,  data, phy,     0xf000,  0x1000

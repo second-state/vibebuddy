@@ -25,26 +25,28 @@
 #define MAX_LINE_BYTES 1024
 #define LINE_BUFFER_BYTES (MAX_LINE_BYTES + 2)
 #define IO_BUFFER_BYTES 256
-/// 串口驱动的接收环形缓冲：语音包的一行接近 1 KB，给它留出几行的余量。
-/// 连续长行在 UART 桥上会被冲坏，那是 Mac 端按线速分段发送来解决的，
-/// 设备侧的驱动与中断路径已经用直接轮询 FIFO 的对照实验证明无辜。
+/// Receive ring buffer of the UART driver: one voice pack line is close to 1 KB, so leave
+/// room for several lines. Back-to-back long lines get mangled on the UART bridge; the Mac
+/// solves that by pacing its sends to the line rate, and a control experiment polling the
+/// FIFO directly cleared the device-side driver and interrupt path.
 #define UART_RX_BUFFER_BYTES 4096
 
 static bool ready_scheduled;
 static TickType_t ready_deadline;
-/// 超过这个时间没有收到任何消息，就认为与 Mac 端失联。
+/// With no message for longer than this, the link to the Mac counts as lost.
 #define LINK_TIMEOUT_MS 15000
 static TickType_t last_message_tick;
 static bool link_lost;
-/// 上一次报给 Mac 端的档位、关灯状态与小时数，只在变化时各报一行。
+/// The level, backlight state and hour last reported to the Mac; each is reported as a line only when it changes.
 static agent_leisure_tier_t reported_tier = AGENT_LEISURE_ALERT;
 static bool reported_lights_out;
 static int reported_hour = -1;
 
-// 两条输出都只是诊断通道，谁都不许拖住主循环。接 BOX 的 UART 桥时，USB
-// Serial/JTAG 那头没有主机取数据，tx ring buffer 填满后任何等待都是永久的：
-// 主任务停摆，画面定格，失联检测也一起死掉，而 Mac 端的心跳照样写得进串口，
-// 两边都看不出设备已经没了。写不进去就丢掉这一段。
+// Both outputs are only diagnostic channels, and neither may hold up the main loop. When
+// the BOX's UART bridge is used, no host drains the USB Serial/JTAG side, so once its tx
+// ring buffer fills any wait is forever: the main task stalls, the screen freezes, link-loss
+// detection dies with it, and the Mac's heartbeat still gets written to the port, so
+// neither side notices the device is gone. If a write doesn't fit, drop that piece.
 static void transport_write_all(const char *data, size_t length) {
   uart_write_bytes(UART_NUM_0, data, length);
   usb_serial_jtag_write_bytes(data, length, 0);
@@ -104,11 +106,12 @@ static void report_pomodoro(const char *what) {
   transport_write_value_line("POMODORO ", what);
 }
 
-/// 静音：长按 K2 翻转，不持久化。开会静了音忘记开回来，设备就哑好几天；
-/// 重启恢复有声比记住更安全，屏幕上的 MUTE 标记负责提醒。
+/// Mute: long-press K2 to toggle; not persisted. Mute it for a meeting and forget, and the
+/// device would stay silent for days; coming back with sound after a restart is safer than
+/// remembering, and the MUTE badge on screen is the reminder.
 static bool muted;
 
-/// 所有语音都从这里出去，静音时只记一行日志。
+/// Every voice line goes out through here; when muted it only logs a line.
 static void play_prompt(agent_audio_prompt_t prompt, const char *label) {
   if (muted) {
     transport_write_value_line("AUDIO MUTED ", label);
@@ -121,14 +124,14 @@ static void play_prompt(agent_audio_prompt_t prompt, const char *label) {
   }
 }
 
-/// 音量是设备自己的事实，App 的滑块只是遥控：改完报一行，hello 也报。
+/// Volume is the device's own fact and the app's slider is just a remote: report a line after a change, and on hello too.
 static void announce_volume(void) {
   char text[24];
   snprintf(text, sizeof(text), "VOLUME %u\n", agent_audio_volume() % 1000u);
   transport_write_literal(text);
 }
 
-/// 当日记录变了就存一次，并报一行给 Mac 端。一天只有几次，NVS 不在乎。
+/// When today's record changes, save it once and report a line to the Mac. It happens a few times a day; NVS doesn't mind.
 static void save_tally(void) {
   agent_pomodoro_tally_t tally;
   agent_pomodoro_tally(&tally);
@@ -142,7 +145,7 @@ static void save_tally(void) {
   }
 }
 
-/// 把番茄钟推到前面来；已经在前面就只重绘。
+/// Brings the pomodoro to the front; if it is already there, just redraws.
 static void show_pomodoro(void) {
   if (agent_display_mode() == AGENT_MODE_POMODORO) {
     agent_display_refresh();
@@ -151,9 +154,10 @@ static void show_pomodoro(void) {
   }
 }
 
-/// 三个键各管一件事，与模式无关：K0 是番茄钟的键，K1 在值班与番茄钟之间
-/// 切换（长按去休闲），K2 交给 Mac 端去打开来源。休闲模式里任何键先把
-/// 小灯灵叫回值班，再执行本职：休闲没有遮住任何需要先看一眼的东西。
+/// Each of the three keys does one thing regardless of mode: K0 is the pomodoro key, K1
+/// switches between duty and pomodoro (long press goes to leisure), and K2 asks the Mac to
+/// open the source. In leisure mode any key first calls the buddy back to duty and then does
+/// its own job: leisure hides nothing that needs a look first.
 static void on_button(agent_button_event_t event) {
   uint32_t now = clock_ms();
   agent_mode_t mode_before = agent_display_mode();
@@ -203,17 +207,18 @@ static void on_button(agent_button_event_t event) {
   agent_pomodoro_toggle(now);
   if (before.run == AGENT_POMODORO_PENDING) {
     report_pomodoro(break_phase ? "BREAK START" : "FOCUS START");
-    // 开始一个阶段时把番茄钟推到前面：圆环开始走就是反馈。
+    // Starting a phase brings the pomodoro to the front: the ring starting to move is the feedback.
     show_pomodoro();
     return;
   }
-  // 暂停与继续不换场景，小灯灵场景右上角的徽章会跟着闪。
+  // Pause and resume don't change scenes; the badge in the top right of the buddy scene flashes along.
   report_pomodoro(before.run == AGENT_POMODORO_PAUSED ? "RESUMED" : "PAUSED");
   agent_display_refresh();
 }
 
-/// 阶段结束是只消费一次的边沿：播一次语音，并把番茄钟推到前面来——
-/// 这正是用户该看一眼的时刻。下一阶段停在待开始，等用户按 K0。
+/// A phase end is an edge consumed once: play the voice once and bring the pomodoro to the
+/// front, since this is exactly when the user should glance at it. The next phase waits to
+/// start until the user presses K0.
 static void handle_pomodoro_transition(agent_pomodoro_transition_t transition) {
   if (transition == AGENT_POMODORO_NOTHING) {
     return;
@@ -229,10 +234,12 @@ static void handle_pomodoro_transition(agent_pomodoro_transition_t transition) {
   show_pomodoro();
 }
 
-/// 无聊度按状态累计，不按消息：Agent 有活、番茄钟在走、链路断了，都不算
-/// 空闲。值班空闲够久就去休闲；有事立刻回来。番茄钟模式里，待开始的一屏
-/// 静止的 25:00 和值班空闲一样无聊，五分钟就走；暂停的是用户有意停在那里
-/// 的，放了半小时才当人走了。都是先回值班，接着自然会去休闲。
+/// Boredom accumulates on state, not on messages: agents at work, a running pomodoro or a
+/// lost link are not idle. After duty has been idle long enough, go to leisure; come back
+/// the moment something happens. In pomodoro mode, a still 25:00 waiting to start is as dull
+/// as idle duty and leaves after five minutes; a pause is the user stopping there on
+/// purpose, so only after half an hour is the user assumed gone. Either way it returns to
+/// duty first and then drifts into leisure naturally.
 static void tend_leisure(void) {
   uint32_t now = clock_ms();
   agent_pomodoro_view_t pomodoro;
@@ -246,7 +253,7 @@ static void tend_leisure(void) {
   bool changed = agent_leisure_tick(now);
   agent_leisure_view_t leisure;
   agent_leisure_view(now, &leisure);
-  // 档位按差异汇报，不按“本次有没有变化”：唤醒路径会先在别处推进导演。
+  // Report the level by difference, not by "did it change this time": the wake path advances the director elsewhere first.
   if (leisure.tier != reported_tier) {
     reported_tier = leisure.tier;
     transport_write_value_line("LEISURE ",
@@ -316,10 +323,11 @@ static size_t parse_tasks(const cJSON *message, agent_display_task_t *tasks) {
   return count;
 }
 
-/// 当日战绩随每条状态事件下发，空闲屏用它轮播。
+/// Today's stats come with every state event, and the idle screen rotates through them.
 ///
-/// 不能只在 `agent.idle` 上取：`task.done` 之后设备是自己回到空闲的，
-/// 那一刻正是用户会看的一眼，缓存的战绩必须已经包含刚完成的这一件。
+/// Taking them only from `agent.idle` isn't enough: after `task.done` the device returns to
+/// idle on its own, and that is exactly when the user glances over, so the cached stats
+/// must already include the task just finished.
 static void parse_stats(const cJSON *message) {
   const cJSON *stat_list = cJSON_GetObjectItemCaseSensitive(message, "stats");
   if (!cJSON_IsArray(stat_list)) {
@@ -340,7 +348,7 @@ static void parse_stats(const cJSON *message) {
   }
   agent_display_set_stats(lines, count);
 
-  // “7 DONE” 这一行的数字：休闲时它决定小灯灵是累了还是无聊。
+  // The number in the "7 DONE" line: in leisure it decides whether the buddy is tired or bored.
   unsigned done = 0;
   for (size_t index = 0; index < count; index++) {
     if (strstr(lines[index], "DONE") != NULL) {
@@ -455,14 +463,15 @@ static void handle_line(char *line, size_t length) {
     return;
   }
 
-  // 心跳只用于证明链路存活，不显示也不回显；每 5 秒一次的诊断行会淹没日志。
-  // 它顺带捎来 Mac 端的构建标识：设备可能随时重启，一次性的握手会丢。
+  // The heartbeat only proves the link is alive; it isn't shown or echoed, since a diagnostic
+  // line every 5 seconds would drown the log. It also carries the Mac's build stamp: the
+  // device may restart at any time, and a one-off handshake would be lost.
   if (strcmp(event->valuestring, "device.heartbeat") == 0) {
     const cJSON *build = cJSON_GetObjectItemCaseSensitive(message, "build");
     if (cJSON_IsString(build)) {
       agent_display_set_daemon_build(build->valuestring);
     }
-    // 本地小时数也随心跳来：设备没有时钟，白天黑夜只能听 Mac 端的。
+    // The local hour also comes with the heartbeat: the device has no clock, so day and night are whatever the Mac says.
     const cJSON *hour = cJSON_GetObjectItemCaseSensitive(message, "hour");
     if (cJSON_IsNumber(hour) && (int)hour->valuedouble != reported_hour) {
       reported_hour = (int)hour->valuedouble;
@@ -471,7 +480,7 @@ static void handle_line(char *line, size_t length) {
       snprintf(text, sizeof(text), "CLOCK HOUR %d\n", reported_hour % 100);
       transport_write_literal(text);
     }
-    // 本地日期也随心跳来：番茄钟的当日记录按它清零。
+    // The local date also comes with the heartbeat: the pomodoro's daily record resets on it.
     const cJSON *day = cJSON_GetObjectItemCaseSensitive(message, "day");
     if (cJSON_IsNumber(day) && day->valuedouble > 0 &&
         agent_pomodoro_set_day((uint32_t)day->valuedouble)) {
@@ -482,30 +491,32 @@ static void handle_line(char *line, size_t length) {
     return;
   }
 
-  // 截图是调试动作，不算 Agent 的动静，也不叫醒休闲。
+  // A screenshot is a debugging action: it isn't agent activity and doesn't wake leisure.
   if (strcmp(event->valuestring, "device.screenshot") == 0) {
     agent_display_dump(write_shot_line);
     cJSON_Delete(message);
     return;
   }
 
-  // Mac 端刚连上时问一声：模式、固件构建号、音色只在开机或变化时才报，
-  // daemon 比设备重启得勤，不问就一直不知道。
+  // The Mac asks when it first connects: mode, firmware build and voice are only reported
+  // at boot or on change, and the daemon restarts more often than the device, so without
+  // asking it would never know.
   if (strcmp(event->valuestring, "device.hello") == 0) {
     announce_state();
     cJSON_Delete(message);
     return;
   }
 
-  // 眨眼确认与语音包写入都是 App 在操作设备本身，同样不算 Agent 的动静。
+  // Blink-to-identify and voice pack writes are the app operating the device itself, so they aren't agent activity either.
   if (strcmp(event->valuestring, "device.identify") == 0) {
     agent_display_identify();
     transport_write_literal("IDENTIFY\n");
     cJSON_Delete(message);
     return;
   }
-  // 音量：App 的滑块从这里落到 codec 并存进 NVS；不带 level 只是问一声。
-  // 试听走 play_prompt，静音时同样不出声，和别的播报一个规矩。
+  // Volume: the app's slider lands here, goes to the codec and is saved to NVS; without a
+  // level it is just a query. The preview goes through play_prompt, so it is silent when
+  // muted, same rule as every other announcement.
   if (strcmp(event->valuestring, "device.volume") == 0) {
     const cJSON *level = cJSON_GetObjectItemCaseSensitive(message, "level");
     if (cJSON_IsNumber(level)) {
@@ -526,7 +537,7 @@ static void handle_line(char *line, size_t length) {
     cJSON_Delete(message);
     return;
   }
-  // 链路自检：把收到的字符串的长度与 CRC 回给 Mac，查串口是否收错字节。
+  // Link self-test: send the received string's length and CRC back to the Mac to check for corrupted serial bytes.
   if (strcmp(event->valuestring, "device.echo") == 0) {
     const cJSON *data = cJSON_GetObjectItemCaseSensitive(message, "data");
     if (cJSON_IsString(data)) {
@@ -538,14 +549,14 @@ static void handle_line(char *line, size_t length) {
                "{\"version\":1,\"event\":\"echo\",\"length\":%u,\"crc\":%lu}\n",
                (unsigned)length, (unsigned long)crc);
       transport_write_literal(reply);
-      // 原样回显一行，Mac 端逐字节比对，看串口到底收成了什么。
+      // Echo the line back verbatim; the Mac compares byte by byte to see what the port actually received.
       transport_write_value_line("ECHO ", data->valuestring);
     }
     cJSON_Delete(message);
     return;
   }
 
-  // Agent 一有动静，小灯灵立刻回来值班。
+  // As soon as an agent does something, the buddy comes straight back to duty.
   agent_leisure_note_activity(clock_ms());
   if (agent_display_mode() == AGENT_MODE_LEISURE) {
     (void)agent_leisure_tick(clock_ms());
@@ -565,8 +576,8 @@ static void handle_line(char *line, size_t length) {
 
 static char announced_build[48];
 
-/// 把设备的静态状态整个报一遍：固件构建号、模式、音色、音量。开机与 hello
-/// 都走这里。
+/// Reports the device's whole static state: firmware build, mode, voice and volume. Both
+/// boot and hello go through here.
 static void announce_state(void) {
   transport_write_value_line("DISPLAY READY BUILD ", announced_build);
   transport_write_value_line("MODE ", mode_name(agent_display_mode()));
@@ -574,7 +585,7 @@ static void announce_state(void) {
   announce_volume();
 }
 
-/// 语音包写入的回执都是 JSON 行：Mac 端要按序号做停等流控，诊断行不够用。
+/// Voice pack write acknowledgements are all JSON lines: the Mac does stop-and-wait flow control by sequence number, which diagnostic lines can't support.
 static void voice_reply(const char *event, int32_t seq, const char *detail) {
   char line[160];
   if (strcmp(event, "voice.written") == 0) {
@@ -636,18 +647,20 @@ static void handle_voice_event(const cJSON *message, const char *event) {
     }
     voice_reply("voice.written", -1, agent_voices_current_id());
     transport_write_value_line("VOICES ", agent_voices_current_id());
-    // 写完用新音色说一句：桥接上写要好几分钟，人未必守着 App 找试听键；
-    // 盒子自己开口就是最直接的"写好了"（2026-09-22 同事写完以为没声音）。
+    // Say a line in the new voice when done: over the bridge a write takes several minutes,
+    // and the user may not be watching the app for the preview button; the box speaking up
+    // is the most direct "done" (on 2026-09-22 a colleague finished a write and thought
+    // there was no sound).
     play_prompt(AGENT_AUDIO_DONE, "DONE");
     return;
   }
   voice_reply("voice.error", -1, "unknown voice event");
 }
 
-/// 版本取 esp_app_desc 里的 git 描述；时刻不取它的 __TIME__，那只在
-/// esp_app_desc.c 被重编时才更新，增量构建后会停在上一次全量构建。
-/// AGENT_BUILD_STAMP 由 main/CMakeLists.txt 每次构建重新生成，
-/// 写法与 Mac 端一致，两行要逐字比对。
+/// The version is the git description in esp_app_desc; the time is not its __TIME__, which
+/// only updates when esp_app_desc.c is recompiled and sticks at the last full build after
+/// incremental builds. AGENT_BUILD_STAMP is regenerated by main/CMakeLists.txt on every
+/// build, in the same format as the Mac side, since the two lines are compared verbatim.
 static void describe_firmware_build(char *out, size_t size) {
   const esp_app_desc_t *desc = esp_app_get_description();
   snprintf(out, size, "%.24s %.16s", desc->version, AGENT_BUILD_STAMP);
@@ -667,7 +680,7 @@ void app_main(void) {
 
   agent_pomodoro_init();
   agent_leisure_init(esp_random(), clock_ms());
-  // 昨天的记录也先恢复：换不换日要等心跳带来日期才知道。
+  // Restore yesterday's record too: whether the day changed is only known once a heartbeat brings the date.
   agent_pomodoro_tally_t tally;
   if (agent_tally_init() == ESP_OK && agent_tally_load(&tally) == ESP_OK) {
     agent_pomodoro_restore_tally(&tally);
@@ -715,7 +728,7 @@ void app_main(void) {
   while (true) {
     int received = uart_read_bytes(UART_NUM_0, input, sizeof(input), 0);
     if (received == 0) {
-      // 这里的等待就是按键的采样周期：100 ms 会漏掉短促的轻点。
+      // This wait is the key sampling period: 100 ms would miss quick taps.
       received =
           usb_serial_jtag_read_bytes(input, sizeof(input), pdMS_TO_TICKS(20));
     }

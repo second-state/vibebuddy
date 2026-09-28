@@ -2,20 +2,21 @@
 
 #include "esp_err.h"
 
-/// 三个键各管一件事，与模式无关。短按都在松开时触发；按住超过阈值会
-/// 触发长按，且松开时不再算一次短按。
+/// Each of the three keys does one thing, regardless of mode. Short presses fire on
+/// release; holding past the threshold fires a long press, and the release then no
+/// longer counts as a short press.
 typedef enum {
-  /// K0（BOOT 键，GPIO0）：番茄钟的开始 / 暂停 / 继续。
+  /// K0 (BOOT key, GPIO0): pomodoro start / pause / resume.
   AGENT_BUTTON_K0_SHORT,
-  /// K0 长按：放弃当前阶段。
+  /// K0 long press: abandon the current phase.
   AGENT_BUTTON_K0_LONG,
-  /// K1：在值班与番茄钟之间切换。
+  /// K1: switch between duty and pomodoro.
   AGENT_BUTTON_K1_SHORT,
-  /// K1 长按：让小灯灵现在就去休闲。
+  /// K1 long press: send the buddy off to leisure right now.
   AGENT_BUTTON_K1_LONG,
-  /// K2：打开当前来源，上报 Mac。
+  /// K2: open the current source, reported to the Mac.
   AGENT_BUTTON_K2_SHORT,
-  /// K2 长按：静音开关。
+  /// K2 long press: mute toggle.
   AGENT_BUTTON_K2_LONG,
 } agent_button_event_t;
 

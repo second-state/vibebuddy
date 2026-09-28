@@ -1,13 +1,13 @@
-//! 任务卡第一行的来源：Agent 自己给会话起的名字。
+//! Where a task card's first line comes from: the name the agent itself gave the session.
 //!
-//! 项目名分不开同一个项目里的几件事。两个 Agent 都把会话名存在本机：
-//! Claude App 的会话索引有它自动生成的 `title`，Codex 的 `state_5.sqlite`
-//! 有用户起的 `name` 和线程记录的 `git_branch`。这些都不是 prompt：前者是
-//! App 侧栏里本来就显示的摘要，后者是用户自己敲的名字。Codex 的 `title`
-//! 列是原始首条消息（还混着注入的上下文），不用。
+//! The project name can't tell apart several things going on in one project. Both agents store session names locally:
+//! Claude App's session index has an auto-generated `title`, and Codex's `state_5.sqlite`
+//! has the user-given `name` and the thread's recorded `git_branch`. None of these is a prompt: the former is
+//! the summary the app's sidebar already shows, the latter are names the user typed. Codex's `title`
+//! column is the raw first message (mixed with injected context), so it's not used.
 //!
-//! 查询有缓存：Hook 每几秒来一次，不能每次都扫目录、开数据库。标题可能在
-//! 会话开始后一会儿才生成，所以没查到的每 30 秒再试，查到的每 5 分钟刷新。
+//! Lookups are cached: hooks arrive every few seconds, so we can't scan directories and open databases each time. A title may
+//! only be generated a while after the session starts, so misses are retried every 30 seconds and hits refreshed every 5 minutes.
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -25,8 +25,8 @@ pub struct SessionTitles {
     enabled: bool,
     codex_db: Option<PathBuf>,
     cache: HashMap<String, Cached>,
-    /// 线程是否存在于 Codex 的线程表；没查到的也缓存，免得后台会话每个
-    /// Hook 都开一次数据库。
+    /// Whether the thread exists in Codex's thread table; misses are cached too, so background sessions don't
+    /// open the database on every hook.
     known: HashMap<String, (Option<bool>, Instant)>,
 }
 
@@ -46,7 +46,7 @@ impl SessionTitles {
         }
     }
 
-    /// 测试用：什么都查不到，标题退回分支或项目名，线程一律当作存在。
+    /// For tests: finds nothing, so titles fall back to branch or project name and every thread counts as existing.
     pub fn disabled() -> Self {
         Self {
             enabled: false,
@@ -56,7 +56,7 @@ impl SessionTitles {
         }
     }
 
-    /// 测试用：指定 Codex 状态库的位置。
+    /// For tests: points at a specific Codex state database.
     #[cfg(test)]
     pub fn with_codex_db(db: PathBuf) -> Self {
         Self {
@@ -67,8 +67,8 @@ impl SessionTitles {
         }
     }
 
-    /// 这个线程是否存在于 Codex 的线程表。查不了（库不在、打不开）返回 None，
-    /// 调用方按“存在”处理：宁可多显示一个后台会话，也不能把真会话滤掉。
+    /// Whether this thread exists in Codex's thread table. Returns None when it can't tell (no database, can't open it);
+    /// callers treat that as "exists": better to show one background session too many than to filter out a real one.
     pub fn codex_thread_known(&mut self, thread_id: &str) -> Option<bool> {
         if !self.enabled {
             return None;
@@ -90,7 +90,7 @@ impl SessionTitles {
         known
     }
 
-    /// Claude App 给这个会话起的标题。终端里直接跑的会话没有记录。
+    /// The title Claude App gave this session. Sessions run directly in a terminal have no record.
     pub fn claude(&mut self, cli_session_id: &str, cwd: Option<&str>) -> Option<String> {
         if !self.enabled {
             return None;
@@ -101,7 +101,7 @@ impl SessionTitles {
         })
     }
 
-    /// Codex 线程的名字：用户起的 `name` 优先，其次线程记录的分支。
+    /// The Codex thread's name: the user-given `name` first, then the thread's recorded branch.
     pub fn codex(&mut self, thread_id: &str) -> Option<String> {
         if !self.enabled {
             return None;
@@ -135,8 +135,8 @@ impl SessionTitles {
     }
 }
 
-/// 只读打开 Codex 的状态库。Codex 自己在写它（WAL），只读连接不会碍事；
-/// 任何失败都当作没有标题。
+/// Opens Codex's state database read-only. Codex writes it itself (WAL); a read-only connection doesn't get in the way.
+/// Any failure counts as no title.
 pub fn codex_thread_title(db: &Path, thread_id: &str) -> Option<String> {
     let connection = rusqlite::Connection::open_with_flags(
         db,
@@ -155,7 +155,7 @@ pub fn codex_thread_title(db: &Path, thread_id: &str) -> Option<String> {
         .map(|value| branch_tail(&value))
 }
 
-/// 线程表里有没有这个 id。库打不开时返回 None。
+/// Whether the thread table has this id. Returns None when the database can't be opened.
 pub fn codex_thread_exists(db: &Path, thread_id: &str) -> Option<bool> {
     let connection = rusqlite::Connection::open_with_flags(
         db,
@@ -172,10 +172,10 @@ pub fn codex_thread_exists(db: &Path, thread_id: &str) -> Option<bool> {
         .map(|count| count > 0)
 }
 
-/// 工作目录所在的分支；主分支说明不了任务，不算。
+/// The branch of the working directory; the main branch says nothing about the task, so it doesn't count.
 ///
-/// worktree 的 `.git` 是文件，指向主仓库里这个 worktree 自己的目录，那里的
-/// `HEAD` 才是它的分支——不能用 `project_root` 回到主仓库去读。
+/// A worktree's `.git` is a file pointing at that worktree's own directory inside the main repository, and the
+/// `HEAD` there is its branch; going back to the main repository via `project_root` would read the wrong one.
 pub fn git_branch(cwd: &str) -> Option<String> {
     for dir in Path::new(cwd).ancestors() {
         let git = dir.join(".git");
@@ -198,8 +198,8 @@ fn is_feature_branch(branch: &str) -> bool {
     !matches!(branch.trim(), "" | "main" | "master" | "HEAD")
 }
 
-/// `claude/pomodoro-timer-feature` 只留最后一段：前缀说的是谁开的分支，
-/// 卡片上放不下也不需要。
+/// Keep only the last segment of `claude/pomodoro-timer-feature`: the prefix says who opened the branch,
+/// which doesn't fit on the card and isn't needed.
 fn branch_tail(branch: &str) -> String {
     branch
         .trim()
@@ -219,7 +219,7 @@ mod tests {
             std::process::id()
         ));
         let _ = std::fs::remove_dir_all(&base);
-        std::fs::create_dir_all(&base).expect("创建临时目录");
+        std::fs::create_dir_all(&base).expect("create temp dir");
         base
     }
 

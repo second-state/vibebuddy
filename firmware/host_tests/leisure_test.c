@@ -1,4 +1,4 @@
-// 休闲导演的主机端测试。由 tools/test-leisure.sh 编译运行。
+// Host tests for the leisure director. Built and run by tools/test-leisure.sh.
 #include <stdio.h>
 #include <stdlib.h>
 
@@ -10,7 +10,7 @@ static int failures;
   do {                                                                      \
     if (!(condition)) {                                                     \
       failures++;                                                           \
-      fprintf(stderr, "%s:%d: 断言失败: %s\n", __FILE__, __LINE__,          \
+      fprintf(stderr, "%s:%d: assertion failed: %s\n", __FILE__, __LINE__,          \
               #condition);                                                  \
     }                                                                       \
   } while (0)
@@ -23,7 +23,7 @@ static agent_leisure_view_t view_at(uint32_t now_ms) {
   return view;
 }
 
-/// 把时间推到 now，每 20 ms tick 一次，像主循环那样。有符号比较，允许回绕。
+/// Advances time to now, ticking every 20 ms like the main loop. Signed comparison, so wraparound is fine.
 static void advance_to(uint32_t *clock, uint32_t now) {
   while ((int32_t)(now - *clock) > 0) {
     *clock += 20;
@@ -69,7 +69,7 @@ static void bored_plays_skits_and_never_repeats(void) {
   agent_leisure_init(11, 0);
   uint32_t clock = 0;
   advance_to(&clock, MINUTES(5) + 4000);
-  // 进入无聊 3 秒后开第一场。
+  // The first skit starts 3 seconds after getting bored.
   CHECK(view_at(clock).skit != AGENT_SKIT_NONE);
   CHECK(view_at(clock).skit != AGENT_SKIT_SLEEP);
 
@@ -86,7 +86,7 @@ static void bored_plays_skits_and_never_repeats(void) {
       continue;
     }
     if (!in_gap) {
-      continue;  // 同一场还在演
+      continue;  // the same skit is still playing
     }
     in_gap = false;
     if (current == previous) {
@@ -98,7 +98,7 @@ static void bored_plays_skits_and_never_repeats(void) {
   }
   CHECK(played >= 20);
   CHECK(repeats == 0);
-  // 24 分钟里七出都该露过面。
+  // All seven skits should have appeared within 24 minutes.
   for (int index = AGENT_SKIT_PATROL; index <= AGENT_SKIT_DREAM; index++) {
     CHECK(seen[index]);
   }
@@ -109,7 +109,7 @@ static void skit_frames_advance_at_eight_fps(void) {
   agent_leisure_start_skit(AGENT_SKIT_PATROL, 1000);
   CHECK(view_at(1000).skit_frame == 0);
   CHECK(view_at(1000 + 125 * 8).skit_frame == 8);
-  // 12 秒后巡逻结束，回到底色。
+  // Patrol ends after 12 seconds and returns to the base look.
   uint32_t clock = 1000;
   advance_to(&clock, 1000 + 12500);
   CHECK(view_at(clock).skit == AGENT_SKIT_NONE);
@@ -133,7 +133,7 @@ static void lights_go_out_only_at_night(void) {
   CHECK(view_at(clock).tier == AGENT_LEISURE_SLEEPY);
   CHECK(!view_at(clock).lights_out);
 
-  // 22 点还不算夜里，23 点起算，到早上 7 点。
+  // 22:00 is not night yet; night runs from 23:00 to 07:00.
   agent_leisure_set_hour(22);
   CHECK(!view_at(clock).lights_out);
   agent_leisure_set_hour(23);
@@ -144,12 +144,12 @@ static void lights_go_out_only_at_night(void) {
   CHECK(!view_at(clock).lights_out);
   agent_leisure_set_hour(23);
 
-  // 关着灯的时候有事，立刻亮。
+  // Something happens while the light is off: turn it on immediately.
   agent_leisure_note_activity(clock);
   (void)agent_leisure_tick(clock);
   CHECK(!view_at(clock).lights_out);
 
-  // 夜里但没睡够 90 分钟，不关。
+  // Night, but not asleep for 90 minutes yet: don't turn off.
   agent_leisure_init(9, 0);
   agent_leisure_set_hour(1);
   clock = 0;
@@ -195,7 +195,7 @@ static void nothing_done_means_kicking_the_ball(void) {
       ball++;
     }
   }
-  // 权重 7/22，即便不连演，也该占三成上下。
+  // Weight 7/22: even without back-to-back repeats it should be about 30%.
   CHECK(played >= 20);
   CHECK(ball * 10 >= played * 2);
 }
@@ -204,7 +204,7 @@ static void millisecond_counter_may_wrap(void) {
   uint32_t start = UINT32_MAX - MINUTES(2);
   agent_leisure_init(19, start);
   uint32_t clock = start;
-  advance_to(&clock, start + MINUTES(4));  // 回绕后
+  advance_to(&clock, start + MINUTES(4));  // after wraparound
   CHECK(view_at(clock).tier == AGENT_LEISURE_ALERT);
   advance_to(&clock, start + MINUTES(6));
   CHECK(view_at(clock).tier == AGENT_LEISURE_BORED);
@@ -222,9 +222,9 @@ int main(void) {
   nothing_done_means_kicking_the_ball();
   millisecond_counter_may_wrap();
   if (failures != 0) {
-    fprintf(stderr, "%d 处失败\n", failures);
+    fprintf(stderr, "%d failure(s)\n", failures);
     return EXIT_FAILURE;
   }
-  puts("leisure: 全部通过");
+  puts("leisure: all passed");
   return EXIT_SUCCESS;
 }

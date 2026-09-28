@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""语音包打包脚本的测试：字节布局必须与固件 agent_voice_pack.h 描述的一致。"""
+"""Tests for the voice pack packer: the byte layout must match what the firmware's agent_voice_pack.h describes."""
 
 from __future__ import annotations
 

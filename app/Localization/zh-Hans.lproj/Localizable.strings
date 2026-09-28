@@ -1,0 +1,171 @@
+/* Simplified Chinese for the Mac app. Keys are the English text in the Swift
+   sources; tools/check-localization.py keeps this table in sync with them. */
+
+/* Menu bar */
+"daemon not responding · click to restart" = "daemon 异常 · 点击重启";
+"Box online · firmware %@" = "盒子在线 · 固件 %@";
+"Box not found" = "未找到盒子";
+"On duty" = "值班";
+"Pomodoro" = "番茄钟";
+"Leisure" = "休闲";
+"Mode: %@" = "模式：%@";
+"Today: done %lld · asks %lld · busy %@" = "今天：完成 %1$lld · 确认 %2$lld · 忙碌 %3$@";
+"%lld h %lld min" = "%1$lld 小时 %2$lld 分";
+"%lld min" = "%lld 分";
+"Settings…" = "设置…";
+"Quit Vibe Buddy (the box goes offline)" = "退出 Vibe Buddy（盒子将离线）";
+
+/* Windows and alerts */
+"Vibe Buddy Settings" = "Vibe Buddy 设置";
+"Welcome to Vibe Buddy" = "欢迎使用 Vibe Buddy";
+"Found an old vibebuddyd background service" = "发现旧的 vibebuddyd 后台服务";
+"A daemon is already running on port 7331" = "7331 端口已经有 daemon 在跑";
+"Vibe Buddy now manages its own daemon, and two daemons would fight over the serial port. Remove the old one and take over?" = "Vibe Buddy 现在自己看管 daemon，两个 daemon 会抢串口。卸掉旧的并接管吗？";
+"Remove and take over" = "卸载并接管";
+"Later" = "稍后";
+
+/* Notifications and errors */
+"The daemon failed to start three times in a row. Click the menu bar icon to restart it." = "daemon 连续三次启动失败，点菜单栏图标重启。";
+"Codex hook config updated" = "Codex 的 Hook 配置更新了";
+"Vibe Buddy rewrote ~/.codex/hooks.json. Codex silently disables hooks that change: type /hooks in Codex and re-trust them so the box keeps getting Codex events." = "Vibe Buddy 改写了 ~/.codex/hooks.json。Codex 会静默停用改过的 hook，请在 Codex 里输入 /hooks 重新信任，盒子才收得到 Codex 的事。";
+"Box disconnected" = "盒子断开了";
+"Vibe Buddy hasn't seen the box for 30 seconds. Check the USB cable." = "Vibe Buddy 已经 30 秒没找到盒子，检查一下 USB 线。";
+"Couldn't change Launch at login: %@" = "登录时启动设置失败：%@";
+"This app has no voice pack for %@" = "App 里没有 %@ 的语音包";
+"This build has no bundled firmware" = "这个构建没有附带固件";
+"Couldn't unzip %@" = "解不开 %@";
+"Couldn't write the hook config: %@" = "写 Hook 配置失败：%@";
+"Volume change was rejected (%lld)" = "音量未被接受（%lld）";
+"Voice pack write was rejected (%lld)" = "写入未被接受（%lld）";
+"Firmware flash was rejected (%lld)" = "烧录未被接受（%lld）";
+"Screenshot failed (%lld)" = "截图失败（%lld）";
+"The firmware package has no %@" = "固件包里没有 %@";
+"%@ is not an ESP32-S3 image" = "%@ 不是 ESP32-S3 的镜像";
+
+/* Settings: tabs and General */
+"General" = "通用";
+"Sound" = "声音";
+"Agents" = "接入";
+"Device" = "设备";
+"Advanced" = "高级";
+"Launch at login" = "登录时启动";
+"Notify me when the box disconnects or the daemon fails" = "盒子断开或 daemon 异常时通知我";
+"Not connected" = "未连接";
+
+/* Settings: Sound */
+"Volume" = "音量";
+"Play a line on the box" = "在盒子上试一句";
+"Saved on the box and kept across restarts. Previews on this Mac aren't affected; to mute, long-press K2 on the box." = "存在盒子里，重启不丢。Mac 上的试听不受它影响；静音只在盒子上长按 K2。";
+"Announcement voice" = "播报音色";
+"The box is using “%@”. Preview a voice, then click Use to write it to the box — no firmware flash needed. Over the UART port this takes a few minutes; when it's done the box says a line in the new voice." = "盒子现在用的是「%@」。挑一个试听，点「使用」写进盒子；不用刷固件。UART 口上要写几分钟，写完盒子会用新音色说一句。";
+"Didn't finish, so the box keeps its built-in voice. Reconnect the cable and click Use again." = "没写完，盒子先用内置音色；插好线后重新点「使用」。";
+"Built-in voice (Wanwan Xiaohe)" = "内置音色（湾湾小何）";
+"In use" = "已写入";
+"Use" = "使用";
+"Writing voice pack… %@" = "正在写入语音包… %@";
+"Voice pack written" = "语音包已写入";
+"Flashing firmware… %@" = "正在刷入固件… %@";
+"Firmware flashed, the box is restarting" = "固件已刷入，盒子重启中";
+"Failed: %@" = "失败：%@";
+
+/* Voice catalog */
+"Wanwan Xiaohe" = "湾湾小何";
+"Chinese · Taiwanese accent · Doubao · same voice as Xiaozhi" = "中文 · 台湾口音 · 豆包语音 · 小智同款";
+"Xiaohe 2.0" = "小何 2.0";
+"Chinese · Mandarin · Doubao" = "中文 · 普通话 · 豆包语音";
+"HsiaoYu" = "晓雨";
+"HsiaoChen" = "晓臻";
+"Chinese · Taiwanese accent · Microsoft" = "中文 · 台湾口音 · 微软";
+"Xiaoxiao" = "晓晓";
+"Chinese · Mandarin · Microsoft" = "中文 · 普通话 · 微软";
+"English · US · Microsoft" = "英文 · 美式 · 微软";
+
+/* Settings: Agents */
+"Connect agents" = "接入 Agent";
+"Vibe Buddy only forwards session IDs, event names and working directories — never prompts or replies." = "Vibe Buddy 只转发会话标识、事件名和工作目录，不转发 prompt 与回复。";
+"This writes user-level config, so one install covers both the desktop app's sessions and the same agent running in a terminal." = "写的是用户级配置，装一次两处都算数：桌面应用里的会话，和终端里跑的同一个 Agent。";
+"Repair" = "修复";
+"Remove" = "移除";
+"Connect" = "接入";
+"%@ wasn't found on this Mac" = "这台 Mac 上没找到 %@";
+"Not set up" = "未接入";
+"The config changed at %@ and no Codex event has arrived since. Codex silently disables hooks that change: type /hooks in Codex and re-trust Vibe Buddy's six hooks." = "配置在 %@ 改过，之后没收到过 Codex 事件。Codex 会静默停用改过的 hook：在 Codex 里输入 /hooks，把 Vibe Buddy 的六条重新信任。";
+"Last event %@" = "最近一次事件 %@";
+"Waiting for the first event… (Codex only runs this config after you trust it in /hooks)" = "等待第一次事件…（Codex 要先在 /hooks 里信任这份配置才会运行它）";
+"Waiting for the first event…" = "等待第一次事件…";
+"Will change %@" = "将改动 %@";
+"Nothing to change." = "没有需要改的地方。";
+"After writing, open /hooks in Codex to review and trust this config — the app can't do that for you." = "写入后还要在 Codex 里打开 /hooks 核对并信任这份配置，App 替不了你。";
+"Cancel" = "取消";
+"Write" = "写入";
+
+/* Settings: Device */
+"Link" = "链路";
+"Box firmware" = "盒子固件";
+"Bundled with app" = "App 附带";
+"Update to bundled version" = "更新到 App 附带版本";
+"The box isn't running Vibe Buddy firmware." = "盒子跑的不是 Vibe Buddy 固件。";
+"Flash Vibe Buddy firmware" = "刷入 Vibe Buddy 固件";
+"Before retrying, hold K0 on the box and replug the cable to put it in download mode." = "重试前可以按住盒子的 K0 再插一次线，让它进入下载模式。";
+"Retry" = "重试";
+"Flash from file…" = "从文件刷入…";
+"Make the box blink" = "让盒子眨眼";
+"Box screen" = "盒子画面";
+"Refresh" = "刷新";
+"Save image" = "保存图片";
+"Click Refresh to see what the box is showing" = "点「刷新」看看盒子在干什么";
+"daemon isn't running" = "daemon 没起来";
+"UART bridge" = "UART 桥";
+"native USB" = "原生 USB";
+"Choose a firmware package" = "选择固件包";
+"Flash this firmware?" = "刷入这份固件？";
+"unknown" = "未知";
+"Firmware package: %@\nBox now: %@\nThe box restarts once; its voice pack and today's stats are kept. Over the UART bridge this takes a few minutes." = "固件包：%1$@\n盒子现在：%2$@\n盒子会重启一次，语音包和当日战绩都保留。UART 桥上大约要几分钟。";
+"Flash" = "刷入";
+"Update the box firmware?" = "更新盒子固件？";
+"The box restarts once; its voice pack and today's stats are kept. Over the UART bridge this takes a few minutes." = "盒子会重启一次，语音包和当日战绩都保留。UART 桥上大约要几分钟。";
+"Update" = "更新";
+"Flash the box with Vibe Buddy?" = "把盒子刷成 Vibe Buddy？";
+"The box's current firmware and data will be erased and can't be recovered. It restarts on its own when done; over the UART port this takes a few minutes." = "盒子里现有的固件和数据会被清掉，无法恢复。刷完盒子自动重启，UART 口上大约要几分钟。";
+
+/* Settings: Advanced */
+"Open logs folder" = "打开日志文件夹";
+"Running · %@" = "运行中 · %@";
+"Not running" = "未运行";
+"Restart daemon" = "重启 daemon";
+"Export diagnostics…" = "导出诊断…";
+"Config file: %@" = "配置文件：%@";
+
+/* Onboarding */
+"Welcome" = "欢迎";
+"Find the box" = "找设备";
+"Pick a voice" = "选音色";
+"Done" = "完成";
+"Back" = "上一步";
+"Skip" = "跳过";
+"Not now" = "先不接";
+"Next" = "下一步";
+"Get started" = "开始使用";
+"Vibe Buddy turns what Codex and Claude Code are doing into pictures and sounds on the box." = "Vibe Buddy 把 Codex 和 Claude Code 的状态变成盒子上的画面和声音。";
+"Next: plug in the box, connect your agents, pick an announcement voice, and choose whether to launch at login. Everything can be changed or skipped." = "接下来几步：插上盒子，接入 Agent，挑一个播报音色，决定要不要开机就启动。都能改，都能跳过。";
+"Connect the box to this Mac with a USB cable." = "把盒子用 USB 线插到这台 Mac。";
+"Flashing Vibe Buddy firmware…" = "正在刷入 Vibe Buddy 固件…";
+"Hold K0 on the box and replug the cable to put it in download mode, then retry." = "按住盒子的 K0 再插一次线，让它进入下载模式，然后重试。";
+"The box screen stays dark for a few minutes — don't unplug it. It restarts on its own when done, and this page will show it as found." = "盒子屏幕会黑几分钟，别拔线。刷完它自动重启，这里会变成「找到了」。";
+"Found a box (%@), but it isn't running Vibe Buddy firmware." = "找到盒子（%@），但它跑的不是 Vibe Buddy 固件。";
+"This build has no bundled firmware, so it can't flash the box." = "这个构建没有附带固件，没法刷入。";
+"This erases the box's current firmware and data for good. If the native USB port doesn't find the box, use its UART port instead." = "会清掉盒子里现有的固件与数据，无法恢复。原生 USB 口找不到盒子时，改接盒子的 UART 口。";
+"Found it: %@" = "找到了：%@";
+"Make it blink" = "让它眨一下眼";
+"If the backlight flashes, that's the one." = "盒子背光闪了就是它。";
+"No box yet — this updates once you plug it in." = "还没找到盒子，插上后这里会变。";
+"Starting the daemon…" = "daemon 正在启动…";
+"Connect your agents so their progress shows up on the box." = "接入 Agent：让它们的进展传到盒子上。";
+"Only session IDs, event names and working directories are forwarded. After writing Codex's config, trust it once on its /hooks page." = "只转发会话标识、事件名和工作目录。Codex 写入后要在它的 /hooks 页面信任一次。";
+"Pick an announcement voice." = "挑一个播报音色。";
+"The box's built-in voice speaks Chinese (Wanwan Xiaohe); pick an English voice above to hear announcements in English." = "盒子内置的是中文音色（湾湾小何）；想听英文播报，在上面挑一个英文音色。";
+"If you skip this, the box uses its built-in voice, Wanwan Xiaohe (Chinese)." = "不选就用盒子内置的湾湾小何。";
+"Start Vibe Buddy automatically when you log in?" = "登录时自动启动 Vibe Buddy？";
+"macOS may say a background item was added — that's expected." = "系统可能会提示「已添加后台项目」，那是 macOS 的正常提示。";
+"All set." = "好了。";
+"Vibe Buddy lives in the menu bar: the icon is the buddy's face, with its eyes open while the box is online. To change anything, choose Settings… from its menu." = "Vibe Buddy 住在菜单栏里：图标是氛围小助手的脸，盒子在线时睁着眼。想改什么，菜单里的「设置…」。";

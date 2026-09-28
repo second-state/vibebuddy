@@ -4,8 +4,8 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 
-# 固件（no_std）也依赖这个 crate，所以 serde 与 serde_json 不走 workspace
-# 依赖：那边开着默认特性，会把 std 带进固件。
+# The no_std firmware depends on this crate too, so serde and serde_json don't use the workspace
+# dependencies: those enable default features, which would pull std into the firmware.
 [features]
 default = ["std"]
 std = ["serde/std", "serde_json/std"]

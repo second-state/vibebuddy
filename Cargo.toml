@@ -1,6 +1,6 @@
 [workspace]
 members = ["daemon", "firmware-rs/core", "hook", "protocol"]
-# 设备固件用 Xtensa 工具链单独构建，见 firmware-rs/device。
+# The device firmware builds separately with the Xtensa toolchain; see firmware-rs/device.
 exclude = ["firmware-rs/device"]
 resolver = "3"
 

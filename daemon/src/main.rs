@@ -41,34 +41,34 @@ use tokio_stream::wrappers::BroadcastStream;
 use tracing::{info, warn};
 use tracing_subscriber::EnvFilter;
 
-/// 最后一个会话僵死后不会再有 Hook 事件，只能靠定时扫描释放画面。
+/// Once the last session hangs there are no more hook events; only a periodic sweep can free the screen.
 const SWEEP_INTERVAL: Duration = Duration::from_secs(60);
-/// 心跳间隔。设备按这个节奏判断链路是否还活着，固件的超时是它的三倍。
+/// Heartbeat interval. The device uses this cadence to judge whether the link is alive; the firmware timeout is three times it.
 const HEARTBEAT_INTERVAL: Duration = Duration::from_secs(5);
-/// 构建时的 git 描述，由 `build.rs` 写入。
+/// Build-time git description, written by `build.rs`.
 const BUILD_REVISION: &str = env!("VIBEBUDDY_BUILD");
 
 #[derive(Clone)]
 struct AppState {
     transport: Arc<dyn Transport>,
-    /// 所有 Agent 共享一个聚合器：设备只有一块屏幕和一只小灯灵。
+    /// All agents share one aggregator: the device has just one screen and one little buddy.
     activities: Arc<Mutex<ActivityTracker>>,
-    /// 会话标题的查询与缓存：Claude App 的会话标题、Codex 的线程名。
+    /// Session title lookup and cache: Claude app session titles and Codex thread names.
     titles: Arc<Mutex<SessionTitles>>,
-    /// 设备此刻的样子，从诊断行里拼出来。
+    /// What the device looks like right now, pieced together from diagnostic lines.
     device: Arc<Mutex<DeviceState>>,
     hooks_seen: Arc<Mutex<HooksSeen>>,
     config: Arc<Mutex<Config>>,
     config_path: Option<PathBuf>,
-    /// 正在写语音包或烧固件；同一时刻只有一个。
+    /// Writing a voice pack or flashing firmware; only one at a time.
     operation: Arc<Mutex<Option<Operation>>>,
-    /// 设备消息的广播：写语音包、截图这些要等回执的操作各自订阅。
+    /// Broadcast of device messages: operations that wait for an ack, like voice-pack writes and screenshots, each subscribe.
     device_bus: broadcast::Sender<DeviceMessage>,
-    /// 状态变了就叫一声，状态流据此推一份新快照。
+    /// Pinged whenever the status changes; the status stream pushes a new snapshot on it.
     status_changed: broadcast::Sender<()>,
-    /// App 的版本，随心跳报给设备；没有 App 时为 None。
+    /// The app's version, reported to the device with the heartbeat; None when there is no app.
     app_version: Option<String>,
-    /// 真正的串口 worker，烧固件时要让它让出端口；测试里没有。
+    /// The real serial worker, which must give up the port while flashing; absent in tests.
     serial: Option<Arc<SerialTransport>>,
 }
 
@@ -133,7 +133,7 @@ impl AppState {
         if let Some(path) = &self.config_path
             && let Err(error) = snapshot.save(path)
         {
-            warn!(%error, path = %path.display(), "配置保存失败");
+            warn!(%error, path = %path.display(), "failed to save config");
         }
         self.notify_status();
     }
@@ -157,7 +157,7 @@ async fn main() {
     let bind_address = env::var("VIBEBUDDY_BIND")
         .unwrap_or_else(|_| "127.0.0.1:7331".to_owned())
         .parse::<SocketAddr>()
-        .unwrap_or_else(|error| panic!("VIBEBUDDY_BIND 无效：{error}"));
+        .unwrap_or_else(|error| panic!("invalid VIBEBUDDY_BIND: {error}"));
     let serial_config = SerialConfig::from_env();
     let (serial_transport, device_events) = SerialTransport::spawn(serial_config);
     let serial_transport = Arc::new(serial_transport);
@@ -181,16 +181,16 @@ async fn main() {
     let app = app(state);
     let listener = tokio::net::TcpListener::bind(bind_address)
         .await
-        .unwrap_or_else(|error| panic!("无法监听 {bind_address}：{error}"));
+        .unwrap_or_else(|error| panic!("cannot listen on {bind_address}: {error}"));
 
-    info!(address = %bind_address, "vibebuddyd 已启动");
+    info!(address = %bind_address, "vibebuddyd started");
     axum::serve(listener, app)
         .await
-        .unwrap_or_else(|error| panic!("HTTP server 失败：{error}"));
+        .unwrap_or_else(|error| panic!("HTTP server failed: {error}"));
 }
 
-/// 设备到 Mac 的事件目前只开放 K2 单击。优先打开当前活动；空闲时返回最近
-/// 一次可定位的 Agent/CI 来源。
+/// Device-to-Mac events currently only allow a K2 click. Open the current activity first; when idle, return the
+/// most recent locatable agent/CI source.
 async fn handle_device_events(
     state: AppState,
     mut events: tokio::sync::mpsc::Receiver<DeviceMessage>,
@@ -200,14 +200,14 @@ async fn handle_device_events(
     }
 }
 
-/// 每条设备消息都走这里：更新设备状态、广播给等回执的操作，K2 则去开来源。
-/// 测试也从这里注入设备消息，所以它不能依赖串口。
+/// Every device message goes through here: update device state, broadcast to operations waiting for acks, and K2 opens the source.
+/// Tests inject device messages here too, so it must not depend on the serial port.
 async fn publish_device_message(state: &AppState, message: DeviceMessage) {
     if state.device.lock().await.apply(&message) {
         state.notify_status();
     }
     let _ = state.device_bus.send(message.clone());
-    // 刚连上先问一声，设备会把模式、固件构建号、音色重报一遍。
+    // Ask right after connecting; the device reports its mode, firmware build and voice again.
     if matches!(message, DeviceMessage::Connected { .. }) {
         send_event(state, device_command("device.hello"));
     }
@@ -217,7 +217,7 @@ async fn publish_device_message(state: &AppState, message: DeviceMessage) {
     if is_k2_press(&event) {
         open_k2_source(state).await;
     } else if !event.event.starts_with("voice.") && event.event != "echo" {
-        info!(event = %event.event, "忽略未绑定的设备事件");
+        info!(event = %event.event, "ignoring unbound device event");
     }
 }
 
@@ -225,24 +225,24 @@ async fn open_k2_source(state: &AppState) {
     {
         let sources = state.activities.lock().await.focus_sources();
         if sources.is_empty() {
-            info!("K2 已按下，但当前没有可打开的活动");
+            info!("K2 pressed, but there is no activity to open");
             return;
         }
         for source in sources {
-            // Codex 线程要先确认还在：打开一个不存在的线程得到的是空白会话。
+            // Check a Codex thread still exists first: opening a missing thread gives a blank session.
             if let ActivitySource::Codex { thread_id, .. } = &source
                 && state.titles.lock().await.codex_thread_known(thread_id) == Some(false)
             {
-                warn!(%thread_id, "K2 跳过不存在的 Codex 线程");
+                warn!(%thread_id, "K2 skipped a Codex thread that no longer exists");
                 continue;
             }
             match source_opener::open(source).await {
-                // 记下链接本身：跳错地方时，日志要能直接说出跳去了哪儿。
+                // Log the link itself: when it jumps to the wrong place, the log should say exactly where it went.
                 Ok(link) => {
-                    info!(%link, "K2 已打开当前活动来源");
+                    info!(%link, "K2 opened the current activity's source");
                     break;
                 }
-                Err(error) => warn!(%error, "K2 打开来源失败，试下一个候选"),
+                Err(error) => warn!(%error, "K2 failed to open source, trying the next candidate"),
             }
         }
     }
@@ -254,9 +254,9 @@ fn is_k2_press(event: &Event) -> bool {
         && event.extra.get("action").and_then(|value| value.as_str()) == Some("press")
 }
 
-/// App 看管时它把自己的 pid 放在 VIBEBUDDY_PARENT_PID 里。App 被强杀后 daemon
-/// 会被 launchd 收养，父 pid 变成 1；那就跟着退出，别占着串口和端口等下一个
-/// App 起不来。macOS 没有 prctl(PR_SET_PDEATHSIG)，只能轮询。
+/// When the app supervises it, the app puts its pid in VIBEBUDDY_PARENT_PID. If the app is force-killed, the daemon
+/// is adopted by launchd and its parent pid becomes 1; then exit too, rather than holding the serial port and HTTP port so
+/// the next app can't start. macOS has no prctl(PR_SET_PDEATHSIG), so this has to poll.
 async fn watch_parent() {
     let Some(expected) = env::var("VIBEBUDDY_PARENT_PID")
         .ok()
@@ -268,17 +268,17 @@ async fn watch_parent() {
     loop {
         ticker.tick().await;
         if std::os::unix::process::parent_id() != expected {
-            info!(expected, "看管我的 App 已经不在，跟着退出");
+            info!(expected, "the supervising app is gone, exiting too");
             std::process::exit(0);
         }
     }
 }
 
-/// daemon 的构建标识：git 描述加上二进制自己的时间戳。
+/// The daemon's build identifier: the git description plus the binary's own timestamp.
 ///
-/// 时间戳取可执行文件的 mtime，不用编译期常量。`build.rs` 只在它声明的依赖
-/// 变化时才重跑；改一行源码重新链接时，编译期写下的时刻不会更新，正好在你
-/// 最需要它准的时候骗你。
+/// The timestamp is the executable's mtime, not a compile-time constant. `build.rs` only reruns when its declared
+/// dependencies change; when you edit one line and relink, the time recorded at compile time doesn't update, lying to
+/// you exactly when you most need it to be accurate.
 fn build_identity(app_version: Option<&str>) -> String {
     let built = std::env::current_exe()
         .and_then(|path| path.metadata())
@@ -293,7 +293,7 @@ fn build_identity(app_version: Option<&str>) -> String {
     build_identity_from(app_version, BUILD_REVISION, &built)
 }
 
-/// App 在时它的版本号排最前：设备页脚那一行就是 App 版本加构建号。
+/// When the app is present its version comes first: the device footer line is the app version plus the build.
 fn build_identity_from(app_version: Option<&str>, revision: &str, built: &str) -> String {
     let mut parts = Vec::new();
     if let Some(version) = app_version {
@@ -304,7 +304,7 @@ fn build_identity_from(app_version: Option<&str>, revision: &str, built: &str) -
     parts.join(" ").trim_end().to_owned()
 }
 
-/// 当日战绩的存放位置。缺少 `HOME` 时退回内存计数，不让 daemon 起不来。
+/// Where today's stats are stored. Without `HOME`, fall back to in-memory counts so the daemon still starts.
 fn stats_file() -> Option<PathBuf> {
     if let Ok(path) = env::var("VIBEBUDDY_STATS_FILE") {
         return Some(PathBuf::from(path));
@@ -333,11 +333,11 @@ fn app(state: AppState) -> Router {
         .with_state(state)
 }
 
-/// 截一张盒子当前画面，回 PNG。写语音包或烧固件时不截：截图行会挤掉回执。
+/// Capture the box's current screen and return a PNG. Refused while writing a voice pack or flashing: screenshot lines would crowd out acks.
 async fn post_screenshot(State(state): State<AppState>) -> axum::response::Response {
     use axum::response::IntoResponse;
     if matches!(&*state.operation.lock().await, Some(current) if current.state == OperationState::Running) {
-        return (StatusCode::CONFLICT, "设备上有操作在进行").into_response();
+        return (StatusCode::CONFLICT, "another device operation is in progress").into_response();
     }
     let bus = state.device_bus.subscribe();
     match screenshot::capture(state.transport.clone(), bus).await {
@@ -353,7 +353,7 @@ async fn get_status(State(state): State<AppState>) -> Json<Status> {
     Json(state.snapshot().await)
 }
 
-/// SSE：连上先推一份，之后状态一变再推一份完整快照。
+/// SSE: push one snapshot on connect, then a full snapshot whenever the status changes.
 async fn status_stream(
     State(state): State<AppState>,
 ) -> Sse<impl tokio_stream::Stream<Item = Result<SseEvent, Infallible>>> {
@@ -382,7 +382,7 @@ fn device_command(name: &str) -> Event {
     Event::named(name)
 }
 
-/// 设备上同一时刻只能有一个操作：占上位就返回 None，否则回给调用方 409。
+/// Only one operation can run on the device at a time: returns None once the slot is taken, otherwise a 409 for the caller.
 async fn begin_operation(
     state: &AppState,
     kind: OperationKind,
@@ -392,7 +392,7 @@ async fn begin_operation(
     if matches!(&*operation, Some(current) if current.state == OperationState::Running) {
         return Some((
             StatusCode::CONFLICT,
-            Json(ApiResponse { accepted: false, message: "设备上已有操作在进行".to_owned() }),
+            Json(ApiResponse { accepted: false, message: "another device operation is in progress".to_owned() }),
         ));
     }
     *operation = Some(Operation { kind, state: OperationState::Running, progress: 0.0, message });
@@ -401,8 +401,8 @@ async fn begin_operation(
     None
 }
 
-/// 从阻塞线程或写入循环里报进度。只在操作还在跑时写：完成后迟到的回调
-/// 不能把 100% 改回去。
+/// Report progress from a blocking thread or the write loop. Only written while the operation is running: a late callback
+/// after completion must not turn 100% back.
 fn report_progress(state: &AppState, fraction: f32, message: Option<String>) {
     let state = state.clone();
     tokio::spawn(async move {
@@ -422,19 +422,19 @@ async fn post_identify(State(state): State<AppState>) -> (StatusCode, Json<ApiRe
     post_event(State(state), Json(device_command("device.identify"))).await
 }
 
-/// 与固件 `AGENT_AUDIO_VOLUME_MIN/MAX` 一致：下限不到零，静音另有按键且不持久化。
+/// Matches the firmware's `AGENT_AUDIO_VOLUME_MIN/MAX`: the floor is above zero; muting has its own button and isn't persisted.
 const VOLUME_RANGE: std::ops::RangeInclusive<u8> = 20..=100;
 
 #[derive(serde::Deserialize)]
 struct VolumeRequest {
     level: u8,
-    /// 让盒子用新音量播一句"任务完成"，滑块才不是盲调。
+    /// Have the box play "task complete" at the new volume, so the slider isn't adjusted blind.
     #[serde(default)]
     preview: bool,
 }
 
-/// 调音量：越界直接拒绝而不是替用户改数。设备应用后回 `VOLUME` 行，
-/// 状态里的音量随之更新，App 显示的始终是盒子上的值。
+/// Set the volume: out-of-range values are rejected rather than adjusted for the user. The device answers with a `VOLUME` line
+/// once applied, the status volume follows, and the app always shows the value on the box.
 async fn post_volume(
     State(state): State<AppState>,
     Json(request): Json<VolumeRequest>,
@@ -444,7 +444,7 @@ async fn post_volume(
             StatusCode::BAD_REQUEST,
             Json(ApiResponse {
                 accepted: false,
-                message: format!("音量要在 {} 到 {} 之间", VOLUME_RANGE.start(), VOLUME_RANGE.end()),
+                message: format!("volume must be between {} and {}", VOLUME_RANGE.start(), VOLUME_RANGE.end()),
             }),
         );
     }
@@ -456,7 +456,7 @@ async fn post_volume(
     post_event(State(state), Json(event)).await
 }
 
-/// 写语音包：请求体就是包本身。写入在后台跑，进度在状态流里。
+/// Write a voice pack: the request body is the pack itself. The write runs in the background with progress in the status stream.
 async fn post_voice_pack(
     State(state): State<AppState>,
     body: Bytes,
@@ -464,10 +464,10 @@ async fn post_voice_pack(
     let Some(voice) = voice_writer::voice_id_of(&body) else {
         return (
             StatusCode::BAD_REQUEST,
-            Json(ApiResponse { accepted: false, message: "请求体不是语音包".to_owned() }),
+            Json(ApiResponse { accepted: false, message: "request body is not a voice pack".to_owned() }),
         );
     };
-    if let Some(refused) = begin_operation(&state, OperationKind::VoicePack, format!("正在写入 {voice}")).await {
+    if let Some(refused) = begin_operation(&state, OperationKind::VoicePack, format!("writing {voice}")).await {
         return refused;
     }
     let bus = state.device_bus.subscribe();
@@ -481,19 +481,19 @@ async fn post_voice_pack(
         .await;
         match result {
             Ok(written) => {
-                info!(voice = %written, "语音包已写入设备");
+                info!(voice = %written, "voice pack written to device");
                 task_state.save_config(|config| config.voice = Some(written.clone())).await;
                 task_state
                     .set_operation(Some(Operation {
                         kind: OperationKind::VoicePack,
                         state: OperationState::Done,
                         progress: 1.0,
-                        message: format!("已写入 {written}"),
+                        message: format!("wrote {written}"),
                     }))
                     .await;
             }
             Err(error) => {
-                warn!(%error, "语音包写入失败");
+                warn!(%error, "voice pack write failed");
                 task_state
                     .set_operation(Some(Operation {
                         kind: OperationKind::VoicePack,
@@ -507,7 +507,7 @@ async fn post_voice_pack(
     });
     (
         StatusCode::ACCEPTED,
-        Json(ApiResponse { accepted: true, message: format!("开始写入 {voice}") }),
+        Json(ApiResponse { accepted: true, message: format!("started writing {voice}") }),
     )
 }
 
@@ -518,8 +518,8 @@ struct FirmwareRequest {
     app: PathBuf,
 }
 
-/// 烧固件：三件套的路径由 App 给出（都在它的包里）。串口 worker 让出端口，
-/// ROM 协议逐段写并校验，完了硬复位、worker 重连。进度走状态流。
+/// Flash firmware: the app supplies the three image paths (all inside its bundle). The serial worker releases the port,
+/// the ROM protocol writes and verifies each segment, then hard-resets and the worker reconnects. Progress goes through the status stream.
 async fn post_firmware(
     State(state): State<AppState>,
     Json(request): Json<FirmwareRequest>,
@@ -531,7 +531,7 @@ async fn post_firmware(
             _ => {
                 return (
                     StatusCode::BAD_REQUEST,
-                    Json(ApiResponse { accepted: false, message: format!("读不到固件文件 {}", path.display()) }),
+                    Json(ApiResponse { accepted: false, message: format!("cannot read firmware file {}", path.display()) }),
                 );
             }
         }
@@ -543,7 +543,7 @@ async fn post_firmware(
             _ => {
                 return (
                     StatusCode::CONFLICT,
-                    Json(ApiResponse { accepted: false, message: "没有连着的盒子".to_owned() }),
+                    Json(ApiResponse { accepted: false, message: "no box connected".to_owned() }),
                 );
             }
         }
@@ -551,16 +551,16 @@ async fn post_firmware(
     let Some(serial) = state.serial.clone() else {
         return (
             StatusCode::NOT_IMPLEMENTED,
-            Json(ApiResponse { accepted: false, message: "没有串口 worker".to_owned() }),
+            Json(ApiResponse { accepted: false, message: "no serial worker".to_owned() }),
         );
     };
-    if let Some(refused) = begin_operation(&state, OperationKind::Firmware, "让出串口".to_owned()).await {
+    if let Some(refused) = begin_operation(&state, OperationKind::Firmware, "releasing the serial port".to_owned()).await {
         return refused;
     }
     let task_state = state.clone();
     tokio::spawn(async move {
         serial.set_suspended(true);
-        // 等 worker 真把端口放掉。
+        // Wait until the worker has actually let go of the port.
         tokio::time::sleep(Duration::from_millis(800)).await;
         let progress_state = task_state.clone();
         let result = tokio::task::spawn_blocking(move || {
@@ -570,57 +570,57 @@ async fn post_firmware(
             rom_flasher::flash(&port, bridge, &segments, &mut report)
         })
         .await
-        .unwrap_or_else(|error| Err(format!("烧录任务崩溃：{error}")));
+        .unwrap_or_else(|error| Err(format!("flash task crashed: {error}")));
         serial.set_suspended(false);
         let operation = match result {
             Ok(()) => {
-                info!("固件已烧录，等设备重启");
-                Operation { kind: OperationKind::Firmware, state: OperationState::Done, progress: 1.0, message: "烧录完成，设备重启中".to_owned() }
+                info!("firmware flashed, waiting for the device to restart");
+                Operation { kind: OperationKind::Firmware, state: OperationState::Done, progress: 1.0, message: "flash complete, device restarting".to_owned() }
             }
             Err(error) => {
-                warn!(%error, "固件烧录失败");
+                warn!(%error, "firmware flash failed");
                 Operation { kind: OperationKind::Firmware, state: OperationState::Failed, progress: 0.0, message: error }
             }
         };
         task_state.set_operation(Some(operation)).await;
     });
-    (StatusCode::ACCEPTED, Json(ApiResponse { accepted: true, message: "开始烧录".to_owned() }))
+    (StatusCode::ACCEPTED, Json(ApiResponse { accepted: true, message: "started flashing".to_owned() }))
 }
 
-/// App 看管 daemon：退出即重启。先把响应发出去再退。
+/// The app supervises the daemon: exiting means restarting. Send the response first, then exit.
 async fn post_restart() -> (StatusCode, Json<ApiResponse>) {
     tokio::spawn(async {
         tokio::time::sleep(Duration::from_millis(200)).await;
-        info!("按 App 的要求退出，等它重新拉起");
+        info!("exiting at the app's request; it will relaunch us");
         std::process::exit(0);
     });
-    (StatusCode::ACCEPTED, Json(ApiResponse { accepted: true, message: "daemon 即将重启".to_owned() }))
+    (StatusCode::ACCEPTED, Json(ApiResponse { accepted: true, message: "daemon is restarting".to_owned() }))
 }
 
-/// 定期告诉设备链路还活着。
+/// Periodically tell the device the link is still alive.
 ///
-/// 没有心跳时，daemon 崩溃或串口断开后设备会一直显示最后一个状态，
-/// 看上去任务仍在进行。状态设备最严重的失败是显示过时状态而不自知。
+/// Without heartbeats, after a daemon crash or serial disconnect the device would keep showing the last state,
+/// looking as if a task were still running. The worst failure for a status device is showing stale state without knowing it.
 async fn send_heartbeats(state: AppState) {
     let build = build_identity(state.app_version.as_deref());
-    info!(build = %build, "Mac 端构建标识");
+    info!(build = %build, "Mac-side build id");
     let mut ticker = tokio::time::interval(HEARTBEAT_INTERVAL);
     loop {
         ticker.tick().await;
         let now = chrono::Local::now();
         let heartbeat = heartbeat_event(&build, now.hour(), local_day(&now));
         match heartbeat.to_ndjson() {
-            // 队列满意味着设备已经收不到东西，这时心跳没有意义，丢弃即可。
+            // A full queue means the device isn't receiving anything; a heartbeat is pointless then, so just drop it.
             Ok(frame) => drop(state.transport.send(frame)),
-            Err(error) => warn!(%error, "心跳编码失败"),
+            Err(error) => warn!(%error, "failed to encode heartbeat"),
         }
     }
 }
 
-/// 心跳捎带三样东西：构建标识、本地小时数、本地日期。都随每次心跳重复发，
-/// 因为设备可能随时重启，一次性的握手会丢。小时数让小灯灵知道现在是白天
-/// 还是夜里，日期让番茄钟知道什么时候算新的一天：设备没有时钟，也不该
-/// 为了这个去连 Wi-Fi。
+/// The heartbeat piggybacks three things: build identifier, local hour and local date. All are repeated with every heartbeat
+/// because the device may restart at any time and a one-off handshake would be lost. The hour tells the buddy whether it's day
+/// or night, and the date tells the pomodoro when a new day starts: the device has no clock and shouldn't
+/// join Wi-Fi just for that.
 fn heartbeat_event(build: &str, hour: u32, day: u32) -> Event {
     Event {
         version: VERSION,
@@ -638,19 +638,19 @@ fn heartbeat_event(build: &str, hour: u32, day: u32) -> Event {
     }
 }
 
-/// 本地日期压成一个整数 YYYYMMDD：设备只需要比较它变没变。
+/// Local date packed into one integer YYYYMMDD: the device only needs to compare whether it changed.
 fn local_day(now: &chrono::DateTime<chrono::Local>) -> u32 {
     use chrono::Datelike;
     now.year() as u32 * 10_000 + now.month() * 100 + now.day()
 }
 
-/// 轮询 GitHub Actions。没有配置仓库时它什么也不做。
+/// Poll GitHub Actions. Does nothing when no repos are configured.
 async fn poll_ci(state: AppState) {
     let mut watcher = CiWatcher::default();
     let mut ticker = tokio::time::interval(ci::POLL_INTERVAL);
     loop {
         ticker.tick().await;
-        // 先取数据再上锁：`gh` 可能跑上几秒，持锁等它会把 Hook 全堵住。
+        // Fetch before taking the lock: `gh` may run for seconds, and holding the lock meanwhile would block all hooks.
         let workspaces = state.activities.lock().await.recent_workspaces();
         let fetched = watcher.fetch(&workspaces).await;
         if fetched.is_empty() {
@@ -665,7 +665,7 @@ async fn poll_ci(state: AppState) {
             events
         };
         for event in events {
-            info!(event = %event.event, "CI 状态变化");
+            info!(event = %event.event, "CI status changed");
             send_event(&state, event);
         }
     }
@@ -685,20 +685,20 @@ async fn sweep_expired_activities(state: AppState) {
         let Some(event) = event else {
             continue;
         };
-        info!(event = %event.event, "清除过期的活动");
+        info!(event = %event.event, "clearing expired activity");
         send_event(&state, event);
     }
 }
 
-/// 后台任务发事件的共用路径。队列满或编码失败只记日志，不影响下一轮。
+/// Shared path for background tasks sending events. A full queue or encoding failure is only logged and doesn't affect the next round.
 fn send_event(state: &AppState, event: Event) {
     match event.to_ndjson() {
         Ok(frame) => {
             if let Err(error) = state.transport.send(frame) {
-                warn!(?error, "状态未能进入发送队列");
+                warn!(?error, "status could not be queued for sending");
             }
         }
-        Err(error) => warn!(%error, "状态编码失败"),
+        Err(error) => warn!(%error, "failed to encode status"),
     }
 }
 
@@ -724,21 +724,21 @@ async fn post_event(
             StatusCode::ACCEPTED,
             Json(ApiResponse {
                 accepted: true,
-                message: "事件已进入设备发送队列".to_owned(),
+                message: "event queued for the device".to_owned(),
             }),
         ),
         Err(TransportError::QueueFull) => (
             StatusCode::SERVICE_UNAVAILABLE,
             Json(ApiResponse {
                 accepted: false,
-                message: "设备发送队列已满".to_owned(),
+                message: "device send queue is full".to_owned(),
             }),
         ),
         Err(TransportError::Closed) => (
             StatusCode::SERVICE_UNAVAILABLE,
             Json(ApiResponse {
                 accepted: false,
-                message: "串口 worker 已停止".to_owned(),
+                message: "serial worker has stopped".to_owned(),
             }),
         ),
     }
@@ -784,7 +784,7 @@ async fn forward(state: AppState, event: Option<Event>) -> (StatusCode, Json<Api
             StatusCode::ACCEPTED,
             Json(ApiResponse {
                 accepted: true,
-                message: "Hook 已接收，可见状态未变化".to_owned(),
+                message: "hook accepted, visible state unchanged".to_owned(),
             }),
         );
     };
@@ -804,7 +804,7 @@ mod tests {
 
     impl Transport for RecordingTransport {
         fn send(&self, frame: Vec<u8>) -> Result<(), TransportError> {
-            self.frames.lock().expect("mutex 不应中毒").push(frame);
+            self.frames.lock().expect("mutex should not be poisoned").push(frame);
             Ok(())
         }
     }
@@ -813,9 +813,9 @@ mod tests {
         fn events(&self) -> Vec<Event> {
             self.frames
                 .lock()
-                .expect("mutex 不应中毒")
+                .expect("mutex should not be poisoned")
                 .iter()
-                .map(|frame| serde_json::from_slice(frame).expect("帧应是合法事件"))
+                .map(|frame| serde_json::from_slice(frame).expect("frame should be a valid event"))
                 .collect()
         }
     }
@@ -830,10 +830,10 @@ mod tests {
     }
 
     fn device_event(json: &str) -> DeviceMessage {
-        DeviceMessage::Event(serde_json::from_str(json).expect("测试事件应可解析"))
+        DeviceMessage::Event(serde_json::from_str(json).expect("test event should parse"))
     }
 
-    /// 等记录型 Transport 里出现第 `index` 条事件。
+    /// Wait for the `index`-th event to show up in the recording transport.
     async fn nth_event(transport: &RecordingTransport, index: usize) -> Event {
         for _ in 0..200 {
             if let Some(event) = transport.events().get(index) {
@@ -841,7 +841,7 @@ mod tests {
             }
             tokio::time::sleep(Duration::from_millis(5)).await;
         }
-        panic!("第 {index} 条事件迟迟没有出现");
+        panic!("event {index} never showed up");
     }
 
     #[test]
@@ -882,16 +882,16 @@ mod tests {
         let state = test_state(transport);
         let response = status_stream(State(state.clone())).await.into_response();
         let mut body = response.into_body();
-        let first = body.frame().await.expect("先推一份").expect("帧可读");
-        let first = String::from_utf8_lossy(first.data_ref().expect("数据帧")).into_owned();
+        let first = body.frame().await.expect("first snapshot is pushed").expect("frame is readable");
+        let first = String::from_utf8_lossy(first.data_ref().expect("data frame")).into_owned();
         assert!(first.starts_with("event: status\n"), "{first}");
         assert!(first.contains("\"connected\":false"), "{first}");
 
         publish_device_message(&state, DeviceMessage::Connected { port: "/dev/cu.s".to_owned(), bridge: false }).await;
-        let second = body.frame().await.expect("状态变了再推一份").expect("帧可读");
-        let second = String::from_utf8_lossy(second.data_ref().expect("数据帧")).into_owned();
+        let second = body.frame().await.expect("another snapshot is pushed after the status changes").expect("frame is readable");
+        let second = String::from_utf8_lossy(second.data_ref().expect("data frame")).into_owned();
         assert!(second.contains("\"connected\":true"), "{second}");
-        let _ = to_bytes; // 只用到帧接口
+        let _ = to_bytes; // only the frame interface is used
     }
 
     #[tokio::test]
@@ -927,7 +927,7 @@ mod tests {
             publish_device_message(&state, DeviceMessage::Line("SHOT 0000:320".to_owned())).await;
         }
         publish_device_message(&state, DeviceMessage::Line("SHOT END".to_owned())).await;
-        let response = handle.await.expect("截图任务不该崩");
+        let response = handle.await.expect("screenshot task should not panic");
         assert_eq!(response.status(), StatusCode::OK);
         assert_eq!(response.headers()["content-type"], "image/png");
     }
@@ -976,7 +976,7 @@ mod tests {
     async fn writing_a_voice_pack_waits_for_each_acknowledgement() {
         let transport = Arc::new(RecordingTransport::default());
         let state = test_state(transport.clone());
-        let pack = sample_pack("hsiaoyu", 1000); // 1256 字节 → 两块
+        let pack = sample_pack("hsiaoyu", 1000); // 1256 bytes → two chunks
 
         let (status, _) = post_voice_pack(State(state.clone()), Bytes::from(pack.clone())).await;
         assert_eq!(status, StatusCode::ACCEPTED);
@@ -985,7 +985,7 @@ mod tests {
         assert_eq!(begin.event, "voice.begin");
         assert_eq!(begin.extra["size"], 1256);
         tokio::time::sleep(Duration::from_millis(20)).await;
-        assert_eq!(transport.events().len(), 1, "没收到 ready 之前不能发块");
+        assert_eq!(transport.events().len(), 1, "no chunk may be sent before ready arrives");
 
         publish_device_message(&state, device_event(r#"{"version":1,"event":"voice.ready","seq":-1}"#)).await;
         let first = nth_event(&transport, 1).await;
@@ -993,7 +993,7 @@ mod tests {
         assert_eq!(first.extra["seq"], 0);
         assert_eq!(first.extra["crc"], crc32fast::hash(&pack[..672]));
         tokio::time::sleep(Duration::from_millis(20)).await;
-        assert_eq!(transport.events().len(), 2, "没收到 ack 之前不能发下一块");
+        assert_eq!(transport.events().len(), 2, "the next chunk may not be sent before the ack arrives");
 
         publish_device_message(&state, device_event(r#"{"version":1,"event":"voice.ack","seq":0}"#)).await;
         let second = nth_event(&transport, 2).await;
@@ -1010,7 +1010,7 @@ mod tests {
             }
             tokio::time::sleep(Duration::from_millis(5)).await;
         }
-        let operation = state.operation.lock().await.clone().expect("应有操作记录");
+        let operation = state.operation.lock().await.clone().expect("an operation should be recorded");
         assert_eq!(operation.state, OperationState::Done);
         assert_eq!(state.config.lock().await.voice.as_deref(), Some("hsiaoyu"));
     }
@@ -1033,7 +1033,7 @@ mod tests {
             }
             tokio::time::sleep(Duration::from_millis(5)).await;
         }
-        let operation = state.operation.lock().await.clone().expect("应有操作记录");
+        let operation = state.operation.lock().await.clone().expect("an operation should be recorded");
         assert_eq!(operation.state, OperationState::Failed);
         assert!(operation.message.contains("ESP_ERR_INVALID_SIZE"), "{}", operation.message);
         assert_eq!(state.config.lock().await.voice, None);
@@ -1055,7 +1055,7 @@ mod tests {
         let transport = Arc::new(RecordingTransport::default());
         let event: Event =
             serde_json::from_str(r#"{"version":1,"event":"task.done","title":"Hello"}"#)
-                .expect("测试消息应可解析");
+                .expect("test message should parse");
 
         let (status, Json(response)) =
             post_event(State(test_state(transport.clone())), Json(event)).await;
@@ -1063,7 +1063,7 @@ mod tests {
         assert_eq!(status, StatusCode::ACCEPTED);
         assert!(response.accepted);
         assert_eq!(
-            transport.frames.lock().expect("mutex 不应中毒").as_slice(),
+            transport.frames.lock().expect("mutex should not be poisoned").as_slice(),
             [b"{\"version\":1,\"event\":\"task.done\",\"title\":\"Hello\"}\n"]
         );
     }
@@ -1072,8 +1072,8 @@ mod tests {
     fn heartbeat_carries_build_local_hour_and_day() {
         let frame = heartbeat_event("abc1234 2026-09-15 12:00", 23, 20260915)
             .to_ndjson()
-            .expect("心跳应可编码");
-        let text = String::from_utf8(frame).expect("心跳必须是 UTF-8");
+            .expect("heartbeat should encode");
+        let text = String::from_utf8(frame).expect("heartbeat must be UTF-8");
         assert!(text.contains(r#""event":"device.heartbeat""#));
         assert!(text.contains(r#""build":"abc1234 2026-09-15 12:00""#));
         assert!(text.contains(r#""hour":23"#));
@@ -1092,13 +1092,13 @@ mod tests {
         let event: Event = serde_json::from_str(
             r#"{"version":1,"event":"button","button":"K2","action":"press"}"#,
         )
-        .expect("按钮事件应可解析");
+        .expect("button event should parse");
         assert!(is_k2_press(&event));
 
         let release: Event = serde_json::from_str(
             r#"{"version":1,"event":"button","button":"K2","action":"release"}"#,
         )
-        .expect("释放事件应可解析");
+        .expect("release event should parse");
         assert!(!is_k2_press(&release));
     }
 }
