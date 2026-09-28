@@ -50,27 +50,41 @@ diff -ru .probe/baseline .probe/connected
 
 ## Stage 1 固件
 
+固件是 Rust（esp-hal + embassy，no_std），分两层：[`firmware-rs/core`](firmware-rs/core) 放所有不碰硬件的逻辑，[`firmware-rs/device`](firmware-rs/device) 只做硬件胶水。取舍见 [ADR-0006](docs/adr/0006-firmware-in-rust-with-esp-hal.md)，第一次上机的验收步骤见 [`docs/firmware-bringup.md`](docs/firmware-bringup.md)。
+
+先装一次 Xtensa 工具链与 espflash：
+
+```bash
+cargo install espup espflash --locked
+espup install --targets esp32s3
+```
+
 连接 ATK-DNESP32S3-BOX V1.1 的 `USB-SLAVE` 口后执行：
 
 ```bash
-./tools/flash.sh /dev/cu.usbmodem8401
+just flash /dev/cu.usbmodem8401
 uv run --with pyserial python tools/serial-hello.py /dev/cu.usbmodem8401
 ```
 
-烧录前可以在 Mac 上先验证固件里不依赖硬件的部分：`./tools/test-pomodoro.sh` 跑番茄钟状态机的测试，`./tools/preview-display.sh` 把固件的绘制代码渲染成 PNG 看版式。
+`just flash` 先构建三件套（bootloader、分区表、app）再用 espflash 写入，`voices` 分区与设置区不动，换固件不丢音色。
 
-固件使用 [`firmware/partitions.csv`](firmware/partitions.csv) 的自定义分区表（app 分区 4 MB），因为语音资产已经装不进默认的 1 MB。这个选择写在 `sdkconfig.defaults` 里，但 ESP-IDF 只在生成 `sdkconfig` 时读取 defaults：2026-09-15 之前就存在 `firmware/sdkconfig` 的检出目录要先删掉它再构建，否则仍按旧分区表检查大小并失败。
+烧录前可以在 Mac 上验证固件里不依赖硬件的部分：`just test-firmware` 跑 firmware-core 的测试（状态机、绘制、串口协议、存储、codec 序列），并把 Rust 与 C 两份固件的画面逐像素比对。
 
-设备若只接着 BOX 的 `UART` 口（CH343 桥，`/dev/cu.usbmodem5909…`），不要用 `flash.sh`：那条路在 esptool 默认参数下会把 flash 擦掉后写不进去。用 [`tools/flash-bridge.sh`](tools/flash-bridge.sh)，它以 `--no-stub` 加 256 字节写块烧录，先单独写分区表试路，再写 app：
+固件使用 [`firmware/partitions.csv`](firmware/partitions.csv) 的自定义分区表（app 分区 4 MB），因为语音资产已经装不进默认的 1 MB。espflash 解析不了其中 `voices` 分区的自定义子类型，所以分区表由 [`tools/make-partition-table.py`](tools/make-partition-table.py) 编译，结果与 ESP-IDF 的 `gen_esp32part.py` 逐字节一致。
+
+C 固件（`firmware/`，ESP-IDF）在 Rust 版实机验收完成前保留作退路：`just flash-c /dev/cu.usbmodem8401` 刷回去。
+
+设备若只接着 BOX 的 `UART` 口（CH343 桥，`/dev/cu.usbmodem5909…`），不要用 `just flash`：那条路在默认写块下会把 flash 擦掉后写不进去。用 [`tools/flash-bridge.sh`](tools/flash-bridge.sh)，它以 `--no-stub` 加 256 字节写块烧录，先单独写分区表试路，再写 app：
 
 ```bash
 launchctl bootout gui/$(id -u)/com.vibebuddy.vibebuddyd
+tools/build-firmware.sh
 ./tools/flash-bridge.sh /dev/cu.usbmodem59090668961 partition
 ./tools/flash-bridge.sh /dev/cu.usbmodem59090668961 app
 launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.vibebuddy.vibebuddyd.plist
 ```
 
-`flash.sh` 会覆盖当前固件。2026-09-14 的原厂 `xiaozhi` 1.9.4 整片备份保存在本机 `.probe/factory/`，权限为 `600`，不会提交到 Git。
+`just flash` 会覆盖当前固件。2026-09-14 的原厂 `xiaozhi` 1.9.4 整片备份保存在本机 `.probe/factory/`，权限为 `600`，不会提交到 Git。
 
 ## Vibe Buddy App
 

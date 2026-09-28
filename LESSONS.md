@@ -162,6 +162,27 @@ App 自己的接入页当时显示的是橙点加"等待第一次事件…（记
 
 `sdkconfig` 不在 git 里，所以这是每台机器各自独立的坑：谁的机器上留着旧的那份，谁就在悄悄用错配置，而且 CI 上永远复现不了——CI 是干净 checkout，没有 sdkconfig，走的是正确路径。判断方法：构建产物与仓库里声明的配置对不上时，先确认那份声明有没有真的被读进去，别先怀疑声明本身写错了。
 
+## worktree 住在主仓库里面，往上找配置会找出界
+
+2026-09-26 给 Rust 固件建设备 crate `firmware-rs/device`。它要用 Xtensa 工具链单独构建，所以在 worktree 根 `Cargo.toml` 里写了 `exclude`。结果 `cargo build` 报「当前包以为自己在一个 workspace 里」，指的却是 `/Users/dragon/workspace/vibe-buddy/Cargo.toml`，也就是主仓库。
+
+原因有两层：
+
+- cargo 找 workspace 根时，遇到把自己 exclude 掉的清单并不停下，会继续往上找。
+- 本仓库的 worktree 放在主仓库的 `.claude/worktrees/` 下面，再往上一层就是主仓库。
+
+于是这个 worktree 里的构建，读到了主仓库那份、不同分支的配置。
+
+凡是「从当前目录往上找」的机制，比如 cargo workspace、`.cargo/config.toml`、`rust-toolchain.toml`、各种 dotfile，在嵌套 worktree 里都可能越界读到主仓库。独立构建的 crate 要在自己的清单里写一个空的 `[workspace]` 把边界钉死，不能只靠上层 exclude。判断方法：报错或日志里出现的路径不在当前 worktree 下，就是越界了。
+
+## espflash 解析不了自定义数据子类型的分区表
+
+同一天打 Rust 固件的烧录镜像。`espflash save-image --partition-table firmware/partitions.csv` 直接 panic，位置在 `esp-idf-part` 的 `Option::unwrap()`。原因是 `voices` 分区的子类型 `0x40` 是自定义值，而 `SubType::data()` 只认 ESP-IDF 预定义的枚举。
+
+改法是分区表不交给 espflash，由 `tools/make-partition-table.py` 自己编。编完拿 ESP-IDF 的 `gen_esp32part.py` 对同一份 CSV 生成一遍，逐字节比对一致才用。bootloader 与 app 仍用 espflash 出，但 bootloader 必须带 `--flash-size 16mb`，否则镜像头里写的是默认大小，4 MB 以外的 `voices` 分区会被 bootloader 当成越界。
+
+把别人的格式实现换成自己写的，就必须拿原实现的输出做一次逐字节对照，否则只是换了一个没被验证的实现。
+
 ## 别人的 App 升级，会悄悄拿走我们依赖的进程环境
 
 2026-09-28 发现，任务完成后按 K2，打不开 Codex 会话，daemon 日志一律报「会话没有宿主窗口」。

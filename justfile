@@ -10,31 +10,28 @@ test:
     cargo test --workspace
     swift run --package-path app SelfTest
 
-# Firmware parts that don't need hardware: pomodoro, leisure, voice pack
+# Tests for the hardware-independent firmware (firmware-core), then a pixel-by-pixel comparison of the Rust and C firmware screens
 test-firmware:
+    cargo test -p vibebuddy-firmware-core
+    tools/compare-display.sh
+
+# Build the Rust firmware images into firmware-rs/device/build (needed for a Release app bundle); FAST_CLOCK=1 builds the acceptance-test variant
+firmware:
+    tools/build-firmware.sh
+
+# Flash the Rust firmware (native USB port; with only the UART bridge, use tools/flash-bridge.sh)
+flash port:
+    tools/flash.sh {{port}}
+
+# Fall back to the C firmware: build it with ESP-IDF and flash it (if the Rust firmware misbehaves)
+flash-c port:
+    tools/flash-c.sh {{port}}
+
+# The C firmware's own host tests: pomodoro, leisure, voice pack
+test-firmware-c:
     tools/test-pomodoro.sh
     tools/test-leisure.sh
     tools/test-voice-pack.sh
-
-# Build the three firmware images into firmware/build (needed for a Release app bundle)
-firmware:
-    #!/usr/bin/env bash
-    set -euo pipefail
-    if ! command -v idf.py >/dev/null; then
-        # The activation script can't be sourced (see LESSONS.md); read its environment with -e instead.
-        while IFS='=' read -r key value; do
-            [[ "${key}" == "PATH" ]] && export PATH="${value}:${PATH}"
-            [[ "${key}" != "PATH" && "${key}" != "SYSTEM_PATH" ]] && export "${key}=${value}"
-        done < <("${HOME}/.espressif/tools/activate_idf_v5.5.3.sh" -e)
-        idf() { "${IDF_PYTHON_ENV_PATH}/bin/python" "${IDF_PATH}/tools/idf.py" "$@"; }
-    else
-        idf() { idf.py "$@"; }
-    fi
-    idf -C firmware build
-
-# Flash the firmware (native USB port; with only the UART bridge, use tools/flash-bridge.sh)
-flash port:
-    tools/flash.sh {{port}}
 
 # Build app/build/Vibe Buddy.app (needs the three firmware images first)
 app:

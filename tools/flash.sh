@@ -1,30 +1,12 @@
 #!/usr/bin/env bash
+# Flash the Rust firmware over the native USB port. The three images come from tools/build-firmware.sh;
+# the voices partition and the settings area are left alone, so a firmware change keeps the voice.
+# With only the UART bridge connected, use tools/flash-bridge.sh. To go back to the C firmware: tools/flash-c.sh.
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-firmware_dir="${repo_root}/firmware"
+build_dir="${BUILD_DIR:-${repo_root}/firmware-rs/device/build}"
 serial_port="${1:-}"
-
-if command -v idf.py >/dev/null 2>&1; then
-    idf_command=(idf.py)
-else
-    activation_script="${HOME}/.espressif/tools/activate_idf_v5.5.3.sh"
-    if [[ ! -f "${activation_script}" ]]; then
-        echo "ESP-IDF v5.5.3 activation script not found: ${activation_script}" >&2
-        exit 1
-    fi
-
-    caller_path="${PATH}"
-    while IFS='=' read -r key value; do
-        if [[ "${key}" == "PATH" ]]; then
-            export PATH="${value}:${caller_path}"
-        elif [[ "${key}" != "SYSTEM_PATH" ]]; then
-            export "${key}=${value}"
-        fi
-    done < <("${activation_script}" -e)
-
-    idf_command=("${IDF_PYTHON_ENV_PATH}/bin/python" "${IDF_PATH}/tools/idf.py")
-fi
 
 if [[ -z "${serial_port}" ]]; then
     shopt -s nullglob
@@ -37,9 +19,8 @@ if [[ -z "${serial_port}" ]]; then
     serial_port="${ports[0]}"
 fi
 
-if [[ ! -c "${serial_port}" ]]; then
-    echo "Serial port is not a character device: ${serial_port}" >&2
-    exit 1
-fi
-
-"${idf_command[@]}" -C "${firmware_dir}" -p "${serial_port}" build flash
+"${repo_root}/tools/build-firmware.sh"
+# Stay in the bootloader after the first two images and reset only after the last one, so a half-updated firmware never runs.
+espflash write-bin -S --chip esp32s3 --port "${serial_port}" --after no-reset 0x0 "${build_dir}/bootloader.bin"
+espflash write-bin -S --chip esp32s3 --port "${serial_port}" --after no-reset 0x8000 "${build_dir}/partition-table.bin"
+espflash write-bin -S --chip esp32s3 --port "${serial_port}" 0x10000 "${build_dir}/vibebuddy-fw.bin"

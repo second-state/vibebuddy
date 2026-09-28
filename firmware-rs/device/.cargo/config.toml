@@ -1,0 +1,14 @@
+# Deliberately no runner: `espflash flash` cannot parse the custom subtypes in partitions.csv, and
+# without a partition table it writes espflash's default one and wipes the voices partition. Always
+# flash with `just flash` (tools/flash.sh).
+
+[build]
+rustflags = ["-C", "link-arg=-nostartfiles"]
+target = "xtensa-esp32s3-none-elf"
+
+[env]
+# Keep esp-hal's logs off serial: every line on serial is protocol for the Mac to parse.
+ESP_LOG = "off"
+
+[unstable]
+build-std = ["alloc", "core"]

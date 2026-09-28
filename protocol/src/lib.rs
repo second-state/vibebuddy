@@ -1,5 +1,18 @@
-use std::collections::BTreeMap;
-use std::fmt;
+//! The message envelope between the Mac and the device. The daemon encodes it and the firmware
+//! decodes it: one type, compiled once on each side, so a field mismatch fails to compile. The
+//! firmware has no std, so this crate uses only `core` and `alloc`; the `std` feature adds nothing
+//! but a `std::error::Error` impl.
+#![no_std]
+
+extern crate alloc;
+#[cfg(any(feature = "std", test))]
+extern crate std;
+
+use alloc::borrow::ToOwned;
+use alloc::collections::BTreeMap;
+use alloc::string::String;
+use alloc::vec::Vec;
+use core::fmt;
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -82,6 +95,7 @@ impl fmt::Display for ProtocolError {
     }
 }
 
+#[cfg(feature = "std")]
 impl std::error::Error for ProtocolError {}
 
 #[cfg(test)]

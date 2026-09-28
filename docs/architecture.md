@@ -51,7 +51,7 @@ Codex / Claude / Browser <---------- open source <------------+<- vibebuddyd <- 
 
 ## 关键决定
 
-1. 第一阶段采用 monorepo，Mac 端优先 Rust，固件优先评估 ESP-IDF。
+1. 第一阶段采用 monorepo，Mac 端与固件都用 Rust：固件是 esp-hal + embassy（no_std），不碰硬件的逻辑放在 `firmware-rs/core`，Mac 上直接测试，协议类型两端共用一份（ADR-0006）。C 固件在实机验收前保留作退路。
 2. CLI 必须经由 daemon，避免多个进程竞争串口并分散重连逻辑。
 3. Vibe Buddy Protocol v1 使用 NDJSON，一行一个 JSON object。
 4. 固件硬件配置必须来自精确板型的官方资料或实机验证，不借用相似板卡 GPIO。
@@ -63,5 +63,5 @@ Codex / Claude / Browser <---------- open source <------------+<- vibebuddyd <- 
 10. 每个 Agent 一个 Adapter，但所有 Adapter 写入同一个聚合器。设备只有一块屏幕和一只氛围小助手，两个聚合器会各自维护任务卡栈并互相覆盖。Adapter 因此不持有状态，只做事件翻译和活动身份合成；任务卡标题带 Agent 前缀，因为两个 Agent 常在同一目录下工作。
 11. CI 与 Agent 共用同一套任务卡和播报，只是来源不同：GitHub Actions 由 `vibebuddyd` 主动轮询，不靠 Hook。只有亲眼见过某次 run 在跑，它结束时才播报；否则每次重启 daemon 都会把仓库里最近一次历史结果重新宣告一遍。关注哪些仓库不需要用户配置：Hook 已经带来了 `cwd`，Agent 最近工作过的项目就是该关心 CI 的那些，仓库名从本地 `.git/config` 推导。
 12. K2 打开的来源必须与屏幕主状态使用同一套优先级，不能另做一个“最近窗口”列表。聚合器只保存定位所需的 thread id、session id 或 repo/run id，不保存 prompt 与回复；外部参数不经过 shell。Codex 子 Agent 的生命周期 session 不是桌面可导航 thread，Hook 必须把它映射到父 thread 后再关联来源；K2 的落点由运行处决定：跑在 Agent 自己的桌面应用里才用 deeplink，跑在别的应用里就把那个应用拉到前台，没有宿主的会话跳过。运行处与桌面会话 id 都由 Hook 从进程环境判定后上报，daemon 只做路由，不去磁盘上猜——按 CLI `session_id` 认领 transcript 是一对多的，会打开影子会话。
-13. 番茄钟、休闲与模式切换都在固件里，`vibebuddyd` 只收诊断行。它是设备 I/O 与确定性渲染，本来就是固件的职责；更要紧的是用户拿它计时时 Mac 端可能没在跑，一个要靠心跳才走的计时器没有用。固件里凡是不碰硬件的逻辑——番茄钟状态机、休闲导演、绘制代码——都要能在 Mac 上直接编译：状态机与导演有主机测试，画面与剧目有主机预览，烧录之前就能看见版式和动画。
+13. 番茄钟、休闲与模式切换都在固件里，`vibebuddyd` 只收诊断行。它是设备 I/O 与确定性渲染，本来就是固件的职责；更要紧的是用户拿它计时时 Mac 端可能没在跑，一个要靠心跳才走的计时器没有用。固件里凡是不碰硬件的逻辑——番茄钟状态机、休闲导演、绘制代码、串口协议处理——都在 `firmware-rs/core`，Mac 上 `cargo test` 就能跑：状态机与导演有单元测试，整条串口链有假板子上的端到端测试，画面与剧目有主机预览，烧录之前就能看见版式和动画。
 14. Mac 端的图形界面是原生 SwiftUI 菜单栏 App，`vibebuddyd` 作为 helper 由它看管；语音包放独立分区、走串口协议写入；Hook 改为 Rust 单二进制复制到 Application Support。三条取舍分别见 ADR-0004、0003、0005，整体设计见 [`app.md`](app.md)。

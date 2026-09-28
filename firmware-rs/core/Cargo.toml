@@ -1,0 +1,18 @@
+[package]
+name = "vibebuddy-firmware-core"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+# Everything in the firmware that does not touch hardware: state machine, drawing, protocol handling,
+# storage formats, chip register sequences. no_std, compiled once for the device and once for the Mac;
+# `cargo test` on the Mac runs the whole chain.
+[features]
+# For on-device acceptance testing: squeezes leisure's five minutes into five seconds and the pomodoro's
+# 25 minutes into 25 seconds.
+fast-clock = []
+
+[dependencies]
+libm = "0.2"
+serde_json = { version = "1", default-features = false, features = ["alloc"] }
+vibebuddy-protocol = { path = "../../protocol", default-features = false }

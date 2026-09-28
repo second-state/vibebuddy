@@ -6,7 +6,7 @@
 #   --install  Copy the result to /Applications and launch it from there. The app you use day to day must live there:
 #              a worktree's build directory can be deleted at any time, and the login item and hooks point into it,
 #              so after the next reboot nothing is left (this happened once on 2026-09-17).
-# A release build requires the three images in firmware/build; if any is missing it fails and says to build the firmware first.
+# A release build requires the three images in firmware-rs/device/build; if any is missing it fails and says to build the firmware first.
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
@@ -79,31 +79,18 @@ cp "${repo_root}/target/release/vibebuddyd" "${contents}/MacOS/vibebuddyd"
 cp "${repo_root}/target/release/vibebuddy-hook" "${contents}/MacOS/vibebuddy-hook"
 
 echo "== Firmware"
-fw="${repo_root}/firmware/build"
-if [[ -f "${fw}/bootloader/bootloader.bin" && -f "${fw}/partition_table/partition-table.bin" && -f "${fw}/vibebuddy-fw.bin" ]]; then
-    cp "${fw}/bootloader/bootloader.bin" "${contents}/Resources/firmware/bootloader.bin"
-    cp "${fw}/partition_table/partition-table.bin" "${contents}/Resources/firmware/partition-table.bin"
-    cp "${fw}/vibebuddy-fw.bin" "${contents}/Resources/firmware/vibebuddy-fw.bin"
-    # The build ID must match exactly what the box footer reports: the esp_app_desc version in the image plus
-    # this build's timestamp, formatted like the firmware's describe_firmware_build.
-    python3 - "${fw}" > "${contents}/Resources/firmware/build.txt" <<'PY'
-import re, struct, sys
-from pathlib import Path
-build = Path(sys.argv[1])
-image = (build / "vibebuddy-fw.bin").read_bytes()
-# esp_app_desc_t sits at image offset 0x20: magic(4) secure_version(4) reserv1(8) version[32]
-magic, = struct.unpack_from("<I", image, 0x20)
-assert magic == 0xABCD5432, "esp_app_desc not found"
-version = image[0x30:0x50].split(b"\0", 1)[0].decode()[:24]
-stamp_header = next(build.rglob("agent_build_stamp.h"))
-stamp = re.search(r'"([^"]+)"', stamp_header.read_text()).group(1)[:16]
-print(f"{version} {stamp}")
-PY
+# The Rust firmware's three images and build ID, produced by tools/build-firmware.sh. build.txt matches the box
+# footer and its DISPLAY READY BUILD line character for character; the app compares against it to offer updates.
+fw="${repo_root}/firmware-rs/device/build"
+if [[ -f "${fw}/bootloader.bin" && -f "${fw}/partition-table.bin" && -f "${fw}/vibebuddy-fw.bin" && -f "${fw}/build.txt" ]]; then
+    for file in bootloader.bin partition-table.bin vibebuddy-fw.bin build.txt; do
+        cp "${fw}/${file}" "${contents}/Resources/firmware/${file}"
+    done
     echo "Bundled firmware $(cat "${contents}/Resources/firmware/build.txt")"
 elif [[ ${debug} -eq 1 ]]; then
     echo "No firmware build output; debug build ships without firmware"
 else
-    echo "A release build needs the three firmware images in firmware/build; run idf.py -C firmware build first" >&2
+    echo "A release build needs the three firmware images in firmware-rs/device/build; run tools/build-firmware.sh first" >&2
     exit 1
 fi
 
