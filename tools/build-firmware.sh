@@ -25,7 +25,7 @@ fi
 elf="${device}/target/xtensa-esp32s3-none-elf/release/vibebuddy-firmware"
 
 mkdir -p "${out}"
-work="$(mktemp -d -t vibebuddy-firmware)"
+work="$(mktemp -d "${TMPDIR:-/tmp}/vibebuddy-firmware.XXXXXX")"
 trap 'rm -rf "${work}"' EXIT
 
 # The ESP-IDF second-stage bootloader bundled with espflash. --flash-size writes 16 MB into its image header;
