@@ -182,3 +182,18 @@ App 自己的接入页当时显示的是橙点加"等待第一次事件…（记
 改法是分区表不交给 espflash，由 `tools/make-partition-table.py` 自己编。编完拿 ESP-IDF 的 `gen_esp32part.py` 对同一份 CSV 生成一遍，逐字节比对一致才用。bootloader 与 app 仍用 espflash 出，但 bootloader 必须带 `--flash-size 16mb`，否则镜像头里写的是默认大小，4 MB 以外的 `voices` 分区会被 bootloader 当成越界。
 
 把别人的格式实现换成自己写的，就必须拿原实现的输出做一次逐字节对照，否则只是换了一个没被验证的实现。
+
+## 别人的 App 升级，会悄悄拿走我们依赖的进程环境
+
+2026-09-28 发现，任务完成后按 K2，打不开 Codex 会话，daemon 日志一律报「会话没有宿主窗口」。
+
+K2 的落点由 hook 判定，唯一依据是 `__CFBundleIdentifier`：LaunchServices 启动 App 时注入这个变量，它沿进程链一路继承到 hook。问题出在 Codex 桌面 App 升级到 26.924、改名为 ChatGPT.app 之后：它启动 `codex app-server` 时把这个变量清掉了，于是每一个 Codex 会话都被判成 Headless。
+
+我们一行代码没改，功能就坏了，而且毫无动静：K2 按下去没有任何反应，只有 daemon 日志里一行 WARN。上一次成功打开 Codex 会话是 9 月 17 日，中间隔了 11 天。
+
+修法：环境变量缺失时，沿 hook 自己的进程链往上，找到由 launchd 直接拉起的那个祖先，读它路径里最外层 `.app` 的 bundle id。必须取最外层，因为 ChatGPT.app 里还嵌着一个 `CodexCLI.app`，它有自己的 bundle id（`com.openai.codex.cli`），但没有窗口可以激活。
+
+凡是依赖宿主进程「顺手」提供的东西，都不是契约，对方升级时不会通知我们，比如继承下来的环境变量、进程名、目录结构。这类依赖要有两层防护：
+
+- **第二依据**：主依据缺失时，退到一个由操作系统本身保证的事实，这里是进程树和 bundle 结构。
+- **失败要能被人看见**：判定结果从「能跳」变成「无处可去」时，应当有人知道，而不是只留一行 WARN。这一条还没做。
