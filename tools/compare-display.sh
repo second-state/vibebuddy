@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
-# Rust 固件的画面必须与 C 固件逐像素一致：两边各渲染同一组场景（含全部休闲
-# 剧目的每一帧），逐个文件比对。C 固件删掉之前，改绘制代码后都跑一遍。
+# The Rust firmware's screens must match the C firmware's pixel for pixel: both render the same scenes (including
+# every frame of every leisure skit) and each file is compared. Until the C firmware is removed, run this after
+# any change to the drawing code.
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -30,8 +31,8 @@ for c_file in "${work}"/c/*.ppm; do
     total=$((total + 1))
     if ! cmp -s "${c_file}" "${work}/rust/${name}"; then
         different=$((different + 1))
-        echo "不一致: ${name}"
+        echo "differs: ${name}"
     fi
 done
-echo "比对 ${total} 帧，不一致 ${different} 帧"
+echo "compared ${total} frames, ${different} differ"
 [[ ${different} -eq 0 ]]

@@ -1,7 +1,8 @@
-//! 320×240 的 RGB565 帧缓冲与最基本的画法：填矩形、粗线、5×7 点阵字。
+//! A 320×240 RGB565 frame buffer and the most basic drawing: filled rectangles, thick lines, 5×7 bitmap text.
 //!
-//! 缓冲按屏幕要的字节序排：每个像素高字节在前。C 固件在内存里存小端 u16，
-//! 让 LCD 驱动发送时交换字节；这里直接存成线上的样子，DMA 拿去就发。
+//! The buffer is in the byte order the panel wants: high byte first for each pixel. The C firmware stores
+//! little-endian u16 in memory and has the LCD driver swap bytes on send; here it is stored as it goes on
+//! the wire, so DMA can send it as is.
 
 pub const WIDTH: i32 = 320;
 pub const HEIGHT: i32 = 240;
@@ -49,8 +50,8 @@ const DIGIT_GLYPHS: [[u8; 7]; 10] = [
     [0x0e, 0x11, 0x11, 0x0f, 0x01, 0x01, 0x0e],
 ];
 
-/// 一个字节的一行点阵。没有字形的字节（包括 UTF-8 多字节字符的每个字节）
-/// 画成一个小问号似的占位符，和 C 固件一样按字节画。
+/// One bitmap row for a byte. Bytes without a glyph (including every byte of a UTF-8 multibyte character)
+/// draw as a small question-mark-like placeholder; drawing is per byte, as in the C firmware.
 fn glyph_row(character: u8, row: usize) -> u8 {
     let upper = character.to_ascii_uppercase();
     match upper {
@@ -73,7 +74,7 @@ fn glyph_row(character: u8, row: usize) -> u8 {
     }
 }
 
-/// RGB565 各分量减半。
+/// Halves each RGB565 component.
 pub fn half_bright(color: u16) -> u16 {
     (color >> 1) & 0x7bef
 }
@@ -111,7 +112,7 @@ impl<'a> Canvas<'a> {
         }
     }
 
-    /// 三像素粗的 Bresenham 线。
+    /// A three-pixel-thick Bresenham line.
     pub fn draw_line(&mut self, mut x0: i32, mut y0: i32, x1: i32, y1: i32, color: u16) {
         let delta_x = (x1 - x0).abs();
         let step_x = if x0 < x1 { 1 } else { -1 };
@@ -135,7 +136,7 @@ impl<'a> Canvas<'a> {
         }
     }
 
-    /// 从 (x, y) 起按字节画，最多 `max_characters` 个；遇到 NUL 停。
+    /// Draws byte by byte from (x, y), at most `max_characters`; stops at NUL.
     pub fn draw_text(&mut self, x: i32, y: i32, text: &[u8], scale: i32, color: u16, max_characters: usize) {
         for (index, &character) in text.iter().take(max_characters).enumerate() {
             if character == 0 {
@@ -165,7 +166,7 @@ impl<'a> Canvas<'a> {
         self.draw_text((WIDTH - width) / 2, y, text, scale, color, max_characters);
     }
 
-    /// 困倦期整屏转暗：每个像素各分量减半。
+    /// Dims the whole frame for the sleepy phase: halves each component of every pixel.
     pub fn dim(&mut self) {
         for pair in self.bytes[..FRAME_BYTES].as_chunks_mut::<2>().0 {
             let dimmed = half_bright(u16::from_be_bytes([pair[0], pair[1]])).to_be_bytes();

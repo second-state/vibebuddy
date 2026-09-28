@@ -1,21 +1,24 @@
-//! 语音包的读与写：设备 `voices` 分区里放着当前播报音色的五句成品。
-//! 分区为空或校验不过就用编译内置的那套。换音色只写这个分区，不换固件
-//! （ADR-0003）。
+//! Reading and writing voice packs: the device's `voices` partition holds the current
+//! announcement voice's five finished lines. If the partition is empty or fails its check, the
+//! compiled-in set is used. Changing voice writes only this partition, never the firmware
+//! (ADR-0003).
 //!
-//! C 固件把分区映射进地址空间直接喂 I2S，写入前要和播放任务对一套「在播」
-//! 标记。这里不映射：播放任务按块从 flash 读，写入会话开始前由上层先停掉
-//! 播放（见 `Firmware` 里的 voice.begin），两边不会同时碰这块 flash。
+//! The C firmware maps the partition into the address space and feeds I2S from it directly, so
+//! the writer has to agree with the playback task on a "playing" flag first. There is no mapping
+//! here: the playback task reads flash chunk by chunk, and the layer above stops playback before a
+//! write session begins (see voice.begin in `Firmware`), so the two never touch this flash at once.
 
 use crate::audio::Prompt;
 use crate::storage::{Flash, FlashError, Region, SECTOR_BYTES};
 use crate::voice_pack::{self, CLIPS, HEADER_BYTES, VoicePack};
 
-/// 每块最多这么多原始字节；Mac 端按它切块，base64 后一行不超过协议上限。
+/// Maximum raw bytes per chunk; the Mac splits by this so a base64 line stays under the protocol limit.
 pub const CHUNK_BYTES: usize = 672;
-/// 解码一块与回读校验共用的缓冲；一块最多 672 字节，校验按 1 KB 读。
+/// Buffer shared by chunk decoding and read-back verification; a chunk is at most 672 bytes,
+/// verification reads 1 KB at a time.
 const BUFFER_BYTES: usize = 1024;
 
-/// 写入失败的原因。回执里用 ESP-IDF 的错误名：Mac 端和日志一直认这套字。
+/// Why a write failed. Replies use ESP-IDF error names: the Mac and the logs have always used them.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum VoiceError {
     NotFound,
@@ -49,21 +52,21 @@ impl From<FlashError> for VoiceError {
     }
 }
 
-/// 一句语音在 flash 上的绝对位置。
+/// Absolute location of one line in flash.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct ClipLocation {
     pub offset: u32,
     pub length: u32,
 }
 
-/// 五句的位置；None 表示用内置音色。
+/// Locations of the five lines; None means the built-in voice.
 pub type ClipTable = Option<[ClipLocation; CLIPS]>;
 
 struct Session {
     expected_total: u32,
     received: u32,
     next_seq: u32,
-    /// 还没凑满 4 字节、写不进 flash 的尾巴。flash 写入要 4 字节对齐。
+    /// Leftover bytes short of 4 that cannot be written yet. Flash writes must be 4-byte aligned.
     tail: [u8; 4],
     tail_length: usize,
 }
@@ -72,7 +75,7 @@ pub struct Voices {
     partition: Option<Region>,
     pack: Option<VoicePack>,
     session: Option<Session>,
-    /// 包头那 256 字节留在内存里，最后校验通过才落盘。
+    /// The 256 header bytes stay in memory and are written to flash only after the final check passes.
     header: [u8; HEADER_BYTES],
     buffer: [u8; BUFFER_BYTES + 4],
 }
@@ -88,7 +91,8 @@ impl Voices {
         Self { partition: None, pack: None, session: None, header: [0; HEADER_BYTES], buffer: [0; BUFFER_BYTES + 4] }
     }
 
-    /// 记下分区并校验里面的包。没有分区时返回 NotFound，内置音色照用。
+    /// Records the partition and verifies the pack in it. Returns NotFound without one; the built-in
+    /// voice still works.
     pub fn init(&mut self, flash: &mut dyn Flash, partition: Option<Region>) -> Result<(), VoiceError> {
         self.partition = partition;
         if partition.is_none() {
@@ -98,7 +102,7 @@ impl Voices {
         Ok(())
     }
 
-    /// 当前音色 id；内置为 "builtin"。
+    /// Current voice id; "builtin" for the built-in one.
     pub fn current_id(&self) -> &str {
         match &self.pack {
             Some(pack) => pack.voice_id(),
@@ -106,7 +110,8 @@ impl Voices {
         }
     }
 
-    /// 播放用的位置表。写入会话进行中一律用内置：分区里的东西正在被改写。
+    /// Location table for playback. While a write session is running, always built-in: the partition
+    /// is being rewritten.
     pub fn clips(&self) -> ClipTable {
         let pack = self.pack.as_ref()?;
         if self.session.is_some() {
@@ -123,7 +128,7 @@ impl Voices {
         Some(table)
     }
 
-    /// 读包头并校验包头与载荷。校验不过就当分区为空。
+    /// Reads the header and verifies header and payload. A failed check treats the partition as empty.
     fn validate(&mut self, flash: &mut dyn Flash) -> bool {
         self.pack = None;
         let Some(partition) = self.partition else {
@@ -150,7 +155,7 @@ impl Voices {
         let mut offset = 0;
         while offset < length {
             let block = (length - offset).min(BUFFER_BYTES as u32);
-            // flash 读也按 4 字节对齐读，多读的尾巴不进 CRC。
+            // Flash reads are 4-byte aligned too; the extra tail bytes are left out of the CRC.
             let aligned = block.div_ceil(4) * 4;
             let buffer = &mut self.buffer[..aligned as usize];
             flash.read(partition.offset + HEADER_BYTES as u32 + offset, buffer)?;
@@ -160,10 +165,11 @@ impl Voices {
         Ok(crc)
     }
 
-    /// 写入会话：begin 擦分区，chunk 按序写入，end 校验后才写包头并切换。
-    /// 中途失败或 abort 之后分区无效，播报自动回落内置音色。调用方要先让
-    /// 播放停下来。
-    /// begin 之前的检查：有没有分区、总大小放不放得下。
+    /// Write session: begin erases the partition, chunk writes in order, end verifies before
+    /// writing the header and switching. After a failure midway or an abort the partition is
+    /// invalid, and announcements fall back to the built-in voice. The caller must stop playback
+    /// first.
+    /// Checks before begin: is there a partition, and does the total size fit.
     pub fn check_begin(&self, total_bytes: u32) -> Result<Region, VoiceError> {
         let partition = self.partition.ok_or(VoiceError::NotFound)?;
         if total_bytes as usize <= HEADER_BYTES || total_bytes > partition.size {
@@ -182,14 +188,15 @@ impl Voices {
         Ok(())
     }
 
-    /// `crc` 是这一块原始字节的 CRC32：串口收错一个字节就当场拒绝，不等到最后。
+    /// `crc` is the CRC32 of this chunk's raw bytes: one bad byte over serial is rejected on the spot,
+    /// not at the end.
     pub fn chunk(&mut self, flash: &mut dyn Flash, seq: u32, base64: &[u8], crc: u32) -> Result<(), VoiceError> {
         let partition = self.partition.ok_or(VoiceError::InvalidState)?;
         let session = self.session.as_mut().ok_or(VoiceError::InvalidState)?;
         if seq != session.next_seq {
             return Err(VoiceError::InvalidArg);
         }
-        // 缓冲前 4 字节留给上一块的尾巴，解码结果接在后面。
+        // The buffer's first 4 bytes are reserved for the previous chunk's tail; decoded bytes follow.
         let decoded = match voice_pack::decode_base64(base64, &mut self.buffer[4..4 + BUFFER_BYTES]) {
             Some(length) if length > 0 => length,
             _ => return Err(VoiceError::InvalidArg),
@@ -203,7 +210,7 @@ impl Voices {
         }
 
         let mut consumed = 0;
-        // 包头那段先留在内存里。
+        // The header part stays in memory for now.
         if (session.received as usize) < HEADER_BYTES {
             let take = (HEADER_BYTES - session.received as usize).min(decoded);
             let at = session.received as usize;
@@ -211,8 +218,8 @@ impl Voices {
             consumed = take;
         }
         if consumed < decoded {
-            // 载荷从 256 开始，一直是 4 字节对齐的：写入位置就是已经收到的字节
-            // 数减去手里还攥着的尾巴。
+            // The payload starts at 256 and stays 4-byte aligned: the write position is the bytes
+            // received so far minus the tail still being held.
             let payload_start = 4 + consumed;
             let tail_length = session.tail_length;
             let start = payload_start - tail_length;
@@ -248,7 +255,7 @@ impl Voices {
         if HEADER_BYTES as u32 + parsed.payload_length != session.expected_total {
             return Err(VoiceError::InvalidSize);
         }
-        // 回读校验：写进 flash 的才算数，内存里的不算。
+        // Read-back verification: what is in flash counts, not what is in memory.
         let crc = self.payload_crc(flash, partition, parsed.payload_length)?;
         if crc != parsed.payload_crc32 {
             return Err(VoiceError::InvalidCrc);
@@ -268,7 +275,7 @@ impl Voices {
     }
 }
 
-/// 五句的顺序与语音包一致。
+/// The five lines are in the same order as in the voice pack.
 pub fn clip_index(prompt: Prompt) -> usize {
     prompt as usize
 }
@@ -299,7 +306,8 @@ mod tests {
         out
     }
 
-    /// 一个五句长度各不相同、都不是 4 的倍数的包，逼出对齐的边界。
+    /// A pack whose five lines all differ in length and none is a multiple of 4, to hit the alignment
+    /// edges.
     fn pack() -> Vec<u8> {
         let lengths = [1001, 2003, 3005, 4007, 5009];
         let payload: Vec<u8> = (0..lengths.iter().sum::<u32>()).map(|index| (index * 7 % 251) as u8).collect();
@@ -334,7 +342,7 @@ mod tests {
         let clips = voices.clips().unwrap();
         assert_eq!(clips[0], ClipLocation { offset: PARTITION.offset + 256, length: 1001 });
 
-        // 重启后一样认得出来。
+        // Still recognized after a reboot.
         let mut again = Voices::new();
         again.init(&mut flash, Some(PARTITION)).unwrap();
         assert_eq!(again.current_id(), "wanwanxiaohe");

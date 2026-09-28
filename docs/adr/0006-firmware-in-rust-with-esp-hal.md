@@ -2,36 +2,36 @@
 status: accepted
 ---
 
-# 固件改用 Rust：esp-hal + embassy，逻辑放进可在 Mac 上测试的 firmware-core
+# Firmware in Rust: esp-hal + embassy, with the logic in a host-testable firmware-core
 
-固件原本是 ESP-IDF 上的 C（约 3900 行）。最初就打算用 Rust 写，当时没有坚持。2026-09-26 决定改写：固件改用 esp-hal 1.x 加 embassy，no_std，不带 ESP-IDF。代码分两层：
+The firmware was C on ESP-IDF, about 3,900 lines. The plan had been to write it in Rust from the start; that didn't stick at the time. On 2026-09-26 we rewrote it with esp-hal 1.x and embassy, no_std, without ESP-IDF. The code has two layers:
 
-- `firmware-rs/core`：状态机、绘制、协议处理、存储格式、ES8311 与 ST7789 的命令序列，全部不碰硬件，属于 Mac 端 workspace，`cargo test` 直接跑。
-- `firmware-rs/device`：只做硬件胶水，把 LCD_CAM、I2C、I2S、UART、USB Serial/JTAG、flash 接到 core 的 `Board` 接口上。它用 Xtensa 工具链单独构建。
+- `firmware-rs/core`: state machines, rendering, protocol handling, storage formats, and the ES8311 and ST7789 command sequences. None of it touches hardware. It belongs to the host workspace, and `cargo test` runs it on a Mac.
+- `firmware-rs/device`: hardware glue only. It connects LCD_CAM, I2C, I2S, UART, USB Serial/JTAG and flash to core's `Board` trait, and builds separately with the Xtensa toolchain.
 
-`protocol` crate 改成 no_std 加 alloc，daemon 与固件编译同一份 `Event` 类型。
+The `protocol` crate became no_std + alloc, so the daemon and the firmware compile the same `Event` type.
 
-## 为什么是 esp-hal，不是 esp-idf-hal
+## Why esp-hal and not esp-idf-hal
 
-C 固件对 ESP-IDF 的依赖很浅：
+The C firmware leaned on ESP-IDF very little:
 
-- 没用 LVGL，画面是自己画的；
-- `esp_codec_dev` 只用来给 ES8311 发一串寄存器；
-- NVS 只存了三个整数和一个音量；
-- mbedtls 只用了 base64。
+- no LVGL; the screen is drawn by hand;
+- `esp_codec_dev` only sent a series of ES8311 register writes;
+- NVS held three integers and a volume;
+- mbedtls was used only for base64.
 
-esp-idf-hal 迁移成本最低，但本质仍是 ESP-IDF，协议也还得两边各写一份。esp-hal 多出来的工作是自己写 ES8311 序列、自己写设置存储，都不大。
+esp-idf-hal would have been the cheapest port, but underneath it is still ESP-IDF, and the protocol would still exist twice. esp-hal's extra work is writing the ES8311 sequence and a settings store ourselves; neither is large.
 
-## 被拒绝的方案
+## Rejected options
 
-- **保留 C，只把协议改成共享的描述文件（schema）**：解决不了「状态机与绘制只能靠 C 的主机测试凑合」的问题。
-- **esp-idf-hal / esp-idf-svc**：能直接用 NVS 和 esp_codec_dev，但换来的只是一层 Rust 外壳。
+- **Keep C and share the protocol through a schema file**: this does nothing for the state machines and rendering, which could only be tested through makeshift C host harnesses.
+- **esp-idf-hal / esp-idf-svc**: NVS and esp_codec_dev would work directly, but all we would gain is a Rust shell.
 
-## 后果
+## Consequences
 
-- **画面等价要靠比对来保证。** C 固件删掉之前，`tools/compare-display.sh` 渲染两份固件的同一组场景（含全部休闲剧目的每一帧）逐像素比对，改绘制代码后都要跑。首次移植时 826 帧全部一致。
-- **设置存储换了格式。** 原 `nvs` 分区上改为追加式记录（`firmware-core/src/storage.rs`）。第一次刷 Rust 固件时，当日番茄记录和音量回到默认值。刷回 C 固件时，NVS 会发现页格式不认识并自行擦除。
-- **分区表不变，语音包格式不变。** 换固件不丢音色。
-- **构建产物的来源变了。** bootloader 用 espflash 自带的 ESP-IDF 二级 bootloader。分区表由 `tools/make-partition-table.py` 自己编，因为 espflash 解析不了自定义数据子类型，编出来的结果与 ESP-IDF 的 `gen_esp32part.py` 逐字节一致。
-- **CI 换工具链。** 固件改用 esp-rs 的 Xtensa 工具链构建，不再需要 ESP-IDF 的 docker 镜像。
-- **C 固件暂时保留。** `firmware/` 在实机验收完成前不删，出问题时 `just flash-c` 退回。
+- **Screen equivalence is checked by comparison.** Until the C firmware is deleted, `tools/compare-display.sh` renders the same scenes with both firmwares, including every frame of every leisure skit, and compares them pixel by pixel. Run it after any change to the drawing code. The first port matched on all 826 frames.
+- **Settings use a new format.** The old `nvs` partition now holds an append-only record log (`firmware-core/src/storage.rs`). The first time the Rust firmware runs, today's pomodoro tally and the volume reset to their defaults. Flashing the C firmware back makes NVS find pages it doesn't recognize and erase them.
+- **The partition table and voice pack format are unchanged.** Changing firmware keeps the installed voice.
+- **Build outputs come from different places.** The bootloader is the ESP-IDF second-stage bootloader bundled with espflash. The partition table is compiled by `tools/make-partition-table.py`, because espflash can't parse custom data subtypes; its output is byte-identical to ESP-IDF's `gen_esp32part.py`.
+- **CI switches toolchains.** The firmware job uses esp-rs's Xtensa toolchain and no longer needs the ESP-IDF Docker image.
+- **The C firmware stays for now.** `firmware/` is kept as a fallback (`just flash-c`) until the Rust firmware has proven itself on hardware for a while.

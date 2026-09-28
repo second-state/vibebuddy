@@ -1,11 +1,13 @@
 #!/usr/bin/env python3
-"""新固件上机后的冒烟检查：串口能判断的自动判断，要人看、要人听的逐条提示。
+"""Smoke check for new firmware on a real box: what the serial line can decide is checked automatically; what
+needs eyes or ears is asked one item at a time.
 
-用法（先退出 Vibe Buddy App，让出串口）：
+Usage (quit the Vibe Buddy app first so it releases the serial port):
     uv run --with pyserial python tools/firmware-smoke.py /dev/cu.usbmodemXXXX
 
-它依次检查：握手与构建标识、长行串口完整性、四种状态的显示与播报、音量、
-眨眼确认、截图（存成 PPM，可以直接打开看），最后把音量还原、状态回到空闲。
+It checks, in order: the handshake and build ID, serial integrity on a long line, how the four states are shown
+and announced, volume, the identify blink, and a screenshot (saved as a PPM you can open directly). Finally it
+restores the volume and returns the box to idle.
 """
 
 import argparse
@@ -28,7 +30,7 @@ class Device:
     def send(self, event, **fields):
         message = {"version": 1, "event": event, **fields}
         line = json.dumps(message, separators=(",", ":"), ensure_ascii=False).encode() + b"\n"
-        # 和 daemon 一样按 128 字节分段写：经 UART 桥时一次写太多会被桥吞错。
+        # Write in 128-byte pieces like the daemon does: the UART bridge corrupts larger writes.
         for start in range(0, len(line), 128):
             self.serial.write(line[start:start + 128])
             self.serial.flush()
@@ -43,7 +45,7 @@ class Device:
                 yield raw.decode("utf-8", errors="replace").rstrip("\r")
 
     def expect(self, wanted, seconds=3.0):
-        """收到所有 wanted 行（前缀匹配）就返回收到的全部行；超时返回 None。"""
+        """Return every line received once all `wanted` lines (prefix match) have arrived; None on timeout."""
         pending = list(wanted)
         seen = []
         for line in self.lines(seconds):
@@ -51,7 +53,7 @@ class Device:
             pending = [item for item in pending if not line.startswith(item)]
             if not pending:
                 return seen
-        print(f"    没等到: {pending}；收到: {seen[-8:]}")
+        print(f"    never saw: {pending}; received: {seen[-8:]}")
         return None
 
 
@@ -59,38 +61,40 @@ results = []
 
 
 def check(name, ok, detail=""):
+    """`ok` is True, False, or None for a human check that was skipped with --no-ask."""
     results.append((name, ok))
-    print(f"{'PASS' if ok else 'FAIL'}  {name}{('  ' + detail) if detail else ''}")
+    verdict = "SKIP" if ok is None else "PASS" if ok else "FAIL"
+    print(f"{verdict}  {name}{('  ' + detail) if detail else ''}")
 
 
 def ask(prompt):
-    answer = input(f"  人工确认：{prompt} [y/n] ").strip().lower()
+    answer = input(f"  check by hand: {prompt} [y/n] ").strip().lower()
     return answer.startswith("y")
 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("port")
-    parser.add_argument("--no-ask", action="store_true", help="跳过要人看、要人听的确认")
-    parser.add_argument("--shot", default="firmware-smoke.ppm", help="截图存到这里")
+    parser.add_argument("--no-ask", action="store_true", help="skip the checks that need someone to look or listen (reported as SKIP)")
+    parser.add_argument("--shot", default="firmware-smoke.ppm", help="where to save the screenshot")
     args = parser.parse_args()
-    confirm = (lambda prompt: True) if args.no_ask else ask
+    confirm = (lambda prompt: None) if args.no_ask else ask
     device = Device(args.port)
 
-    print("== 握手")
+    print("== Handshake")
     device.send("device.hello")
     seen = device.expect(["DISPLAY READY BUILD ", "MODE ", "VOICES ", "VOLUME "])
-    check("hello 回报构建号、模式、音色、音量", seen is not None)
+    check("hello reports build, mode, voice and volume", seen is not None)
     volume = None
     if seen:
         build = next(line for line in seen if line.startswith("DISPLAY READY BUILD "))[len("DISPLAY READY BUILD "):]
         volume = next(line for line in seen if line.startswith("VOLUME "))[len("VOLUME "):]
         expected = (REPO / "firmware-rs/device/build/build.txt")
         if expected.exists():
-            check("盒子上的构建标识就是刚打的这一版", build == expected.read_text().strip(), build)
-        print(f"    音色 {next(line for line in seen if line.startswith('VOICES '))[7:]}，音量 {volume}")
+            check("the box runs the build just made", build == expected.read_text().strip(), build)
+        print(f"    voice {next(line for line in seen if line.startswith('VOICES '))[7:]}, volume {volume}")
 
-    print("== 串口完整性（一行接近协议上限）")
+    print("== Serial integrity (a line close to the protocol limit)")
     data = "".join(chr(33 + (index * 7) % 94) for index in range(900)).replace('"', "a").replace("\\", "b")
     device.send("device.echo", data=data)
     seen = device.expect(['{"version":1,"event":"echo"'])
@@ -98,43 +102,43 @@ def main():
     if seen:
         reply = json.loads(next(line for line in seen if line.startswith('{"version":1,"event":"echo"')))
         ok = reply["length"] == len(data) and reply["crc"] == zlib.crc32(data.encode())
-    check("900 字节的一行原样收到", ok)
+    check("a 900-byte line arrives intact", ok)
 
-    print("== 四种状态")
+    print("== The four states")
     tasks = [{"title": "CC:SMOKE TEST", "status": "running", "elapsed_s": 5, "project": "VIBE-BUDDY"}]
     device.send("task.start", title="CC:SMOKE TEST", tasks=tasks)
-    check("工作中", device.expect(["EVENT task.start", "DISPLAY STATE WORKING"]) is not None)
-    check("屏幕：橙色、左边一张任务卡、小灯灵脸上是 > 和跳动的点", confirm("屏幕是否如上"))
+    check("working", device.expect(["EVENT task.start", "DISPLAY STATE WORKING"]) is not None)
+    check("screen: orange, one task card on the left, > and bouncing dots on the face", confirm("does the screen look like that"))
 
     tasks[0]["status"] = "input_required"
     device.send("agent.input_required", title="CC:SMOKE TEST", tasks=tasks)
-    check("需要确认 + 播报", device.expect(["DISPLAY STATE INPUT REQUIRED", "AUDIO QUEUED INPUT_REQUIRED"]) is not None)
-    check("听到「需要确认」那一句，画面转黄", confirm("听到了吗"))
+    check("input required + announcement", device.expect(["DISPLAY STATE INPUT REQUIRED", "AUDIO QUEUED INPUT_REQUIRED"]) is not None)
+    check("heard the input-required line, screen turned yellow", confirm("did you hear it"))
 
     tasks[0]["status"] = "failed"
     device.send("task.error", title="CC:SMOKE TEST", tasks=tasks)
-    check("失败 + 播报", device.expect(["DISPLAY STATE FAILED", "AUDIO QUEUED FAILED"]) is not None)
+    check("failed + announcement", device.expect(["DISPLAY STATE FAILED", "AUDIO QUEUED FAILED"]) is not None)
 
     tasks[0]["status"] = "done"
     device.send("task.done", title="CC:SMOKE TEST", tasks=tasks, stats=["3 DONE", "1 ASKS"])
-    check("完成 + 播报", device.expect(["DISPLAY STATE DONE", "AUDIO QUEUED DONE"]) is not None)
-    check("听到「完成」、画面转绿、5 秒后自己回到空闲", confirm("是否如此"))
+    check("done + announcement", device.expect(["DISPLAY STATE DONE", "AUDIO QUEUED DONE"]) is not None)
+    check("heard the done line, screen turned green, back to idle after 5 s", confirm("did it"))
 
-    print("== 音量")
+    print("== Volume")
     device.send("device.volume", level=40, preview=True)
     seen = device.expect(["VOLUME 40", "AUDIO QUEUED DONE"])
-    check("音量调到 40 并试听", seen is not None)
-    check("试听明显比刚才轻", confirm("是否变轻"))
+    check("volume set to 40 with a preview", seen is not None)
+    check("the preview was clearly quieter", confirm("was it quieter"))
     if volume and volume.isdigit():
         device.send("device.volume", level=int(volume))
-        check(f"音量还原为 {volume}", device.expect([f"VOLUME {volume}"]) is not None)
+        check(f"volume restored to {volume}", device.expect([f"VOLUME {volume}"]) is not None)
 
-    print("== 眨眼确认")
+    print("== Identify")
     device.send("device.identify")
     check("IDENTIFY", device.expect(["IDENTIFY"]) is not None)
-    check("背光快闪了约一秒", confirm("闪了吗"))
+    check("the backlight blinked for about a second", confirm("did it blink"))
 
-    print("== 截图")
+    print("== Screenshot")
     device.send("device.screenshot")
     pixels = []
     backlight = None
@@ -148,19 +152,20 @@ def main():
                 color, count = run.split(":")
                 pixels.extend([int(color, 16)] * int(count))
     ok = len(pixels) == 320 * 240
-    check("截图完整（76800 像素）", ok, f"背光 {backlight}")
+    check("complete screenshot (76800 pixels)", ok, f"backlight {backlight}")
     if ok:
         rgb = bytearray()
         for pixel in pixels:
             rgb += bytes([((pixel >> 11) & 0x1F) * 255 // 31, ((pixel >> 5) & 0x3F) * 255 // 63, (pixel & 0x1F) * 255 // 31])
         Path(args.shot).write_bytes(b"P6\n320 240\n255\n" + bytes(rgb))
-        print(f"    截图存到 {args.shot}，和屏幕上的样子对一下")
+        print(f"    saved to {args.shot}; compare it with the screen")
 
     device.send("agent.idle")
     device.expect(["DISPLAY STATE READY"])
 
-    failed = [name for name, ok in results if not ok]
-    print(f"\n共 {len(results)} 项，失败 {len(failed)} 项")
+    failed = [name for name, ok in results if ok is False]
+    skipped = sum(1 for _, ok in results if ok is None)
+    print(f"\n{len(results)} checks, {len(failed)} failed, {skipped} skipped")
     for name in failed:
         print(f"  - {name}")
     return 1 if failed else 0

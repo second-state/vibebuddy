@@ -1,7 +1,8 @@
-//! 没有盒子时的替身：firmware-core 加一块内存里的假板子，串口换成标准输入输出。
-//! `tools/firmware-smoke.py` 可以对着它跑，先验证脚本与整条串口链。
+//! A stand-in when there is no box: firmware-core plus an in-memory fake board, with the serial port
+//! replaced by stdin/stdout. `tools/firmware-smoke.py` can run against it to validate the script and the
+//! whole serial chain first.
 //!
-//! 用法：python3 tools/simulate-device.py（它开一个伪终端，把这个程序挂上去）。
+//! Usage: python3 tools/simulate-device.py (it opens a pseudo-terminal and attaches this program to it).
 
 use std::io::{Read, Write};
 use std::sync::mpsc;
@@ -98,7 +99,7 @@ impl Board for SimulatedBoard {
     }
 }
 
-/// 16 MB flash，分区表照 firmware/partitions.csv 摆。
+/// 16 MB flash, with the partition table laid out per firmware/partitions.csv.
 fn flash_with_partitions() -> MemoryFlash {
     let mut bytes = vec![0xFF; 0x610000];
     let entries = [("nvs", 0x9000u32, 0x6000u32), ("phy_init", 0xF000, 0x1000), ("factory", 0x10000, 0x400000), ("voices", 0x410000, 0x200000)];

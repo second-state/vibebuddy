@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
-"""把 firmware/partitions.csv 编成 ESP-IDF 格式的分区表二进制（烧在 0x8000）。
+"""Compile firmware/partitions.csv into an ESP-IDF partition table binary (flashed at 0x8000).
 
-espflash 自带的分区表解析不认自定义数据子类型（voices 是 0x40），一碰就
-panic，所以 Rust 固件的构建自己编。格式与 ESP-IDF 的 gen_esp32part.py 逐字节
-一致：每项 32 字节，之后一项 MD5，再用 0xFF 补满 0xC00。
+espflash's partition table parser rejects custom data subtypes (voices is 0x40) with a panic, so the
+Rust firmware build compiles the table itself. The output is byte-identical to ESP-IDF's
+gen_esp32part.py: 32-byte entries, then an MD5 entry, padded with 0xFF to 0xC00.
 
-用法：make-partition-table.py <partitions.csv> <输出.bin>
+Usage: make-partition-table.py <partitions.csv> <output.bin>
 """
 
 import hashlib
@@ -62,7 +62,7 @@ def encode(rows):
     table = b""
     for name, kind, subtype, offset, size, flags in rows:
         label = name.encode("ascii")
-        assert len(label) <= 16, f"分区名太长：{name}"
+        assert len(label) <= 16, f"partition name too long: {name}"
         table += struct.pack("<2sBBLL16sL", b"\xaa\x50", kind, subtype, offset, size, label, flags)
     table += b"\xeb\xeb" + b"\xff" * 14 + hashlib.md5(table).digest()
     assert len(table) <= TABLE_BYTES

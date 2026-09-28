@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""开一个伪终端，把 firmware-core 的模拟器挂上去，打印出可以当串口用的设备路径。
+"""Open a pseudo-terminal, attach the firmware-core simulator to it, and print a device path usable as a serial port.
 
-没有盒子时用它先把 tools/firmware-smoke.py 这类串口工具跑通：
-    python3 tools/simulate-device.py            # 打印 /dev/ttysNNN，Ctrl-C 结束
+Without a box, use it to get serial tools such as tools/firmware-smoke.py working first:
+    python3 tools/simulate-device.py            # prints /dev/ttysNNN; Ctrl-C to stop
     uv run --with pyserial python tools/firmware-smoke.py /dev/ttysNNN --no-ask
 """
 
@@ -18,7 +18,7 @@ REPO = Path(__file__).resolve().parent.parent
 
 subprocess.run(["cargo", "build", "--quiet", "-p", "vibebuddy-firmware-core", "--example", "simulator"], cwd=REPO, check=True)
 master, slave = pty.openpty()
-# 原始模式：不回显、不做行编辑，和真串口一样。
+# Raw mode: no echo and no line editing, like a real serial port.
 tty.setraw(slave)
 attributes = termios.tcgetattr(slave)
 attributes[3] &= ~termios.ECHO

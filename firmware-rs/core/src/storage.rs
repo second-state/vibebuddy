@@ -1,29 +1,30 @@
-//! 片上 flash：分区表、设置记录。
+//! On-chip flash: partition table and settings records.
 //!
-//! C 固件用 ESP-IDF 的 NVS 存当日番茄记录与音量。esp-hal 没有 NVS，这里在
-//! 原来的 `nvs` 分区上写一个追加式的小日志：每条记录 32 字节、自带序号与
-//! CRC，读的时候取序号最大的有效一条。一天只写几次，追加写把擦除摊到每
-//! 128 条一次，不磨损 flash。第一次开机读不到有效记录（那里还是 NVS 的旧页），
-//! 就当全新设备，从第一个扇区擦起。
+//! The C firmware keeps today's pomodoro tally and the volume in ESP-IDF's NVS. esp-hal has no NVS,
+//! so this writes a small append-only log over the old `nvs` partition: each record is 32 bytes
+//! with its own sequence number and CRC, and reading takes the valid record with the highest
+//! sequence. There are only a few writes a day, and appending spreads erases out to one per 128
+//! records, so flash does not wear. When the first boot finds no valid record (the old NVS pages
+//! are still there), it is treated as a brand-new device and erasing starts from the first sector.
 
 use crate::pomodoro::Tally;
 use crate::voice_pack::crc32;
 
 pub const SECTOR_BYTES: u32 = 4096;
 
-/// flash 操作失败。ESP-IDF 那边的名字是 ESP_ERR_FLASH_OP_FAIL，回执沿用它。
+/// A flash operation failed. ESP-IDF calls it ESP_ERR_FLASH_OP_FAIL, and replies keep that name.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct FlashError;
 
-/// 设备的 flash。偏移都是整片 flash 的绝对地址；写入的偏移与长度必须是
-/// 4 的倍数，擦除按扇区对齐。
+/// The device's flash. Offsets are absolute addresses in the whole flash; write offsets and lengths
+/// must be multiples of 4, and erases are sector-aligned.
 pub trait Flash {
     fn read(&mut self, offset: u32, bytes: &mut [u8]) -> Result<(), FlashError>;
     fn write(&mut self, offset: u32, bytes: &[u8]) -> Result<(), FlashError>;
     fn erase(&mut self, from: u32, to: u32) -> Result<(), FlashError>;
 }
 
-/// flash 上的一段区域。
+/// A region of flash.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Region {
     pub offset: u32,
@@ -34,8 +35,8 @@ pub const PARTITION_TABLE_OFFSET: u32 = 0x8000;
 const PARTITION_ENTRY_BYTES: usize = 32;
 const PARTITION_MAX_ENTRIES: usize = 95;
 
-/// 按标签找分区。ESP-IDF 分区表：每项 32 字节，魔数 0xAA 0x50，之后是类型、
-/// 子类型、u32 偏移、u32 大小、16 字节标签、u32 标志；以全 0xFF 或 MD5 项结束。
+/// Finds a partition by label. ESP-IDF partition table: 32 bytes per entry, magic 0xAA 0x50, then
+/// type, subtype, u32 offset, u32 size, 16-byte label, u32 flags; ends at an all-0xFF or MD5 entry.
 pub fn find_partition(flash: &mut dyn Flash, label: &str) -> Option<Region> {
     let mut entry = [0u8; PARTITION_ENTRY_BYTES];
     for index in 0..PARTITION_MAX_ENTRIES {
@@ -56,7 +57,7 @@ pub fn find_partition(flash: &mut dyn Flash, label: &str) -> Option<Region> {
     None
 }
 
-/// 设备自己记着的事：当日番茄记录与音量。
+/// What the device remembers itself: today's pomodoro tally and the volume.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Settings {
     pub tally: Tally,
@@ -69,7 +70,7 @@ const SLOTS_PER_SECTOR: u32 = SECTOR_BYTES / RECORD_BYTES;
 
 pub struct SettingsStore {
     region: Region,
-    /// 最近一条有效记录所在的槽位与它的序号。
+    /// Slot and sequence number of the latest valid record.
     latest: Option<(u32, u32)>,
 }
 
@@ -101,7 +102,7 @@ fn decode(record: &[u8; RECORD_BYTES as usize]) -> Option<(u32, Settings)> {
 }
 
 impl SettingsStore {
-    /// 扫一遍区域，返回存储本身与读到的最新设置（没有就是 None）。
+    /// Scans the region, returning the store and the latest settings found (None if there are none).
     pub fn open(flash: &mut dyn Flash, region: Region) -> Result<(Self, Option<Settings>), FlashError> {
         let region = Region { offset: region.offset, size: region.size / SECTOR_BYTES * SECTOR_BYTES };
         let mut store = Self { region, latest: None };
@@ -147,8 +148,9 @@ impl SettingsStore {
         if slot % SLOTS_PER_SECTOR == 0 {
             self.erase_sector_of(flash, slot)?;
         } else {
-            // 下一格本该是擦过的；不是（掉电写了半条之类），就把整个扇区擦掉
-            // 从扇区开头写。最新那条会跟着被擦，但马上就被这一条取代。
+            // The next slot should be erased; if not (e.g. power lost mid-write), erase the whole
+            // sector and write from its start. The latest record goes with it, but this one replaces
+            // it right away.
             let mut existing = [0u8; RECORD_BYTES as usize];
             flash.read(self.slot_offset(slot), &mut existing)?;
             if existing.iter().any(|&byte| byte != 0xFF) {
@@ -168,7 +170,7 @@ pub(crate) mod tests {
     use std::vec;
     use std::vec::Vec;
 
-    /// 内存里的 NOR flash：写只能把 1 变 0，擦除把整段变回 0xFF。
+    /// NOR flash in memory: writes can only turn 1s into 0s, erases reset the range to 0xFF.
     pub(crate) struct MemoryFlash {
         pub bytes: Vec<u8>,
         pub erases: Vec<(u32, u32)>,
@@ -189,8 +191,8 @@ pub(crate) mod tests {
         }
 
         fn write(&mut self, offset: u32, bytes: &[u8]) -> Result<(), FlashError> {
-            assert_eq!(offset % 4, 0, "写入偏移没对齐");
-            assert_eq!(bytes.len() % 4, 0, "写入长度没对齐");
+            assert_eq!(offset % 4, 0, "write offset not aligned");
+            assert_eq!(bytes.len() % 4, 0, "write length not aligned");
             let start = offset as usize;
             let target = self.bytes.get_mut(start..start + bytes.len()).ok_or(FlashError)?;
             for (cell, &byte) in target.iter_mut().zip(bytes) {
@@ -239,13 +241,13 @@ pub(crate) mod tests {
     fn the_latest_record_wins_across_sectors_and_wraparound() {
         let mut flash = MemoryFlash::new(0x10000);
         let (mut store, _) = SettingsStore::open(&mut flash, NVS).unwrap();
-        // 六个扇区 768 格，写两圈多一点。
+        // Six sectors hold 768 slots; write a bit more than two rounds.
         for completed in 0..1700 {
             store.save(&mut flash, &settings(completed)).unwrap();
         }
         let (_, found) = SettingsStore::open(&mut flash, NVS).unwrap();
         assert_eq!(found, Some(settings(1699)));
-        // 每 128 条才擦一次。
+        // Only one erase per 128 records.
         assert_eq!(flash.erases.len(), 1700usize.div_ceil(128));
     }
 
@@ -254,7 +256,7 @@ pub(crate) mod tests {
         let mut flash = MemoryFlash::new(0x10000);
         let (mut store, _) = SettingsStore::open(&mut flash, NVS).unwrap();
         store.save(&mut flash, &settings(1)).unwrap();
-        // 下一格被写了半条。
+        // The next slot holds half a record.
         flash.bytes[0x9000 + 32] = 0x12;
         store.save(&mut flash, &settings(2)).unwrap();
         let (_, found) = SettingsStore::open(&mut flash, NVS).unwrap();

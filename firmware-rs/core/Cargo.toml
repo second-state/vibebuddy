@@ -4,10 +4,12 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 
-# 固件里与硬件无关的一切：状态机、绘制、协议处理、存储格式、芯片寄存器序列。
-# no_std，设备与 Mac 各编译一次；在 Mac 上 `cargo test` 就能跑整条链。
+# Everything in the firmware that does not touch hardware: state machine, drawing, protocol handling,
+# storage formats, chip register sequences. no_std, compiled once for the device and once for the Mac;
+# `cargo test` on the Mac runs the whole chain.
 [features]
-# 实机验收用：把休闲的五分钟压成五秒、番茄钟的 25 分钟压成 25 秒。
+# For on-device acceptance testing: squeezes leisure's five minutes into five seconds and the pomodoro's
+# 25 minutes into 25 seconds.
 fast-clock = []
 
 [dependencies]

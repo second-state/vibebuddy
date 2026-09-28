@@ -1,5 +1,6 @@
-//! 整条链的主机测试：一块假板子，串口喂 JSON，看回了什么、存了什么、播了什么。
-//! 期望的输出行都取自 C 固件的行为，Mac 端的解析依赖它们逐字不变。
+//! Host tests for the whole chain: a fake board, JSON fed over serial, then check what came
+//! back, what was stored and what was played. The expected output lines are taken from the C
+//! firmware's behavior, and the Mac's parsing relies on them staying verbatim.
 
 use std::cell::Cell;
 
@@ -23,7 +24,7 @@ impl Flash for MemoryFlash {
         Ok(())
     }
     fn write(&mut self, offset: u32, bytes: &[u8]) -> Result<(), FlashError> {
-        assert_eq!((offset % 4, bytes.len() % 4), (0, 0), "flash 写入没对齐");
+        assert_eq!((offset % 4, bytes.len() % 4), (0, 0), "flash write is not aligned");
         let start = offset as usize;
         for (cell, &byte) in self.bytes.get_mut(start..start + bytes.len()).ok_or(FlashError)?.iter_mut().zip(bytes) {
             *cell &= byte;
@@ -36,7 +37,7 @@ impl Flash for MemoryFlash {
     }
 }
 
-/// 16 MB flash，分区表与 partitions.csv 一致。
+/// 16 MB flash, with a partition table matching partitions.csv.
 fn blank_flash() -> MemoryFlash {
     let mut flash = MemoryFlash { bytes: vec![0xFF; 0x610000] };
     let entries = [("nvs", 1u8, 2u8, 0x9000u32, 0x6000u32), ("phy_init", 1, 1, 0xF000, 0x1000), ("factory", 0, 0, 0x10000, 0x400000), ("voices", 1, 0x40, 0x410000, 0x200000)];
@@ -87,7 +88,7 @@ impl FakeBoard {
     }
 
     fn take_lines(&mut self) -> Vec<String> {
-        let text = String::from_utf8(std::mem::take(&mut self.output)).expect("输出是 UTF-8");
+        let text = String::from_utf8(std::mem::take(&mut self.output)).expect("output is UTF-8");
         text.lines().map(str::to_owned).collect()
     }
 
@@ -205,7 +206,7 @@ fn a_done_event_is_shown_announced_and_returns_to_idle() {
     firmware.poll(&mut board);
     board.advance(20);
     firmware.poll(&mut board);
-    assert!(board.presents > presents, "5 秒后应重画成空闲");
+    assert!(board.presents > presents, "should redraw as idle after 5 seconds");
 }
 
 #[test]
@@ -227,7 +228,7 @@ fn bad_lines_are_reported() {
     assert_eq!(send(&mut firmware, &mut board, r#"{"version":2,"event":"x"}"#), ["ERROR unsupported_version"]);
     let long = format!(r#"{{"version":1,"event":"x","title":"{}"}}"#, "a".repeat(1100));
     assert_eq!(send(&mut firmware, &mut board, &long), ["ERROR input_too_large"]);
-    // 一行 CRLF 结尾也认。
+    // A line ending in CRLF is accepted too.
     firmware.receive(&mut board, b"{\"version\":1,\"event\":\"device.identify\"}\r\n");
     assert_eq!(board.take_lines(), ["IDENTIFY"]);
 }
@@ -237,14 +238,14 @@ fn the_tally_and_volume_survive_a_reboot() {
     let (mut firmware, mut board, _) = booted(blank_flash());
     let lines = send(&mut firmware, &mut board, r#"{"version":1,"event":"device.heartbeat","build":"def","hour":14,"day":20260926}"#);
     assert_eq!(lines, ["CLOCK HOUR 14", "POMODORO TODAY 0 0S DAY 20260926"]);
-    // 同一小时、同一天不再报。
+    // The same hour and the same day are not reported again.
     assert!(send(&mut firmware, &mut board, r#"{"version":1,"event":"device.heartbeat","hour":14,"day":20260926}"#).is_empty());
 
     assert_eq!(send(&mut firmware, &mut board, r#"{"version":1,"event":"device.volume","level":80}"#), ["VOLUME 80"]);
     assert_eq!(send(&mut firmware, &mut board, r#"{"version":1,"event":"device.volume","level":5,"preview":true}"#), ["VOLUME 20", "AUDIO QUEUED DONE"]);
     assert_eq!(send(&mut firmware, &mut board, r#"{"version":1,"event":"device.volume","level":80}"#), ["VOLUME 80"]);
 
-    // 专注一次：按 K0 开始，25 分钟后结束。开机后 40 ms 内的翻转算抖动。
+    // One focus session: press K0 to start, it ends 25 minutes later. A flip within 40 ms of boot counts as bounce.
     board.advance(100);
     board.k0 = true;
     firmware.poll(&mut board);
@@ -306,7 +307,7 @@ fn a_voice_pack_is_written_over_the_serial_line() {
     let (mut firmware, mut board, _) = booted(blank_flash());
     let pack = voice_pack_bytes();
 
-    // 还在出声：先停播放，不擦分区、不回 ready。
+    // Still making sound: stop playback first; don't erase the partition or reply ready.
     board.busy = true;
     let begin = format!(r#"{{"version":1,"event":"voice.begin","size":{}}}"#, pack.len());
     assert!(send(&mut firmware, &mut board, &begin).is_empty());
@@ -323,14 +324,14 @@ fn a_voice_pack_is_written_over_the_serial_line() {
             encode_base64(piece),
             voice_pack::crc32(0, piece)
         );
-        assert!(chunk.len() <= 1024, "一块不能超过协议上限");
+        assert!(chunk.len() <= 1024, "a chunk must not exceed the protocol limit");
         assert_eq!(send(&mut firmware, &mut board, &chunk), [format!(r#"{{"version":1,"event":"voice.ack","seq":{seq}}}"#)]);
     }
     let lines = send(&mut firmware, &mut board, r#"{"version":1,"event":"voice.end"}"#);
     assert_eq!(lines, [r#"{"version":1,"event":"voice.written","voice":"xiaohe"}"#, "VOICES xiaohe", "AUDIO QUEUED DONE"]);
-    assert_eq!(board.played.last(), Some(&(Prompt::Done, true)), "写完用新音色说一句");
+    assert_eq!(board.played.last(), Some(&(Prompt::Done, true)), "says a line in the new voice when done");
 
-    // 重启后照样用它。
+    // It is still used after a restart.
     let flash = board.flash;
     let (_, _, lines) = booted(flash);
     assert!(lines.contains(&"VOICES xiaohe".to_owned()));
@@ -401,7 +402,7 @@ fn holding_k0_while_idle_does_nothing_and_a_tap_starts_focus() {
     board.k0 = false;
     firmware.poll(&mut board);
     let lines = board.take_lines();
-    assert!(!lines.iter().any(|line| line.starts_with("POMODORO")), "空闲时长按 K0 不该有动作：{lines:?}");
+    assert!(!lines.iter().any(|line| line.starts_with("POMODORO")), "holding K0 while idle should do nothing: {lines:?}");
 
     board.advance(100);
     board.k0 = true;

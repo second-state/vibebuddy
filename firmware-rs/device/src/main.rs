@@ -1,17 +1,17 @@
-//! Vibe Buddy 固件入口：把 ATK-DNESP32S3-BOX 的硬件接到 firmware-core 上。
+//! Vibe Buddy firmware entry point: wires the ATK-DNESP32S3-BOX hardware to firmware-core.
 //!
-//! 板上的连线（与 C 固件一致）：
-//! - LCD：ST7789，8 位并口。CS GPIO1、DC GPIO2、RD GPIO41、WR GPIO42，
-//!   D0–D7 = GPIO40、39、38、12、11、10、9、46。
-//! - I2C0：SDA GPIO48、SCL GPIO45。上面挂着 XL9555 扩展口（0x20）与 ES8311
-//!   codec（0x18，NS4168 版本没有）。
-//! - XL9555 P0：bit7 LCD 背光、bit5 功放使能、bit4 K1、bit3 K2（按键低有效）。
-//! - K0：BOOT 键，GPIO0，低有效。
-//! - I2S0：BCLK GPIO21、WS GPIO13、DOUT GPIO14，不用 MCLK。
-//! - UART0：TX GPIO43、RX GPIO44，接 CH343 桥；另有芯片自带的 USB Serial/JTAG。
+//! Board wiring (same as the C firmware):
+//! - LCD: ST7789, 8-bit parallel. CS GPIO1, DC GPIO2, RD GPIO41, WR GPIO42,
+//!   D0-D7 = GPIO40, 39, 38, 12, 11, 10, 9, 46.
+//! - I2C0: SDA GPIO48, SCL GPIO45. Carries the XL9555 expander (0x20) and the ES8311
+//!   codec (0x18, absent on the NS4168 variant).
+//! - XL9555 P0: bit7 LCD backlight, bit5 amplifier enable, bit4 K1, bit3 K2 (keys active low).
+//! - K0: BOOT key, GPIO0, active low.
+//! - I2S0: BCLK GPIO21, WS GPIO13, DOUT GPIO14, no MCLK.
+//! - UART0: TX GPIO43, RX GPIO44, to the CH343 bridge; the chip's own USB Serial/JTAG as well.
 #![no_std]
 #![no_main]
-#![deny(clippy::mem_forget, reason = "esp_hal 的类型常常持有正在传输的缓冲，forget 它们不安全")]
+#![deny(clippy::mem_forget, reason = "esp_hal types often hold buffers mid-transfer; forgetting them is unsound")]
 
 extern crate alloc;
 
@@ -55,8 +55,9 @@ use crate::storage::SharedFlash;
 
 esp_bootloader_esp_idf::esp_app_desc!();
 
-/// panic 之后重启，和 C 固件（ESP-IDF 默认 panic 即复位）一样。esp-backtrace
-/// 先把回溯打出来，再调这里；不接管的话它关中断死循环，盒子冻结到断电。
+/// Reboot after a panic, like the C firmware (ESP-IDF resets on panic by default). esp-backtrace
+/// prints the backtrace first and then calls this; left alone it disables interrupts and spins, and
+/// the box freezes until power is cut.
 #[unsafe(no_mangle)]
 fn custom_halt() -> ! {
     esp_hal::system::software_reset()
@@ -71,11 +72,12 @@ const XL9555_SPEAKER: u8 = 0x20;
 const XL9555_K1: u8 = 0x10;
 const XL9555_K2: u8 = 0x08;
 
-/// 构建标识：git 描述 + 构建时刻，由 build.rs 写进来。
+/// Build stamp: git description plus build time, written in by build.rs.
 const BUILD: &str = env!("VIBEBUDDY_FW_BUILD");
 
-/// 同一个标识以固定前缀、NUL 结尾留在镜像里：打包脚本从 .bin 里把它找出来
-/// 写成 build.txt，App 拿它和盒子报的 `DISPLAY READY BUILD` 逐字比对。
+/// The same stamp stays in the image with a fixed prefix and a NUL terminator: the packaging script
+/// finds it in the .bin and writes build.txt, which the App compares byte for byte with the box's
+/// `DISPLAY READY BUILD`.
 #[used]
 static BUILD_MARKER: &[u8] = concat!("VIBEBUDDY-BUILD:", env!("VIBEBUDDY_FW_BUILD"), "\0").as_bytes();
 
@@ -94,13 +96,13 @@ impl Expander<'_> {
         self.i2c.write(XL9555_ADDRESS, &[register, value])
     }
 
-    /// 读改写输出口的一位。
+    /// Read-modify-write one bit of the output port.
     fn set_output(&mut self, mask: u8, on: bool) -> Result<(), I2cError> {
         let output = self.read(XL9555_OUTPUT_PORT0)?;
         self.write(XL9555_OUTPUT_PORT0, if on { output | mask } else { output & !mask })
     }
 
-    /// 读改写方向寄存器：置 1 为输入。
+    /// Read-modify-write the direction register: 1 means input.
     fn set_direction(&mut self, mask: u8, input: bool) -> Result<(), I2cError> {
         let direction = self.read(XL9555_CONFIG_PORT0)?;
         self.write(XL9555_CONFIG_PORT0, if input { direction | mask } else { direction & !mask })
@@ -131,9 +133,9 @@ struct DeviceBoard {
     transport: Transport,
     flash: SharedFlash,
     k0: Input<'static>,
-    /// RD 脚一直拉高：只写不读。放在这里是为了让它活着。
+    /// The RD pin stays high: write-only. Kept here so it stays alive.
     _lcd_read: Output<'static>,
-    /// ES8311 版本才有 codec；NS4168 版本没有音量可调。
+    /// Only the ES8311 variant has a codec; the NS4168 variant has no adjustable volume.
     has_codec: bool,
 }
 
@@ -189,7 +191,7 @@ impl Board for DeviceBoard {
     }
 
     fn init_audio(&mut self, volume: u32) -> AudioStatus {
-        // 有 ES8311 就是 ES8311 版本；地址没人应答就是 NS4168 版本。
+        // An ES8311 means the ES8311 variant; no answer at the address means the NS4168 variant.
         let mut chip_id = [0u8];
         match self.i2c.write_read(ES8311_ADDRESS, &[0xFD], &mut chip_id) {
             Ok(()) => {
@@ -242,39 +244,39 @@ impl Board for DeviceBoard {
     }
 }
 
-#[allow(clippy::large_stack_frames, reason = "main 里本来就要摆一堆外设和缓冲")]
+#[allow(clippy::large_stack_frames, reason = "main has to hold a lot of peripherals and buffers anyway")]
 #[esp_rtos::main]
 async fn main(spawner: Spawner) -> ! {
     let peripherals = esp_hal::init(esp_hal::Config::default().with_cpu_clock(CpuClock::max()));
-    // JSON 解析与一帧画面里的几行文字都在堆上，64 KB 足够。
+    // JSON parsing and the few lines of text in a frame live on the heap; 72 KB is enough.
     esp_alloc::heap_allocator!(#[esp_hal::ram(reclaimed)] size: 73744);
 
     let timg0 = TimerGroup::new(peripherals.TIMG0);
     esp_rtos::start(timg0.timer0, peripherals.FROM_CPU_INTR0);
 
-    // 串口先起来：后面每一步的结果都要报给 Mac 端。
+    // Serial comes up first: the result of every later step is reported to the Mac.
     let uart = Uart::new(peripherals.UART0, UartConfig::default().with_baudrate(115_200))
-        .expect("UART0 配置")
+        .expect("UART0 config")
         .with_tx(peripherals.GPIO43)
         .with_rx(peripherals.GPIO44);
     serial::start_uart(uart);
     let (usb_rx, usb_tx) = UsbSerialJtag::new(peripherals.USB_DEVICE).into_async().split();
-    spawner.spawn(serial::usb_rx_task(usb_rx).expect("USB 读任务"));
+    spawner.spawn(serial::usb_rx_task(usb_rx).expect("USB read task"));
 
     storage::install(FlashStorage::new(peripherals.FLASH));
 
     let i2c = I2c::new(peripherals.I2C0, I2cConfig::default().with_frequency(Rate::from_khz(400)))
-        .expect("I2C0 配置")
+        .expect("I2C0 config")
         .with_sda(peripherals.GPIO48)
         .with_scl(peripherals.GPIO45);
 
     let lcd_read = Output::new(peripherals.GPIO41, Level::High, OutputConfig::default());
     let lcd_cam = LcdCam::new(peripherals.LCD_CAM);
-    // WR 空闲为高、下降沿送数据，与 ESP-IDF i80 的默认（pclk_idle_low = 0、
-    // pclk_active_neg = 0）一致；esp-hal 的默认是空闲为低。
+    // WR idles high and data goes out on the falling edge, matching the ESP-IDF i80 defaults
+    // (pclk_idle_low = 0, pclk_active_neg = 0); esp-hal defaults to idle low.
     let clock = ClockMode { polarity: Polarity::IdleHigh, phase: Phase::ShiftLow };
     let bus = I8080::new(lcd_cam.lcd, peripherals.DMA_CH0, I8080Config::default().with_frequency(Rate::from_mhz(10)).with_clock_mode(clock))
-        .expect("LCD i8080 配置")
+        .expect("LCD i8080 config")
         .with_cs(peripherals.GPIO1)
         .with_dc(peripherals.GPIO2)
         .with_wrx(peripherals.GPIO42)
@@ -286,11 +288,12 @@ async fn main(spawner: Spawner) -> ! {
         .with_data5(peripherals.GPIO10)
         .with_data6(peripherals.GPIO9)
         .with_data7(peripherals.GPIO46);
-    let parameters = dma_tx_buffer!(16).expect("LCD 参数缓冲");
-    let frame: DmaTxBuf = dma_tx_buffer!(FRAME_BYTES).expect("LCD 帧缓冲");
+    let parameters = dma_tx_buffer!(16).expect("LCD parameter buffer");
+    let frame: DmaTxBuf = dma_tx_buffer!(FRAME_BYTES).expect("LCD frame buffer");
     let lcd = Lcd::new(bus, parameters, frame);
 
-    // I2S 先开流（全是零），和 C 固件一样在配 codec 之前时钟就已经在走。
+    // Start the I2S stream first (all zeros): as in the C firmware, the clock runs before the codec is
+    // configured.
     let i2s = I2s::new(
         peripherals.I2S0,
         peripherals.DMA_CH1,
@@ -299,11 +302,11 @@ async fn main(spawner: Spawner) -> ! {
             .with_data_format(DataFormat::Data16Channel16)
             .with_channels(Channels::STEREO),
     )
-    .expect("I2S0 配置")
+    .expect("I2S0 config")
     .into_async();
     let i2s_tx = i2s.i2s_tx.with_bclk(peripherals.GPIO21).with_ws(peripherals.GPIO13).with_dout(peripherals.GPIO14).build();
     let stream: DmaTxStreamBuf = dma_tx_stream_buffer!(STREAM_BYTES, STREAM_CHUNK);
-    spawner.spawn(audio::audio_task(i2s_tx, stream).expect("音频任务"));
+    spawner.spawn(audio::audio_task(i2s_tx, stream).expect("audio task"));
 
     let k0 = Input::new(peripherals.GPIO0, InputConfig::default().with_pull(Pull::Up));
 
@@ -317,8 +320,8 @@ async fn main(spawner: Spawner) -> ! {
         has_codec: false,
     };
 
-    // 让音频任务先跑一轮把 I2S 流开起来：ES8311 以 BCLK 为时钟，C 固件也是
-    // 先使能 I2S 再配 codec。
+    // Let the audio task run once to start the I2S stream: the ES8311 is clocked by BCLK, and the C
+    // firmware also enables I2S before configuring the codec.
     Timer::after_millis(20).await;
 
     let seed = Rng::new().random();
@@ -342,7 +345,7 @@ async fn main(spawner: Spawner) -> ! {
             firmware.receive(&mut board, &input[..count]);
         }
         firmware.poll(&mut board);
-        // 这里的等待就是按键的采样周期：太长会漏掉短促的轻点。
+        // This wait is the key sampling period: too long would miss quick taps.
         Timer::after_millis(10).await;
     }
 }

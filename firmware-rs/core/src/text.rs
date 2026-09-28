@@ -1,4 +1,4 @@
-//! 栈上的小字符串：画面上的一行、串口上的一行都用它拼，不上堆。
+//! Small stack-allocated strings: lines on screen and lines on the serial port are built with it, off the heap.
 
 use core::fmt;
 
@@ -24,7 +24,7 @@ impl<const N: usize> Text<N> {
         self.length == 0
     }
 
-    /// 放得下多少放多少，超出的截掉，和 snprintf 一样。
+    /// Takes as much as fits and truncates the rest, like snprintf.
     pub fn push_bytes(&mut self, bytes: &[u8]) {
         let take = bytes.len().min(N - self.length);
         self.bytes[self.length..self.length + take].copy_from_slice(&bytes[..take]);
@@ -45,7 +45,7 @@ impl<const N: usize> fmt::Write for Text<N> {
     }
 }
 
-/// `format!` 的栈上版本：`text!(24, "{} FOCUS", n)`。
+/// A stack version of `format!`: `text!(24, "{} FOCUS", n)`.
 #[macro_export]
 macro_rules! text {
     ($size:expr, $($arg:tt)*) => {{
@@ -55,7 +55,7 @@ macro_rules! text {
     }};
 }
 
-/// 按字节截断复制，最多 `limit` 字节，与 C 的 strncpy 到定长数组一致。
+/// Copies bytes truncated to at most `limit` bytes, matching C's strncpy into a fixed-size array.
 pub fn truncated(bytes: &[u8], limit: usize) -> alloc::vec::Vec<u8> {
     let end = bytes.iter().take(limit).position(|&byte| byte == 0).unwrap_or(bytes.len().min(limit));
     bytes[..end].to_vec()

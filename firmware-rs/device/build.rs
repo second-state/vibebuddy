@@ -1,10 +1,10 @@
 use std::process::Command;
 
-/// 链接脚本、Xtensa 链接器检查，以及把构建标识编进固件。
+/// Linker script, Xtensa linker check, and compiling the build stamp into the firmware.
 ///
-/// 页脚与 `DISPLAY READY BUILD` 那一行都显示「git 描述 + 构建时刻」，写法与
-/// C 固件（esp_app_desc 的版本 + 每次构建重新生成的时刻）一致：Mac 端要逐字
-/// 比对两边的构建标识。
+/// The footer and the `DISPLAY READY BUILD` line both show "git description + build time", written
+/// the same way as the C firmware (esp_app_desc's version + a time regenerated on every build): the
+/// Mac compares the two sides' build stamps byte for byte.
 fn main() {
     check_xtensa_linker_available();
     println!("cargo:rustc-link-arg=-Tlinkall.x");
@@ -14,7 +14,7 @@ fn main() {
     let describe: String = describe.chars().take(24).collect();
     let stamp: String = stamp.chars().take(16).collect();
     println!("cargo:rustc-env=VIBEBUDDY_FW_BUILD={describe} {stamp}");
-    // 不存在的文件：让构建脚本每次都重跑，构建时刻才是这一次的。
+    // A file that never exists: rerun the build script every time so the build time is this build's.
     println!("cargo:rerun-if-changed=.build-stamp-never-exists");
 }
 
@@ -34,6 +34,6 @@ fn check_xtensa_linker_available() {
     };
     let linker = format!("xtensa-{chip}-elf-gcc");
     if Command::new(&linker).arg("--version").output().is_err() {
-        panic!("找不到 Xtensa 链接器 `{linker}`：先 `. ~/export-esp.sh`（没有就先 `espup install`）。");
+        panic!("Xtensa linker `{linker}` not found: run `. ~/export-esp.sh` first (or `espup install` if you don't have it).");
     }
 }

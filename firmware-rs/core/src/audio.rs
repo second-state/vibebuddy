@@ -1,17 +1,17 @@
-//! 语音播报与 ES8311 codec。
+//! Voice announcements and the ES8311 codec.
 //!
-//! C 固件经 esp_codec_dev 驱动 ES8311。那套库在 Rust 里没有，这里把它对本板
-//! 配置（从模式、不用 MCLK、BCLK 当时钟源、24 kHz、16 bit、I2S 标准格式）
-//! 实际发出的寄存器读写逐条搬过来，顺序与取值都按 esp_codec_dev 1.6.2 的
-//! es8311.c：`es8311_codec_new`（open）→ `esp_codec_dev_open`（set_fs、
-//! enable）→ 设音量。测试里有一份逐条的期望序列。
+//! The C firmware drives the ES8311 through esp_codec_dev. That library does not exist in Rust, so
+//! this ports, one by one, the register reads and writes it actually issues for this board's
+//! configuration (slave mode, no MCLK, BCLK as clock source, 24 kHz, 16 bit, standard I2S format),
+//! with order and values following es8311.c in esp_codec_dev 1.6.2: `es8311_codec_new` (open) ->
+//! `esp_codec_dev_open` (set_fs, enable) -> set volume. The tests hold the expected sequence.
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Prompt {
     InputRequired = 0,
     Done = 1,
     Failed = 2,
-    /// 番茄钟：专注结束、休息结束各播一次。
+    /// Pomodoro: played once at the end of focus and once at the end of a break.
     FocusDone = 3,
     BreakDone = 4,
 }
@@ -20,11 +20,12 @@ impl Prompt {
     pub const ALL: [Prompt; 5] = [Prompt::InputRequired, Prompt::Done, Prompt::Failed, Prompt::FocusDone, Prompt::BreakDone];
 }
 
-/// 音频采样率：内置与语音包里的 PCM 都是 24 kHz、16 bit、双声道、小端序。
+/// Audio sample rate: both built-in and voice pack PCM are 24 kHz, 16 bit, stereo, little endian.
 pub const SAMPLE_RATE: u32 = 24000;
 
-/// 音量：codec 的 0 到 100 刻度。下限不到零——能存下来的零音量就是从后门
-/// 做出来的持久静音，而静音有意不持久化。
+/// Volume on the codec's 0 to 100 scale. The floor is above zero: a zero volume that
+/// could be saved would be a persistent mute through the back door, and mute is
+/// deliberately not persisted.
 pub const VOLUME_MIN: u32 = 20;
 pub const VOLUME_MAX: u32 = 100;
 pub const VOLUME_DEFAULT: u32 = 65;
@@ -35,7 +36,7 @@ pub fn clamp_volume(level: u32) -> u32 {
 
 pub const ES8311_ADDRESS: u8 = 0x18;
 
-/// ES8311 的寄存器口：读一个、写一个。设备那边是 I2C，测试里是记录器。
+/// The ES8311 register port: read one, write one. I2C on the device, a recorder in tests.
 pub trait Registers {
     type Error;
     fn read(&mut self, register: u8) -> Result<u8, Self::Error>;
@@ -47,9 +48,9 @@ fn update<R: Registers>(codec: &mut R, register: u8, change: impl FnOnce(u8) -> 
     codec.write(register, change(value))
 }
 
-/// esp_codec_dev 的音量换算：0–100 映射到 -50–0 dB（0 是 -96 dB），扣掉
-/// 功放 5 V、DAC 3.3 V 的硬件增益，再按寄存器 0x00=-95.5 dB、0xFF=+32 dB
-/// 线性取整。
+/// esp_codec_dev's volume conversion: 0-100 maps to -50-0 dB (0 is -96 dB), minus the hardware
+/// gain of a 5 V amplifier and 3.3 V DAC, then linearly rounded down with register 0x00 = -95.5 dB
+/// and 0xFF = +32 dB.
 pub fn volume_register(volume: u32) -> u8 {
     let db = if volume == 0 {
         -96.0f32
@@ -70,14 +71,15 @@ pub fn volume_register(volume: u32) -> u8 {
     ((db - -95.5) * ratio) as i32 as u8
 }
 
-/// 打开 codec 并开始播放，最后设上音量。每一步都对应 es8311.c 里的一次读写。
+/// Opens the codec and starts playback, then sets the volume. Each step matches one read or write
+/// in es8311.c.
 pub fn start_es8311<R: Registers>(codec: &mut R, volume: u32) -> Result<(), R::Error> {
     // es8311_open
     let system = codec.read(0x0D)?;
     if system != 0xFA {
         codec.write(0x0D, 0xFA)?;
     }
-    // 增强 I2C 抗噪；第一次写偶尔失败，所以写两遍。
+    // Improve I2C noise immunity; the first write occasionally fails, so write it twice.
     codec.write(0x44, 0x08)?;
     codec.write(0x44, 0x08)?;
     for (register, value) in [
@@ -95,24 +97,24 @@ pub fn start_es8311<R: Registers>(codec: &mut R, volume: u32) -> Result<(), R::E
     ] {
         codec.write(register, value)?;
     }
-    // 从模式。
+    // Slave mode.
     update(codec, 0x00, |value| value & 0xBF)?;
-    // 内部 MCLK 取自 BCLK，不反相。
+    // Internal MCLK taken from BCLK, not inverted.
     codec.write(0x01, 0xBF)?;
-    // SCLK 不反相。
+    // SCLK not inverted.
     update(codec, 0x06, |value| value & !0x20)?;
     codec.write(0x13, 0x10)?;
     codec.write(0x1B, 0x0A)?;
     codec.write(0x1C, 0x6A)?;
     codec.write(0x44, 0x58)?;
 
-    // es8311_set_fs：16 bit、I2S 标准格式、24 kHz。
+    // es8311_set_fs: 16 bit, standard I2S format, 24 kHz.
     update(codec, 0x09, |value| value | 0x0C)?;
     update(codec, 0x0A, |value| value | 0x0C)?;
     update(codec, 0x09, |value| value & 0xFC)?;
     update(codec, 0x0A, |value| value & 0xFC)?;
-    // MCLK = 24 kHz × 256 = 6.144 MHz 那一行系数：pre_div 1、adc/dac_div 1、
-    // 单速、osr 0x10、lrck 0x00FF、bclk_div 4。不用 MCLK 时倍频固定取 ×8。
+    // Coefficients from the MCLK = 24 kHz × 256 = 6.144 MHz row: pre_div 1, adc/dac_div 1,
+    // single speed, osr 0x10, lrck 0x00FF, bclk_div 4. Without MCLK the multiplier is fixed at ×8.
     update(codec, 0x02, |value| (value & 0x07) | (3 << 3))?;
     codec.write(0x05, 0x00)?;
     update(codec, 0x03, |value| (value & 0x80) | 0x10)?;
@@ -137,11 +139,11 @@ pub fn start_es8311<R: Registers>(codec: &mut R, volume: u32) -> Result<(), R::E
     codec.write(0x15, 0x40)?;
     codec.write(0x37, 0x08)?;
     codec.write(0x45, 0x00)?;
-    // 取消静音。
+    // Unmute.
     update(codec, 0x31, |value| value & 0x9F)?;
 
-    // esp_codec_dev_open 最后按设备的初始音量 0 与未静音各补一次，
-    // 然后 C 固件立刻设成存下来的音量。
+    // esp_codec_dev_open finishes by applying the device's initial volume 0 and unmute once each,
+    // then the C firmware immediately sets the saved volume.
     codec.write(0x32, volume_register(0))?;
     update(codec, 0x31, |value| value & 0x9F)?;
     set_es8311_volume(codec, volume)
@@ -156,7 +158,7 @@ mod tests {
     use super::*;
     use std::vec::Vec;
 
-    /// 记下每一次读写；寄存器初值都当 0。
+    /// Records every read and write; all registers start at 0.
     struct Recorder {
         values: [u8; 256],
         log: Vec<(char, u8, u8)>,
@@ -179,7 +181,7 @@ mod tests {
 
     #[test]
     fn volume_matches_esp_codec_dev() {
-        // hw_gain = 20·log10(3.3/5) ≈ -3.609 dB；reg = (db + 3.609 + 95.5) × 2。
+        // hw_gain = 20·log10(3.3/5) ≈ -3.609 dB; reg = (db + 3.609 + 95.5) × 2.
         assert_eq!(volume_register(65), 163);
         assert_eq!(volume_register(100), 198);
         assert_eq!(volume_register(20), 118);

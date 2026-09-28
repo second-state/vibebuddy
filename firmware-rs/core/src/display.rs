@@ -1,7 +1,9 @@
-//! 小灯灵的整块画面：值班、番茄钟、休闲三个模式各自的场景，加上动画节奏、
-//! 背光、截图。只往帧缓冲里画，提交与背光交给 [`Screen`]。
+//! The buddy's whole screen: the scenes for each of the duty, pomodoro and leisure modes, plus animation
+//! pacing, backlight and screenshots. Only draws into the frame buffer; committing and the backlight are
+//! left to [`Screen`].
 //!
-//! 坐标、颜色、帧节奏都照搬 C 固件的 agent_display.c，画面应当逐像素一致。
+//! Coordinates, colors and frame pacing are copied from the C firmware's agent_display.c; the screens
+//! should match pixel for pixel.
 
 use alloc::vec::Vec;
 
@@ -31,10 +33,10 @@ const COLOR_BREAK: u16 = 0x4ecc;
 const TITLE_BYTES: usize = 63;
 const BUILD_BYTES: usize = 47;
 
-/// 空闲小动作：每 40 帧里最后 8 帧做一个。
+/// Idle small moves: one in the last 8 frames of every 40.
 const IDLE_MOOD_PERIOD: u32 = 40;
 const IDLE_MOOD_FRAMES: u32 = 8;
-/// 空闲屏轮播的一行每 6 帧换一次。
+/// The rotating line on the idle screen changes every 6 frames.
 const IDLE_ROTATE_FRAMES: u32 = 6;
 
 const RING_CENTER_X: i32 = 118;
@@ -44,14 +46,14 @@ const RING_TICK_INNER: i32 = 70;
 const RING_TICK_OUTER: i32 = 79;
 const RING_HAND_INNER: i32 = 64;
 const RING_HAND_OUTER: i32 = 86;
-/// 闹铃先抖 20 帧，每帧 100 ms，左右各偏 3 像素。
+/// The alarm first shakes for 20 frames of 100 ms each, 3 pixels to either side.
 const RING_ALARM_SHAKE_FRAMES: u32 = 20;
 const RING_ALARM_SHAKE_FRAME_MS: u32 = 100;
 const RING_ALARM_SHAKE_PX: i32 = 3;
 const PANEL_X: i32 = 208;
 use core::f32::consts::TAU;
-/// 踢球的抛物线沿用 C 固件的 3.14159，不是 π：画面要与它逐像素一致。
-#[allow(clippy::approx_constant, reason = "与 C 固件同一个近似值")]
+/// The ball's arc keeps the C firmware's 3.14159 rather than π: the screen must match it pixel for pixel.
+#[allow(clippy::approx_constant, reason = "the same approximation as the C firmware")]
 const BALL_PI: f32 = 3.14159;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -64,9 +66,10 @@ pub enum State {
     Offline,
 }
 
-/// 小灯灵同一时刻只处于一个模式，每个模式拥有整块画面。值班盯着 Agent，
-/// 番茄钟给用户计时，休闲是值班空闲够久之后自己去玩。Agent 状态在三个
-/// 模式里都继续更新，只是番茄钟模式只给它留一行摘要。
+/// The buddy is in exactly one mode at a time, and each mode owns the whole screen. Duty
+/// watches the agents, pomodoro times the user, and leisure is the buddy playing on its
+/// own after duty has been idle long enough. Agent state keeps updating in all three
+/// modes; pomodoro mode just gives it a one-line summary.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Mode {
     Duty,
@@ -84,14 +87,16 @@ impl Mode {
     }
 }
 
-/// 一张任务卡的输入。
+/// The input for one task card.
 pub struct TaskInput<'a> {
     pub title: Option<&'a [u8]>,
     pub state: State,
-    /// 进入当前状态已经过去的秒数。设备收到后自行继续计时，因为可见状态
-    /// 不变时 Mac 端不会再发消息，卡片上的数字却必须一直走。
+    /// Seconds since entering the current state. The device keeps counting on its own,
+    /// because the Mac sends nothing while the visible state is unchanged, yet the number
+    /// on the card must keep moving.
     pub elapsed_s: i32,
-    /// 所属项目；标题是会话名时画在第二行，空或与标题重复则不画。
+    /// Owning project; drawn on the second line when the title is a session name, skipped when empty or
+    /// the same as the title.
     pub project: Option<&'a [u8]>,
 }
 
@@ -103,14 +108,14 @@ struct Task {
     received_ms: u32,
 }
 
-/// 屏幕硬件：帧缓冲、提交、背光。
+/// Screen hardware: frame buffer, commit, backlight.
 pub trait Screen {
     fn frame(&mut self) -> &mut [u8];
     fn present(&mut self) -> Result<(), ()>;
     fn set_backlight(&mut self, on: bool) -> Result<(), ()>;
 }
 
-/// 画一帧要看的外部状态：番茄钟与休闲导演归主程序所有。
+/// External state needed to draw a frame: the pomodoro and the leisure director belong to the main program.
 pub struct Scene<'a> {
     pub now_ms: u32,
     pub pomodoro: &'a pomodoro::Pomodoro,
@@ -129,17 +134,18 @@ pub struct Display {
     daemon_build: Vec<u8>,
     animation_frame: u32,
     next_animation_at: u32,
-    /// 背光当前是否点亮。休闲模式夜里睡久了会关掉它，任何事情一来就点亮。
+    /// Whether the backlight is on. Leisure mode turns it off after sleeping long at night; anything at all
+    /// turns it back on.
     backlight_on: bool,
-    /// 眨眼确认：背光快闪到这个时刻为止；None 表示没在闪。
+    /// Blink to identify: the backlight flashes until this time; None means not flashing.
     identify_until: Option<u32>,
     identify_next_toggle: u32,
     muted: bool,
-    /// 闹铃在响：阶段结束了、用户还没动手。记下结束时的阶段，视图一变
-    /// （开始、放弃、跳过）就停；切走画面也停。
+    /// The alarm is ringing: the phase ended and the user hasn't acted yet. Records the phase at the end;
+    /// stops as soon as the view changes (start, abandon, skip) or the screen is switched away.
     ring_alarm: bool,
     ring_alarm_phase: Phase,
-    /// 还要抖几帧；抖完转为脉动。
+    /// Shake frames left; after shaking, switch to pulsing.
     ring_alarm_shake_frames: u32,
 }
 
@@ -151,13 +157,13 @@ enum IdleMood {
     Stretch,
 }
 
-/// 小动作已经进行了几帧；负数表示当前没有小动作。
+/// How many frames the small move has run; negative means no small move right now.
 fn idle_mood_phase(frame: u32) -> i32 {
     (frame % IDLE_MOOD_PERIOD) as i32 - (IDLE_MOOD_PERIOD - IDLE_MOOD_FRAMES) as i32
 }
 
-/// 空闲时轮流做三个小动作。呼吸和眨眼之外还得有点别的，否则一台一直亮着
-/// 的设备看上去更像卡住了而不是在待命。
+/// Cycle through three small moves while idle. Breathing and blinking alone aren't enough: a device that is
+/// always lit would look stuck rather than on standby.
 fn idle_mood(frame: u32) -> IdleMood {
     if idle_mood_phase(frame) < 0 {
         return IdleMood::None;
@@ -224,7 +230,7 @@ fn draw_pet_face(canvas: &mut Canvas, state: State, frame: u32, x_offset: i32, y
             canvas.draw_line(153 + x_offset, face_y + 25, 167 + x_offset, face_y + 25, color);
         }
         State::Offline => {
-            // 闭眼与平直的嘴：睡着，而不是出错。
+            // Closed eyes and a flat mouth: asleep, not an error.
             canvas.fill_rect(143 + x_offset, face_y + 14, 8, 3, color);
             canvas.fill_rect(169 + x_offset, face_y + 14, 8, 3, color);
             canvas.draw_line(154 + x_offset, face_y + 25, 166 + x_offset, face_y + 25, color);
@@ -232,14 +238,14 @@ fn draw_pet_face(canvas: &mut Canvas, state: State, frame: u32, x_offset: i32, y
         State::Idle => {
             let mood = idle_mood(frame);
             if mood == IdleMood::Nap {
-                // 打盹：闭眼加一个飘起来的 Z。和失联的闭眼靠颜色与这个 Z 区分。
+                // Dozing: closed eyes plus a floating Z. The color and this Z tell it apart from the link-lost closed eyes.
                 canvas.fill_rect(143 + x_offset, face_y + 14, 8, 3, color);
                 canvas.fill_rect(169 + x_offset, face_y + 14, 8, 3, color);
                 canvas.draw_line(154 + x_offset, face_y + 25, 166 + x_offset, face_y + 25, color);
                 canvas.draw_text(172 + x_offset, 44 + y_offset - idle_mood_phase(frame), b"Z", 2, color, 1);
                 return;
             }
-            // 左顾右盼：只平移眼睛，看上去像在打量房间。
+            // Looking around: only the eyes move sideways, as if sizing up the room.
             let gaze = if mood == IdleMood::Look { if frame % 4 < 2 { -3 } else { 3 } } else { 0 };
             let blinking = frame % 8 == 7;
             let (eye_y, eye_height) = if blinking { (14, 3) } else { (8, 10) };
@@ -251,8 +257,8 @@ fn draw_pet_face(canvas: &mut Canvas, state: State, frame: u32, x_offset: i32, y
     }
 }
 
-/// 天线、身体、手臂和脸上的屏幕。x、y 是相对值班位置的偏移；手臂抬起用
-/// 正数。脸另外画，腿也另外画，因为它们各自还有别的姿势。
+/// Antenna, body, arms and the screen on the face. x and y are offsets from the duty position; raised arms
+/// use positive values. The face and legs are drawn separately, since each has other poses too.
 fn draw_pet_body(canvas: &mut Canvas, x: i32, y: i32, antenna: i32, knob_color: u16, left_arm: i32, right_arm: i32) {
     canvas.fill_rect(157 + x, 48 + y - antenna, 6, 13 + antenna, COLOR_PET_HIGHLIGHT);
     canvas.fill_rect(153 + x, 44 + y - antenna, 14, 10, knob_color);
@@ -265,7 +271,7 @@ fn draw_pet_body(canvas: &mut Canvas, x: i32, y: i32, antenna: i32, knob_color: 
     canvas.fill_rect(132 + x, 79 + y, 56, 32, COLOR_SCREEN);
 }
 
-/// 下半身与两只脚；脚抬起用正数。
+/// Lower body and both feet; raised feet use positive values.
 fn draw_pet_legs(canvas: &mut Canvas, x: i32, y: i32, left_foot: i32, right_foot: i32) {
     canvas.fill_rect(139 + x, 121 + y, 42, 25, COLOR_PET);
     canvas.fill_rect(126 + x, 125 + y - left_foot, 13, 17, COLOR_PET_HIGHLIGHT);
@@ -282,7 +288,7 @@ fn draw_buddy(canvas: &mut Canvas, state: State, frame: u32, x_offset: i32, colo
         State::Idle if frame.is_multiple_of(8) => 1,
         _ => 0,
     };
-    // 伸懒腰时只拉长天线、身体不动，才像伸展而不是整只跳一下。
+    // When stretching, only lengthen the antenna and keep the body still, so it reads as a stretch rather than a hop.
     let antenna = if state == State::Idle && idle_mood(frame) == IdleMood::Stretch { 5 } else { 0 };
     draw_pet_body(canvas, x_offset, y_offset, antenna, color, 0, 0);
     draw_pet_face(canvas, state, frame, x_offset, y_offset, color);
@@ -298,7 +304,7 @@ fn short_state_label(state: State) -> &'static [u8] {
     }
 }
 
-/// 卡片右下角只有三格宽，超过一小时就只报小时。
+/// The card's bottom-right corner is only three cells wide; past an hour, show hours only.
 fn format_elapsed(seconds: i32) -> Text<8> {
     let seconds = seconds.max(0);
     if seconds < 60 {
@@ -310,7 +316,7 @@ fn format_elapsed(seconds: i32) -> Text<8> {
     }
 }
 
-/// 当日记录的一行："3 FOCUS 1H15"。不到一小时只写分钟。
+/// One line of the daily record: "3 FOCUS 1H15". Under an hour, only minutes.
 fn format_tally(completed: u32, focus_s: u32) -> Text<23> {
     let minutes = focus_s / 60;
     if minutes < 60 {
@@ -320,7 +326,7 @@ fn format_tally(completed: u32, focus_s: u32) -> Text<23> {
     }
 }
 
-/// 向上取整到秒：刚开始显示 25:00，走到最后一毫秒仍是 00:01。
+/// Rounds up to the second: shows 25:00 at the start and still 00:01 in the last millisecond.
 fn format_countdown(remaining_ms: u32) -> Text<7> {
     let seconds = remaining_ms.div_ceil(1000);
     text!(7, "{:02}:{:02}", (seconds / 60) % 100, seconds % 60)
@@ -336,8 +342,8 @@ fn phase_color(view: &pomodoro::View) -> u16 {
     }
 }
 
-/// 从圆心向外画一段径向线。角度从 12 点起顺时针；shift 是整圈的横向偏移，
-/// 只有闹铃抖动时不为零。
+/// Draws a radial segment outward from the center. Angles run clockwise from 12 o'clock; shift is the whole
+/// ring's horizontal offset, nonzero only while the alarm shakes.
 fn draw_radial(canvas: &mut Canvas, angle: f32, inner: i32, outer: i32, thickness: i32, color: u16, shift: i32) {
     let dx = libm::sinf(angle);
     let dy = -libm::cosf(angle);
@@ -348,7 +354,7 @@ fn draw_radial(canvas: &mut Canvas, angle: f32, inner: i32, outer: i32, thicknes
     }
 }
 
-/// 睁眼微笑，每三秒眨一次。
+/// Eyes open and smiling, blinking every three seconds.
 fn resting_pose(frame: u32) -> Pose {
     Pose { eyes: if frame % 24 == 23 { Eyes::Closed } else { Eyes::Open }, mouth: Mouth::Smile, ..Pose::default() }
 }
@@ -404,7 +410,7 @@ fn draw_sleeping_z(canvas: &mut Canvas, x: i32, y: i32, frame: u32) {
     canvas.draw_text(172 + x, 44 + y - (frame % 16) as i32, b"Z", 2, COLOR_READY, 1);
 }
 
-/// 剧目之间的普通空闲：站着，呼吸，眨眼。
+/// Plain idle between skits: standing, breathing, blinking.
 fn skit_rest(canvas: &mut Canvas, frame: u32) {
     let mut pose = resting_pose(frame);
     pose.y = ((frame / 8) % 2) as i32;
@@ -417,7 +423,7 @@ fn skit_sleep(canvas: &mut Canvas, frame: u32) {
     draw_sleeping_z(canvas, 0, pose.y, frame);
 }
 
-/// 巡逻：走到右边，停下看你一眼，走到左边，再回来。
+/// Patrol: walk to the right, stop and glance at you, walk to the left, then come back.
 fn skit_patrol(canvas: &mut Canvas, frame: u32) {
     let mut pose = resting_pose(frame);
     let frame_i = frame as i32;
@@ -451,14 +457,14 @@ fn draw_ball(canvas: &mut Canvas, cx: i32, cy: i32, frame: u32) {
     canvas.fill_rect(cx - 4, cy - 4, 8, 8, COLOR_INPUT);
     canvas.fill_rect(cx - 3, cy - 5, 6, 10, COLOR_INPUT);
     canvas.fill_rect(cx - 5, cy - 3, 10, 6, COLOR_INPUT);
-    // 一个绕着转的深色点，球才像在滚。
+    // A dark dot circling around makes the ball look like it's rolling.
     const SPIN: [[i32; 2]; 4] = [[-2, -2], [2, -2], [2, 2], [-2, 2]];
     let spin = SPIN[(frame % 4) as usize];
     canvas.fill_rect(cx + spin[0] - 1, cy + spin[1] - 1, 2, 2, COLOR_BACKGROUND);
 }
 
-/// 踢球：球从左边滚到脚边，一脚踢开，弹一下又滚回来，再一脚踢出画面。
-/// 球始终在身体左侧飞，不穿过身体。
+/// Ball: the ball rolls from the left to the feet, gets kicked away, bounces and rolls back, then is kicked
+/// off screen. The ball always flies on the left of the body and never passes through it.
 fn skit_ball(canvas: &mut Canvas, frame: u32) {
     const GROUND: i32 = 149;
     const AT_FOOT: i32 = 116;
@@ -497,7 +503,8 @@ fn skit_ball(canvas: &mut Canvas, frame: u32) {
     draw_ball(canvas, ball_x, ball_y, frame);
 }
 
-/// 看书：举着一本书一行行扫，隔几秒翻一页，中间被剧情吓一跳。
+/// Reading: holds up a book and scans it line by line, turns a page every few seconds, and gets startled by
+/// the plot midway.
 fn skit_read(canvas: &mut Canvas, frame: u32) {
     let mut pose = resting_pose(frame);
     pose.left_arm = 10;
@@ -528,7 +535,7 @@ fn skit_read(canvas: &mut Canvas, frame: u32) {
     }
 }
 
-/// 数星星：仰头数到七，越数越慢，数着数着睡着了。
+/// Counting stars: looks up and counts to seven, slower and slower, and falls asleep counting.
 fn skit_stars(canvas: &mut Canvas, frame: u32) {
     const STARS: [[i32; 2]; 12] = [
         [20, 36], [48, 52], [75, 40], [100, 60], [130, 34], [200, 44],
@@ -558,8 +565,8 @@ fn skit_stars(canvas: &mut Canvas, frame: u32) {
     }
 }
 
-/// 躲猫猫：溜到屏幕右边缘外只剩一只手在晃，探出半个身子看一眼，再缩回去，
-/// 最后走回来。
+/// Hide and seek: slips past the right edge of the screen until only a waving hand shows, leans half out for
+/// a look, ducks back, and finally walks back.
 fn skit_hide(canvas: &mut Canvas, frame: u32) {
     let mut pose = resting_pose(frame);
     let frame_i = frame as i32;
@@ -583,7 +590,8 @@ fn skit_hide(canvas: &mut Canvas, frame: u32) {
     draw_pet_pose(canvas, &pose);
 }
 
-/// 被自己吓醒：睡着，突然一个感叹号跳起来，左右张望，打个哈欠，接着睡。
+/// Startled awake: asleep, then an exclamation mark jumps up, it looks left and right, yawns, and goes back
+/// to sleep.
 fn skit_startle(canvas: &mut Canvas, frame: u32) {
     let sleeping = !(24..56).contains(&frame);
     let mut pose = if sleeping { sleeping_pose(frame) } else { resting_pose(frame) };
@@ -641,7 +649,7 @@ impl Display {
         }
     }
 
-    /// 屏幕硬件已经初始化好、背光还关着：画第一帧，再开背光。
+    /// The screen hardware is initialized and the backlight is still off: draw the first frame, then turn on the backlight.
     pub fn start(&mut self, screen: &mut dyn Screen, scene: &Scene) -> Result<(), ()> {
         self.ready = true;
         self.show_tasks(screen, scene, State::Idle, None, &[])?;
@@ -654,8 +662,9 @@ impl Display {
         self.mode
     }
 
-    /// Agent 那边是否无事可做：主状态空闲且没有任务卡。休闲模式的无聊度
-    /// 按这个状态累计，而不是按多久没收到消息，因为长任务中途本来就没有消息。
+    /// Whether the agents have nothing going on: main state idle and no task cards. Leisure
+    /// boredom accumulates on this, not on time since the last message, because long tasks
+    /// send no messages midway anyway.
     pub fn agent_idle(&self) -> bool {
         self.state == State::Idle && self.tasks.is_empty()
     }
@@ -675,7 +684,8 @@ impl Display {
 
     fn state_color(&self, state: State) -> u16 {
         if self.link_lost {
-            // 失联期间所有颜色转灰：状态可能已经过时，不该继续用鲜艳色宣称它成立。
+            // Everything turns gray while the link is lost: the state may be stale and shouldn't keep claiming it in
+            // bright colors.
             return COLOR_MUTED;
         }
         match state {
@@ -687,7 +697,7 @@ impl Display {
         }
     }
 
-    /// 收到卡片时的秒数加上设备自己走过的时间。
+    /// Seconds at the time the card was received, plus the time the device has counted since.
     fn task_elapsed_seconds(&self, task: &Task, now_ms: u32) -> i32 {
         task.elapsed_base + (now_ms.wrapping_sub(task.received_ms) / 1000) as i32
     }
@@ -705,25 +715,27 @@ impl Display {
             canvas.fill_rect(x + 2, y + 2, 4, 28, color);
             canvas.draw_text(x + 12, y + 5, &task.title, 1, COLOR_TEXT, 26);
             canvas.draw_text(x + 12, y + 17, short_state_label(task.state), 1, color, 4);
-            // 第一行是会话名时，项目名挪到第二行；标题本身就是项目名就不重复。
+            // When the first line is a session name, the project name moves to the second line; if the title is the
+            // project name, don't repeat it.
             if !task.project.is_empty() && !contains(&task.title, &task.project) {
                 canvas.draw_text(x + 42, y + 17, &task.project, 1, COLOR_MUTED, 16);
             }
             let elapsed = format_elapsed(self.task_elapsed_seconds(task, now_ms));
             let elapsed_width = elapsed.len() as i32 * 6 - 1;
-            // 等待确认时把时长也点亮：这一栏回答的正是「等了多久」。
+            // While waiting for input, light up the duration too: this column answers exactly "how long has it waited".
             let elapsed_color = if task.state == State::InputRequired { color } else { COLOR_MUTED };
             canvas.draw_text(x + width - 8 - elapsed_width, y + 17, elapsed.as_bytes(), 1, elapsed_color, 8);
         }
     }
 
-    /// 页脚显示两侧的构建标识：本机固件，以及心跳捎来的 Mac 端。
+    /// The footer shows the build stamps of both sides: this firmware, and the Mac side carried by the heartbeat.
     ///
-    /// 只显示，不判断。固件要插 USB、停 daemon 才能烧，daemon 改一行就重启，
-    /// 两边大部分时间本来就不在同一个 commit 上；把「不一致」当成告警，几天内
-    /// 就会被彻底无视。真正会出事的是协议能力不匹配，而那不是 commit 能回答的。
+    /// Display only, no judgement. Flashing firmware means plugging in USB and stopping the daemon, while the
+    /// daemon restarts after a one-line change, so most of the time the two sides aren't on the same commit;
+    /// treating a mismatch as a warning would get it ignored within days. What actually breaks is a protocol
+    /// capability mismatch, which a commit can't answer.
     ///
-    /// 两行左对齐到同一列——逐字比对靠的是对齐，不是颜色。
+    /// Both lines are left-aligned to the same column: verbatim comparison relies on alignment, not color.
     fn draw_build_footer(&self, canvas: &mut Canvas) {
         let mut firmware_line = Text::<55>::new();
         firmware_line.push_bytes(b"FW     ");
@@ -737,8 +749,8 @@ impl Display {
         canvas.draw_text(x, 228, daemon_line.as_bytes(), 1, COLOR_MUTED, 56);
     }
 
-    /// 空闲时在标题与战绩之间轮播。空闲屏出现得最频繁，只写一句固定的话太浪费。
-    /// 番茄钟的当日记录是设备自己记的，也排进来。
+    /// While idle, rotate between the title and stats. The idle screen shows up most often, so a single fixed
+    /// sentence is a waste. The pomodoro's daily record is kept by the device itself and goes into the rotation too.
     fn draw_idle_line(&self, canvas: &mut Canvas, scene: &Scene) {
         let pomodoro = scene.pomodoro.view(scene.now_ms);
         let tally_line = format_tally(pomodoro.completed, pomodoro.focus_s);
@@ -766,8 +778,8 @@ impl Display {
         canvas.draw_text_centered(195, lines[slot], 2, color);
     }
 
-    /// 闹铃是否还在响。结束后视图一变就是用户动过手了：开始下一阶段
-    /// 变成运行中，放弃或跳过换了阶段。
+    /// Whether the alarm is still ringing. After the end, any change of view means the user acted: starting the
+    /// next phase makes it running, abandoning or skipping changes the phase.
     fn ring_alarm_active(&mut self, view: &pomodoro::View) -> bool {
         if self.ring_alarm && (view.run != Run::Pending || view.phase != self.ring_alarm_phase) {
             self.ring_alarm = false;
@@ -780,7 +792,7 @@ impl Display {
         self.ring_alarm && self.ring_alarm_shake_frames > 0
     }
 
-    /// 抖动时整圈的横向偏移：每帧换一边。
+    /// The whole ring's horizontal offset while shaking: switches side every frame.
     fn ring_alarm_shift(&self) -> i32 {
         if !self.ring_alarm_shaking() {
             return 0;
@@ -793,8 +805,8 @@ impl Display {
         let elapsed = view.total_ms - view.remaining_ms;
         let sweep = TAU * elapsed as f32 / view.total_ms as f32;
         let shift = self.ring_alarm_shift();
-        // 闹铃：整圈亮成下一阶段的颜色。抖完之后一帧亮一帧暗，像心跳，
-        // 不是灰与亮的硬闪。
+        // Alarm: the whole ring lights up in the next phase's color. After shaking, alternate a bright and a dim
+        // frame like a heartbeat, not a hard flash between gray and bright.
         if alarm && !self.ring_alarm_shaking() && self.animation_frame % 2 == 1 {
             color = half_bright(color);
         }
@@ -806,8 +818,8 @@ impl Display {
         draw_radial(canvas, sweep, RING_HAND_INNER, RING_HAND_OUTER, 3, color, shift);
     }
 
-    /// 番茄钟场景里 Agent 只剩右下角几行：它仍然回答“现在最需要我注意什么”，
-    /// 语音也照常播，只是画面让给了倒计时。
+    /// In the pomodoro scene the agents keep only a few lines at the bottom right: they still answer "what needs
+    /// my attention most", and voice lines still play; the screen just goes to the countdown.
     fn draw_agent_summary(&self, canvas: &mut Canvas, label: &[u8], status_color: u16) {
         canvas.draw_text(PANEL_X, 176, b"AGENT", 1, COLOR_MUTED, 18);
         canvas.draw_text(PANEL_X, 188, label, 1, status_color, 18);
@@ -823,14 +835,14 @@ impl Display {
         let alarm = self.ring_alarm_active(&view);
         self.draw_pomodoro_ring(canvas, &view, alarm);
 
-        // 暂停时数字闪烁：停表的老规矩。闹铃抖动时数字跟着圆环一起抖。
+        // While paused the digits blink, the old stopwatch rule. While the alarm shakes, the digits shake with the ring.
         if !paused || self.animation_frame.is_multiple_of(2) {
             let countdown = format_countdown(view.remaining_ms);
             canvas.draw_text(RING_CENTER_X - 58 + self.ring_alarm_shift(), RING_CENTER_Y - 14, countdown.as_bytes(), 4, COLOR_TEXT, 5);
         }
 
-        // 空闲写 READY；专注刚结束、休息还没开始时写 BREAK 配 05:00，
-        // 和空闲区分开：这一屏在等的是开始休息，不是开始专注。
+        // Idle shows READY; right after focus ends and before the break starts, show BREAK with 05:00
+        // to tell it apart from idle: this screen is waiting for the break to start, not for focus to start.
         let phase_label: &[u8] = if view.is_idle() {
             b"READY"
         } else if view.phase == Phase::Break {
@@ -852,8 +864,8 @@ impl Display {
             canvas.draw_text(PANEL_X, 98, b"PAUSED", 2, color, 9);
         }
 
-        // 当日记录：完成几次记几格，再一行写清次数与累计专注时长。按 Mac 端
-        // 的本地日期清零，重启不丢。
+        // Daily record: one cell per completed session, plus a line with the count and total focus time. Resets
+        // on the Mac's local date and survives restarts.
         canvas.draw_text(PANEL_X, 118, b"TODAY", 1, COLOR_MUTED, 18);
         let shown = view.completed.min(8);
         for index in 0..shown as i32 {
@@ -869,7 +881,8 @@ impl Display {
         self.draw_agent_summary(canvas, label, status_color);
     }
 
-    /// 小灯灵场景右上角的番茄钟小徽章：切回来看 Agent 时，倒计时不该消失。
+    /// Small pomodoro badge at the top right of the buddy scene: switching back to watch the agents shouldn't
+    /// hide the countdown.
     fn draw_pomodoro_badge(&self, canvas: &mut Canvas, scene: &Scene) {
         let view = scene.pomodoro.view(scene.now_ms);
         if view.is_idle() || (view.run == Run::Paused && self.animation_frame % 2 == 1) {
@@ -882,7 +895,7 @@ impl Display {
         canvas.draw_text(WIDTH - 8 - (7 * 6 - 1), 15, badge.as_bytes(), 1, phase_color(&view), 12);
     }
 
-    /// 梦话：睡着了，头顶冒出一串小泡泡，泡泡里是今天的战绩。
+    /// Sleep talking: asleep, with a string of small bubbles overhead showing today's stats.
     fn skit_dream(&self, canvas: &mut Canvas, frame: u32) {
         let pose = sleeping_pose(frame);
         draw_pet_pose(canvas, &pose);
@@ -928,7 +941,7 @@ impl Display {
         if !self.tasks.is_empty() {
             canvas.draw_text_centered(195, b"LATEST ON TOP", 1, COLOR_MUTED);
         } else if self.state == State::Idle && !self.link_lost {
-            // 失联时不轮播：会动的画面看上去像还活着，正好与 NO LINK 相反。
+            // No rotation while the link is lost: a moving screen looks alive, the exact opposite of NO LINK.
             self.draw_idle_line(canvas, scene);
         } else if !self.title.is_empty() {
             canvas.draw_text_centered(195, &self.title, 2, COLOR_TEXT);
@@ -950,7 +963,7 @@ impl Display {
         let leisure = scene.leisure.view(scene.now_ms);
         if self.mode == Mode::Leisure {
             if leisure.lights_out {
-                // 夜里睡久了就关背光；没人看的画面也不必再画。
+                // After sleeping long at night, turn off the backlight; a screen nobody watches needn't be drawn.
                 self.ensure_backlight(screen, false);
                 return Ok(());
             }
@@ -980,7 +993,8 @@ impl Display {
     fn animation_period(&self) -> u32 {
         match self.mode {
             Mode::Leisure => leisure::FRAME_MS,
-            // 倒计时每秒变一次；暂停时的闪烁要每半秒一帧；闹铃抖动更快。
+            // The countdown changes every second; blinking while paused needs a frame every half second; the alarm
+            // shake is faster still.
             Mode::Pomodoro => if self.ring_alarm_shaking() { RING_ALARM_SHAKE_FRAME_MS } else { 500 },
             Mode::Duty => match self.state {
                 State::Working => 250,
@@ -1021,10 +1035,11 @@ impl Display {
         self.render(screen, scene)
     }
 
-    /// 截图：把当前帧缓冲按行程编码逐行交给 `write_line`（不含换行）。
-    /// 第一行 `SHOT BEGIN 320x240 BACKLIGHT ON|OFF`，中间每行若干段
-    /// `rgb565:长度`，最后 `SHOT END`。
-    /// 边编码边写出，不攒整帧：一帧的行程编码有几十 KB，比堆还大。
+    /// Screenshot: run-length encodes the current framebuffer and hands it to `write_line`
+    /// line by line (without newlines). The first line is `SHOT BEGIN 320x240 BACKLIGHT ON|OFF`,
+    /// each middle line holds several `rgb565:length` runs, and the last is `SHOT END`.
+    /// Writes out while encoding instead of buffering the whole frame: one frame's run-length encoding is
+    /// tens of KB, larger than the heap.
     pub fn dump(&self, frame: &[u8], write_line: &mut dyn FnMut(&[u8])) {
         let begin = text!(64, "SHOT BEGIN {}x{} BACKLIGHT {}", WIDTH, HEIGHT, if self.backlight_on { "ON" } else { "OFF" });
         write_line(begin.as_bytes());
@@ -1053,12 +1068,12 @@ impl Display {
         write_line(b"SHOT END");
     }
 
-    /// 记录当日战绩，空闲屏会轮播这几行。下一次绘制时生效。
+    /// Records today's stats, which the idle screen rotates through. Takes effect on the next draw.
     pub fn set_stats(&mut self, lines: &[&[u8]]) {
         self.stats = lines.iter().take(MAX_STATS).map(|line| truncated(line, TITLE_BYTES)).collect();
     }
 
-    /// 心跳每 5 秒一次，标识没变就不能重画。
+    /// The heartbeat comes every 5 seconds; don't redraw if the stamp hasn't changed.
     fn set_build(&mut self, screen: &mut dyn Screen, scene: &Scene, firmware: bool, build: &[u8]) {
         let value = truncated(build, BUILD_BYTES);
         let slot = if firmware { &mut self.firmware_build } else { &mut self.daemon_build };
@@ -1071,8 +1086,9 @@ impl Display {
         }
     }
 
-    /// 设置本机固件与 Mac 端的构建标识。设备会替用户比对两者：让人去读两串
-    /// 哈希再自己对比并不可靠，而不一致本身正是要看见的信号。
+    /// Sets the build stamps of this firmware and of the Mac side. The device compares them
+    /// for the user: asking people to read two hashes and compare them isn't reliable, and a
+    /// mismatch is exactly the signal they need to see.
     pub fn set_firmware_build(&mut self, screen: &mut dyn Screen, scene: &Scene, build: &[u8]) {
         self.set_build(screen, scene, true, build);
     }
@@ -1081,7 +1097,8 @@ impl Display {
         self.set_build(screen, scene, false, build);
     }
 
-    /// 眨眼确认：背光快闪约一秒，任何模式下都看得见。引导里用它认盒子。
+    /// Blink to identify: the backlight flashes for about a second, visible in any mode. Onboarding uses it to
+    /// find the box.
     pub fn identify(&mut self, now_ms: u32) {
         if !self.ready {
             return;
@@ -1090,20 +1107,22 @@ impl Display {
         self.identify_next_toggle = now_ms;
     }
 
-    /// 番茄钟阶段结束的闹铃：圆环先抖两秒，再整圈脉动，到用户按键或切走
-    /// 画面为止。静音时这是唯一的提醒。调用方随后要把番茄钟画面推到前面。
+    /// Alarm at the end of a pomodoro phase: the ring shakes for two seconds, then the whole
+    /// ring pulses until the user presses a key or leaves the screen. When muted this is the
+    /// only reminder. The caller must then bring the pomodoro screen to the front.
     pub fn pomodoro_ended(&mut self, scene: &Scene) {
         let view = scene.pomodoro.view(scene.now_ms);
         self.ring_alarm = true;
         self.ring_alarm_phase = view.phase;
         self.ring_alarm_shake_frames = RING_ALARM_SHAKE_FRAMES;
-        // 调用方紧接着会重绘第一帧；这里只把后面的帧排到抖动的节奏上。
+        // The caller redraws the first frame right after; this only schedules the later frames on the shake rhythm.
         self.animation_frame = 0;
         self.next_animation_at = scene.now_ms.wrapping_add(RING_ALARM_SHAKE_FRAME_MS);
     }
 
-    /// 链路失联时覆盖显示：小灯灵闭眼，画面转灰。
-    /// 底层状态与任务卡保留，因为它们是最后已知的事实，只是不再可信。
+    /// Overlay while the link is lost: the buddy closes its eyes and the screen turns gray.
+    /// The underlying state and task cards are kept: they are the last known facts, just no
+    /// longer trustworthy.
     pub fn set_link_lost(&mut self, screen: &mut dyn Screen, scene: &Scene, lost: bool) {
         if self.link_lost == lost {
             return;
@@ -1120,7 +1139,7 @@ impl Display {
         }
         self.mode = mode;
         self.animation_frame = 0;
-        // 把番茄钟画面切走就是看见了：闹铃不必再响。
+        // Switching away from the pomodoro screen means it was seen: the alarm can stop.
         if mode != Mode::Pomodoro {
             self.ring_alarm = false;
             self.ring_alarm_shake_frames = 0;
@@ -1131,7 +1150,7 @@ impl Display {
         }
     }
 
-    /// 静音时左上角常驻一个 MUTE 标记：静音是会被忘掉的状态，得一直看得见。
+    /// While muted, a MUTE badge stays in the top left: mute is easy to forget, so it must stay visible.
     pub fn set_muted(&mut self, screen: &mut dyn Screen, scene: &Scene, muted: bool) {
         if self.muted == muted {
             return;
@@ -1142,7 +1161,7 @@ impl Display {
         }
     }
 
-    /// 立即重绘。按键改变了番茄钟之后不该再等下一帧动画。
+    /// Redraws immediately. After a key press changes the pomodoro, don't wait for the next animation frame.
     pub fn refresh(&mut self, screen: &mut dyn Screen, scene: &Scene) {
         if self.ready {
             let _ = self.render(screen, scene);
@@ -1183,7 +1202,8 @@ impl Display {
         self.backlight_on
     }
 
-    /// 预览用：直接摆出动画帧、闹铃抖动与闹铃开关，好逐帧对照 C 固件的画面。
+    /// For previews: sets the animation frame, alarm shake and alarm switch directly, to compare against the C
+    /// firmware's screens frame by frame.
     #[doc(hidden)]
     pub fn preview_pose(&mut self, frame: Option<u32>, shake_frames: Option<u32>, alarm: Option<bool>) {
         if let Some(frame) = frame {

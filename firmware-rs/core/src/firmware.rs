@@ -1,8 +1,9 @@
-//! 固件的主程序：串口行协议、按键、番茄钟、休闲、语音、屏幕之间的调度。
-//! 对应 C 固件的 vibebuddy_fw.c。硬件都藏在 [`Board`] 后面，所以整条链在
-//! Mac 上就能跑测试：喂一行 JSON，看它回了什么、画了什么、播了什么。
+//! The firmware's main program: dispatch between the serial line protocol, keys, pomodoro,
+//! leisure, voice and screen. Mirrors vibebuddy_fw.c in the C firmware. All hardware sits
+//! behind [`Board`], so the whole chain runs as tests on the Mac: feed a JSON line, then see
+//! what it replied, drew and played.
 //!
-//! 串口上的每一行输出都和 C 固件逐字一致，Mac 端的解析不用改。
+//! Every line of serial output matches the C firmware verbatim, so the Mac's parsing needs no change.
 
 use alloc::collections::BTreeMap;
 use alloc::vec::Vec;
@@ -22,55 +23,55 @@ use crate::voices::{ClipTable, Voices, VoiceError};
 
 pub const MAX_LINE_BYTES: usize = 1024;
 const LINE_BUFFER_BYTES: usize = MAX_LINE_BYTES + 2;
-/// 超过这个时间没有收到任何消息，就认为与 Mac 端失联。
+/// With no message for longer than this, the link to the Mac counts as lost.
 const LINK_TIMEOUT_MS: u32 = 15000;
-/// task.done 之后这么久自己回到空闲。
+/// After task.done, return to idle on our own after this long.
 const DONE_TO_IDLE_MS: u32 = 5000;
-/// voice.begin 最多等这么久让正在播的一句放完；最长的一句不到 7 秒。
+/// voice.begin waits at most this long for the line being played to finish; the longest line is under 7 seconds.
 const AUDIO_DRAIN_MS: u32 = 10000;
 
 pub const FIRMWARE_NAME: &str = "vibebuddy-fw 0.1.0";
 
-/// 音频初始化的结果：成功时是 codec 型号（ES8311 或 NS4168），失败时是
-/// 卡在哪一步。两者都原样报给 Mac 端。
+/// Result of audio init: the codec model (ES8311 or NS4168) on success, or the step it got
+/// stuck at on failure. Either is reported to the Mac as is.
 pub type AudioStatus = Result<&'static str, &'static str>;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum VolumeError {
-    /// NS4168 版本没有 codec，音量不可调。
+    /// The NS4168 variant has no codec, so the volume can't be adjusted.
     NotSupported,
     Failed,
 }
 
-/// 截图时的回调：拿到只读的帧缓冲和一个往串口写的口子。
+/// Screenshot callback: gets the read-only framebuffer and a way to write to the serial port.
 pub type FrameAction<'a> = dyn FnMut(&[u8], &mut dyn FnMut(&[u8])) + 'a;
 
-/// 设备层提供的一切。
+/// Everything the device layer provides.
 pub trait Board: Screen {
-    /// 单调毫秒计数，允许回绕。
+    /// Monotonic millisecond count; wraparound is allowed.
     fn now_ms(&self) -> u32;
-    /// 同时写到 UART0 与 USB Serial/JTAG。只是诊断通道，谁都不许拖住主循环：
-    /// 没有对端在读的那一路写不进去就丢。
+    /// Writes to both UART0 and USB Serial/JTAG. These are only diagnostic channels and neither
+    /// may hold up the main loop: if the side with no reader can't take a write, drop it.
     fn write(&mut self, bytes: &[u8]);
     fn flash(&mut self) -> &mut dyn Flash;
-    /// 同时借出帧缓冲（只读）与串口输出：截图要一边读帧一边往外写。
+    /// Lends out the framebuffer (read-only) and serial output together: a screenshot reads the frame while writing it out.
     fn with_frame_and_output(&mut self, action: &mut FrameAction);
 
-    /// 初始化屏幕硬件（背光保持关闭）。
+    /// Initializes the display hardware (backlight stays off).
     fn init_display(&mut self) -> bool;
-    /// 初始化 I2S 与 codec，按给定音量开声。
+    /// Initializes I2S and the codec, and turns sound on at the given volume.
     fn init_audio(&mut self, volume: u32) -> AudioStatus;
-    /// 初始化按键，返回当时三个键的状态。
+    /// Initializes the keys and returns the state of all three at that moment.
     fn init_buttons(&mut self) -> Option<Levels>;
 
-    /// K0 的电平与扩展口上 K1、K2 的电平（true 为按下）；扩展口读失败给 None。
+    /// K0's level and the levels of K1 and K2 on the expander (true means pressed); None if the expander read fails.
     fn read_buttons(&mut self) -> (bool, Option<(bool, bool)>);
 
-    /// 排一句播报。`clips` 为 None 时播内置音色。队满返回 Err。
+    /// Queues an announcement. With `clips` None, plays the built-in voice. Returns Err when the queue is full.
     fn play(&mut self, prompt: Prompt, clips: ClipTable) -> Result<(), ()>;
-    /// 停掉正在播的并清空队列。
+    /// Stops what is playing and clears the queue.
     fn stop_audio(&mut self);
-    /// 还在出声：队列里有、正在播，或者 DMA 里还没冲成静音。
+    /// Still making sound: something is queued, playing, or not yet flushed to silence in DMA.
     fn audio_busy(&self) -> bool;
     fn set_volume(&mut self, level: u32) -> Result<(), VolumeError>;
 }
@@ -91,19 +92,20 @@ pub struct Firmware {
     last_message_ms: u32,
     link_lost: bool,
     ready_deadline: Option<u32>,
-    /// 静音：长按 K2 翻转，不持久化。开会静了音忘记开回来，设备就哑好几天；
-    /// 重启恢复有声比记住更安全，屏幕上的 MUTE 标记负责提醒。
+    /// Mute: long-press K2 to toggle; not persisted. Mute it for a meeting and forget, and the
+    /// device would stay silent for days; coming back with sound after a restart is safer than
+    /// remembering, and the MUTE badge on screen is the reminder.
     muted: bool,
-    /// voice.begin 收到了，正在等播放停下来再擦分区：总字节数与开始等的时刻。
+    /// voice.begin arrived and we are waiting for playback to stop before erasing the partition: total bytes and when the wait began.
     pending_voice_begin: Option<(u32, u32)>,
 
-    /// 上一次报给 Mac 端的档位、关灯状态与小时数，只在变化时各报一行。
+    /// The level, backlight state and hour last reported to the Mac; each is reported as a line only when it changes.
     reported_tier: Tier,
     reported_lights_out: bool,
     reported_hour: i32,
 }
 
-/// 借用 Firmware 的番茄钟与休闲导演组一帧画面的上下文。
+/// Borrows the Firmware's pomodoro and leisure director to build the context for one frame.
 macro_rules! scene {
     ($self:ident, $now:expr) => {
         Scene { now_ms: $now, pomodoro: &$self.pomodoro, leisure: &$self.leisure }
@@ -119,14 +121,14 @@ fn task_state(status: &str) -> State {
     }
 }
 
-/// strtoul 的子集：跳过前导空白，读开头的十进制数字；没有数字就是 0。
+/// A subset of strtoul: skip leading whitespace and read the leading decimal digits; no digits means 0.
 fn leading_number(text: &str) -> u32 {
     text.trim_start().bytes().take_while(u8::is_ascii_digit).fold(0u32, |value, digit| {
         value.wrapping_mul(10).wrapping_add((digit - b'0') as u32)
     })
 }
 
-/// 信封的扩展字段（BTreeMap）与任务卡（JSON 对象）都能按键取值。
+/// Both the envelope's extra fields (BTreeMap) and task cards (JSON objects) can be looked up by key.
 trait Fields {
     fn field(&self, key: &str) -> Option<&Value>;
 }
@@ -180,7 +182,7 @@ impl Firmware {
         board.write(text.as_bytes());
     }
 
-    /// 一行 `label value`，value 里的回车换行换成空格。
+    /// One `label value` line, with CR and LF in value replaced by spaces.
     fn write_value_line<B: Board>(board: &mut B, label: &str, value: &[u8]) {
         board.write(label.as_bytes());
         let mut start = 0;
@@ -195,10 +197,10 @@ impl Firmware {
         board.write(b"\n");
     }
 
-    /// 开机：按 C 固件的顺序初始化各部分，并报同样的几行。
+    /// Boot: initialize each part in the C firmware's order and report the same lines.
     pub fn boot<B: Board>(&mut self, board: &mut B) {
         let now = board.now_ms();
-        // 昨天的记录也先恢复：换不换日要等心跳带来日期才知道。
+        // Restore yesterday's record too: whether the day changed is only known once a heartbeat brings the date.
         let settings_region = find_partition(board.flash(), "nvs");
         let loaded = settings_region.map(|region| SettingsStore::open(board.flash(), region));
         match loaded {
@@ -252,7 +254,7 @@ impl Firmware {
         Self::write_value_line(board, "READY ", FIRMWARE_NAME.as_bytes());
     }
 
-    /// 串口收到的字节，UART 与 USB 两路都往这里送。
+    /// Bytes received on the serial port; both UART and USB feed in here.
     pub fn receive<B: Board>(&mut self, board: &mut B, bytes: &[u8]) {
         for &byte in bytes {
             if byte == b'\n' {
@@ -286,7 +288,7 @@ impl Firmware {
         }
     }
 
-    /// 主循环每一圈调一次：失联检测、延时回到空闲、按键、番茄钟、休闲、动画。
+    /// Called once per main loop pass: link-loss detection, delayed return to idle, keys, pomodoro, leisure, animation.
     pub fn poll<B: Board>(&mut self, board: &mut B) {
         let now = board.now_ms();
         if now.wrapping_sub(self.last_message_ms) as i32 >= LINK_TIMEOUT_MS as i32 {
@@ -337,7 +339,7 @@ impl Firmware {
         if self.pending_voice_begin.is_some() { None } else { self.voices.clips() }
     }
 
-    /// 所有语音都从这里出去，静音时只记一行日志。
+    /// Every voice line goes out through here; when muted it only logs a line.
     fn play_prompt<B: Board>(&mut self, board: &mut B, prompt: Prompt, label: &str) {
         if self.muted {
             Self::write_value_line(board, "AUDIO MUTED ", label.as_bytes());
@@ -350,7 +352,7 @@ impl Firmware {
         }
     }
 
-    /// 音量是设备自己的事实，App 的滑块只是遥控：改完报一行，hello 也报。
+    /// Volume is the device's own fact and the app's slider is just a remote: report a line after a change, and on hello too.
     fn announce_volume<B: Board>(&self, board: &mut B) {
         let line = text!(24, "VOLUME {}\n", self.volume % 1000);
         board.write(line.as_bytes());
@@ -364,7 +366,7 @@ impl Firmware {
         }
     }
 
-    /// 当日记录变了就存一次，并报一行给 Mac 端。一天只有几次。
+    /// When today's record changes, save it once and report a line to the Mac. It happens a few times a day.
     fn save_tally<B: Board>(&mut self, board: &mut B) {
         let tally = self.pomodoro.tally();
         let line = text!(48, "POMODORO TODAY {} {}S DAY {}\n", tally.completed % 10000, tally.focus_s % 1_000_000, tally.day % 100_000_000);
@@ -374,7 +376,7 @@ impl Firmware {
         }
     }
 
-    /// 把番茄钟推到前面来；已经在前面就只重绘。
+    /// Brings the pomodoro to the front; if it is already there, just redraws.
     fn show_pomodoro<B: Board>(&mut self, board: &mut B) {
         if self.display.mode() == Mode::Pomodoro {
             self.refresh(board);
@@ -394,9 +396,10 @@ impl Firmware {
         }
     }
 
-    /// 三个键各管一件事，与模式无关：K0 是番茄钟的键，K1 在值班与番茄钟之间
-    /// 切换（长按去休闲），K2 交给 Mac 端去打开来源。休闲模式里任何键先把
-    /// 小灯灵叫回值班，再执行本职：休闲没有遮住任何需要先看一眼的东西。
+    /// Each of the three keys does one thing regardless of mode: K0 is the pomodoro key, K1
+    /// switches between duty and pomodoro (long press goes to leisure), and K2 asks the Mac to
+    /// open the source. In leisure mode any key first calls the buddy back to duty and then does
+    /// its own job: leisure hides nothing that needs a look first.
     fn on_button<B: Board>(&mut self, board: &mut B, event: ButtonEvent) {
         let now = board.now_ms();
         let mode_before = self.display.mode();
@@ -445,17 +448,18 @@ impl Firmware {
         self.pomodoro.toggle(now);
         if before.run == Run::Pending {
             Self::report_pomodoro(board, if break_phase { "BREAK START" } else { "FOCUS START" });
-            // 开始一个阶段时把番茄钟推到前面：圆环开始走就是反馈。
+            // Starting a phase brings the pomodoro to the front: the ring starting to move is the feedback.
             self.show_pomodoro(board);
             return;
         }
-        // 暂停与继续不换场景，小灯灵场景右上角的徽章会跟着闪。
+        // Pause and resume don't change scenes; the badge in the top right of the buddy scene flashes along.
         Self::report_pomodoro(board, if before.run == Run::Paused { "RESUMED" } else { "PAUSED" });
         self.refresh(board);
     }
 
-    /// 阶段结束是只消费一次的边沿：播一次语音，并把番茄钟推到前面来——
-    /// 这正是用户该看一眼的时刻。下一阶段停在待开始，等用户按 K0。
+    /// A phase end is an edge consumed once: play the voice once and bring the pomodoro to the
+    /// front, since this is exactly when the user should glance at it. The next phase waits to
+    /// start until the user presses K0.
     fn handle_pomodoro_transition<B: Board>(&mut self, board: &mut B, transition: Transition) {
         let focus_ended = match transition {
             Transition::Nothing => return,
@@ -476,10 +480,12 @@ impl Firmware {
         self.show_pomodoro(board);
     }
 
-    /// 无聊度按状态累计，不按消息：Agent 有活、番茄钟在走、链路断了，都不算
-    /// 空闲。值班空闲够久就去休闲；有事立刻回来。番茄钟模式里，待开始的一屏
-    /// 静止的 25:00 和值班空闲一样无聊，五分钟就走；暂停的是用户有意停在那里
-    /// 的，放了半小时才当人走了。都是先回值班，接着自然会去休闲。
+    /// Boredom accumulates on state, not on messages: agents at work, a running pomodoro or a
+    /// lost link are not idle. After duty has been idle long enough, go to leisure; come back
+    /// the moment something happens. In pomodoro mode, a still 25:00 waiting to start is as dull
+    /// as idle duty and leaves after five minutes; a pause is the user stopping there on
+    /// purpose, so only after half an hour is the user assumed gone. Either way it returns to
+    /// duty first and then drifts into leisure naturally.
     fn tend_leisure<B: Board>(&mut self, board: &mut B) {
         let now = board.now_ms();
         let pomodoro = self.pomodoro.view(now);
@@ -490,7 +496,7 @@ impl Firmware {
         let mode = self.display.mode();
         let changed = self.leisure.tick(now);
         let leisure = self.leisure.view(now);
-        // 档位按差异汇报，不按“本次有没有变化”：唤醒路径会先在别处推进导演。
+        // Report the level by difference, not by "did it change this time": the wake path advances the director elsewhere first.
         if leisure.tier != self.reported_tier {
             self.reported_tier = leisure.tier;
             Self::write_value_line(board, "LEISURE ", leisure.tier.name().as_bytes());
@@ -514,10 +520,11 @@ impl Firmware {
         }
     }
 
-    /// 当日战绩随每条状态事件下发，空闲屏用它轮播。
+    /// Today's stats come with every state event, and the idle screen rotates through them.
     ///
-    /// 不能只在 `agent.idle` 上取：`task.done` 之后设备是自己回到空闲的，
-    /// 那一刻正是用户会看的一眼，缓存的战绩必须已经包含刚完成的这一件。
+    /// Taking them only from `agent.idle` isn't enough: after `task.done` the device returns to
+    /// idle on its own, and that is exactly when the user glances over, so the cached stats
+    /// must already include the task just finished.
     fn parse_stats(&mut self, fields: &BTreeMap<alloc::string::String, Value>) {
         let Some(Value::Array(items)) = fields.get("stats") else {
             return;
@@ -525,7 +532,7 @@ impl Firmware {
         let lines: Vec<&str> = items.iter().filter_map(Value::as_str).take(MAX_STATS).collect();
         let bytes: Vec<&[u8]> = lines.iter().map(|line| line.as_bytes()).collect();
         self.display.set_stats(&bytes);
-        // “7 DONE” 这一行的数字：休闲时它决定小灯灵是累了还是无聊。
+        // The number in the "7 DONE" line: in leisure it decides whether the buddy is tired or bored.
         let done = lines.iter().find(|line| line.contains("DONE")).map(|line| leading_number(line)).unwrap_or(0);
         self.leisure.set_done_count(done);
     }
@@ -590,7 +597,7 @@ impl Firmware {
             Self::write_literal(board, "ERROR invalid_json\n");
             return;
         };
-        // title 可以没有，有就必须是字符串；其余由协议信封本身把关。
+        // title may be absent, but if present it must be a string; the protocol envelope checks the rest.
         let title_ok = match value.get("title") {
             None => true,
             Some(title) => title.is_string(),
@@ -617,13 +624,14 @@ impl Firmware {
         let now = board.now_ms();
 
         match event {
-            // 心跳只用于证明链路存活，不显示也不回显；每 5 秒一次的诊断行会淹没日志。
-            // 它顺带捎来 Mac 端的构建标识：设备可能随时重启，一次性的握手会丢。
+            // The heartbeat only proves the link is alive; it isn't shown or echoed, since a diagnostic
+            // line every 5 seconds would drown the log. It also carries the Mac's build stamp: the
+            // device may restart at any time, and a one-off handshake would be lost.
             "device.heartbeat" => {
                 if let Some(build) = string(fields, "build") {
                     self.display.set_daemon_build(board, &scene!(self, now), build.as_bytes());
                 }
-                // 本地小时数也随心跳来：设备没有时钟，白天黑夜只能听 Mac 端的。
+                // The local hour also comes with the heartbeat: the device has no clock, so day and night are whatever the Mac says.
                 if let Some(hour) = number(fields, "hour").map(|hour| hour as i32)
                     && hour != self.reported_hour
                 {
@@ -632,7 +640,7 @@ impl Firmware {
                     let line = text!(24, "CLOCK HOUR {}\n", hour % 100);
                     board.write(line.as_bytes());
                 }
-                // 本地日期也随心跳来：番茄钟的当日记录按它清零。
+                // The local date also comes with the heartbeat: the pomodoro's daily record resets on it.
                 if let Some(day) = number(fields, "day")
                     && day > 0.0
                     && self.pomodoro.set_day(day as u32)
@@ -641,7 +649,7 @@ impl Firmware {
                     self.refresh(board);
                 }
             }
-            // 截图是调试动作，不算 Agent 的动静，也不叫醒休闲。
+            // A screenshot is a debugging action: it isn't agent activity and doesn't wake leisure.
             "device.screenshot" => {
                 let display = &self.display;
                 board.with_frame_and_output(&mut |frame, output| {
@@ -651,16 +659,18 @@ impl Firmware {
                     });
                 });
             }
-            // Mac 端刚连上时问一声：模式、固件构建号、音色只在开机或变化时才报，
-            // daemon 比设备重启得勤，不问就一直不知道。
+            // The Mac asks when it first connects: mode, firmware build and voice are only reported
+            // at boot or on change, and the daemon restarts more often than the device, so without
+            // asking it would never know.
             "device.hello" => self.announce_state(board),
-            // 眨眼确认与语音包写入都是 App 在操作设备本身，同样不算 Agent 的动静。
+            // Blink-to-identify and voice pack writes are the app operating the device itself, so they aren't agent activity either.
             "device.identify" => {
                 self.display.identify(now);
                 Self::write_literal(board, "IDENTIFY\n");
             }
-            // 音量：App 的滑块从这里落到 codec 并存起来；不带 level 只是问一声。
-            // 试听走 play_prompt，静音时同样不出声，和别的播报一个规矩。
+            // Volume: the app's slider lands here, goes to the codec and is saved; without a
+            // level it is just a query. The preview goes through play_prompt, so it is silent when
+            // muted, same rule as every other announcement.
             "device.volume" => {
                 if let Some(level) = number(fields, "level") {
                     let wanted = if level < 0.0 { 0 } else { level as u32 };
@@ -682,17 +692,17 @@ impl Firmware {
                 }
             }
             _ if event.starts_with("voice.") => self.handle_voice_event(board, fields, event),
-            // 链路自检：把收到的字符串的长度与 CRC 回给 Mac，查串口是否收错字节。
+            // Link self-test: send the received string's length and CRC back to the Mac to check for corrupted serial bytes.
             "device.echo" => {
                 if let Some(data) = string(fields, "data") {
                     let reply = text!(96, "{{\"version\":1,\"event\":\"echo\",\"length\":{},\"crc\":{}}}\n", data.len(), crc32(0, data.as_bytes()));
                     board.write(reply.as_bytes());
-                    // 原样回显一行，Mac 端逐字节比对，看串口到底收成了什么。
+                    // Echo the line back verbatim; the Mac compares byte by byte to see what the port actually received.
                     Self::write_value_line(board, "ECHO ", data.as_bytes());
                 }
             }
             _ => {
-                // Agent 一有动静，小灯灵立刻回来值班。
+                // As soon as an agent does something, the buddy comes straight back to duty.
                 self.leisure.note_activity(now);
                 if self.display.mode() == Mode::Leisure {
                     self.leisure.tick(now);
@@ -708,8 +718,8 @@ impl Firmware {
         }
     }
 
-    /// 把设备的静态状态整个报一遍：固件构建号、模式、音色、音量。开机与 hello
-    /// 都走这里。
+    /// Reports the device's whole static state: firmware build, mode, voice and volume. Both
+    /// boot and hello go through here.
     fn announce_state<B: Board>(&self, board: &mut B) {
         Self::write_value_line(board, "DISPLAY READY BUILD ", &self.build);
         Self::write_value_line(board, "MODE ", self.display.mode().name().as_bytes());
@@ -717,7 +727,7 @@ impl Firmware {
         self.announce_volume(board);
     }
 
-    /// 语音包写入的回执都是 JSON 行：Mac 端要按序号做停等流控，诊断行不够用。
+    /// Voice pack write acknowledgements are all JSON lines: the Mac does stop-and-wait flow control by sequence number, which diagnostic lines can't support.
     fn voice_reply<B: Board>(board: &mut B, event: &str, seq: i64, detail: &str) {
         let line = match event {
             "voice.written" => text!(160, "{{\"version\":1,\"event\":\"voice.written\",\"voice\":\"{}\"}}\n", detail),
@@ -734,14 +744,15 @@ impl Firmware {
                     Self::voice_reply(board, "voice.error", -1, VoiceError::InvalidArg.name());
                     return;
                 };
-                // 分区不在、大小不对就直接回错，不去打断正在播的那一句。
+                // A missing partition or a wrong size is an immediate error, without interrupting the line being played.
                 if let Err(error) = self.voices.check_begin(size as u32) {
                     Self::voice_reply(board, "voice.error", -1, error.name());
                     return;
                 }
-                // 正在播的那一句可能就读着这块分区：先让播放停下、DMA 冲成静音，
-                // 再擦。擦分区要好几秒，这期间主循环停着，DMA 会把缓冲里的东西
-                // 一遍遍重放，所以必须先是静音。等待在 poll 里继续。
+                // The line being played may be reading this very partition: stop playback and let DMA
+                // flush to silence first, then erase. Erasing takes several seconds with the main loop
+                // stalled, and DMA replays whatever is in its buffer over and over, so it must be
+                // silence first. The wait continues in poll.
                 board.stop_audio();
                 self.pending_voice_begin = Some((size as u32, board.now_ms()));
                 self.continue_voice_begin(board);
@@ -772,15 +783,17 @@ impl Firmware {
                 let id = alloc::string::String::from(self.voices.current_id());
                 Self::voice_reply(board, "voice.written", -1, &id);
                 Self::write_value_line(board, "VOICES ", id.as_bytes());
-                // 写完用新音色说一句：桥接上写要好几分钟，人未必守着 App 找试听键；
-                // 盒子自己开口就是最直接的"写好了"（2026-09-22 同事写完以为没声音）。
+                // Say a line in the new voice when done: over the bridge a write takes several minutes,
+                // and the user may not be watching the app for the preview button; the box speaking up
+                // is the most direct "done" (on 2026-09-22 a colleague finished a write and thought
+                // there was no sound).
                 self.play_prompt(board, Prompt::Done, "DONE");
             }
             _ => Self::voice_reply(board, "voice.error", -1, "unknown voice event"),
         }
     }
 
-    /// voice.begin 的后半：播放停下了（或者等够了）就擦分区、回 voice.ready。
+    /// The second half of voice.begin: once playback has stopped (or we've waited long enough), erase the partition and reply voice.ready.
     fn continue_voice_begin<B: Board>(&mut self, board: &mut B) {
         let Some((size, since)) = self.pending_voice_begin else {
             return;

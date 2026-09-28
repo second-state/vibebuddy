@@ -1,5 +1,6 @@
-//! 片上 flash：主循环（设置、语音包写入）与音频任务（按块读语音）共用。
-//! 两者在同一个执行器上轮流跑，临界区只是把借用关系交代清楚。
+//! On-chip flash, shared by the main loop (settings, voice pack writes) and the audio task (reading
+//! lines chunk by chunk). Both take turns on the same executor; the critical section only makes the
+//! borrowing explicit.
 
 use core::cell::RefCell;
 
@@ -20,8 +21,8 @@ fn with_flash<T>(action: impl FnOnce(&mut FlashStorage<'static>) -> Result<T, es
     })
 }
 
-/// 读任意偏移、任意长度：按 4 字节对齐读进一小块缓冲再挑出要的部分。
-/// 语音每一句的偏移与长度不保证 4 字节对齐。
+/// Reads any offset and length: reads 4-byte aligned into a small buffer, then picks out the wanted
+/// part. Voice line offsets and lengths are not guaranteed to be 4-byte aligned.
 pub fn read_unaligned(offset: u32, out: &mut [u8]) -> Result<(), FlashError> {
     let mut window = Aligned([0u8; 260]);
     let mut done = 0;
@@ -38,11 +39,11 @@ pub fn read_unaligned(offset: u32, out: &mut [u8]) -> Result<(), FlashError> {
     Ok(())
 }
 
-/// esp-storage 对没有按字对齐的缓冲会在栈上垫一个 4 KB 的扇区缓冲。
+/// For a buffer that is not word-aligned, esp-storage puts a 4 KB sector buffer on the stack.
 #[repr(align(4))]
 struct Aligned([u8; 260]);
 
-/// 给 [`vibebuddy_firmware_core::firmware::Board`] 的 flash 口。
+/// The flash port for [`vibebuddy_firmware_core::firmware::Board`].
 pub struct SharedFlash;
 
 impl Flash for SharedFlash {
@@ -54,8 +55,9 @@ impl Flash for SharedFlash {
         with_flash(|flash| flash.write_nor(offset, bytes))
     }
 
-    /// 按 64 KB 一段擦，每段单独进出临界区：擦整个 voices 分区要好几秒，
-    /// 一直关着中断，UART 的接收中断就跑不了，128 字节的 FIFO 会溢出。
+    /// Erases in 64 KB steps, each in its own critical section: erasing the whole voices partition
+    /// takes several seconds, and with interrupts off all that time the UART receive interrupt cannot
+    /// run and the 128-byte FIFO overflows.
     fn erase(&mut self, from: u32, to: u32) -> Result<(), FlashError> {
         const STEP: u32 = 64 * 1024;
         let mut at = from;

@@ -1,10 +1,10 @@
-//! Vibe Buddy 固件里与硬件无关的部分。
+//! The hardware-independent part of the Vibe Buddy firmware.
 //!
-//! 设备层（`firmware-rs/device`，esp-hal + embassy）只负责把引脚、I2C、I2S、
-//! LCD、串口、flash 接到 [`firmware::Board`] 上；状态机、绘制、协议处理、存储
-//! 格式、芯片寄存器序列都在这里，no_std，Mac 上 `cargo test` 就能跑。
+//! The device layer (`firmware-rs/device`, esp-hal + embassy) only wires pins, I2C, I2S, the LCD,
+//! the serial port and flash onto [`firmware::Board`]; the state machine, drawing, protocol handling,
+//! storage formats and chip register sequences all live here, no_std, and `cargo test` runs them on the Mac.
 #![no_std]
-#![allow(clippy::result_unit_err, reason = "硬件口只报成败：失败的细节设备层自己知道，协议上也只报一行")]
+#![allow(clippy::result_unit_err, reason = "hardware ports only report success or failure: the device layer knows the details, and the protocol reports just one line anyway")]
 
 extern crate alloc;
 #[cfg(test)]
@@ -24,7 +24,8 @@ pub mod storage;
 pub mod voice_pack;
 pub mod voices;
 
-/// 实机验收用的时间压缩：带 `fast-clock` 特性时，休闲与番茄钟的时限都除以 60。
+/// Time compression for on-device acceptance testing: with the `fast-clock` feature, the leisure and
+/// pomodoro durations are divided by 60.
 #[cfg(feature = "fast-clock")]
 pub const TIME_SCALE: u32 = 60;
 #[cfg(not(feature = "fast-clock"))]

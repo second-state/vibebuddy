@@ -1,13 +1,13 @@
-# 故意不设 runner：`espflash flash` 解析不了 partitions.csv 的自定义子类型，
-# 不给分区表又会写入 espflash 的默认表、把 voices 分区抹掉。烧录一律走
-# `just flash`（tools/flash.sh）。
+# Deliberately no runner: `espflash flash` cannot parse the custom subtypes in partitions.csv, and
+# without a partition table it writes espflash's default one and wipes the voices partition. Always
+# flash with `just flash` (tools/flash.sh).
 
 [build]
 rustflags = ["-C", "link-arg=-nostartfiles"]
 target = "xtensa-esp32s3-none-elf"
 
 [env]
-# esp-hal 的日志不走串口：串口上每一行都是给 Mac 端解析的协议。
+# Keep esp-hal's logs off serial: every line on serial is protocol for the Mac to parse.
 ESP_LOG = "off"
 
 [unstable]

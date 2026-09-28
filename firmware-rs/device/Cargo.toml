@@ -6,11 +6,11 @@ license = "MIT"
 rust-version = "1.95"
 publish = false
 
-# 盒子（ATK-DNESP32S3-BOX，ESP32-S3）上跑的固件：esp-hal + embassy，no_std。
-# 这里只有硬件胶水，逻辑都在 ../core。用 Xtensa 工具链单独构建：
+# Firmware for the box (ATK-DNESP32S3-BOX, ESP32-S3): esp-hal + embassy, no_std.
+# Only hardware glue lives here; the logic is all in ../core. Build separately with the Xtensa toolchain:
 #   . ~/export-esp.sh && cargo build --release
-# 或者直接 tools/build-firmware.sh，它还会打出烧录用的三件套。
-# 独立的 workspace：目标与工具链都和上层的 Mac 端 crate 不一样。
+# or just run tools/build-firmware.sh, which also produces the three files for flashing.
+# A separate workspace: target and toolchain both differ from the Mac-side crates above.
 [workspace]
 
 [[bin]]
@@ -20,7 +20,8 @@ test = false
 bench = false
 
 [features]
-# 实机验收用：休闲的五分钟压成五秒、番茄钟的 25 分钟压成 25 秒。
+# For on-device acceptance: compresses leisure's five minutes to five seconds and the pomodoro's
+# 25 minutes to 25 seconds.
 fast-clock = ["vibebuddy-firmware-core/fast-clock"]
 
 [dependencies]

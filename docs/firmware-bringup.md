@@ -1,55 +1,73 @@
-# Rust 固件第一次上机
+# Bringing up the Rust firmware on a box
 
-2026-09-26 固件改写成 Rust（ADR-0006）时手边没有盒子。当时 Mac 上能验证的都验证了，剩下只有实机才能回答的问题，按下面的顺序过一遍。
+The firmware was rewritten in Rust on 2026-09-26 (ADR-0006) without a box at hand. Everything that could be verified on a Mac was verified then; the first hardware bring-up followed on 2026-09-28. This page records both, and is the checklist for flashing a new box.
 
-## 已经在 Mac 上验证过的
+## Verified on a Mac
 
-- `just test-firmware`：firmware-core 的 51 个测试，外加 Rust 与 C 两份固件的画面逐像素比对（826 帧，含每个休闲剧目的每一帧）。
-- 整条串口链：假板子上的端到端测试。另外还有模拟器（`tools/simulate-device.py`），可以对着它跑 `tools/firmware-smoke.py`，16 项全过。
-- ES8311 寄存器序列：对照 esp_codec_dev 1.6.2 逐条列出，写进测试。
-- 分区表：与 ESP-IDF 的 `gen_esp32part.py` 输出逐字节一致。
-- 构建标识：源码不改、隔一分钟再构建，标识里的时刻跟着变。
+- `just test-firmware`: the firmware-core tests, plus a pixel-by-pixel comparison of the Rust and C firmware screens (826 frames, including every frame of every leisure skit).
+- The whole serial path: end-to-end tests on a fake board, and `tools/firmware-smoke.py` against the pty simulator (`tools/simulate-device.py`).
+- The ES8311 register sequence, listed write by write against esp_codec_dev 1.6.2 in a test.
+- The partition table, byte-identical to ESP-IDF's `gen_esp32part.py`.
+- The build ID refreshes on every build: rebuilding a minute later with no source change moves its timestamp.
 
-## 只有实机能回答的
+## First bring-up, 2026-09-28
 
-| 风险 | 表现 | 先看哪里 |
+Everything worked on the first flash; nothing needed a fix on the spot.
+
+| Check | Result |
+|---|---|
+| Boot report (8 lines) | Matched the expected lines exactly |
+| Screen: colors, orientation, animation | Correct |
+| Audio: three announcements, volume change | Correct, no pops |
+| Buttons K0, K1, K2 | Correct |
+| Serial: 900-byte echo, screenshot | Passed on both the native USB port and the UART bridge |
+| The app connects and reads the firmware build | Passed; no Mac-side change needed |
+| Writing a voice pack; the box speaks in the new voice | Passed |
+| Voice and volume survive a power cycle | Passed |
+| Overnight on the UART bridge only | [pending] |
+
+The review fixes applied before bring-up (see the PR) were in place, so it can't be shown which of those problems would have appeared on hardware.
+
+## Where to look when something goes wrong
+
+| Risk | Symptom | Where to look |
 |---|---|---|
-| ST7789 初始化或 i8080 时序 | 串口报 `DISPLAY ERROR`，或背光亮但花屏、黑屏 | `firmware-rs/core/src/lcd.rs` 的命令表；`device/src/lcd.rs` 里无参数命令（SWRESET、SLPOUT、INVON、DISPON）带一个哑参数字节发——esp-hal 的 i8080 没法像 ESP-IDF 那样关掉数据阶段，这是唯一与 C 固件不同的地方 |
-| 颜色或方向不对 | 红蓝对调、整屏镜像、上下颠倒 | MADCTL（0x36）的取值；像素字节序（帧缓冲按大端存） |
-| ES8311 或 I2S 格式 | `AUDIO QUEUED` 有，没声音；或者声音变调、有杂音 | `core/src/audio.rs` 的序列；`main.rs` 的 `TdmConfig` |
-| 音频流断了没恢复 | 写完语音包之后再也不出声 | `device/src/audio.rs` 的断流检测 |
-| UART 接收 | 只接 UART 桥时 `invalid_json` 变多 | `device/src/serial.rs` 的中断与环形缓冲 |
-| USB 输出卡住 | 只接 UART 桥、过夜后画面定格（见 LESSONS.md「没有对端的输出通道」） | `serial.rs` 的 `write_usb` |
-| 设置存储 | 重启后番茄记录或音量不对 | `core/src/storage.rs` |
+| ST7789 init or i8080 timing | `DISPLAY ERROR` on the serial line, or a lit but garbled or black screen | The command table in `firmware-rs/core/src/lcd.rs`. `device/src/lcd.rs` sends parameterless commands (SWRESET, SLPOUT, INVON, DISPON) with a dummy parameter byte, because esp-hal's i8080 driver can't disable the data phase the way ESP-IDF does. This is the one place the Rust firmware drives the panel differently from the C firmware. |
+| Wrong colors or orientation | Red and blue swapped, mirrored or upside down | The MADCTL (0x36) values; pixel byte order (the framebuffer is big-endian) |
+| ES8311 or I2S format | `AUDIO QUEUED` appears but nothing plays; or pitch shifts or noise | The sequence in `core/src/audio.rs`; the `TdmConfig` in `main.rs` |
+| The audio stream stops and never recovers | Silence after a voice pack write | The stall detection in `device/src/audio.rs` |
+| UART receive | More `invalid_json` with only the UART bridge connected | The interrupt and ring buffer in `device/src/serial.rs` |
+| USB output blocking | Frozen screen after a night on the UART bridge alone (see LESSONS.md on output channels without a reader) | `write_usb` in `serial.rs` |
+| Settings storage | Wrong pomodoro tally or volume after a restart | `core/src/storage.rs` |
 
-## 与 C 固件有意不同的地方
+## Intentional differences from the C firmware
 
-- 设置（当日番茄记录、音量）换了存储格式，第一次刷 Rust 固件会回到默认值。
-- `voice.begin` 会立刻打断正在播的那一句再擦分区；C 固件是等它播完（最多 10 秒）。
-- JSON 解析比 cJSON 严格：非法 UTF-8、`"version":1.0`、非字符串的 `message` 都回 `ERROR invalid_message`（或 `invalid_json`）。Mac 端从不发这些，但 `device.echo` 查串口错字节时，收坏的那一行不再回 CRC，只回 `ERROR invalid_json`——这本身也说明串口收错了。
+- Settings (today's pomodoro tally, the volume) use a new storage format, so they reset once when the Rust firmware is first flashed.
+- `voice.begin` interrupts the line currently playing before erasing the partition; the C firmware waited up to 10 seconds for it to finish.
+- JSON parsing is stricter than cJSON: invalid UTF-8, `"version":1.0` and a non-string `message` get `ERROR invalid_message` (or `invalid_json`). The Mac never sends these. When `device.echo` is used to hunt corrupted bytes, a corrupted line now gets `ERROR invalid_json` instead of a CRC reply, which says the same thing.
 
-## 步骤
+## Steps
 
-1. **先退出 Vibe Buddy App**，让出串口。
-2. **接原生 USB 口**（`USB-SLAVE`，`/dev/cu.usbmodem…`），刷新固件：
+1. **Quit the Vibe Buddy app** so it releases the serial port.
+2. **Connect the native USB port** (`USB-SLAVE`, `/dev/cu.usbmodem…`) and flash:
 
    ```bash
    just flash /dev/cu.usbmodemXXXX
    ```
 
-   它会先构建三件套，再依次写 bootloader、分区表、app。`voices` 分区与设置区不动。
-3. **看开机报告。** 这一步和第 4 步都会占用串口，看完先 Ctrl-C 退出：
+   It builds the three images, then writes the bootloader, the partition table and the app. The `voices` partition and the settings area are left alone.
+3. **Read the boot report.** This step and step 4 both hold the serial port; exit with Ctrl-C when done:
 
    ```bash
    espflash monitor -S --chip esp32s3 --port /dev/cu.usbmodemXXXX
    ```
 
-   应当依次出现：
+   The expected lines are:
 
    ```
    TALLY LOADED 0 0S DAY 0
    DISPLAY READY BUILD v0.2.1-… 2026-…
-   VOICES <原来的音色>
+   VOICES <the voice that was installed>
    AUDIO READY
    AUDIO CODEC ES8311
    VOLUME 65
@@ -57,32 +75,32 @@
    READY vibebuddy-fw 0.1.0
    ```
 
-   - 第一次刷 Rust 固件时，当日番茄记录和音量回到默认值（0 次、65），这是预期的：存储格式换了。
-   - 如果 panic，esp-backtrace 会先把回溯打在同一个口上，然后软复位（和 C 固件一样），所以会看到开机报告反复出现。
-4. **跑冒烟检查**，按提示看屏幕、听声音：
+   - On the first Rust flash, the tally and volume come back as defaults (0 and 65). That is expected: the storage format changed.
+   - On a panic, esp-backtrace prints the backtrace on the same port and then resets the chip, like the C firmware did, so the boot report repeats.
+4. **Run the smoke check** and answer its prompts about the screen and the sound:
 
    ```bash
    uv run --with pyserial python tools/firmware-smoke.py /dev/cu.usbmodemXXXX
    ```
 
-5. **按键。**
-   - K0 短按开始番茄钟，长按放弃。
-   - K1 短按切换值班和番茄钟，长按进休闲。
-   - K2 长按静音，左上角出现 MUTE。
-6. **打开 App**：设备页应显示同一个固件构建号。用 Claude Code 或 Codex 跑一个任务，看任务卡、表情和播报。
-7. **在 App 里换一次音色**：写完盒子会用新音色说一句。再重启盒子，音色应保持不变。
-8. **只接 UART 桥过一夜。** USB 口不接主机，确认第二天早上画面还在动。这条专门验证「没有对端的输出通道不能阻塞」。
+5. **Buttons.**
+   - K0: a short press starts a pomodoro; a long press abandons it.
+   - K1: a short press switches between duty and pomodoro; a long press starts leisure.
+   - K2: a long press toggles mute, and MUTE appears in the top left.
+6. **Open the app.** The Device tab should show the same firmware build. Run a task in Claude Code or Codex and watch the task card, the face and the announcement.
+7. **Change the voice once in the app.** When the write finishes, the box speaks in the new voice. Power-cycle it and check that the voice stays.
+8. **Leave it on the UART bridge alone overnight**, with nothing on the USB port, and check the next morning that the screen still animates. This verifies that an output channel without a reader never blocks.
 
-## 退回 C 固件
+## Going back to the C firmware
 
 ```bash
 just flash-c /dev/cu.usbmodemXXXX
 ```
 
-C 固件的 NVS 认不出 Rust 固件写的设置记录，会自己擦掉重来；语音包不受影响。
+The C firmware's NVS won't recognize the settings records the Rust firmware wrote, and erases them. Voice packs are not affected.
 
-## 验收通过之后
+## Once the Rust firmware has proven itself
 
-- 删掉 `firmware/`：C 源码、`host_tests`、`tools/*-c.sh` 与 `tools/test-*.sh`、`tools/compare-display.sh`、`tools/preview-display.sh`。
-- 内置 PCM 从 `firmware/main/assets` 挪到 `firmware-rs/device/assets`。
-- 把 README 里 C 固件相关的段落去掉。
+- Delete `firmware/`: the C sources, `host_tests`, `tools/*-c.sh`, `tools/test-*.sh`, `tools/compare-display.sh` and `tools/preview-display.sh`.
+- Move the built-in PCM files from `firmware/main/assets` to `firmware-rs/device/assets`.
+- Remove the C firmware paragraphs from the README.

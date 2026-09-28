@@ -1,7 +1,7 @@
-//! 在 Mac 上把固件画面渲染成 PPM，和 C 固件的 display_preview.c 一模一样的
-//! 场景与文件名：`tools/compare-display.sh` 拿两边的输出逐字节比对。
+//! Renders firmware screens to PPM on the Mac, with exactly the same scenes and file names as the C
+//! firmware's display_preview.c: `tools/compare-display.sh` compares the two outputs byte for byte.
 //!
-//! 用法：cargo run -p vibebuddy-firmware-core --example preview -- <目录> [leisure]
+//! Usage: cargo run -p vibebuddy-firmware-core --example preview -- <directory> [leisure]
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -33,7 +33,7 @@ struct Preview {
     display: Display,
     pomodoro: Pomodoro,
     leisure: Leisure,
-    /// C 预览里时钟按 FreeRTOS 的 10 ms 节拍走，毫秒数要先截到 10 的倍数。
+    /// In the C preview the clock advances in FreeRTOS 10 ms ticks, so milliseconds are first truncated to a multiple of 10.
     now: u32,
 }
 
@@ -70,10 +70,10 @@ fn write_ppm(path: &Path, bytes: &[u8]) {
         out.push((((pixel >> 5) & 0x3f) * 255 / 63) as u8);
         out.push(((pixel & 0x1f) * 255 / 31) as u8);
     }
-    fs::write(path, out).expect("写 PPM");
+    fs::write(path, out).expect("write PPM");
 }
 
-/// 把每个剧目逐帧渲染出来。
+/// Renders every skit frame by frame.
 fn render_skits(preview: &mut Preview) {
     let skits = [
         (Skit::Patrol, "patrol", 96),
@@ -101,8 +101,8 @@ fn render_skits(preview: &mut Preview) {
 
 fn main() {
     let arguments: Vec<String> = std::env::args().collect();
-    let directory = PathBuf::from(arguments.get(1).expect("用法: preview <输出目录> [leisure]"));
-    fs::create_dir_all(&directory).expect("建目录");
+    let directory = PathBuf::from(arguments.get(1).expect("usage: preview <output directory> [leisure]"));
+    fs::create_dir_all(&directory).expect("create directory");
     let mut preview = Preview {
         directory,
         screen: Frame { bytes: vec![0; FRAME_BYTES] },
@@ -156,7 +156,7 @@ fn main() {
     preview.set_mode(Mode::Pomodoro);
     preview.show(State::Idle, None, &[]);
 
-    // 闹铃头三秒逐帧：抖动 20 帧各 100 ms，之后脉动每拍 500 ms。
+    // The alarm's first three seconds frame by frame: 20 shake frames of 100 ms each, then a 500 ms pulse beat.
     for frame in 0..30u32 {
         if frame < 20 {
             preview.display.preview_pose(Some(frame), Some(20 - frame), None);
@@ -171,7 +171,7 @@ fn main() {
     preview.snapshot("pomodoro_alarm_pulse_dim");
     preview.display.preview_pose(Some(0), None, None);
     preview.snapshot("pomodoro_alarm_pulse");
-    // 待开始的样子本身也要看，先把闹铃按掉。
+    // The pending look needs checking on its own too, so dismiss the alarm first.
     preview.display.preview_pose(None, None, Some(false));
     preview.snapshot("pomodoro_break_pending");
 

@@ -1,16 +1,17 @@
-//! 休闲模式的导演：管无聊度、抽剧目、决定什么时候转暗和关背光。
-//! 不读时钟、不碰硬件，所有入口都由调用方传入毫秒计数，允许回绕。
+//! Director for leisure mode: tracks boredom, draws skits, and decides when to dim and
+//! turn off the backlight. It reads no clock and touches no hardware; every entry point
+//! takes a millisecond count from the caller, and wraparound is allowed.
 
 use crate::TIME_SCALE;
 
-/// 空闲多久算无聊、多久算困倦、夜里困倦多久后关背光。
+/// How long idle counts as bored, as sleepy, and how long sleepy at night before the backlight goes off.
 pub const BORED_AFTER_MS: u32 = 5 * 60 * 1000 / TIME_SCALE;
 pub const SLEEPY_AFTER_MS: u32 = 30 * 60 * 1000 / TIME_SCALE;
 pub const LIGHTS_OUT_AFTER_MS: u32 = 90 * 60 * 1000 / TIME_SCALE;
-/// 剧目动画的帧长：8 fps。
+/// Frame length of skit animations: 8 fps.
 pub const FRAME_MS: u32 = 125;
 
-/// 进入一个档位后多久开第一场；之后的间隔按档位随机。
+/// How long after entering a level the first skit starts; later gaps are random per level.
 const FIRST_SKIT_DELAY_MS: u32 = 3000;
 const BORED_GAP_MIN_MS: u32 = 20000 / TIME_SCALE;
 const BORED_GAP_MAX_MS: u32 = 40000 / TIME_SCALE;
@@ -19,11 +20,11 @@ const SLEEPY_GAP_MAX_MS: u32 = 300_000 / TIME_SCALE;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Tier {
-    /// 待命：现有的呼吸、眨眼、轮播战绩。
+    /// Standby: the usual breathing, blinking and rotating stats.
     Alert,
-    /// 无聊：隔一会儿演一段小剧目。
+    /// Bored: play a short skit every so often.
     Bored,
-    /// 困倦：以睡觉为主，画面转暗。
+    /// Sleepy: mostly sleeping, with the screen dimmed.
     Sleepy,
 }
 
@@ -39,7 +40,7 @@ impl Tier {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Skit {
-    /// 剧目之间的普通空闲。
+    /// Plain idle between skits.
     None,
     Patrol,
     Ball,
@@ -48,7 +49,7 @@ pub enum Skit {
     Hide,
     Startle,
     Dream,
-    /// 困倦期的底色：睡觉。
+    /// Base look while sleepy: sleeping.
     Sleep,
 }
 
@@ -71,7 +72,7 @@ impl Skit {
         }
     }
 
-    /// 各剧目时长；0 表示一直演到档位变化。
+    /// Length of each skit; 0 means it plays until the level changes.
     fn length_ms(self) -> u32 {
         match self {
             Skit::None | Skit::Sleep => 0,
@@ -86,11 +87,11 @@ impl Skit {
 pub struct View {
     pub tier: Tier,
     pub skit: Skit,
-    /// 当前剧目已经演了几帧。
+    /// How many frames of the current skit have played.
     pub skit_frame: u32,
-    /// 困倦：画面转暗。
+    /// Sleepy: dim the screen.
     pub dim: bool,
-    /// 夜里睡久了：关背光。
+    /// Asleep long enough at night: backlight off.
     pub lights_out: bool,
 }
 
@@ -128,7 +129,7 @@ impl Leisure {
     }
 
     fn rng_next(&mut self) -> u32 {
-        // xorshift32：够随机，也够小。
+        // xorshift32: random enough, and small enough.
         let mut x = self.rng_state;
         x ^= x << 13;
         x ^= x >> 17;
@@ -141,7 +142,7 @@ impl Leisure {
         low + self.rng_next() % (high - low + 1)
     }
 
-    /// 夜里：23 点到早上 7 点。不知道几点就当白天，宁可亮着也不要在下午关灯。
+    /// Night: 23:00 to 07:00. An unknown hour counts as daytime: better to stay lit than go dark in the afternoon.
     fn is_night(&self) -> bool {
         self.hour >= 23 || (self.hour >= 0 && self.hour < 7)
     }
@@ -165,7 +166,7 @@ impl Leisure {
         }
     }
 
-    /// 剧目权重。夜里多睡少玩；今天一件没做就无聊地踢球，做得多就累得梦多。
+    /// Skit weights. At night, more sleep and less play; nothing done today means bored ball-kicking, lots done means tired and more dreams.
     fn skit_weights(&self, tier: Tier) -> [u32; SKIT_COUNT] {
         let mut weights = [0u32; SKIT_COUNT];
         let mut set = |skit: Skit, weight: u32| weights[skit as usize] = weight;
@@ -175,7 +176,7 @@ impl Leisure {
             return weights;
         }
         let table: [(Skit, u32, u32); 7] = [
-            // 剧目，夜里的权重，白天的权重
+            // skit, night weight, day weight
             (Skit::Patrol, 1, 3),
             (Skit::Ball, 1, 3),
             (Skit::Read, 2, 3),
@@ -199,7 +200,7 @@ impl Leisure {
 
     fn pick_skit(&mut self, tier: Tier) -> Skit {
         let mut weights = self.skit_weights(tier);
-        // 不连着演同一出；只剩一出可选时才允许重复。
+        // Don't play the same skit twice in a row; repeat only when it is the only choice left.
         let total: u32 = weights.iter().sum();
         let without_last = total - weights[self.last_skit as usize];
         let total = if without_last > 0 {
@@ -229,27 +230,27 @@ impl Leisure {
         self.next_skit_at_ms = now_ms.wrapping_add(FIRST_SKIT_DELAY_MS);
     }
 
-    /// 任何活动都把无聊度清零：Agent 有动静、按键、番茄钟在走。
+    /// Any activity resets boredom: agent activity, a key press, a running pomodoro.
     pub fn note_activity(&mut self, now_ms: u32) {
         self.idle_since_ms = now_ms;
     }
 
-    /// K1 长按：现在就去玩。
+    /// K1 long press: go play right now.
     pub fn force_bored(&mut self, now_ms: u32) {
         self.idle_since_ms = now_ms.wrapping_sub(BORED_AFTER_MS);
     }
 
-    /// 本地小时数，来自 Mac 端心跳；-1 表示不知道。
+    /// Local hour from the Mac's heartbeat; -1 means unknown.
     pub fn set_hour(&mut self, hour: i32) {
         self.hour = hour;
     }
 
-    /// 当日完成的专注或任务数，决定它是累了还是无聊。
+    /// Focus sessions or tasks completed today, which decides whether it is tired or bored.
     pub fn set_done_count(&mut self, done: u32) {
         self.done_count = done;
     }
 
-    /// 推进导演。档位或剧目变了返回 true。
+    /// Advances the director. Returns true when the level or skit changed.
     pub fn tick(&mut self, now_ms: u32) -> bool {
         let mut changed = false;
         let next_tier = self.tier_for(now_ms);
@@ -289,7 +290,7 @@ impl Leisure {
         }
     }
 
-    /// 测试与预览用：立刻开演某个剧目。
+    /// For tests and previews: start a given skit immediately.
     pub fn start_skit(&mut self, skit: Skit, now_ms: u32) {
         let needed = if skit == Skit::Sleep { Tier::Sleepy } else { Tier::Bored };
         let back = if needed == Tier::Sleepy { SLEEPY_AFTER_MS } else { BORED_AFTER_MS };
@@ -309,7 +310,7 @@ mod tests {
         n * 60 * 1000
     }
 
-    /// 把时间推到 now，每 20 ms tick 一次，像主循环那样。有符号比较，允许回绕。
+    /// Advances time to now, ticking every 20 ms like the main loop. Signed comparison, so wraparound is allowed.
     fn advance_to(leisure: &mut Leisure, clock: &mut u32, now: u32) {
         while now.wrapping_sub(*clock) as i32 > 0 {
             *clock = clock.wrapping_add(20);
@@ -356,7 +357,7 @@ mod tests {
         let mut leisure = Leisure::new(11, 0);
         let mut clock = 0;
         advance_to(&mut leisure, &mut clock, minutes(5) + 4000);
-        // 进入无聊 3 秒后开第一场。
+        // The first skit starts 3 seconds after becoming bored.
         assert_ne!(leisure.view(clock).skit, Skit::None);
         assert_ne!(leisure.view(clock).skit, Skit::Sleep);
 
@@ -376,7 +377,7 @@ mod tests {
                 continue;
             }
             if !in_gap {
-                continue; // 同一场还在演
+                continue; // the same skit is still playing
             }
             in_gap = false;
             if current == previous {
@@ -388,9 +389,9 @@ mod tests {
         }
         assert!(played >= 20);
         assert_eq!(repeats, 0);
-        // 24 分钟里七出都该露过面。
+        // All seven skits should show up within 24 minutes.
         for skit in [Skit::Patrol, Skit::Ball, Skit::Read, Skit::Stars, Skit::Hide, Skit::Startle, Skit::Dream] {
-            assert!(seen[skit as usize], "{skit:?} 没出现");
+            assert!(seen[skit as usize], "{skit:?} never appeared");
         }
     }
 
@@ -400,7 +401,7 @@ mod tests {
         leisure.start_skit(Skit::Patrol, 1000);
         assert_eq!(leisure.view(1000).skit_frame, 0);
         assert_eq!(leisure.view(1000 + 125 * 8).skit_frame, 8);
-        // 12 秒后巡逻结束，回到底色。
+        // Patrol ends after 12 seconds and returns to the base look.
         let mut clock = 1000;
         advance_to(&mut leisure, &mut clock, 1000 + 12500);
         assert_eq!(leisure.view(clock).skit, Skit::None);
@@ -427,7 +428,7 @@ mod tests {
         assert_eq!(leisure.view(clock).tier, Tier::Sleepy);
         assert!(!leisure.view(clock).lights_out);
 
-        // 22 点还不算夜里，23 点起算，到早上 7 点。
+        // 22:00 is not night yet; night runs from 23:00 to 07:00.
         leisure.set_hour(22);
         assert!(!leisure.view(clock).lights_out);
         leisure.set_hour(23);
@@ -438,12 +439,12 @@ mod tests {
         assert!(!leisure.view(clock).lights_out);
         leisure.set_hour(23);
 
-        // 关着灯的时候有事，立刻亮。
+        // Activity while the lights are out turns them on immediately.
         leisure.note_activity(clock);
         leisure.tick(clock);
         assert!(!leisure.view(clock).lights_out);
 
-        // 夜里但没睡够 90 分钟，不关。
+        // Night, but not asleep for 90 minutes yet: stay on.
         let mut leisure = Leisure::new(9, 0);
         leisure.set_hour(1);
         let mut clock = 0;
@@ -494,7 +495,7 @@ mod tests {
                 ball += 1;
             }
         }
-        // 权重 7/22，即便不连演，也该占三成上下。
+        // Weight 7/22: even without back-to-back repeats it should be around 30%.
         assert!(played >= 20);
         assert!(ball * 10 >= played * 2);
     }

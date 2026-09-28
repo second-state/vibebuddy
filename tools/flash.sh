@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
-# 烧 Rust 固件（原生 USB 口）。三件套来自 tools/build-firmware.sh；
-# voices 分区与设置区不动，换固件不丢音色。只接 UART 桥时用 tools/flash-bridge.sh。
-# 要烧回 C 固件：tools/flash-c.sh。
+# Flash the Rust firmware over the native USB port. The three images come from tools/build-firmware.sh;
+# the voices partition and the settings area are left alone, so a firmware change keeps the voice.
+# With only the UART bridge connected, use tools/flash-bridge.sh. To go back to the C firmware: tools/flash-c.sh.
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -20,7 +20,7 @@ if [[ -z "${serial_port}" ]]; then
 fi
 
 "${repo_root}/tools/build-firmware.sh"
-# 前两段写完留在 bootloader 里，最后一段写完再复位，中途不跑半新半旧的固件。
+# Stay in the bootloader after the first two images and reset only after the last one, so a half-updated firmware never runs.
 espflash write-bin -S --chip esp32s3 --port "${serial_port}" --after no-reset 0x0 "${build_dir}/bootloader.bin"
 espflash write-bin -S --chip esp32s3 --port "${serial_port}" --after no-reset 0x8000 "${build_dir}/partition-table.bin"
 espflash write-bin -S --chip esp32s3 --port "${serial_port}" 0x10000 "${build_dir}/vibebuddy-fw.bin"
