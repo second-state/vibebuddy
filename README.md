@@ -1,5 +1,7 @@
 # Vibe Buddy
 
+English | [简体中文](README.zh-CN.md)
+
 Vibe Buddy is a desk pet for your AI coding agents. It lives in a small ESP32-S3 box next to your keyboard and keeps an eye on Codex, Claude Code and your GitHub Actions runs, so you don't have to. When an agent needs you, finishes, or fails, the buddy tells you with an animation, a task card and a short spoken line.
 
 The buddy is an original character. Codex was the first agent it supported, but the device protocol isn't tied to any one client: any local program or script can send it events.
