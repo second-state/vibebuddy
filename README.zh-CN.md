@@ -202,6 +202,6 @@ daemon 平时由 App 看管。没有 App 的开发机可以用 [`packaging/com.v
 
 源代码以 [GNU 通用公共许可证 v3.0 或更新版本](LICENSE)（GPL-3.0-or-later）授权。氛围小助手的样子和动画都在代码里定义，因此同样适用 GPL。
 
-我们拥有权利的播报音频，以及日后加入的美术素材，以 [CC BY-SA 4.0](LICENSE-ASSETS) 授权。`voices/` 里有几个中文音色出自第三方语音服务，不在此列；具体范围以 [`LICENSE-ASSETS`](LICENSE-ASSETS) 为准。
+我们拥有权利的播报音频，以及日后加入的美术素材，以 [CC BY-SA 4.0](LICENSE-ASSETS) 授权。`voices/` 里的两个中文音色出自火山引擎的语音服务，不在此列；具体范围以 [`LICENSE-ASSETS`](LICENSE-ASSETS) 为准。
 
 两份许可证都不授予「Vibe Buddy」名称或氛围小助手角色的商标权利。

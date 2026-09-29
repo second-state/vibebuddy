@@ -204,6 +204,6 @@ With the five signing secrets set on the repository, releases are signed with a 
 
 The source code is licensed under the [GNU General Public License v3.0 or later](LICENSE). That covers everything that draws the buddy, too, since its look and animations are defined in code.
 
-The voice audio we hold the rights to, and any artwork added later, is licensed under [CC BY-SA 4.0](LICENSE-ASSETS). Some of the Chinese voices in `voices/` come from third-party speech services and aren't covered; [`LICENSE-ASSETS`](LICENSE-ASSETS) lists exactly what is.
+The voice audio we hold the rights to, and any artwork added later, is licensed under [CC BY-SA 4.0](LICENSE-ASSETS). The two Chinese voices in `voices/` come from Volcano Engine's speech service and aren't covered; [`LICENSE-ASSETS`](LICENSE-ASSETS) lists exactly what is.
 
 Neither license grants rights to the name "Vibe Buddy" or the buddy character as a trademark.
