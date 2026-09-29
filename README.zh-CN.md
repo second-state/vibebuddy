@@ -197,3 +197,11 @@ daemon 平时由 App 看管。没有 App 的开发机可以用 [`packaging/com.v
 - 目前只出 arm64。
 
 仓库配齐五个签名 secrets 后用 Developer ID 签名并公证，下载即可打开；没配时退回 ad-hoc 签名，首次打开要在「隐私与安全性」里放行。secrets 用 [`tools/setup-release-signing.sh`](tools/setup-release-signing.sh) 配：它带着走完申请证书、打包 p12、生成 App 专用密码，并逐项验证后写进 GitHub。
+
+## 许可证
+
+源代码以 [GNU 通用公共许可证 v3.0 或更新版本](LICENSE)（GPL-3.0-or-later）授权。氛围小助手的样子和动画都在代码里定义，因此同样适用 GPL。
+
+我们拥有权利的播报音频，以及日后加入的美术素材，以 [CC BY-SA 4.0](LICENSE-ASSETS) 授权。`voices/` 里有几个中文音色出自第三方语音服务，不在此列；具体范围以 [`LICENSE-ASSETS`](LICENSE-ASSETS) 为准。
+
+两份许可证都不授予「Vibe Buddy」名称或氛围小助手角色的商标权利。

@@ -199,3 +199,11 @@ CI builds releases; see [`release-app`](.github/workflows/release-app.yml). It b
 - Only arm64 builds are published for now.
 
 With the five signing secrets set on the repository, releases are signed with a Developer ID and notarized, so they open straight after download. Without them the build falls back to ad-hoc signing, and the first launch has to be allowed under Privacy & Security. [`tools/setup-release-signing.sh`](tools/setup-release-signing.sh) sets the secrets up: it walks you through requesting the certificate, packing the p12 and creating an app-specific password, then checks each one before writing it to GitHub.
+
+## License
+
+The source code is licensed under the [GNU General Public License v3.0 or later](LICENSE). That covers everything that draws the buddy, too, since its look and animations are defined in code.
+
+The voice audio we hold the rights to, and any artwork added later, is licensed under [CC BY-SA 4.0](LICENSE-ASSETS). Some of the Chinese voices in `voices/` come from third-party speech services and aren't covered; [`LICENSE-ASSETS`](LICENSE-ASSETS) lists exactly what is.
+
+Neither license grants rights to the name "Vibe Buddy" or the buddy character as a trademark.
