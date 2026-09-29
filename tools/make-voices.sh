@@ -9,17 +9,16 @@
 # - elevenlabs: ElevenLabs (tools/elevenlabs-tts.py, needs ELEVENLABS_API_KEY from a paid plan, since
 #   the free plan has no commercial license), default voice Jessica; change with ELEVENLABS_VOICE
 #   (a voice id, see tools/elevenlabs-tts.py --list);
-# - edge: edge-tts (Microsoft Edge's read-aloud service: free, no key; not an officially public
-#   API, only used to generate these few lines once), default voice the Taiwanese female HsiaoYu; change with VOICE.
+# - edge: edge-tts (Microsoft Edge's read-aloud service: free, no key), default voice the Taiwanese
+#   female HsiaoYu; change with VOICE. It is not an officially public API and the right to
+#   redistribute its audio is unclear, so use it for local previews only and never commit its output.
 # Each line is normalized to a -1 dBFS peak on its own; the two pomodoro lines get a chime in front.
 # VOICE_LANG picks the language of the five lines: en (default, the built-in voice is
-# English) or zh. English
-# defaults the edge-tts voice to en-US-JennyNeural; Doubao and ElevenLabs just speak
-# whatever text they are given, so pair VOICE_LANG=en with an English voice there.
+# English) or zh. English defaults the edge-tts voice to en-US-JennyNeural; Doubao and
+# ElevenLabs just speak whatever text they are given, so pair the language with a matching voice.
 #
 # Usage: ELEVENLABS_API_KEY=... tools/make-voices.sh   # the built-in voice, Jessica
 #       VOLC_API_KEY=... VOICE_LANG=zh OUT_DIR=voices/wanwanxiaohe tools/make-voices.sh
-#       VOICE_LANG=zh OUT_DIR=voices/hsiaochen VOICE=zh-TW-HsiaoChenNeural tools/make-voices.sh
 #       ELEVENLABS_API_KEY=... VOICE_LANG=en OUT_DIR=voices/jessica tools/make-voices.sh
 #       ELEVENLABS_API_KEY=... VOICE_LANG=en OUT_DIR=voices/chris ELEVENLABS_VOICE=iP95p4xoKVk53GoZ742B tools/make-voices.sh
 set -euo pipefail
