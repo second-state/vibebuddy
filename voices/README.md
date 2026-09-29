@@ -14,23 +14,25 @@
 
 英文版的五句是 `Need your input.` / `Task complete.` / `Task hit a problem.` / `Focus time's up. Take a break.` / `Break's over.`，由 `VOICE_LANG=en` 切换。
 
-## 英文音色（待定）
+## 英文音色
 
-App 的音色目录已经预留了两个英文音色，但音频还没入库：用哪个引擎、生成的音频能否公开分发还没定。
+英文音色用 ElevenLabs 合成，用的是它自带的 premade 音色（不用社区 Voice Library 里的，那些可能附带作者条款）。入库的音频必须出自付费套餐：免费套餐不含商用授权。
 
-| 目录 | 音色 | 引擎 | 状态 |
+| 目录 | 音色 | 引擎 | 备注 |
 |---|---|---|---|
-| `jenny/` | `en-US-JennyNeural` | 微软 edge-tts | 预留，未生成 |
-| `guy/` | `en-US-GuyNeural` | 微软 edge-tts | 预留，未生成 |
-
-定下来之后：
+| `jessica/` | Jessica `cgSgspJ2msm6clMCkdW9` | ElevenLabs（`eleven_multilingual_v2`） | 美式女声，明亮温暖 |
+| `chris/` | Chris `iP95p4xoKVk53GoZ742B` | ElevenLabs（`eleven_multilingual_v2`） | 美式男声，随和自然 |
 
 ```bash
-VOICE_LANG=en OUT_DIR=voices/jenny tools/make-voices.sh
-VOICE_LANG=en OUT_DIR=voices/guy VOICE=en-US-GuyNeural tools/make-voices.sh
+# 密钥是 ElevenLabs 控制台发的 API Key，不进仓库；先确认音色 id 在这个账号下可用
+ELEVENLABS_API_KEY=... tools/elevenlabs-tts.py --list
+ELEVENLABS_API_KEY=... VOICE_LANG=en OUT_DIR=voices/jessica tools/make-voices.sh
+ELEVENLABS_API_KEY=... VOICE_LANG=en OUT_DIR=voices/chris ELEVENLABS_VOICE=iP95p4xoKVk53GoZ742B tools/make-voices.sh
 ```
 
-目录里有了 PCM，`app/scripts/build-app.sh` 就会打出语音包，App 的音色列表随之出现这两项。换别的英文音色时，目录名要与 `app/Sources/VibeBuddyCore/VoicePack.swift` 里 `VoiceCatalogEntry.all` 的 id 一致，并在那里写上 `language: .en`。英文台词比中文长，Jenny 一整套约 1.5 MB，仍在 2 MB 的 `voices` 分区以内。
+目录里有了 PCM，`app/scripts/build-app.sh` 就会打出语音包，App 的音色列表随之出现这两项。换别的英文音色时，目录名要与 `app/Sources/VibeBuddyCore/VoicePack.swift` 里 `VoiceCatalogEntry.all` 的 id 一致，并在那里写上 `language: .en`。英文台词比中文长，一整套约 1.5 MB，仍在 2 MB 的 `voices` 分区以内。
+
+火山与 ElevenLabs 的密钥都设了的时候，`make-voices.sh` 先用火山，都没设就用 edge-tts；要指定就设 `TTS_ENGINE=volc|elevenlabs|edge`。
 
 ## 重新生成
 

@@ -80,9 +80,9 @@ App 是 Vibe Buddy 在 Mac 上的图形界面：一个菜单栏图标加一扇�
 
 写入走现有串口协议：Mac 分块 base64 发，固件自己写分区并校验回报，不复位、不抢串口，两种接法行为一样；桥接 115200 波特下 1.5 MB 约三分钟，原生 USB 口几秒。esptool 路径只留给固件升级。
 
-五个语音包不入库，构建时由脚本从 `voices/*/` 打出，随 App 分发，约 7.5 MB。
+七个语音包（五个中文、两个英文）不入库，构建时由脚本从 `voices/*/` 打出，随 App 分发，约 9.5 MB。
 
-音色目录 `VoiceCatalogEntry.all` 给每个音色标了台词语言（`VoiceLanguage.zh` / `.en`）。选音色的列表只列本次构建真正带了包的音色（启动时按文件是否存在算一次），并把与界面语言一致的排在前面。目录里预留了两个英文音色 `jenny`、`guy`，`voices/` 下还没有它们的 PCM，所以暂时不显示；按 `voices/README.md` 生成之后重新装包就会出现。固件内置音色仍是中文的湾湾小何，英文界面的引导页会提示用户挑一个英文音色。
+音色目录 `VoiceCatalogEntry.all` 给每个音色标了台词语言（`VoiceLanguage.zh` / `.en`）。选音色的列表只列本次构建真正带了包的音色（启动时按文件是否存在算一次），并把与界面语言一致的排在前面。目录里有两个英文音色 `jessica`、`chris`（ElevenLabs），`voices/` 下有了它们的 PCM 才会显示；生成方法见 `voices/README.md`。固件内置音色仍是中文的湾湾小何，英文界面的引导页会提示用户挑一个英文音色。
 
 设备协议要新增的事件（草案，实现时写进 `protocol.md`）：`device.identify`（眨眼）、`voice.begin` / `voice.chunk` / `voice.end`、设备回报 `voice.written` 与校验结果。
 

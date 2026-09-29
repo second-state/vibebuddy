@@ -65,8 +65,8 @@ public struct VoiceCatalogEntry: Equatable, Identifiable, Sendable {
         VoiceCatalogEntry(id: "hsiaoyu", name: String(localized: "HsiaoYu"), tag: String(localized: "Chinese · Taiwanese accent · Microsoft"), language: .zh),
         VoiceCatalogEntry(id: "hsiaochen", name: String(localized: "HsiaoChen"), tag: String(localized: "Chinese · Taiwanese accent · Microsoft"), language: .zh),
         VoiceCatalogEntry(id: "xiaoxiao", name: String(localized: "Xiaoxiao"), tag: String(localized: "Chinese · Mandarin · Microsoft"), language: .zh),
-        VoiceCatalogEntry(id: "jenny", name: "Jenny", tag: String(localized: "English · US · Microsoft"), language: .en),
-        VoiceCatalogEntry(id: "guy", name: "Guy", tag: String(localized: "English · US · Microsoft"), language: .en),
+        VoiceCatalogEntry(id: "jessica", name: "Jessica", tag: String(localized: "English · US · ElevenLabs"), language: .en),
+        VoiceCatalogEntry(id: "chris", name: "Chris", tag: String(localized: "English · US · ElevenLabs"), language: .en),
     ]
 
     /// Voices in `language` first, catalog order otherwise preserved.
