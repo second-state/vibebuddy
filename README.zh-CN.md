@@ -97,7 +97,7 @@ curl -H 'content-type: application/json' \
 
 ## 开发
 
-日常操作都收在根目录的 [`justfile`](justfile) 里，`just` 列出全部。先读这些：[`docs/architecture.md`](docs/architecture.md)（边界与决定）、[`CONTEXT.md`](CONTEXT.md)（领域词汇）、[`docs/pet.md`](docs/pet.md)（氛围小助手设计）、[`docs/protocol.md`](docs/protocol.md)（协议决定）、[`docs/references.md`](docs/references.md)（外部项目的借鉴边界）和 [`LESSONS.md`](LESSONS.md)（经验教训）。
+日常操作都收在根目录的 [`justfile`](justfile) 里，`just` 列出全部。如何搭环境、跑测试、提交改动见 [`CONTRIBUTING.md`](CONTRIBUTING.md)（英文）。先读这些：[`docs/architecture.md`](docs/architecture.md)（边界与决定）、[`CONTEXT.md`](CONTEXT.md)（领域词汇）、[`docs/pet.md`](docs/pet.md)（氛围小助手设计）、[`docs/protocol.md`](docs/protocol.md)（协议决定）、[`docs/references.md`](docs/references.md)（外部项目的借鉴边界）和 [`LESSONS.md`](LESSONS.md)（经验教训）。
 
 ### 仓库布局
 

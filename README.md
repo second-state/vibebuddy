@@ -99,7 +99,7 @@ See [`docs/protocol.md`](docs/protocol.md) for the events.
 
 ## Development
 
-Everyday tasks live in the [`justfile`](justfile); run `just` to list them. The docs to start with are [`docs/architecture.md`](docs/architecture.md) (boundaries and decisions), [`CONTEXT.md`](CONTEXT.md) (domain terms), [`docs/pet.md`](docs/pet.md) (the buddy's design), [`docs/protocol.md`](docs/protocol.md) (protocol decisions), [`docs/references.md`](docs/references.md) (what we borrow from other projects, and where we stop) and [`LESSONS.md`](LESSONS.md) (lessons learned).
+Everyday tasks live in the [`justfile`](justfile); run `just` to list them. See [`CONTRIBUTING.md`](CONTRIBUTING.md) for how to set up, test and send changes. The docs to start with are [`docs/architecture.md`](docs/architecture.md) (boundaries and decisions), [`CONTEXT.md`](CONTEXT.md) (domain terms), [`docs/pet.md`](docs/pet.md) (the buddy's design), [`docs/protocol.md`](docs/protocol.md) (protocol decisions), [`docs/references.md`](docs/references.md) (what we borrow from other projects, and where we stop) and [`LESSONS.md`](LESSONS.md) (lessons learned).
 
 ### Repository layout
 
