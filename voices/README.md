@@ -1,10 +1,10 @@
 # 音色库
 
-同一套五句提示，用五种音色各合成一遍，供日后在 macOS 端让用户挑选。每个子目录就是一整套固件资产，格式与 `firmware/main/assets/` 完全相同（24 kHz、16-bit、双声道、小端序 PCM，峰值 -1 dBFS，番茄钟两句前面拼了钟声），复制过去重新编译即可换音色。`wanwanxiaohe/` 与当前固件资产逐字节一致。
+同一套五句提示，用五种音色各合成一遍，供日后在 macOS 端让用户挑选。每个子目录就是一整套固件资产，格式与 `firmware/main/assets/` 完全相同（24 kHz、16-bit、双声道、小端序 PCM，峰值 -1 dBFS，番茄钟两句前面拼了钟声），复制过去重新编译即可换音色。`jessica/` 与当前固件资产逐字节一致。
 
 | 目录 | 音色 | 引擎 | 备注 |
 |---|---|---|---|
-| `wanwanxiaohe/` | 湾湾小何 `zh_female_wanwanxiaohe_moon_bigtts` | 火山引擎豆包语音 1.0（`seed-tts-1.0`） | 台湾口音，小智音箱同款，当前固件用的就是它 |
+| `wanwanxiaohe/` | 湾湾小何 `zh_female_wanwanxiaohe_moon_bigtts` | 火山引擎豆包语音 1.0（`seed-tts-1.0`） | 台湾口音，小智音箱同款，2026-09 之前是固件内置音色 |
 | `xiaohe2/` | 小何 2.0 `zh_female_xiaohe_uranus_bigtts` | 火山引擎豆包语音 2.0（`seed-tts-2.0`） | 普通话，同一角色的 2.0 版 |
 | `hsiaoyu/` | 晓雨 `zh-TW-HsiaoYuNeural` | 微软 edge-tts | 台湾女声，不用密钥 |
 | `hsiaochen/` | 晓臻 `zh-TW-HsiaoChenNeural` | 微软 edge-tts | 台湾女声，不用密钥 |
@@ -12,7 +12,7 @@
 
 五句台词固定为：需要你确认 / 任务完成 / 任务遇到问题 / 专注结束，休息一下 / 休息结束，对应 `input_required` / `done` / `failed` / `focus_done` / `break_done`。
 
-英文版的五句是 `Need your input.` / `Task complete.` / `Task hit a problem.` / `Focus time's up. Take a break.` / `Break's over.`，由 `VOICE_LANG=en` 切换。
+英文版的五句是 `Hey, I need you for a sec.` / `All done!` / `Uh-oh, something went wrong.` / `Nice work. Time for a break!` / `Break's over. Back to it!`，口语化、短，隔着桌子也听得清。`VOICE_LANG` 默认是 `en`，生成中文音色要写 `VOICE_LANG=zh`。
 
 ## 英文音色
 
@@ -20,7 +20,7 @@
 
 | 目录 | 音色 | 引擎 | 备注 |
 |---|---|---|---|
-| `jessica/` | Jessica `cgSgspJ2msm6clMCkdW9` | ElevenLabs（`eleven_multilingual_v2`） | 美式女声，明亮温暖 |
+| `jessica/` | Jessica `cgSgspJ2msm6clMCkdW9` | ElevenLabs（`eleven_multilingual_v2`） | 美式女声，明亮温暖，固件内置音色 |
 | `chris/` | Chris `iP95p4xoKVk53GoZ742B` | ElevenLabs（`eleven_multilingual_v2`） | 美式男声，随和自然 |
 
 ```bash
@@ -38,10 +38,10 @@ ELEVENLABS_API_KEY=... VOICE_LANG=en OUT_DIR=voices/chris ELEVENLABS_VOICE=iP95p
 
 ```bash
 # 火山引擎音色（密钥是豆包语音控制台发的 API Key，不进仓库）
-VOLC_API_KEY=... OUT_DIR=voices/wanwanxiaohe tools/make-voices.sh
-VOLC_API_KEY=... OUT_DIR=voices/xiaohe2 VOLC_VOICE=zh_female_xiaohe_uranus_bigtts VOLC_RESOURCE_ID=seed-tts-2.0 tools/make-voices.sh
+VOLC_API_KEY=... VOICE_LANG=zh OUT_DIR=voices/wanwanxiaohe tools/make-voices.sh
+VOLC_API_KEY=... VOICE_LANG=zh OUT_DIR=voices/xiaohe2 VOLC_VOICE=zh_female_xiaohe_uranus_bigtts VOLC_RESOURCE_ID=seed-tts-2.0 tools/make-voices.sh
 # edge-tts 音色
-OUT_DIR=voices/hsiaochen VOICE=zh-TW-HsiaoChenNeural tools/make-voices.sh
+VOICE_LANG=zh OUT_DIR=voices/hsiaochen VOICE=zh-TW-HsiaoChenNeural tools/make-voices.sh
 ```
 
 ## 打成语音包

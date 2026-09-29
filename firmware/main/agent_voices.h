@@ -8,7 +8,7 @@
 
 /// Reading and writing voice packs: the device's `voices` partition holds the current
 /// announcement voice's five finished lines. If the partition is empty or fails its
-/// check, the compiled-in set (Wanwan Xiaohe) is used. Changing voice writes only this
+/// check, the compiled-in set (Jessica, English) is used. Changing voice writes only this
 /// partition, never the firmware (ADR-0003).
 
 /// Finds, maps and verifies the partition. Returns ESP_ERR_NOT_FOUND without one; the built-in voice still works.

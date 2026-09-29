@@ -12,13 +12,14 @@
 # - edge: edge-tts (Microsoft Edge's read-aloud service: free, no key; not an officially public
 #   API, only used to generate these few lines once), default voice the Taiwanese female HsiaoYu; change with VOICE.
 # Each line is normalized to a -1 dBFS peak on its own; the two pomodoro lines get a chime in front.
-# VOICE_LANG picks the language of the five lines: zh (default) or en. English
+# VOICE_LANG picks the language of the five lines: en (default, the built-in voice is
+# English) or zh. English
 # defaults the edge-tts voice to en-US-JennyNeural; Doubao and ElevenLabs just speak
 # whatever text they are given, so pair VOICE_LANG=en with an English voice there.
 #
-# Usage: tools/make-voices.sh
-#       VOLC_API_KEY=... tools/make-voices.sh
-#       OUT_DIR=voices/hsiaochen VOICE=zh-TW-HsiaoChenNeural tools/make-voices.sh
+# Usage: ELEVENLABS_API_KEY=... tools/make-voices.sh   # the built-in voice, Jessica
+#       VOLC_API_KEY=... VOICE_LANG=zh OUT_DIR=voices/wanwanxiaohe tools/make-voices.sh
+#       VOICE_LANG=zh OUT_DIR=voices/hsiaochen VOICE=zh-TW-HsiaoChenNeural tools/make-voices.sh
 #       ELEVENLABS_API_KEY=... VOICE_LANG=en OUT_DIR=voices/jessica tools/make-voices.sh
 #       ELEVENLABS_API_KEY=... VOICE_LANG=en OUT_DIR=voices/chris ELEVENLABS_VOICE=iP95p4xoKVk53GoZ742B tools/make-voices.sh
 set -euo pipefail
@@ -27,7 +28,7 @@ repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 # Overwrites the firmware assets by default; to archive into the voice library, point OUT_DIR at voices/<voice>/.
 assets="${OUT_DIR:-${repo_root}/firmware/main/assets}"
 mkdir -p "${assets}"
-language="${VOICE_LANG:-zh}"
+language="${VOICE_LANG:-en}"
 case "${language}" in
     zh) default_voice="zh-TW-HsiaoYuNeural" ;;
     en) default_voice="en-US-JennyNeural" ;;
@@ -57,11 +58,11 @@ trap 'rm -rf "${work}"' EXIT
 # the voice pack's clips (firmware/main/agent_voice_pack.h).
 if [[ "${language}" == "en" ]]; then
     lines=(
-        "input_required|Need your input."
-        "done|Task complete."
-        "failed|Task hit a problem."
-        "focus_voice|Focus time's up. Take a break."
-        "break_voice|Break's over."
+        "input_required|Hey, I need you for a sec."
+        "done|All done!"
+        "failed|Uh-oh, something went wrong."
+        "focus_voice|Nice work. Time for a break!"
+        "break_voice|Break's over. Back to it!"
     )
 else
     lines=(

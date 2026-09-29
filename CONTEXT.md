@@ -97,14 +97,14 @@ App 英文界面与英文日志里的固定说法。写英文文案时用这些�
 | 链路 | link | 设置页「Link」一栏，断开时说 disconnected |
 | 接入 / 修复 / 移除 | Connect / Repair / Remove | Hook 的三个操作；设置页标签页叫 Agents，未接入叫 Not set up |
 | 播报音色 | announcement voice | 选音色的地方；单说音色时用 voice |
-| 内置音色 | built-in voice | 固件自带的湾湾小何 |
+| 内置音色 | built-in voice | 固件自带的 Jessica（英文） |
 | 语音包 | voice pack | |
 | 音量 / 静音 | volume / mute | |
 | 模式 | mode | |
 | 值班 / 番茄钟 / 休闲 | On duty / Pomodoro / Leisure | 界面用首字母大写；代码与注释里是 duty / pomodoro / leisure |
 | 剧目 | skit | 休闲模式里的小表演 |
 | 当日战绩 | today's stats | 菜单里写作 Today: done · asks · busy |
-| 需要确认 | needs input | 语音台词是 Need your input.，战绩里计作 asks |
+| 需要确认 | needs input | 语音台词是 Hey, I need you for a sec.，战绩里计作 asks |
 | 任务卡 | task card | |
 | 固件 / 刷入 | firmware / flash | |
 | UART 桥 / 原生 USB | UART bridge / native USB | |
