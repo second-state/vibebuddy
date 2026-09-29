@@ -1,25 +1,25 @@
-# Stage 2 — `vibebuddyd` 验收记录
+# Stage 2 — `vibebuddyd` acceptance record
 
-验收时间：2026-09-14（Asia/Singapore）
+Accepted: 2026-09-14 (Asia/Singapore)
 
-## 结论
+## Conclusion
 
-Stage 2 **已通过实机验收**。Mac 本机 HTTP 请求经 `vibebuddyd`、`SerialTransport`、ESP32-S3 原生 USB Serial/JTAG 和 Vibe Buddy Protocol 到达 `vibebuddy-fw`；真实 USB 拔插后 daemon 自动重新发现并连接设备，重连后的事件也成功送达。
+Stage 2 **has passed on-device acceptance**. A local HTTP request on the Mac reaches `vibebuddy-fw` via `vibebuddyd`, `SerialTransport`, ESP32-S3 native USB Serial/JTAG and the Vibe Buddy Protocol; after a real USB unplug and replug, the daemon automatically rediscovered and reconnected to the device, and events sent after the reconnect were delivered as well.
 
-## 实现边界
+## Implementation boundaries
 
-- `POST /v1/events` 默认只监听 `127.0.0.1:7331`。
-- `vibebuddy-protocol` 负责 version、非空 event、未知扩展字段、NDJSON 编码和 1024-byte 上限。
-- `SerialTransport` 默认按 `VID:PID 303A:1001` 发现唯一设备，不写死 `/dev/cu.usbmodem8401`。
-- `VIBEBUDDY_SERIAL_PORT` 可显式指定串口；`VIBEBUDDY_USB_SERIAL` 可在多块同型号设备中筛选目标。
-- 发送队列容量为 64。HTTP `202 Accepted` 只表示入队；队列满或 worker 已停止时返回 `503 Service Unavailable`。
-- 串口读写失败后保留尚未确认 flush 的当前帧，每 500 ms 重新发现并连接设备。
+- `POST /v1/events` listens only on `127.0.0.1:7331` by default.
+- `vibebuddy-protocol` handles version, non-empty event, unknown extension fields, NDJSON encoding and the 1024-byte limit.
+- `SerialTransport` by default discovers the single device with `VID:PID 303A:1001` and does not hard-code `/dev/cu.usbmodem8401`.
+- `VIBEBUDDY_SERIAL_PORT` can specify the serial port explicitly; `VIBEBUDDY_USB_SERIAL` can pick the target among several devices of the same model.
+- The send queue holds 64 items. HTTP `202 Accepted` only means enqueued; when the queue is full or the worker has stopped, it returns `503 Service Unavailable`.
+- After a serial read or write failure, the current frame whose flush has not been confirmed is kept, and the device is rediscovered and reconnected every 500 ms.
 
-本阶段没有安装 macOS 后台服务，也没有实现 `beacon` CLI、LCD、audio 或 buttons。
+This stage did not install a macOS background service, and did not implement the `beacon` CLI, LCD, audio or buttons.
 
-## 自动化检查
+## Automated checks
 
-执行：
+Run:
 
 ```bash
 cargo fmt --all -- --check
@@ -27,56 +27,56 @@ cargo test --workspace
 cargo clippy --workspace --all-targets -- -D warnings
 ```
 
-结果：6 个测试通过，Clippy 无告警。测试覆盖无 `id` 的 Hello、未知字段保留、不支持的 version、超长消息、HTTP 入队与 NDJSON framing，以及 USB serial 格式归一化。
+Result: 6 tests passed, no Clippy warnings. The tests cover Hello without `id`, preservation of unknown fields, unsupported version, oversized messages, HTTP enqueueing with NDJSON framing, and USB serial format normalization.
 
-## HTTP → USB → ESP32 实机链路
+## HTTP → USB → ESP32 on-device link
 
-daemon 自动发现并打开：
+The daemon automatically discovered and opened:
 
 ```text
-串口已连接 port=/dev/cu.usbmodem8401
+serial port connected port=/dev/cu.usbmodem8401
 ```
 
-发送：
+Sent:
 
 ```json
 {"version":1,"event":"task.start","id":"stage2-live","title":"Stage 2 HTTP"}
 ```
 
-HTTP 实际返回 `202 Accepted`。ESP32 随后实际返回：
+HTTP actually returned `202 Accepted`. The ESP32 then actually returned:
 
 ```text
 EVENT task.start
 TITLE Stage 2 HTTP
 ```
 
-`version: 2` 的请求实际返回 `400 Bad Request`，没有进入串口队列。
+A request with `version: 2` actually returned `400 Bad Request` and never entered the serial queue.
 
-## 真实断线重连
+## Real disconnect and reconnect
 
-保持同一 `vibebuddyd` 进程运行，用户拔掉 `USB-SLAVE` 后日志记录：
-
-```text
-串口读取失败，开始重连 port=/dev/cu.usbmodem8401 error=Device not configured (os error 6)
-```
-
-重新插回后，无需重启 daemon：
+With the same `vibebuddyd` process kept running, the user unplugged `USB-SLAVE`, and the log recorded:
 
 ```text
-串口已连接 port=/dev/cu.usbmodem8401
+serial read failed, reconnecting port=/dev/cu.usbmodem8401 error=Device not configured (os error 6)
 ```
 
-随后发送：
+After plugging it back in, without restarting the daemon:
+
+```text
+serial port connected port=/dev/cu.usbmodem8401
+```
+
+Then sent:
 
 ```json
 {"version":1,"event":"task.done","id":"stage2-reconnect","title":"Reconnect verified"}
 ```
 
-设备实际返回：
+The device actually returned:
 
 ```text
 EVENT task.done
 TITLE Reconnect verified
 ```
 
-因此本阶段证明的是同一 daemon 进程在真实 USB 断开、重新枚举后恢复传输，不是进程重启或本地模拟。
+What this stage proves, then, is that the same daemon process resumes transport after a real USB disconnect and re-enumeration, not a process restart or a local simulation.

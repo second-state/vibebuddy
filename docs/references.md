@@ -1,50 +1,50 @@
-# 实现参考与适用边界
+# Implementation References and Their Limits
 
-本文记录可借鉴的外部实现，不把参考项目当成 Vibe Buddy 硬件事实来源。
+This document records external implementations worth learning from. The reference projects are not treated as a source of hardware facts for Vibe Buddy.
 
 ## `second-state/echokit_box`
 
-核查版本：[`4484efca885c2ffd01ffb1acdbb5817421583bd8`](https://github.com/second-state/echokit_box/tree/4484efca885c2ffd01ffb1acdbb5817421583bd8)
+Version checked: [`4484efca885c2ffd01ffb1acdbb5817421583bd8`](https://github.com/second-state/echokit_box/tree/4484efca885c2ffd01ffb1acdbb5817421583bd8)
 
-可借鉴：
+Worth borrowing:
 
-- Rust 固件使用 `esp-idf-svc`，并通过 `esp-idf-sys` 接入 C component；这说明“Rust 上层 + 厂家/ESP-IDF C driver”在 ESP32-S3 上是可行组织方式。[Cargo.toml](https://github.com/second-state/echokit_box/blob/4484efca885c2ffd01ffb1acdbb5817421583bd8/Cargo.toml)
-- 工程把板级差异放在 board module/feature 中，适合以后确有第二种硬件时参考；Vibe Buddy 第一块板不提前复制其多板抽象。
-- 仓库固定 `ESP_IDF_VERSION = "v5.4.1"`，使用 `xtensa-esp32s3-espidf` 和 `espflash`。[`.cargo/config.toml`](https://github.com/second-state/echokit_box/blob/4484efca885c2ffd01ffb1acdbb5817421583bd8/.cargo/config.toml)
-- README 记录 EchoKit 设备通过标为 OTG/SLAVE 的口枚举成 JTAG 串口，并给出 `/dev/cu.usbmodem...` 示例；这可作为 Vibe Buddy 插板后的一个排查假设，不能当成目标板结论。[README](https://github.com/second-state/echokit_box/blob/4484efca885c2ffd01ffb1acdbb5817421583bd8/README.md)
+- The Rust firmware uses `esp-idf-svc` and pulls in C components through `esp-idf-sys`; this shows that "Rust on top + vendor/ESP-IDF C drivers" is a workable structure on the ESP32-S3. [Cargo.toml](https://github.com/second-state/echokit_box/blob/4484efca885c2ffd01ffb1acdbb5817421583bd8/Cargo.toml)
+- The project puts board-level differences in a board module/feature, which is worth referring to if a second piece of hardware ever actually appears; Vibe Buddy's first board doesn't copy its multi-board abstraction in advance.
+- The repository pins `ESP_IDF_VERSION = "v5.4.1"` and uses `xtensa-esp32s3-espidf` and `espflash`. [`.cargo/config.toml`](https://github.com/second-state/echokit_box/blob/4484efca885c2ffd01ffb1acdbb5817421583bd8/.cargo/config.toml)
+- The README records that the EchoKit device enumerates as a JTAG serial port through the port labeled OTG/SLAVE, and gives a `/dev/cu.usbmodem...` example; this can serve as one troubleshooting hypothesis once the Vibe Buddy board is plugged in, but not as a conclusion about the target board. [README](https://github.com/second-state/echokit_box/blob/4484efca885c2ffd01ffb1acdbb5817421583bd8/README.md)
 
-不直接采用：
+Not adopted directly:
 
-- EchoKit 的协议面向 Wi-Fi/WebSocket 音频会话，服务端事件用 MessagePack，设备命令部分用 JSON；Vibe Buddy v1 是本地 USB 串行 NDJSON，目标和 framing 不同。[`src/protocol.rs`](https://github.com/second-state/echokit_box/blob/4484efca885c2ffd01ffb1acdbb5817421583bd8/src/protocol.rs)
-- `atom_box.rs` 和 `components/hal_driver` 中的 GPIO、ES8311、XL9555、320×240 LCD 等参数只属于 EchoKit 对应板型。除非精确 PCB/原理图证明一致，否则不得复制到 Vibe Buddy。
-- 该仓库使用 GPL-3.0。没有确定 Vibe Buddy 的许可证兼容策略前，只借鉴思路，不复制实现代码。
+- EchoKit's protocol is designed for Wi-Fi/WebSocket audio sessions, with server events in MessagePack and some device commands in JSON; Vibe Buddy v1 is local USB serial NDJSON, with different goals and framing. [`src/protocol.rs`](https://github.com/second-state/echokit_box/blob/4484efca885c2ffd01ffb1acdbb5817421583bd8/src/protocol.rs)
+- The GPIO, ES8311, XL9555, 320×240 LCD and other parameters in `atom_box.rs` and `components/hal_driver` belong only to the corresponding EchoKit board. They must not be copied into Vibe Buddy unless the exact PCB/schematic proves they match.
+- The repository is licensed under GPL-3.0. Until Vibe Buddy's license compatibility strategy is settled, we borrow only ideas and don't copy implementation code.
 
 ## `second-state/echokit_server`
 
-核查版本：[`d1d976596f122976095b7da4df3e946baf152b96`](https://github.com/second-state/echokit_server/tree/d1d976596f122976095b7da4df3e946baf152b96)
+Version checked: [`d1d976596f122976095b7da4df3e946baf152b96`](https://github.com/second-state/echokit_server/tree/d1d976596f122976095b7da4df3e946baf152b96)
 
-可借鉴：
+Worth borrowing:
 
-- 服务端采用 Rust、Tokio、Axum、Serde 和 tracing/logging 相关生态，与 `vibebuddyd` 的候选技术栈方向一致。[Cargo.toml](https://github.com/second-state/echokit_server/blob/d1d976596f122976095b7da4df3e946baf152b96/Cargo.toml)
-- WebSocket I/O 使用独立消息处理循环和 channel 把 transport 与业务流水线分隔；Stage 2 设计串口收发/重连任务时可参考这个职责边界。[`src/services/ws.rs`](https://github.com/second-state/echokit_server/blob/d1d976596f122976095b7da4df3e946baf152b96/src/services/ws.rs)
+- The server uses Rust, Tokio, Axum, Serde and the tracing/logging ecosystem, which matches the direction of the candidate stack for `vibebuddyd`. [Cargo.toml](https://github.com/second-state/echokit_server/blob/d1d976596f122976095b7da4df3e946baf152b96/Cargo.toml)
+- WebSocket I/O uses a separate message-handling loop and channels to separate the transport from the business pipeline; this division of responsibility is worth referring to when designing the serial send/receive/reconnect tasks in Stage 2. [`src/services/ws.rs`](https://github.com/second-state/echokit_server/blob/d1d976596f122976095b7da4df3e946baf152b96/src/services/ws.rs)
 
-不直接采用：
+Not adopted directly:
 
-- EchoKit Server 是 ASR → LLM → TTS 语音平台，范围显著大于本地状态守护进程。Vibe Buddy 不引入其 AI provider、VAD、音频流、MCP 或配置系统。
-- 它的网络协议、重试和音频分块策略不能替代 Vibe Buddy Protocol 的版本、逐行 framing、输入上限与未知事件规则。
-- 该仓库同样使用 GPL-3.0；当前阶段不复制代码。
+- EchoKit Server is an ASR → LLM → TTS voice platform, far larger in scope than a local state daemon. Vibe Buddy doesn't bring in its AI providers, VAD, audio streaming, MCP or configuration system.
+- Its network protocol, retries and audio chunking strategy can't replace the Vibe Buddy Protocol's versioning, line-by-line framing, input limits and unknown-event rules.
+- This repository is also GPL-3.0; at this stage we don't copy its code.
 
-## 对 Vibe Buddy 的实际影响
+## What this means for Vibe Buddy in practice
 
-1. 保持 Mac 端 Rust + Tokio/Axum 的方向，但到 Stage 2 才创建依赖与代码。
-2. 固件仍优先评估 ESP-IDF C；是否采用 Rust 固件必须以官方 BSP 可复用程度、构建复杂度和 Stage 1 最小链路为依据，不因参考仓库使用 Rust 就自动选择 Rust。
-3. 插板后重点观察 `/dev/cu.usbmodem*`、USB Serial/JTAG 与多 USB 口角色，但不预设结果。
-4. 许可证策略未确定前，参考仓库只用于架构比较和排障线索。
+1. Keep the Rust + Tokio/Axum direction on the Mac side, but don't create dependencies or code until Stage 2.
+2. The firmware still evaluates ESP-IDF C first; whether to adopt Rust firmware must be based on how reusable the official BSP is, build complexity and the Stage 1 minimal link, not chosen automatically because the reference repositories use Rust.
+3. Once the board is plugged in, watch `/dev/cu.usbmodem*`, USB Serial/JTAG and the roles of the multiple USB ports closely, but don't presume the outcome.
+4. Until the license strategy is settled, the reference repositories are used only for architecture comparison and troubleshooting leads.
 
-## 当前设备运行固件：`78/xiaozhi-esp32`
+## Firmware currently running on the device: `78/xiaozhi-esp32`
 
-核查版本：[`v1.9.4 / 3ced7709c65a39494f5684e99111854a5bcbd8c7`](https://github.com/78/xiaozhi-esp32/tree/3ced7709c65a39494f5684e99111854a5bcbd8c7)
+Version checked: [`v1.9.4 / 3ced7709c65a39494f5684e99111854a5bcbd8c7`](https://github.com/78/xiaozhi-esp32/tree/3ced7709c65a39494f5684e99111854a5bcbd8c7)
 
-2026-09-14 的实机启动日志自报应用 `xiaozhi` 1.9.4、ESP-IDF v5.5 和板型 `atk-dnesp32s3-box`，与该固定源码版本相符。这个仓库因此是“当前设备运行固件”的一手实现来源，可用于理解当前可工作的板级配置和选择兼容 ESP-IDF 版本。
+On 2026-09-14 the hardware boot log reported the application `xiaozhi` 1.9.4, ESP-IDF v5.5 and the board `atk-dnesp32s3-box`, matching this pinned source version. This repository is therefore the primary implementation source for "the firmware currently running on the device", and can be used to understand the board configuration that currently works and to choose a compatible ESP-IDF version.
 
-适用边界：它不是正点原子的厂家原理图/BSP，也没有给出用户手中 PCB 的硬件版本。其 [`config.h`](https://github.com/78/xiaozhi-esp32/blob/3ced7709c65a39494f5684e99111854a5bcbd8c7/main/boards/atk-dnesp32s3-box/config.h) 中的 GPIO、LCD 和音频参数只能作为待核对候选，不能单独成为 Vibe Buddy 的最终硬件依据。
+Limits: it is not ALIENTEK's vendor schematic/BSP, and it doesn't state the hardware revision of the PCB in the user's hands. The GPIO, LCD and audio parameters in its [`config.h`](https://github.com/78/xiaozhi-esp32/blob/3ced7709c65a39494f5684e99111854a5bcbd8c7/main/boards/atk-dnesp32s3-box/config.h) can only be candidates to verify, and can't on their own become Vibe Buddy's final hardware basis.

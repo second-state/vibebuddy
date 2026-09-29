@@ -1,65 +1,65 @@
-# 番茄钟模式
+# Pomodoro mode
 
-番茄钟是氛围小助手的第二个模式。第一个是值班：盯着 Agent，回答“Agent 现在怎么样”；番茄钟回答“我自己这一段专注还剩多久”。两者共用一块屏幕，所以需要模式这个概念；它们共用一只扬声器，所以语音不分模式。第三个模式是休闲，见 [`leisure.md`](leisure.md)。
+Pomodoro is the buddy's second mode. The first is On duty: it watches the agents and answers "how are the agents doing right now"; Pomodoro answers "how much is left of my own focus session". The two share one screen, which is why the concept of a mode is needed; they share one speaker, so voice is not mode-specific. The third mode is Leisure; see [`leisure.md`](leisure.md).
 
-## 时长
+## Durations
 
-专注 25 分钟，休息 5 分钟，暂时固定。两个阶段都由用户按键开始，不自动衔接：专注结束后停在“休息待开始”（`BREAK 05:00`），按 K0 才开始计休息；休息结束后回到空闲，按 K0 才开始下一段专注。第一版曾让休息自动开始，理由是休息的意义在于被计时；实际用下来 dragon 要求改成手动——专注结束那一刻人往往还在收尾，休息从起身那一刻算才准。休息待开始时长按 K0 直接跳过休息回到空闲。
+Focus is 25 minutes and break is 5 minutes, fixed for now. Both phases are started by the user with a button press and don't chain automatically: when focus ends, it stops at "break ready to start" (`BREAK 05:00`), and the break timer only starts when you press K0; when the break ends, it returns to idle, and the next focus only starts when you press K0. The first version started the break automatically, on the grounds that the point of a break is to be timed; after actually using it, dragon asked for it to be manual — at the moment focus ends you're often still wrapping up, and the break is only accurate if it's counted from when you get up. While the break is ready to start, holding K0 skips the break and goes straight back to idle.
 
-## 画面
+## Screen
 
-复刻 Focus To-Do 的表盘：一圈 60 根刻度，走过的部分染成阶段色，一根更长的指针停在当前位置，倒计时放在圆心。空闲时指针停在 12 点、刻度全灰、显示 `25:00`。专注是番茄红，休息是绿色，空闲用氛围小助手的 READY 蓝。
+It replicates the Focus To-Do dial: a ring of 60 ticks, the elapsed portion colored in the phase color, a longer hand resting at the current position, and the countdown in the center. When idle, the hand rests at 12 o'clock, all ticks are gray, and it shows `25:00`. Focus is tomato red, break is green, and idle uses the buddy's READY blue.
 
-右栏三组信息：
+The right-hand column has three groups of information:
 
-- 阶段与按键提示：`FOCUS` / `BREAK` / `READY`，下面是当前可用的按键。暂停时倒计时数字每半秒闪一次，并额外显示 `PAUSED`——停表的老规矩。
-- 当日记录：`TODAY` 下面每完成一次专注记一格，再一行 `3 FOCUS 1H15` 写清次数与累计专注时长。只记完成的专注，放弃的不算，暂停的时间也不扣。按 Mac 端心跳带来的本地日期清零，存在 NVS 里，重启不丢；Mac 端跨夜没在跑时，要等心跳回来带着新日期才归零。值班空闲屏的战绩轮播也带这一行。
-- Agent 摘要：氛围小助手的主状态与最上面那张任务卡的标题。番茄钟模式里 Agent 让出了画面，但没有让出注意力：需要确认时这一行仍然变黄，语音照常播。
+- Phase and button hints: `FOCUS` / `BREAK` / `READY`, with the buttons currently available underneath. While paused, the countdown digits blink every half second and `PAUSED` is shown as well — the old stopwatch convention.
+- Today's record: under `TODAY`, each completed focus adds one square, and a further line such as `3 FOCUS 1H15` spells out the count and total focus time. Only completed focus sessions count; abandoned ones don't, and paused time isn't deducted. It resets on the local date carried by the Mac-side heartbeat and is stored in NVS, so it survives a reboot; if the Mac side isn't running across midnight, it only resets once the heartbeat comes back with the new date. The today's stats rotation on the On duty idle screen includes this line too.
+- Agent summary: the buddy's main state and the title of the top task card. In Pomodoro mode the agents give up the screen but not your attention: on needs input this line still turns yellow and the voice line plays as usual.
 
-阶段结束时圆环像闹钟一样响：头两秒圆环和倒计时数字左右抖动，每 0.1 秒换一边、幅度 3 像素，整圈刻度亮成下一阶段的颜色（专注结束是休息的绿，休息结束是 READY 蓝）；之后整圈在阶段色与它的半亮之间一秒一拍地脉动，像心跳而不是灰与亮的硬闪。脉动持续到用户动手为止：按 K0 开始下一阶段、长按 K0 放弃或跳过，或者按 K1 切走画面（休闲接管也算）。钟声和语音是瞬时的，静了音就再也听不见；这套画面让到点之后任何时候瞟一眼都能看出"还没按掉"。这不是番茄钟状态机的一部分：画面模块记下结束时的阶段，视图一变就停。
+When a phase ends, the ring goes off like an alarm clock: for the first two seconds the ring and the countdown digits shake left and right, switching sides every 0.1 seconds with an amplitude of 3 pixels, and all the ticks light up in the next phase's color (green for break when focus ends, READY blue when the break ends); after that the whole ring pulses between the phase color and its half-brightness at one beat per second, like a heartbeat rather than a hard flash between gray and lit. The pulsing continues until the user does something: pressing K0 to start the next phase, holding K0 to abandon or skip, or pressing K1 to switch the screen away (Leisure taking over also counts). The chime and voice line are momentary, and once muted they can never be heard; this visual means that at any time after the timer goes off, a glance shows it "hasn't been dismissed yet". This is not part of the Pomodoro state machine: the display module records the phase that just ended and stops as soon as the view changes.
 
-切回值班时，倒计时不消失：右上角有一个小徽章 `F 18:21` / `B 04:59`，暂停时同样闪烁。
+When switching back to On duty, the countdown doesn't disappear: there is a small badge in the top-right corner, `F 18:21` / `B 04:59`, which also blinks while paused.
 
-失联时只灰掉 Agent 那一栏与顶部状态条。番茄钟是设备自己的事实，不因为 Mac 端失联而变得不可信，圆环保持原色。
+When disconnected, only the agent column and the top status bar go gray. The Pomodoro is the device's own fact, and it doesn't become untrustworthy because the Mac side is disconnected; the ring keeps its colors.
 
-## 按键
+## Buttons
 
-外壳上有 K0、K1、K2 三个键（另有 RST）。三个键各管一件事，与当前模式无关：
+The case has three buttons, K0, K1, and K2 (plus RST). Each button does one thing, regardless of the current mode:
 
-| 按键 | 短按 | 长按（1 秒） |
+| Button | Short press | Long press (1 second) |
 | --- | --- | --- |
-| K0 | 番茄钟：开始 / 暂停 / 继续 | 放弃当前阶段，回到空闲；休息待开始时即跳过休息 |
-| K1 | 在值班与番茄钟之间切换 | 让氛围小助手现在就去休闲 |
-| K2 | 打开当前来源（上报 Mac，行为不变） | 静音开关 |
+| K0 | Pomodoro: start / pause / resume | Abandon the current phase and return to idle; when the break is ready to start, this skips the break |
+| K1 | Toggle between On duty and Pomodoro | Send the buddy to Leisure right now |
+| K2 | Open the current source (reported to the Mac, behavior unchanged) | Mute toggle |
 
-每个键只有一种意思，不用记“在哪个模式里按什么”。专注途中 Agent 需要确认，按 K2 一下就能跳过去，不必先换模式。K0 开始一段专注时会自动切到番茄钟，圆环开始走就是反馈；暂停和继续不换模式，值班画面右上角的徽章会跟着闪。
+Each button has only one meaning, so there's no need to remember "what to press in which mode". If an agent needs input in the middle of a focus session, one press of K2 takes you there without switching modes first. Starting a focus with K0 switches to Pomodoro automatically, and the ring starting to move is the feedback; pause and resume don't switch modes, and the badge in the top-right of the On duty screen blinks along.
 
-短按在松开时才算数，因为只有等到松开才知道它不是一次长按的开头。K2 上报 Mac 的时机因此从按下推迟到松开，对“打开来源”没有可感知的影响。
+A short press only counts on release, because only on release do you know it wasn't the start of a long press. K2's report to the Mac is therefore delayed from press to release, which has no noticeable effect on "open source".
 
-三个键的接线都已实机确认：K0 是 BOOT 键 GPIO0（PCB 丝印写作 `B0`），K1 是 XL9555 P0.4，K2 是 XL9555 P0.3，都是低电平有效。K1 的位是 2026-09-15 第一次烧录时由固件里的候选位探针定出来的：上游固件把 P0.0、P0.1、P0.4 与 P1.1～P1.7 配成输入，固件先把其中任一位变低当作 K1，实机按下时回报 `BUTTON RAW P0=0xEF`，随后收窄成单一位并去掉探针。
+The wiring of all three buttons has been confirmed on the hardware: K0 is the BOOT button on GPIO0 (silkscreened `B0` on the PCB), K1 is XL9555 P0.4, K2 is XL9555 P0.3, all active-low. K1's bit was pinned down on the first flash on 2026-09-15 by a candidate-bit probe in the firmware: the upstream firmware configures P0.0, P0.1, P0.4, and P1.1–P1.7 as inputs, so the firmware initially treated any of those bits going low as K1; pressing it on the hardware reported `BUTTON RAW P0=0xEF`, after which it was narrowed to a single bit and the probe was removed.
 
-## 模式切换规则
+## Mode switching rules
 
-- 用户用 K1 在值班与番茄钟之间主动切换，设备记住他的选择。
-- K0 开始一段专注时切到番茄钟。
-- 阶段结束把番茄钟推到前面来。那一刻正是用户该看一眼的时候：知道该按键开始休息了，或者知道该按键开始下一段专注了。
-- 待开始放了五分钟、暂停放了三十分钟没人动，切回值班，接着由休闲接手（见 [`leisure.md`](leisure.md)）。
-- Agent 事件不抢模式。专注途中 Agent 需要确认，靠语音和右栏那一行黄字提醒；把画面切走等于替用户决定“Agent 比你的专注重要”，那不是设备该做的判断。
+- The user actively toggles between On duty and Pomodoro with K1, and the device remembers the choice.
+- Starting a focus with K0 switches to Pomodoro.
+- The end of a phase brings Pomodoro to the front. That is exactly the moment the user should take a look: to know it's time to press the button to start the break, or to start the next focus.
+- If it sits ready to start for five minutes, or paused for thirty minutes, with no one touching it, it switches back to On duty, and then Leisure takes over (see [`leisure.md`](leisure.md)).
+- Agent events don't take over the mode. If an agent needs input during a focus session, the voice line and the yellow line in the right-hand column do the alerting; switching the screen away would decide on the user's behalf that "the agent matters more than your focus", which is not a judgment the device should make.
 
-## 声音
+## Sound
 
-专注结束和休息结束各播一次：先一段钟声，再一句中文语音。钟声是加法合成的（[`tools/make-pomodoro-audio.py`](../tools/make-pomodoro-audio.py)），专注结束是下行的“叮—咚”，休息结束是上行三音；语音是“专注结束，休息一下”和“休息结束”。钟声负责把注意力拉过来，语音负责说清楚是哪一个。
+The end of focus and the end of the break each play once: first a chime, then a spoken line: "Nice work. Time for a break!" and "Break's over. Back to it!" in the built-in voice. The chimes are additively synthesized ([`tools/make-pomodoro-audio.py`](../tools/make-pomodoro-audio.py)): end of focus is a descending "ding–dong", end of break is a rising three-note figure. The chime pulls your attention in, and the voice line makes clear which one it is.
 
-开始、暂停、继续、放弃都不出声：这些是用户自己按出来的动作，画面已经给了反馈。
+Start, pause, resume, and abandon are silent: these are actions the user pressed themselves, and the screen already gives feedback.
 
-长按 K2 一秒是全局静音：Agent 的播报和番茄钟的铃都不响，再长按恢复；屏幕左上角常驻 `MUTE`。静音不持久化，重启恢复有声——开会静了音忘记开回来，设备哑好几天比多响一次更糟。专注时自动免打扰、夜间自动静音暂未做。
+Holding K2 for one second is a global mute: neither agent announcements nor the Pomodoro chime sound; hold again to unmute, and `MUTE` stays in the top-left corner of the screen. Mute isn't persisted, and sound comes back after a reboot — muting for a meeting and forgetting to turn it back on, leaving the device silent for days, is worse than one extra sound. Automatic do-not-disturb during focus and automatic night-time mute are not done yet.
 
-## 状态归属
+## State ownership
 
-番茄钟的状态完全在固件里，`vibebuddyd` 不参与。它是设备 I/O 与确定性渲染，正是固件的职责；而且用户拿它计时的时候，Mac 端可能根本没在跑。固件只把转换以诊断行的形式发给 Mac（`POMODORO FOCUS START`、`FOCUS END`、`BREAK START`、`BREAK END`、`PAUSED`、`RESUMED`、`STOPPED`、`BREAK SKIPPED`，以及记录变化时的 `POMODORO TODAY <次> <秒>S DAY <日期>`），`vibebuddyd` 记进日志，不做别的。当日记录也留在设备上，不回传：专注一结束面板上的数字就该变，绕一圈 Mac 端只会引入延迟和不一致。
+The Pomodoro state lives entirely in the firmware; `vibebuddyd` is not involved. It is device I/O and deterministic rendering, which is exactly the firmware's job; and while the user is using it as a timer, the Mac side may not be running at all. The firmware only sends transitions to the Mac as diagnostic lines (`POMODORO FOCUS START`, `FOCUS END`, `BREAK START`, `BREAK END`, `PAUSED`, `RESUMED`, `STOPPED`, `BREAK SKIPPED`, and `POMODORO TODAY <count> <seconds>S DAY <date>` when the record changes), and `vibebuddyd` logs them and does nothing else. Today's record also stays on the device and isn't sent back: the number on the panel should change the moment a focus ends, and a round trip through the Mac side would only add latency and inconsistency.
 
-## 验证
+## Verification
 
-- 状态机有主机端测试：`./tools/test-pomodoro.sh`，覆盖开始、暂停、继续、放弃、阶段结束只报一次、毫秒计数回绕。
-- 画面有主机端预览：`./tools/preview-display.sh`，把固件里同一份绘制代码渲染成 PNG，烧录前先看版式；阶段结束的闹铃头三秒拼成 `pomodoro_alarm.gif`。
-- 实机验收清单：按 K1 看到 `25:00` 表盘，再按 K1 回到值班；按 K0 开始，画面自动切到番茄钟、指针走动，按 K1 切回值班能看到右上角徽章；再按 K0 暂停，数字闪烁；长按 K0 回到 `25:00`；等到专注结束听到钟声加语音、画面自动切到 `BREAK 05:00` 且不走动，圆环抖两秒后整圈绿色脉动；按 K0 休息开始走动、脉动停；休息结束听到第二段钟声、回到 `READY`，圆环整圈蓝色脉动到按 K0 为止；长按 K2 静音后重复一遍，只靠画面也能察觉到点；专注途中让 Agent 请求确认，右栏那行变黄且语音照常，按 K2 能打开来源。
+- The state machine has host-side tests: `./tools/test-pomodoro.sh`, covering start, pause, resume, abandon, reporting a phase end only once, and millisecond-counter wraparound.
+- The screen has a host-side preview: `./tools/preview-display.sh` renders the same drawing code from the firmware to PNG so the layout can be checked before flashing; the first three seconds of the phase-end alarm are stitched into `pomodoro_alarm.gif`.
+- Hardware acceptance checklist: press K1 and see the `25:00` dial, press K1 again to return to On duty; press K0 to start, the screen switches to Pomodoro automatically and the hand moves, press K1 to switch back to On duty and see the badge in the top-right corner; press K0 again to pause, and the digits blink; hold K0 to return to `25:00`; wait for focus to end, hear the chime plus voice line, the screen switches automatically to `BREAK 05:00` and doesn't move, the ring shakes for two seconds and then pulses green all round; press K0 and the break starts moving and the pulsing stops; when the break ends, hear the second chime, return to `READY`, and the ring pulses blue all round until K0 is pressed; hold K2 to mute and repeat the whole thing, confirming the timer going off is noticeable from the screen alone; during a focus, have an agent ask for input, the right-hand column line turns yellow and the voice line plays as usual, and pressing K2 opens the source.

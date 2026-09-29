@@ -1,108 +1,108 @@
 # Vibe Buddy Protocol v1
 
-Vibe Buddy Protocol 是 `vibebuddyd` 与 Vibe Buddy 设备之间的应用协议。v1 使用 UTF-8 NDJSON；transport 负责可靠地传送字节流，协议不依赖具体串口名称。
+Vibe Buddy Protocol is the application protocol between `vibebuddyd` and a Vibe Buddy device. v1 uses UTF-8 NDJSON; the transport is responsible for delivering the byte stream reliably, and the protocol doesn't depend on any particular serial port name.
 
 ## Framing
 
-- 每条消息是一个 JSON object，以单个 LF（`\n`）结束。
-- 接收端同时接受 CRLF（`\r\n`），但发送端统一使用 LF。
-- 空行忽略。
-- 单条 JSON 最多 1024 bytes，不含行结束符。超出后丢弃整行并返回 `ERROR input_too_large`。
-- v1 不支持跨行 JSON、JSON array 或多个 JSON object 共用一行。
+- Each message is one JSON object terminated by a single LF (`\n`).
+- Receivers also accept CRLF (`\r\n`), but senders always use LF.
+- Blank lines are ignored.
+- A single JSON message is at most 1024 bytes, excluding the line terminator. Anything longer is dropped as a whole line and answered with `ERROR input_too_large`.
+- v1 doesn't support JSON spanning multiple lines, JSON arrays, or multiple JSON objects on one line.
 
 ## Envelope
 
-每条消息必须包含：
+Every message must include:
 
-- `version`：整数；v1 必须等于 `1`。
-- `event`：非空字符串。
+- `version`: an integer; in v1 it must equal `1`.
+- `event`: a non-empty string.
 
-`id`、`title`、`message` 等字段由具体事件使用。Stage 1 不要求 `id`，所以下面的 Hello 是合法消息：
+Fields such as `id`, `title` and `message` are used by specific events. Stage 1 doesn't require `id`, so the Hello below is a valid message:
 
 ```json
 {"version":1,"event":"task.done","title":"Hello"}
 ```
 
-接收端忽略未知字段，以便旧固件接受新增的可选字段。未知 `event` 也必须完成 framing 和 envelope 解析；Stage 1 固件会输出其名称，不因事件尚未实现而破坏连接。无法识别的 `version` 返回 `ERROR unsupported_version`，不能按 v1 猜测处理。
+Receivers ignore unknown fields, so older firmware accepts newly added optional fields. An unknown `event` must still go through framing and envelope parsing; Stage 1 firmware prints its name and doesn't break the connection just because the event isn't implemented yet. An unrecognized `version` gets `ERROR unsupported_version` and must not be handled as a best guess at v1.
 
-## 方向
+## Direction
 
-Mac 到设备的首批事件：
+The first batch of Mac-to-device events:
 
 - `task.start`
 - `task.done`
 - `task.error`
 
-当前固件识别：
+What the current firmware recognizes:
 
-- `task.start`：工作中，不播放语音。
-- `agent.input_required`：需要用户确认，播放一次“需要你确认”。
-- `task.done`：完成，播放一次“任务完成”，5 秒后回到空闲。
-- `task.error` / `agent.blocked`：失败，播放一次“任务遇到问题”。
-- `agent.idle`：回到空闲，不播放语音。
-- `device.heartbeat`：证明链路存活，不显示、不回显诊断行、不播放语音。
+- `task.start`: working; no voice.
+- `agent.input_required`: needs user input; plays the needs-input line ("Hey, I need you for a sec." in the built-in voice) once.
+- `task.done`: done; plays the done line ("All done!") once and returns to idle after 5 seconds.
+- `task.error` / `agent.blocked`: failed; plays the failed line ("Uh-oh, something went wrong.") once.
+- `agent.idle`: back to idle; no voice.
+- `device.heartbeat`: proves the link is alive; not displayed, no diagnostic line echoed, no voice.
 
-`vibebuddyd` 可附加最多 3 项的 `tasks` 数组。数组按最近活动倒序，设备按给定顺序绘制任务卡：
+`vibebuddyd` may attach a `tasks` array of up to 3 items. The array is in reverse order of most recent activity, and the device draws task cards in the order given:
 
 ```json
 {"version":1,"event":"task.start","title":"GAMMA","tasks":[{"title":"GAMMA","status":"working","elapsed_s":75},{"title":"BETA","status":"input_required","elapsed_s":900}],"stats":["7 DONE","4 ASKS","1H23 BUSY"]}
 ```
 
-每项包含 `title`、`status` 和 `elapsed_s`，可选 `project`；当前状态值为 `working`、`input_required`、`done`、`failed`。`title` 是卡片第一行：Agent 自己给会话起的名字（Claude App 的会话标题、Codex 的线程名）或分支名，都没有才是项目名；`project` 是项目名，设备画在第二行，与标题重复时不画。旧固件会按 v1 规则忽略 `tasks` 与 `project`。未来事件可以包括 `task.progress`、`task.cancelled`、`agent.waiting`、`message`、`system` 和 `device.status`。
+Each item contains `title`, `status` and `elapsed_s`, with optional `project`; the current status values are `working`, `input_required`, `done` and `failed`. `title` is the card's first line: the name the agent gave the session itself (the Claude app's session title, Codex's thread name) or the branch name, falling back to the project name only when neither exists. `project` is the project name, which the device draws on the second line unless it duplicates the title. Older firmware ignores `tasks` and `project` under the v1 rules. Future events may include `task.progress`, `task.cancelled`, `agent.waiting`, `message`, `system` and `device.status`.
 
-`elapsed_s` 是该活动进入**当前状态**已经过去的秒数，不是距上一个事件的秒数：工作中的卡片回答「这个 turn 跑了多久」，等待确认的卡片回答「等了多久」。设备收到后自行继续计时，因为可见状态不变时 `vibebuddyd` 会去重、不再发消息，而屏幕上的数字必须一直走。也正因为要去重，`elapsed_s` 与 `stats` 都在去重之后才盖到事件上；放进快照会让每个工具事件都变成一次重绘，把工作中的动画不断打回第一帧。
+`elapsed_s` is the number of seconds since the activity entered its **current state**, not since the previous event: a working card answers "how long has this turn been running", and a card waiting for input answers "how long has it been waiting". The device keeps counting on its own after receiving it, because `vibebuddyd` deduplicates and sends nothing while the visible state is unchanged, yet the number on screen has to keep ticking. And precisely because of deduplication, `elapsed_s` and `stats` are stamped onto the event only after deduplication; putting them in the snapshot would turn every tool event into a redraw, constantly knocking the working animation back to its first frame.
 
-`stats` 是最多 3 行当日战绩，空闲屏轮播它们。它随每条状态事件下发而不只随 `agent.idle`：`task.done` 之后设备是自己回到空闲的，那一刻正是用户会看的一眼，缓存的战绩必须已经包含刚刚完成的那一件。计数按本地自然日归零，并持久化到 `~/Library/Application Support/VibeBuddy/stats.json`，否则每次重启 daemon 屏幕上写着「今天」的数字都会归零。
+`stats` holds up to 3 lines of today's stats, which the idle screen cycles through. It's sent with every state event, not just `agent.idle`: after `task.done` the device returns to idle on its own, and that is exactly the moment the user glances over, so the cached stats must already include the task that just finished. Counts reset at each local calendar day and are persisted to `~/Library/Application Support/VibeBuddy/stats.json`; otherwise every daemon restart would zero the numbers that the screen labels as "today".
 
-当一个后台任务完成、但画面仍需显示其他活动任务时，`vibebuddyd` 会在当前状态事件上附加 `"announcement":"done"`。这是一次性语音通知，不改变画面状态；`announcement_id` 用于标识对应 turn。设备收到它时排队播放一次“任务完成”。失败走同一条路径，取值为 `"announcement":"failed"`，播放一次“任务遇到问题”。
+When a background task finishes but the screen still needs to show other active tasks, `vibebuddyd` attaches `"announcement":"done"` to the current state event. This is a one-shot voice notification that doesn't change the screen state; `announcement_id` identifies the corresponding turn. When the device receives it, it queues the done line to play once. Failures take the same path with `"announcement":"failed"`, playing the failed line once.
 
-当聚合任务变化仅需重绘既有的输入等待状态时，`vibebuddyd` 会附加 `"suppress_audio":true`。设备继续显示 `agent.input_required`，但不重复播放已经播过的提醒。`announcement` 的一次性通知优先于此字段。
+When a change in aggregated tasks only requires redrawing an existing waiting-for-input state, `vibebuddyd` attaches `"suppress_audio":true`. The device keeps showing `agent.input_required` but doesn't replay the alert it already played. A one-shot `announcement` takes precedence over this field.
 
-`vibebuddyd` 每 5 秒发送一次心跳，并捎上自己的构建标识、本地小时数与本地日期：
+`vibebuddyd` sends a heartbeat every 5 seconds, carrying its own build identifier, the local hour and the local date:
 
 ```json
 {"version":1,"event":"device.heartbeat","build":"9b642af 2026-09-14 17:41","hour":14,"day":20260915}
 ```
 
-`build` 是 `git describe --always --tags --dirty` 加上二进制的时间戳。它随心跳重复发送而不是握手一次，因为设备可能随时重启，一次性的握手会丢。设备只在取值变化时才重绘，否则每 5 秒就要刷一次屏。`hour` 是 Mac 端的本地小时，休闲模式用它区分白天黑夜；`day` 是本地日期 YYYYMMDD，番茄钟的当日记录按它清零。设备没有时钟，也不该为了这个去连 Wi-Fi。旧 daemon 不发它们时设备当白天处理、不换日。
+`build` is `git describe --always --tags --dirty` plus the binary's timestamp. It's repeated with every heartbeat instead of sent once in a handshake, because the device can restart at any time and a one-time handshake would get lost. The device redraws only when the value changes; otherwise it would refresh the screen every 5 seconds. `hour` is the Mac's local hour, which Leisure mode uses to tell day from night; `day` is the local date as YYYYMMDD, which resets Pomodoro's daily record. The device has no clock, and shouldn't connect to Wi-Fi just for this. When an older daemon doesn't send these fields, the device assumes daytime and never rolls over the day.
 
-Mac 端发往 BOX 的 CH343 UART 桥时按线速分段写（每 128 字节等它走完再写下一段）：这条桥一次吞不下超过两百字节的连续数据，会把内容错位而长度不变；原生 USB 口整帧写。
+When writing to the BOX's CH343 UART bridge, the Mac writes in segments paced to line speed (waiting for each 128 bytes to drain before writing the next): this bridge can't take more than about two hundred bytes of continuous data at once, and it scrambles the content while keeping the length unchanged. The native USB port gets whole frames.
 
-设备只显示它，不拿它和自己的固件标识比对：两边的发布节奏本来就不同步，把不一致当告警只会制造持续的假警报。字段缺失时设备显示 `?`，这说明对面是个还不发这个字段的旧 daemon。
+The device only displays the build identifier; it doesn't compare it with its own firmware identifier. The two sides ship on different schedules anyway, so treating a mismatch as a warning would only produce a constant stream of false alarms. When the field is missing the device shows `?`, which means the other end is an older daemon that doesn't send it yet.
 
-设备超过 15 秒没有收到**任何**消息即判定失联，覆盖显示为 `NO LINK` 并把画面转灰；收到任何一行合法消息即恢复。判定依据是所有消息而不只是心跳，因为繁忙时真实事件本身就足以证明链路存活。固件不为心跳输出 `EVENT` 诊断行，否则每天会产生上万行日志。
+If the device receives **no** message of any kind for more than 15 seconds, it considers the link lost, overlays `NO LINK` and turns the screen gray; any valid line restores it. The check is based on all messages, not just heartbeats, because when things are busy the real events alone prove the link is alive. The firmware doesn't print an `EVENT` diagnostic line for heartbeats; otherwise it would produce tens of thousands of log lines a day.
 
-设备到 Mac 的事件同样使用 NDJSON，例如：
+Device-to-Mac events use NDJSON as well, for example:
 
 ```json
 {"version":1,"event":"button","button":"K2","action":"press"}
 ```
 
-当前只上报 K2 短按，在任何模式里都上报。K0（番茄钟）、K1（切换模式、长按去休闲）与 K2 长按（静音）由固件自己消费，不上报。短按在松开时才算数，因为只有等到松开才知道它不是长按的开头；上报时机因此从按下推迟到松开。模式与番茄钟见 [`pomodoro.md`](pomodoro.md)，休闲见 [`leisure.md`](leisure.md)。`vibebuddyd` 收到后按这个顺序选落点：等人回答的任务优先（屏幕主状态显示的就是它，而且它 blocking 着人）；其次是最近一次播报过结束的任务——它已经离开卡片栈，屏幕上再也看不到，而还在跑的任务一直挂在屏幕上、本来就不需要 K2 定位；再次才是最新工作项。落点由下一次播报接力替换，不设时间窗：这台设备的用处正是人不在电脑前，用墙上时钟让落点过期，等于假设用户一直守在旁边。选定活动后先看运行处：跑在 Agent 自己的桌面应用里才用 deeplink——Codex 顶层活动打开自身 thread，子 Agent 活动打开拥有它的父 thread，Claude Code 用 Hook 报的桌面会话 id 走 `claude://code/continue?session=<桌面会话 id>`；跑在别的应用里（终端、编辑器的集成终端）则把那个应用拉到前台，bundle id 由 Hook 上报，daemon 不需要认识它；没有宿主的会话（SSH、后台进程）直接跳过，试下一个候选。GitHub Actions 打开对应 run。当前没有活动时回到最近一次可定位的来源；该定位会写入本机状态文件，daemon 重启后仍然有效。候选按这个顺序逐个试：Codex 线程先在本机线程表里核对存在，不存在就跳过，免得打开一个空白会话。K0、K1 和长按/释放尚未绑定。
+Currently only a K2 short press is reported, in every mode. K0 (Pomodoro), K1 (switch mode; long-press for Leisure) and a K2 long press (mute) are consumed by the firmware itself and not reported. A short press counts only on release, because only on release do you know it wasn't the start of a long press, so reporting is deferred from press to release. See [`pomodoro.md`](pomodoro.md) for modes and Pomodoro, and [`leisure.md`](leisure.md) for Leisure. On receiving it, `vibebuddyd` picks a destination in this order: first, a task waiting for someone to answer (it's what the screen's main state shows, and it's blocking a person); next, the task most recently announced as finished (it has left the card stack and can no longer be seen on screen, whereas a task still running stays on screen and never needs K2 to find it); only then the newest work item. The destination is replaced by the next announcement, with no time window: the whole point of this device is that you're away from the computer, and expiring the destination on a wall clock would assume the user is always sitting nearby. Once an activity is chosen, where it runs decides what happens: only if it runs in the agent's own desktop app is a deeplink used (a top-level Codex activity opens its own thread, a sub-agent activity opens the parent thread that owns it, and Claude Code uses the desktop session id reported by the hook via `claude://code/continue?session=<desktop session id>`); if it runs in another app (a terminal, an editor's integrated terminal), that app is brought to the front, using a bundle id reported by the hook, so the daemon doesn't need to know the app; a session with no host (SSH, a background process) is skipped outright and the next candidate is tried. GitHub Actions opens the corresponding run. When there's no current activity, it falls back to the most recent locatable source; that destination is written to a local state file, so it survives a daemon restart. Candidates are tried one by one in this order: a Codex thread is first checked against the local thread table, and skipped if it isn't there, so a blank session doesn't get opened. K0, K1 and long-press/release are not yet bound.
 
-固件输出的 `READY`、`EVENT`、`TITLE` 和 `ERROR` 行是实机链路验收用的诊断文本，不是设备到 Mac 的正式 JSON 事件。同类的还有 `MODE DUTY` / `POMODORO` / `LEISURE`（模式切换），`POMODORO FOCUS START` / `FOCUS END` / `BREAK START` / `BREAK END` / `PAUSED` / `RESUMED` / `STOPPED` / `BREAK SKIPPED`（番茄钟转换），`LEISURE ALERT` / `BORED` / `SLEEPY`、`LEISURE SKIT <名>`、`LEISURE LIGHTS OUT` / `ON`（休闲），以及 `CLOCK HOUR <n>`（收到的小时数变化）、`TALLY LOADED <次> <秒>S DAY <日期>`（开机恢复的当日记录）、`MUTE ON` / `OFF`（长按 K2）与 `AUDIO MUTED <哪句>`（静音期间被吞掉的语音）。番茄钟与休闲的状态都只在固件里，Mac 端只记日志。
+The `READY`, `EVENT`, `TITLE` and `ERROR` lines the firmware prints are diagnostic text for verifying the on-device link, not formal device-to-Mac JSON events. In the same category are `MODE DUTY` / `POMODORO` / `LEISURE` (mode switches); `POMODORO FOCUS START` / `FOCUS END` / `BREAK START` / `BREAK END` / `PAUSED` / `RESUMED` / `STOPPED` / `BREAK SKIPPED` (Pomodoro transitions); `LEISURE ALERT` / `BORED` / `SLEEPY`, `LEISURE SKIT <name>`, `LEISURE LIGHTS OUT` / `ON` (Leisure); and `CLOCK HOUR <n>` (the received hour changed), `TALLY LOADED <count> <seconds>S DAY <date>` (the daily record restored at boot), `MUTE ON` / `OFF` (K2 long press) and `AUDIO MUTED <which line>` (a voice line swallowed while muted). Pomodoro and Leisure state lives only in the firmware; the Mac just logs it.
 
-## 设备维护：眨眼确认与语音包写入
+## Device maintenance: blink to identify and voice pack writes
 
-这些消息是 App 在操作设备本身，不算 Agent 的动静，不叫醒休闲，也不产生 `EVENT` 诊断行。
+These messages are the app operating on the device itself. They don't count as agent activity, don't wake Leisure mode, and don't produce `EVENT` diagnostic lines.
 
-`device.hello` 是 Mac 端刚连上时的一声招呼：模式、固件构建号、音色、音量只在开机或变化时才报，daemon 比设备重启得勤，不问就一直不知道。设备回四行诊断：`DISPLAY READY BUILD …`、`MODE …`、`VOICES …`、`VOLUME …`。
+`device.hello` is the Mac's greeting right after connecting: mode, firmware build number, voice and volume are otherwise reported only at boot or on change, and the daemon restarts more often than the device, so without asking it would never know. The device replies with four diagnostic lines: `DISPLAY READY BUILD …`, `MODE …`, `VOICES …`, `VOLUME …`.
 
-`device.echo` 是链路自检：设备把 `data` 字符串的长度与 CRC32 回成 `{"event":"echo","length":…,"crc":…}`，再原样回显一行 `ECHO …`，用来查串口有没有收错字节；排查 UART 桥那次就是靠它。
+`device.echo` is a link self-test: the device returns the length and CRC32 of the `data` string as `{"event":"echo","length":…,"crc":…}`, then echoes a line `ECHO …` verbatim. It's used to check whether the serial port is receiving corrupted bytes; that's how the UART bridge problem was tracked down.
 
-`device.identify` 让设备背光快闪约一秒，任何模式下都看得见；引导里用它确认连的是哪一台。设备回一行诊断 `IDENTIFY`。
+`device.identify` makes the device's backlight flash rapidly for about a second, visible in any mode; onboarding uses it to confirm which box is connected. The device replies with one diagnostic line, `IDENTIFY`.
 
-`device.volume` 调扬声器音量：`level` 是 codec 的 20 到 100，越界的值收进范围，存在设备的 NVS 里，重启不丢；不带 `level` 只是问一声。设备应用后回一行 `VOLUME <n>`（没有 codec 的板子回 `VOLUME ERROR` 再报当前值）；带 `preview: true` 时再用当前音量播一句"任务完成"，静音时和别的播报一样不出声。下限不到零：静音只在设备上长按 K2，而且有意不持久化。
+`device.volume` sets the speaker volume: `level` is the codec's 20 to 100, out-of-range values are clamped, and the value is stored in the device's NVS so it survives restarts; without `level` it's just a query. After applying it the device replies with a line `VOLUME <n>` (a board without a codec replies `VOLUME ERROR` and then reports the current value); with `preview: true` it also plays the done line at the current volume, which stays silent while muted just like any other announcement. The floor is above zero: muting happens only by long-pressing K2 on the device, and is deliberately not persisted.
 
-语音包（格式见 `firmware/main/agent_voice_pack.h`）经同一条串口写进 `voices` 分区，不复位、不用 esptool，两种接法行为一样。停等流控：Mac 每发一块就等设备回执，没有回执不发下一块。
+Voice packs (format in `firmware/main/agent_voice_pack.h`) are written into the `voices` partition over the same serial link, without resetting and without esptool; both connection types behave the same. Stop-and-wait flow control: after each chunk the Mac waits for the device's acknowledgment, and sends nothing further without one.
 
 ```json
 {"version":1,"event":"voice.begin","size":1523456}
-{"version":1,"event":"voice.chunk","seq":0,"crc":305419896,"data":"<base64，最多 672 字节原始数据>"}
+{"version":1,"event":"voice.chunk","seq":0,"crc":305419896,"data":"<base64, at most 672 bytes of raw data>"}
 {"version":1,"event":"voice.end"}
 ```
 
-设备的回执：
+The device's acknowledgments:
 
 ```json
 {"version":1,"event":"voice.ready","seq":-1}
@@ -111,13 +111,13 @@ Mac 端发往 BOX 的 CH343 UART 桥时按线速分段写（每 128 字节等它
 {"version":1,"event":"voice.error","seq":12,"message":"ESP_ERR_INVALID_CRC"}
 ```
 
-`begin` 会先等正在播的一句放完，再擦掉所需范围；`size` 是整包字节数，含 256 字节包头。块必须按 `seq` 从 0 连续到达，每块原始数据不超过 672 字节，base64 后整行仍在 1024 字节上限内；`crc` 是这一块原始字节的 CRC32（zlib 同款），设备解码后当场核对，不符就回 `voice.error` 放弃，不等到最后。包头那 256 字节留在设备内存里，`end` 时设备回读 flash 校验载荷 CRC，通过才写包头，然后重新映射并切换到新音色；任一步失败都回 `voice.error`、放弃会话，分区在固件看来是空的，播报回落到内置音色。写入期间的播报用内置音色。
+`begin` first waits for any line currently playing to finish, then erases the needed range; `size` is the whole pack's byte count, including the 256-byte header. Chunks must arrive consecutively by `seq` starting from 0, each with at most 672 bytes of raw data, so the whole line after base64 still fits within the 1024-byte limit. `crc` is the CRC32 of the chunk's raw bytes (the same as zlib's); the device checks it right after decoding and, on a mismatch, replies `voice.error` and aborts rather than waiting until the end. The 256-byte header stays in device memory; on `end` the device reads the flash back to verify the payload CRC, writes the header only if that passes, then remaps and switches to the new voice. If any step fails it replies `voice.error` and abandons the session; the firmware then sees the partition as empty and announcements fall back to the built-in voice. Announcements during a write use the built-in voice.
 
-## Stage 1 错误输出
+## Stage 1 error output
 
-| 输出 | 含义 |
+| Output | Meaning |
 | --- | --- |
-| `ERROR invalid_json` | 该行不是完整合法的 JSON |
-| `ERROR invalid_message` | 根不是 object，或缺少/误用 `version`、`event`、`title` |
-| `ERROR unsupported_version` | `version` 不是 `1` |
-| `ERROR input_too_large` | 一行超过 1024 bytes |
+| `ERROR invalid_json` | The line isn't complete, valid JSON |
+| `ERROR invalid_message` | The root isn't an object, or `version`, `event` or `title` is missing or misused |
+| `ERROR unsupported_version` | `version` isn't `1` |
+| `ERROR input_too_large` | A line exceeds 1024 bytes |

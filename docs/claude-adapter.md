@@ -1,70 +1,70 @@
-# Claude Code 实时适配器
+# Claude Code Live Adapter
 
-## 能力边界
+## Scope
 
-Claude Code 的公开生命周期 Hook 提供了 Vibe Buddy 需要的全部信息，因此适配方式与 Codex 一致：只用官方 Hook，不抓取 UI，不解析 transcript。
+Claude Code's public lifecycle hooks provide everything Vibe Buddy needs, so the approach matches Codex: use only the official hooks, don't scrape the UI, don't parse the transcript.
 
-| Claude Code Hook | Vibe Buddy 状态 |
+| Claude Code Hook | Vibe Buddy state |
 | --- | --- |
-| `UserPromptSubmit` | 工作中 |
-| `PermissionRequest` | 需要确认 |
-| `PostToolUse` | 恢复工作中 |
-| `SubagentStart` | 工作中，子 agent 独立成卡 |
-| `SubagentStop` | 该子 agent 完成 |
-| `Stop`（回复正在等待用户回答） | 需要确认 |
-| `Stop`（其他回复） | 完成 |
-| `StopFailure` | 空闲，标题为 `STOPPED`，不误报成功 |
-| `SessionEnd` | 空闲 |
+| `UserPromptSubmit` | Working |
+| `PermissionRequest` | Needs input |
+| `PostToolUse` | Back to working |
+| `SubagentStart` | Working; the subagent gets its own card |
+| `SubagentStop` | That subagent is done |
+| `Stop` (the reply is waiting for the user to answer) | Needs input |
+| `Stop` (any other reply) | Done |
+| `StopFailure` | Idle, titled `STOPPED`; not falsely reported as success |
+| `SessionEnd` | Idle |
 
-判断助手是否在等待回答的规则与 Codex 共用 [`tools/hook_filter.py`](../tools/hook_filter.py)，理由见 [ADR-0002](adr/0002-both-adapters-share-the-waiting-heuristic.md)。权限类等待不经过该规则，`PermissionRequest` 是显式事件。
+The rule for deciding whether the assistant is waiting for an answer is shared with Codex in [`hook/src/filter.rs`](../hook/src/filter.rs); see [ADR-0002](adr/0002-both-adapters-share-the-waiting-heuristic.md) for why. Permission waits don't go through that rule; `PermissionRequest` is an explicit event.
 
-## 活动身份
+## Activity identity
 
-Claude Code 的 `prompt_id` 与 Codex 的 `turn_id` 语义对齐，都标识一个 Turn。
+Claude Code's `prompt_id` lines up semantically with Codex's `turn_id`: both identify a Turn.
 
-需要注意的是**后台 agent 共享父会话的 `session_id` 与 `prompt_id`**：2026-09-14 的实测显示，子 agent 触发的 `SubagentStart`、`SubagentStop` 及其内部的工具事件，这两个字段都与父会话相同，只有 `agent_id` 不同。因此活动身份必须是 `session_id + prompt_id + agent_id`，否则并行的子 agent 会互相覆盖。
+Note that **background agents share the parent session's `session_id` and `prompt_id`**: a 2026-09-14 test showed that for the `SubagentStart` and `SubagentStop` fired by a subagent, and the tool events inside it, both fields are the same as the parent session's; only `agent_id` differs. So an activity's identity must be `session_id + prompt_id + agent_id`, or parallel subagents overwrite each other.
 
-## 与 Codex 并存
+## Coexisting with Codex
 
-两个 Adapter 写入同一个聚合器，因为设备只有一块屏幕和一只氛围小助手。任务卡标题带 Agent 前缀：Codex 为 `CX:`，Claude Code 为 `CC:`。两个 Agent 常常在同一个目录下工作，没有前缀就无法区分该切回哪个窗口。
+Both adapters write into the same aggregator, because the device has only one screen and one buddy. Task card titles carry an agent prefix: `CX:` for Codex, `CC:` for Claude Code. The two agents often work in the same directory, and without a prefix there's no way to tell which window to switch back to.
 
-前缀只能使用固件字体支持的字符：`A-Z`、`0-9` 以及 `-.:/!?>` 等少数符号。固件按单字节渲染，非 ASCII 分隔符会被拆成两个未知字形。
+The prefix may only use characters the firmware font supports: `A-Z`, `0-9` and a few symbols such as `-.:/!?>`. The firmware renders single bytes, so a non-ASCII separator would be split into two unknown glyphs.
 
-标题取自 git 项目根而非工作目录：直接用工作目录会把 `repo/tools` 显示成 `TOOLS`，把 worktree 显示成分支目录名。worktree 的 `.git` 是指回主仓库的文件，因此两种情况都能还原成同一个项目名。
+The title comes from the git project root rather than the working directory: using the working directory directly would show `repo/tools` as `TOOLS`, and a worktree as its branch directory name. A worktree's `.git` is a file pointing back to the main repository, so both cases resolve to the same project name.
 
-## K2 导航
+## K2 navigation
 
-K2 的落点取决于**运行处**：Agent 进程实际待在哪里。
+Where K2 lands depends on **where the agent runs**: where the agent process actually lives.
 
-| 运行处 | 判据 | K2 打开 |
+| Where it runs | Test | K2 opens |
 | --- | --- | --- |
-| Claude App 的 Code 会话 | 有 `CLAUDE_CODE_HOST_SESSION_ID` | `claude://code/continue?session=<桌面会话 id>` |
-| 别的应用（终端、编辑器） | `__CFBundleIdentifier` 是别人 | `open -b <那个 bundle id>` |
-| 没有宿主（SSH、后台进程） | 两者都没有 | 跳过，试下一个候选 |
+| A Code session in the Claude App | `CLAUDE_CODE_HOST_SESSION_ID` is present | `claude://code/continue?session=<desktop session id>` |
+| Another app (terminal, editor) | `__CFBundleIdentifier` is something else | `open -b <that bundle id>` |
+| No host (SSH, background process) | neither is present | skip, try the next candidate |
 
-判定在 Hook 里做，那是唯一看得见进程环境的地方；`vibebuddyd` 只做路由。Hook 上报 `surface`、`host_bundle_id` 与 `desktop_session_id` 三个派生字段，它们来自环境变量，不含用户内容。
+The decision is made in the hook, the only place that can see the process environment; `vibebuddyd` only routes. The hook reports three derived fields, `surface`, `host_bundle_id` and `desktop_session_id`; they come from environment variables and contain no user content.
 
-**桌面会话 id 由 Claude App 自己给出。** App 起的 Code 会话把它放在 `CLAUDE_CODE_HOST_SESSION_ID` 里，Hook 原样上报：
+**The desktop session id is supplied by the Claude App itself.** Code sessions started by the App put it in `CLAUDE_CODE_HOST_SESSION_ID`, and the hook reports it as is:
 
 ```text
 CLAUDE_CODE_HOST_SESSION_ID=local_44d42f48-a5cc-43c6-b95b-26407f579d39
 ```
 
-早先的做法是拿 CLI `session_id` 去 `~/Library/Application Support/Claude/claude-code-sessions/` 里按 `cliSessionId` 加 `cwd` 消歧。那条路一对多——worktree 迁移、fork、每次 `claude://resume` 导入都会多出一条桌面记录——曾经打开过一个内容停在前一天的影子会话，每按一次还把整份 5.4 MB transcript 重新导入一遍（见 `LESSONS.md`）。环境变量是 App 给的权威身份，不需要猜。索引扫描只作为旧 Hook 与旧状态文件的回退保留。
+The earlier approach took the CLI `session_id` and disambiguated by `cliSessionId` plus `cwd` in `~/Library/Application Support/Claude/claude-code-sessions/`. That mapping was one-to-many: worktree migration, forks and every `claude://resume` import each add another desktop record. It once opened a shadow session whose content stopped at the previous day, and every press re-imported the whole 5.4 MB transcript (see `LESSONS.md`). The environment variable is the authoritative identity given by the App; there's nothing to guess. The index scan is kept only as a fallback for old hooks and old state files.
 
-**终端会话不用 deeplink。** `claude://resume` 会把终端里的会话导入成 App 里的一份副本，人却还在终端里。落点改为把宿主应用拉到前台，bundle id 直接取自 `__CFBundleIdentifier`——LaunchServices 启动应用时注入，沿进程链继承到 Hook。
+**Terminal sessions don't use a deeplink.** `claude://resume` imports the terminal session into a copy inside the App, while the person is still in the terminal. Instead, the target is to bring the host app to the front, with the bundle id taken straight from `__CFBundleIdentifier`, which LaunchServices injects when it launches an app and which is inherited down the process chain to the hook.
 
-这里不认识任何具体终端：读到什么 bundle id 就打开什么。Ghostty、iTerm2、WezTerm、Terminal.app、VS Code 与 Cursor 的集成终端走的都是同一条路，换一个没见过的终端也不需要改代码。不用 `TERM_PROGRAM` 正是因为那要维护一张终端名到 bundle id 的映射表。
+Nothing here knows about any specific terminal: whatever bundle id is read gets opened. Ghostty, iTerm2, WezTerm, Terminal.app, and the integrated terminals in VS Code and Cursor all take the same path, and a terminal we've never seen needs no code change. `TERM_PROGRAM` is avoided precisely because it would require maintaining a table mapping terminal names to bundle ids.
 
-**Claude App 的内嵌终端面板是个例外**：它的 `__CFBundleIdentifier` 也是 Claude App，但那是终端场景。区分靠 `CLAUDE_CODE_HOST_SESSION_ID` 缺席——面板里的 CLI 没有它。此时按宿主处理，K2 把 Claude App 拉到前台，人就落在那个面板上。
+**The Claude App's embedded terminal panel is an exception**: its `__CFBundleIdentifier` is also the Claude App, but it is a terminal scenario. It is told apart by the absence of `CLAUDE_CODE_HOST_SESSION_ID`: the CLI in the panel doesn't have it. In that case it is treated as a host, and K2 brings the Claude App to the front, landing the person on that panel.
 
-**不看 tty。** Agent 执行工具命令用的是非交互子进程，即使宿主是终端也报 `not a tty`（2026-09-21 在 Ghostty 里跑 codex 实测）。Hook 同样是子进程，同样没有 tty。
+**Don't look at the tty.** Agents run tool commands in non-interactive subprocesses, which report `not a tty` even when the host is a terminal (tested on 2026-09-21 running codex in Ghostty). The hook is also a subprocess and has no tty either.
 
-2026-09-15 已用本机 Claude 1.52386.6 验证 `code/continue` 使目标会话的 `lastFocusedAt` 前移，且不产生任何导入日志。
+On 2026-09-15 we verified with the local Claude 1.52386.6 that `code/continue` moves the target session's `lastFocusedAt` forward and produces no import logs.
 
-## 隐私边界
+## Privacy boundary
 
-Hook 的原始载荷含 `prompt`、`tool_input`、`tool_response`、`transcript_path`、`session_title` 和 `last_assistant_message`。[`tools/claude-hook.py`](../tools/claude-hook.py) 在发送 HTTP 前只保留：
+A hook's raw payload contains `prompt`, `tool_input`, `tool_response`, `transcript_path`, `session_title` and `last_assistant_message`. Before sending HTTP, the hook ([`hook/src/claude.rs`](../hook/src/claude.rs); originally `tools/claude-hook.py`) keeps only:
 
 - `session_id`
 - `prompt_id`
@@ -73,15 +73,15 @@ Hook 的原始载荷含 `prompt`、`tool_input`、`tool_response`、`transcript_
 - `agent_id`
 - `agent_type`
 
-还有三个来自进程环境、不含用户内容的派生字段：`surface`、`host_bundle_id` 与 `desktop_session_id`（见上节）。
+There are also three derived fields that come from the process environment and contain no user content: `surface`, `host_bundle_id` and `desktop_session_id` (see the previous section).
 
-当且仅当主会话的 `Stop` 被本机规则判定为等待回答时，额外加入派生字段 `response_kind`。子 agent 的最后一段是写给父会话的报告，不是向用户提问，因此 `SubagentStop` 不做该判定。
+If and only if the main session's `Stop` is judged by the local rule to be waiting for an answer, the derived field `response_kind` is added. A subagent's last paragraph is a report to its parent session, not a question to the user, so `SubagentStop` doesn't go through that check.
 
-它只请求 `http://127.0.0.1:7331/v1/claude-hooks`，超时 0.5 秒；daemon 未运行或载荷无效时静默退出 0。
+It only requests `http://127.0.0.1:7331/v1/claude-hooks`, with a 0.5-second timeout; if the daemon isn't running or the payload is invalid, it silently exits 0.
 
-## 安装
+## Installation
 
-在 `~/.claude/settings.json`（对所有项目生效）或项目的 `.claude/settings.json` 中，为上表的八个事件配置：
+In `~/.claude/settings.json` (applies to all projects) or a project's `.claude/settings.json`, configure the eight events in the table above:
 
 ```json
 {
@@ -101,8 +101,8 @@ Hook 的原始载荷含 `prompt`、`tool_input`、`tool_response`、`transcript_
 }
 ```
 
-Hook 保持同步执行，不使用 `async`。异步会让事件乱序到达，而活动模型依赖顺序：迟到的 `PostToolUse` 会让已经结束的 Turn 复活。脚本本身 0.5 秒超时且失败静默，正常情况下往返不足 10 毫秒。`SessionEnd` 的所有 Hook 共享 1.5 秒预算，0.5 秒的上限在其中是安全的。
+Hooks stay synchronous; don't use `async`. Async would let events arrive out of order, and the activity model depends on order: a late `PostToolUse` would bring an already finished Turn back to life. The script itself has a 0.5-second timeout and fails silently; a normal round trip takes under 10 milliseconds. All `SessionEnd` hooks share a 1.5-second budget, and the 0.5-second cap is safely within it.
 
 ## vibebuddy-hook
 
-2026-09-16 起 Hook 由 Rust 二进制 `vibebuddy-hook claude` 处理（源码在 `hook/`），它的前身 `tools/claude-hook.py` 已退役，测试用例逐条搬了过去。App 把它复制到 `~/Library/Application Support/VibeBuddy/bin/vibebuddy-hook`，配置里的命令写作 `"<那个路径>" claude`；手工配置时也用这个路径，别指向 App 包内，App 挪位置会断（ADR-0005）。
+Since 2026-09-16, hooks are handled by the Rust binary `vibebuddy-hook claude` (source in `hook/`). Its predecessor `tools/claude-hook.py` is retired, and its test cases were carried over one by one. The App copies it to `~/Library/Application Support/VibeBuddy/bin/vibebuddy-hook`, and the command in the configuration is written as `"<that path>" claude`. Use this path when configuring by hand too; don't point it inside the App bundle, or it breaks when the App moves (ADR-0005).
