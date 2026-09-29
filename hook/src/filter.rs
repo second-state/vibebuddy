@@ -18,13 +18,19 @@ struct Rules {
 fn rules() -> &'static Rules {
     static RULES: OnceLock<Rules> = OnceLock::new();
     RULES.get_or_init(|| Rules {
-        question_at_end: Regex::new(r#"[?？][\s*_`'"”’。.!！]*$"#).expect("regex"),
-        question_then_reply: Regex::new(
-            r"(?is)[?？].{0,100}(?:回复|回答|确认|选择|告诉|reply|respond|confirm|choose)",
+        // Trailing markdown, quotes, punctuation, an emoji or a "(yes/no)" hint may follow the question mark.
+        question_at_end: Regex::new(
+            r#"[?？](?:[\s*_`'"”’。.!！\p{So}\p{Sk}\u{FE0F}\u{200D}]|\((?i:y(?:es)?\s*/\s*no?)\))*$"#,
         )
         .expect("regex"),
+        question_then_reply: Regex::new(
+            r"(?is)[?？].{0,100}(?:回复|回答|确认|选择|告诉|reply|respond|confirm|choose)|[?？]\s*(?:just\s+)?(?:let me know|tell me)[.!]*\s*$",
+        )
+        .expect("regex"),
+        // English "let me know" / "tell me" only asks for an answer when it names what it wants
+        // ("which…", "whether…", "your…"); "let me know if…" or a bare "just let me know" is an offer.
         direct_reply_request: Regex::new(
-            r"(?i)(?:^|[。.!！]\s*)(?:(?:请(?:你)?(?:直接)?)|直接)(?:回复|回答|确认|选择|告诉)|(?:^|[.!]\s*)(?:please\s+)?(?:reply|respond|confirm|choose)\b|\blet me know\b",
+            r"(?i)(?:^|[。.!！]\s*)(?:(?:请(?:你)?(?:直接)?)|直接)(?:回复|回答|确认|选择|告诉)|(?:^|[.!]\s*)(?:please\s+)?(?:reply|respond|confirm|choose)\b|(?:\blet me know|(?:^|[.!]\s*)(?:please\s+)?tell me)\s+(?:which|what|whether|your|how\s+you(?:'d|\s+would)?\s+(?:like|want|prefer)|how\s+to\s+proceed)\b",
         )
         .expect("regex"),
         choice_list: Regex::new(r"(?m)^\s*(?:[-*]|\d+[.)])\s+").expect("regex"),
@@ -90,6 +96,42 @@ mod tests {
     fn an_optional_offer_is_not_a_request() {
         assert!(!requires_user_input(Some("如果你还需要调整配色，可以告诉我。")));
         assert!(!requires_user_input(Some("修复完成。If you need anything else, let me know.")));
+    }
+
+    #[test]
+    fn english_questions_wait() {
+        for message in [
+            "Should I go with A or B?",
+            "Want me to push and open the PR?",
+            "Before I continue, can you confirm the database name is `prod`?",
+            "Should I proceed?**",
+            "Do you want me to proceed? (yes/no)",
+            "Want me to go ahead? 🙂",
+            "Should I continue? Let me know.",
+            "Let me know which option you'd like.",
+            "Tell me which file to start with.",
+            "Please confirm before I delete these files.",
+            "I've drafted two options:\n\n- A: faster\n- B: simpler\n\nWhich do you prefer?",
+        ] {
+            assert!(requires_user_input(Some(message)), "{message:?}");
+        }
+    }
+
+    #[test]
+    fn english_sign_offs_are_not_requests() {
+        for message in [
+            "Done. All tests pass.",
+            "Fixed the bug in `parser.rs`. Let me know if you need anything else.",
+            "The PR is open. Let me know if you'd like any changes.",
+            "Let me know if you have any questions!",
+            "Happy to help further — just let me know!",
+            "Let me know how it goes.",
+            "If you want, I can also add tests. Just let me know.",
+            "I'll let you know when it's done.",
+            "Why did it fail? The config was missing a key. I fixed it and the build passes now.",
+        ] {
+            assert!(!requires_user_input(Some(message)), "{message:?}");
+        }
     }
 
     #[test]
