@@ -1,80 +1,145 @@
-Vibe Buddy (formerly VibeBuddy) is a physical status terminal for local AI agents and long-running tasks.
-
 # Vibe Buddy
 
-Vibe Buddy（原名 VibeBuddy，仓库、`vibebuddyd` 与 Vibe Buddy Protocol 沿用旧名）是运行在 ESP32-S3 盒子里的实体 Agent 宠物。原创角色“氛围小助手”用动画、任务卡片和短语音呈现本地 AI Agent 与长任务的状态；Codex 是第一个适配器，但设备协议不绑定某个客户端。
+Vibe Buddy is a desk pet for your AI coding agents. It lives in a small ESP32-S3 box next to your keyboard and keeps an eye on Codex, Claude Code and your GitHub Actions runs, so you don't have to. When an agent needs you, finishes, or fails, the buddy tells you with an animation, a task card and a short spoken line.
 
-## 当前状态
+The buddy is an original character. Codex was the first agent it supported, but the device protocol isn't tied to any one client: any local program or script can send it events.
 
-**Stage 4 — 氛围小助手显示与语音已通过实机验收，Codex、Claude Code 与 GitHub Actions 均已接入。** 它们的事件都经 `vibebuddyd` 和 USB Serial/JTAG 到达盒子，并共享同一个任务卡栈。氛围小助手支持空闲、工作中、需要确认、完成、失败和失联；最多显示 3 张任务卡，最新在最上，每张卡显示它在当前状态里待了多久；需要确认、完成和失败各播报一次短语音，工作中保持安静；空闲时轮播当日战绩并偶尔做个小动作。
+(The project used to be called VibeBuddy; the repository, the `vibebuddyd` daemon and the Vibe Buddy Protocol keep that name.)
 
-氛围小助手有三个模式。**值班**是默认：盯着 Agent，有事叫你。**番茄钟**给你计时（专注 25 分钟、休息 5 分钟）：K0 开始、暂停、继续，长按放弃；K1 在值班与番茄钟之间切换；K2 照旧打开来源，长按静音；阶段结束响铃并播报，下一阶段等你按 K0 再开始；今天完成了几次、专注了多久记在面板上，按日清零，重启不丢。**休闲**是值班空闲够久之后它自己去玩：五分钟后开始演小剧目（巡逻、踢球、看书、数星星、躲猫猫、被自己吓醒、梦话），半小时后困了转暗睡觉，夜里睡够 90 分钟关背光；Agent 一有动静或按任何键立刻回来值班。番茄钟与休闲的状态都在固件里，不依赖 Mac 端。设计见 [`docs/pomodoro.md`](docs/pomodoro.md) 与 [`docs/leisure.md`](docs/leisure.md)。
+## What it does
 
-## 目标架构
+- **Watches your agents.** Codex, Claude Code and GitHub Actions all feed the same stack of up to three task cards, newest on top. Each card shows which agent it is (`CX:` Codex, `CC:` Claude Code, `CI:` GitHub Actions), the session's name and the project, and how long it has been in its current state.
+- **Speaks up only when it matters.** The buddy shows idle, working, needs input, done, failed and disconnected. It says one short line when an agent needs your input, finishes or fails, and stays quiet while agents work.
+- **Keeps today's stats.** When nothing is going on it cycles through what got done today and now and then does a little something.
+
+It has three modes:
+
+- **On duty** (the default): watches your agents and calls you when something happens.
+- **Pomodoro**: a focus timer, 25 minutes of focus and 5 of break. K0 starts, pauses and resumes, and a long press gives up; K1 switches between On duty and Pomodoro; K2 still takes you to the agent's window, and a long press mutes. Each phase ends with a chime and a spoken line, and the next one waits for you to press K0. Today's finished sessions and focus time are kept on the box, reset daily, and survive a restart.
+- **Leisure**: after On duty has been idle long enough, the buddy goes off to play. After five minutes it starts little skits (patrolling, kicking a ball, reading, counting stars, hide-and-seek, startling itself awake, talking in its sleep); after half an hour it gets sleepy and dims; at night, after 90 minutes of sleep, it turns the backlight off. Any agent activity or button press brings it straight back on duty.
+
+Pomodoro and Leisure run entirely on the box and don't need the Mac. Design notes: [`docs/pomodoro.md`](docs/pomodoro.md) and [`docs/leisure.md`](docs/leisure.md).
+
+**Status:** the display and voice have passed on-device acceptance, and Codex, Claude Code and GitHub Actions are all connected. See [`docs/roadmap.md`](docs/roadmap.md) for what's next.
+
+> Most design docs under `docs/` are still in Chinese and are being translated.
+
+## What you need
+
+- **The box:** ALIENTEK ATK-DNESP32S3-BOX V1.1 (ESP32-S3, 16 MB flash, 8 MB PSRAM), with LCD, speaker and three buttons. One USB-C cable powers it, flashes it and carries events. Hardware notes: [`docs/hardware.md`](docs/hardware.md).
+- **A Mac** with Apple silicon and macOS 14 or later.
+- **At least one agent:** Codex or Claude Code. GitHub Actions support uses the `gh` CLI you're already signed in to.
+
+## Getting started
+
+1. Download `VibeBuddy-<version>-arm64.dmg` from the [latest release](https://github.com/longzhi/vibe-buddy/releases/latest) and drag Vibe Buddy to Applications.
+2. Plug the box into the Mac.
+3. Open Vibe Buddy. First-run setup walks you through:
+   - finding the box (it blinks so you know it's the right one);
+   - connecting Codex and Claude Code (you see the exact change to their hook config before it's written);
+   - picking an announcement voice and writing it to the box;
+   - launching at login.
+
+After that Vibe Buddy lives in the menu bar. Its icon tells you whether the box is online, which mode it's in and how much got done today. Settings has five tabs: General, Sound, Agents, Device (firmware updates, screenshots) and Advanced. If the box's firmware differs from the one bundled with the app, Settings → Device offers to update it.
+
+If a release isn't signed yet, macOS blocks the first launch; allow it under System Settings → Privacy & Security.
+
+## How it works
 
 ```text
-Local Programs / Agents / Codex / Scripts
+Local programs / agents / Codex / scripts
                 |
-                | HTTP / Unix Socket
+                | HTTP / Unix socket
                 v
              vibebuddyd
                 |
-                | Transport abstraction
+                | transport abstraction
                 v
           USB Serial / USB CDC
                 |
                 v
-           ESP32S3-BOX
+           ESP32-S3 box
                 |
-      LCD / Speaker / Buttons
+      LCD / speaker / buttons
 ```
 
-- `vibebuddyd`：本机守护进程，负责事件接入、设备连接、重连、路由和状态。
-- `beacon`：只调用 `vibebuddyd` 的命令行客户端，不直接占用串口。
-- `vibebuddy-fw`：ESP32-S3 固件，仅负责设备 I/O 和 Vibe Buddy Protocol 消息处理。
-- Vibe Buddy Protocol：与 transport 解耦的可扩展 NDJSON 协议。
+- `vibebuddyd`: the local daemon. It takes in events, connects to the box, reconnects, routes and keeps state.
+- `beacon`: a command-line client that only talks to `vibebuddyd` and never opens the serial port itself (planned).
+- `vibebuddy-fw`: the ESP32-S3 firmware. It only handles device I/O and Vibe Buddy Protocol messages.
+- Vibe Buddy Protocol: an extensible NDJSON protocol, independent of the transport.
 
-更完整的边界与决定见 [`docs/architecture.md`](docs/architecture.md)，领域词汇见 [`CONTEXT.md`](CONTEXT.md)，氛围小助手设计见 [`docs/pet.md`](docs/pet.md)，番茄钟见 [`docs/pomodoro.md`](docs/pomodoro.md)，休闲模式见 [`docs/leisure.md`](docs/leisure.md)，Codex 接入见 [`docs/codex-adapter.md`](docs/codex-adapter.md)，CI 接入见 [`docs/ci.md`](docs/ci.md)，协议决定见 [`docs/protocol.md`](docs/protocol.md)，阶段门禁见 [`docs/roadmap.md`](docs/roadmap.md)，外部项目的借鉴边界见 [`docs/references.md`](docs/references.md)。
+### Agents
 
-## Stage 0 USB 探测
+Codex and Claude Code connect through local hooks. Both feed the same aggregator, and the task card's first line is the name the agent gave the session (the Claude app's conversation title, or Codex's thread name or branch), with the project name on the second line. Without a session name the project name goes first. The project name comes from the git root, so working in a subdirectory or worktree still shows the project.
 
-在开发板未连接和已连接两种状态下分别运行：
+The hook is a Rust binary in [`hook/`](hook/) (`vibebuddy-hook codex` / `vibebuddy-hook claude`). The app copies it to `~/Library/Application Support/VibeBuddy/bin/` and writes it into your user-level config, so it needs no Python and keeps working if you move the app (ADR-0005).
+
+- Codex: six events in `~/.codex/hooks.json`. After they're written, review and trust them once on Codex's `/hooks` page. See [`docs/codex-adapter.md`](docs/codex-adapter.md).
+- Claude Code: eight events in `~/.claude/settings.json`. See [`docs/claude-adapter.md`](docs/claude-adapter.md).
+
+**Privacy:** the hook only forwards session and turn IDs, event names and the working directory. It never forwards prompts, assistant replies, transcripts or tool results. Both agents share the same rule for deciding whether the assistant is waiting for your answer.
+
+### GitHub Actions
+
+GitHub Actions doesn't use a hook: `vibebuddyd` polls `gh run list` every 30 seconds, using your existing GitHub login. **There's nothing to configure.** The repositories to watch are the projects an agent worked in during the last hour, and `owner/repo` is read from the `origin` remote in `.git/config`. See [`docs/ci.md`](docs/ci.md).
+
+### Sending your own events
+
+Anything that can make an HTTP request can put a card on the box:
 
 ```bash
-./tools/detect-device.sh baseline
-./tools/detect-device.sh connected
-diff -ru .probe/baseline .probe/connected
+curl -H 'content-type: application/json' \
+  --data '{"version":1,"event":"task.done","title":"Hello"}' \
+  http://127.0.0.1:7331/v1/events
 ```
 
-探测结果可能包含本机 USB 设备标识。`.probe/` 默认不纳入 Git。
+See [`docs/protocol.md`](docs/protocol.md) for the events.
 
-## Stage 1 固件
+## Development
 
-固件是 Rust（esp-hal + embassy，no_std），分两层：[`firmware-rs/core`](firmware-rs/core) 放所有不碰硬件的逻辑，[`firmware-rs/device`](firmware-rs/device) 只做硬件胶水。取舍见 [ADR-0006](docs/adr/0006-firmware-in-rust-with-esp-hal.md)，第一次上机的验收步骤见 [`docs/firmware-bringup.md`](docs/firmware-bringup.md)。
+Everyday tasks live in the [`justfile`](justfile); run `just` to list them. The docs to start with are [`docs/architecture.md`](docs/architecture.md) (boundaries and decisions), [`CONTEXT.md`](CONTEXT.md) (domain terms), [`docs/pet.md`](docs/pet.md) (the buddy's design), [`docs/protocol.md`](docs/protocol.md) (protocol decisions), [`docs/references.md`](docs/references.md) (what we borrow from other projects, and where we stop) and [`LESSONS.md`](LESSONS.md) (lessons learned).
 
-先装一次 Xtensa 工具链与 espflash：
+### Repository layout
+
+```text
+app/       # the macOS menu bar app (SwiftPM)
+daemon/    # vibebuddyd
+hook/      # vibebuddy-hook, the Codex and Claude Code hook
+protocol/  # Vibe Buddy Protocol types and codec
+firmware-rs/  # vibebuddy-fw in Rust: core (no hardware) and device (hardware glue)
+firmware/  # the previous C firmware (ESP-IDF), kept as a fallback
+voices/    # announcement voices, one directory per voice
+docs/      # architecture, protocol, hardware evidence, roadmap
+tools/     # detection, flashing and asset scripts
+```
+
+### Firmware
+
+The firmware is Rust (esp-hal + embassy, `no_std`) in two layers: [`firmware-rs/core`](firmware-rs/core) holds all the logic that doesn't touch hardware, and [`firmware-rs/device`](firmware-rs/device) is only hardware glue. The reasoning is in [ADR-0006](docs/adr/0006-firmware-in-rust-with-esp-hal.md), and the first on-device acceptance steps are in [`docs/firmware-bringup.md`](docs/firmware-bringup.md).
+
+Install the Xtensa toolchain and espflash once:
 
 ```bash
 cargo install espup espflash --locked
 espup install --targets esp32s3
 ```
 
-连接 ATK-DNESP32S3-BOX V1.1 的 `USB-SLAVE` 口后执行：
+Connect the box's `USB-SLAVE` port, then:
 
 ```bash
 just flash /dev/cu.usbmodem8401
 uv run --with pyserial python tools/serial-hello.py /dev/cu.usbmodem8401
 ```
 
-`just flash` 先构建三件套（bootloader、分区表、app）再用 espflash 写入，`voices` 分区与设置区不动，换固件不丢音色。
+`just flash` builds the three images (bootloader, partition table, app) and writes them with espflash. It leaves the `voices` partition and the settings area alone, so changing firmware keeps your voice.
 
-烧录前可以在 Mac 上验证固件里不依赖硬件的部分：`just test-firmware` 跑 firmware-core 的测试（状态机、绘制、串口协议、存储、codec 序列），并把 Rust 与 C 两份固件的画面逐像素比对。
+Before flashing you can check the hardware-independent parts on the Mac: `just test-firmware` runs the firmware-core tests (state machine, drawing, serial protocol, storage, codec sequences) and compares the Rust and C firmware's screens pixel by pixel.
 
-固件使用 [`firmware/partitions.csv`](firmware/partitions.csv) 的自定义分区表（app 分区 4 MB），因为语音资产已经装不进默认的 1 MB。espflash 解析不了其中 `voices` 分区的自定义子类型，所以分区表由 [`tools/make-partition-table.py`](tools/make-partition-table.py) 编译，结果与 ESP-IDF 的 `gen_esp32part.py` 逐字节一致。
+The firmware uses the custom partition table in [`firmware/partitions.csv`](firmware/partitions.csv) (a 4 MB app partition), because the voice assets no longer fit in the default 1 MB. espflash can't parse the custom subtype of the `voices` partition, so [`tools/make-partition-table.py`](tools/make-partition-table.py) compiles the table; the result matches ESP-IDF's `gen_esp32part.py` byte for byte.
 
-C 固件（`firmware/`，ESP-IDF）在 Rust 版实机验收完成前保留作退路：`just flash-c /dev/cu.usbmodem8401` 刷回去。
+The C firmware (`firmware/`, ESP-IDF) stays as a fallback until the Rust firmware finishes on-device acceptance: `just flash-c /dev/cu.usbmodem8401` flashes it back.
 
-设备若只接着 BOX 的 `UART` 口（CH343 桥，`/dev/cu.usbmodem5909…`），不要用 `just flash`：那条路在默认写块下会把 flash 擦掉后写不进去。用 [`tools/flash-bridge.sh`](tools/flash-bridge.sh)，它以 `--no-stub` 加 256 字节写块烧录，先单独写分区表试路，再写 app：
+If the box is only connected through its `UART` port (the CH343 bridge, `/dev/cu.usbmodem5909…`), don't use `just flash`: with the default write block size it erases flash and then fails to write. Use [`tools/flash-bridge.sh`](tools/flash-bridge.sh), which flashes with `--no-stub` and 256-byte blocks, writing the partition table first as a test and then the app:
 
 ```bash
 launchctl bootout gui/$(id -u)/com.vibebuddy.vibebuddyd
@@ -84,69 +149,51 @@ tools/build-firmware.sh
 launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.vibebuddy.vibebuddyd.plist
 ```
 
-`just flash` 会覆盖当前固件。2026-09-14 的原厂 `xiaozhi` 1.9.4 整片备份保存在本机 `.probe/factory/`，权限为 `600`，不会提交到 Git。
+`just flash` overwrites whatever firmware is on the box, including the factory `xiaozhi` firmware. Back it up first if you might want it back.
 
-## Vibe Buddy App
-
-Mac 端的图形界面是一个菜单栏 App，它把 `vibebuddyd` 与 `vibebuddy-hook` 带在身上并看管 daemon，取代了 LaunchAgent。装包：
+To find the box's serial port, run the probe once with the box unplugged and once plugged in:
 
 ```bash
-just firmware   # 固件三件套，Release 装包要附带；build-app.sh --debug 可以不带
-just install    # 装包、装进 /Applications 并启动
+./tools/detect-device.sh baseline
+./tools/detect-device.sh connected
+diff -ru .probe/baseline .probe/connected
 ```
 
-日常操作都收在根目录的 [`justfile`](justfile) 里，`just` 列出全部。
+The results can include your machine's USB device identifiers, so `.probe/` is ignored by Git.
 
-首次启动走引导：找盒子（眨眼确认）、接入 Codex 与 Claude Code（写 Hook 配置前展示差异）、挑播报音色写进盒子、登录时启动。之后菜单栏图标回答"盒子在线吗、什么模式、今天干了多少"，设置窗五页管通用、声音、接入、设备（固件更新、截图）、高级。发现旧的 LaunchAgent 会提议卸掉并接管。设计见 [`docs/app.md`](docs/app.md)。
+### The app
 
-App 用 SwiftPM 构建，只需要命令行工具；`swift run --package-path app SelfTest` 跑视图模型的自检。
+The Mac app is a menu bar app. It carries `vibebuddyd` and `vibebuddy-hook` inside its bundle and supervises the daemon, replacing the old LaunchAgent. If it finds the old LaunchAgent, it offers to remove it and take over. Design: [`docs/app.md`](docs/app.md).
 
-发布由 CI 完成，见 [`release-app`](.github/workflows/release-app.yml)：在 Linux 上构建固件、在 Apple 芯片的 runner 上跑测试、装包、用 `app/scripts/make-dmg.sh` 打成 DMG。main 上动到装包内容（`app/`、`daemon/`、`hook/`、`protocol/`、`firmware/`、`voices/`）的提交只出一个保留 7 天的 artifact 供自测；打 `vX.Y.Z` 标签才公证并发 GitHub Release，标签必须与 `Cargo.toml` 的 `version` 一致，否则构建失败。发版一条命令：在干净的 main 上 `just release 0.2.0`，它改 `Cargo.toml`、提交、打标签、推送。同一次发布还挂一个 `VibeBuddy-firmware-vX.Y.Z.zip`（固件三件套加 `build.txt`），拿到它的人在设置 → 设备「从文件刷入…」里选它即可烧进盒子。目前只出 arm64。仓库配齐五个签名 secrets 后用 Developer ID 签名并公证，下载即可打开；没配时退回 ad-hoc 签名，首次打开要在「隐私与安全性」里放行。secrets 用 [`tools/setup-release-signing.sh`](tools/setup-release-signing.sh) 配：它带着走完申请证书、打包 p12、生成 App 专用密码，并逐项验证后写进 GitHub。
+```bash
+just firmware   # the three firmware images; a Release build needs them, build-app.sh --debug doesn't
+just install    # build the app, install it to /Applications and launch it
+```
 
-## Stage 2 daemon
+The app builds with SwiftPM and only needs the command-line tools. `swift run --package-path app SelfTest` runs the view-model self-test.
 
-启动 `vibebuddyd`：
+### The daemon
+
+Run `vibebuddyd` on its own:
 
 ```bash
 cargo run -p vibebuddyd
 ```
 
-默认只监听 `127.0.0.1:7331`，并按 Espressif USB Serial/JTAG 的 `VID:PID 303A:1001` 自动发现设备。发送事件：
+By default it only listens on `127.0.0.1:7331` and finds the box by its Espressif USB Serial/JTAG ID, `VID:PID 303A:1001`. `VIBEBUDDY_BIND` changes the listen address, `VIBEBUDDY_SERIAL_PORT` names a serial port explicitly, and `VIBEBUDDY_USB_SERIAL` picks one box among several identical ones. HTTP `202 Accepted` means the event entered the bounded send queue; whether the box actually received it is what the daemon logs from the box's reply.
 
-```bash
-curl -H 'content-type: application/json' \
-  --data '{"version":1,"event":"task.done","title":"Hello"}' \
-  http://127.0.0.1:7331/v1/events
-```
+The app normally supervises the daemon. On a development machine without the app you can install it as a LaunchAgent with [`packaging/com.vibebuddy.vibebuddyd.plist`](packaging/com.vibebuddy.vibebuddyd.plist), but don't run both: they'd fight over the serial port. For the app, the daemon also serves `GET /v1/status`, SSE `/v1/status/stream`, `/v1/config`, `/v1/device/{identify,screenshot,voice-pack,firmware}` and `/v1/daemon/restart`.
 
-可用 `VIBEBUDDY_BIND` 修改监听地址、`VIBEBUDDY_SERIAL_PORT` 显式指定串口，或用 `VIBEBUDDY_USB_SERIAL` 在多块相同设备中选择目标。HTTP `202 Accepted` 表示事件进入有界发送队列；设备实际接收结果以 daemon 记录的设备响应为准。
+When sending through the box's CH343 UART bridge, the daemon writes in line-rate chunks: the bridge can't take more than about two hundred bytes of continuous data and garbles the content without changing its length. The native USB port doesn't have this problem. See [`LESSONS.md`](LESSONS.md).
 
-daemon 由 Vibe Buddy App 看管（见上）。没有 App 的开发机可以用 [`packaging/com.vibebuddy.vibebuddyd.plist`](packaging/com.vibebuddy.vibebuddyd.plist) 装成 LaunchAgent，但两者不能同时跑，会抢串口。App 还提供 `GET /v1/status`、SSE `/v1/status/stream`、`/v1/config`、`/v1/device/{identify,screenshot,voice-pack,firmware}` 与 `/v1/daemon/restart`。
+### Releases
 
-经 BOX 的 CH343 UART 桥发送时 daemon 按线速分段写：这条桥一次吞不下超过两百字节的连续数据，会把内容错位而长度不变；原生 USB 口不受影响。教训见 [`LESSONS.md`](LESSONS.md)。
+CI builds releases; see [`release-app`](.github/workflows/release-app.yml). It builds the firmware on Linux, runs the tests on an Apple silicon runner, assembles the app and packs it into a DMG with `app/scripts/make-dmg.sh`.
 
-## Agent 接入
+- Commits on main that touch what goes into the app (`app/`, `daemon/`, `hook/`, `protocol/`, `firmware/`, `voices/`) only produce a test artifact kept for 7 days.
+- A `vX.Y.Z` tag notarizes the app and publishes a GitHub Release. The tag must match `version` in `Cargo.toml`, or the build fails.
+- Releasing is one command on a clean main: `just release 0.2.0` updates `Cargo.toml`, commits, tags and pushes.
+- Each release also carries `VibeBuddy-firmware-vX.Y.Z.zip` (the three firmware images plus `build.txt`). Anyone with it can flash a box from Settings → Device → Flash from file….
+- Only arm64 builds are published for now.
 
-Codex 与 Claude Code 都由本机 Hook 接入，各有一个隐私过滤脚本，两者写入同一个聚合器。任务卡标题带 Agent 前缀：Codex 为 `CX:`，Claude Code 为 `CC:`。第一行写 Agent 自己给会话起的名字（Claude App 的会话标题、Codex 的线程名或分支），第二行写项目名；会话没有名字时第一行就是项目名。项目名取自 git 项目根，因此在子目录或 worktree 中工作时显示的仍是项目名。
-
-Hook 是一个 Rust 二进制 [`hook/`](hook/)（`vibebuddy-hook codex` / `vibebuddy-hook claude`），App 把它复制到 `~/Library/Application Support/VibeBuddy/bin/` 并写进用户级配置；不依赖 python3，App 挪位置也不断（ADR-0005）。
-
-- Codex：`~/.codex/hooks.json` 的六个事件，写入后要在 Codex 的 `/hooks` 页面审查、信任；详见 [`docs/codex-adapter.md`](docs/codex-adapter.md)。
-- Claude Code：`~/.claude/settings.json` 的八个事件；详见 [`docs/claude-adapter.md`](docs/claude-adapter.md)。
-
-它只抽取会话与回合标识、事件名和工作目录，不转发 prompt、助手回复、transcript 或工具结果；判断助手是否在等待回答的规则两个 Agent 共用。它的前身是两个 Python 脚本，已退役；配置还指着旧路径的机器，App 启动时会把自己写的条目换成新路径。
-
-## CI 接入
-
-GitHub Actions 不走 Hook，由 `vibebuddyd` 每 30 秒用 `gh run list` 主动轮询，沿用你已有的 GitHub 登录。**不需要配置**：关注哪些仓库由 Agent 最近一小时工作过的项目自动推导，`owner/repo` 从 `.git/config` 的 `origin` 远端读出。任务卡前缀为 `CI:`，详见 [`docs/ci.md`](docs/ci.md)。
-
-## 仓库布局
-
-```text
-daemon/    # vibebuddyd；Stage 2 开始实现
-cli/       # beacon；Stage 6 开始实现
-protocol/  # Vibe Buddy Protocol 类型与编解码
-firmware/  # vibebuddy-fw
-docs/      # 架构、协议、硬件证据和路线图
-tools/     # 探测与烧录辅助脚本
-```
+With the five signing secrets set on the repository, releases are signed with a Developer ID and notarized, so they open straight after download. Without them the build falls back to ad-hoc signing, and the first launch has to be allowed under Privacy & Security. [`tools/setup-release-signing.sh`](tools/setup-release-signing.sh) sets the secrets up: it walks you through requesting the certificate, packing the p12 and creating an app-specific password, then checks each one before writing it to GitHub.
