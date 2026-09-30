@@ -24,6 +24,8 @@ Hardware result (2026-09-14): with the timeouts temporarily shortened to seconds
 
 Codex hooks don't provide a structured field saying "this assistant reply asks the user to answer". `Stop` provides `last_assistant_message`; the privacy-filter script checks, locally only, whether the last paragraph contains an explicit question or a request for a reply, and then emits `response_kind: input_required`. This is a conservative text rule, not a remote semantic analysis of the reply body.
 
+The English waiting heuristic shared by both adapters ignores Markdown emphasis markers in optional sign-offs and trailing punctuation or emoji without textual content: `**Let me know** if you need anything else.`, `Just let me know…` and `Just let me know :)` do not require input. Formatted concrete requests still require input.
+
 ## K2 navigation and where the agent runs
 
 Where K2 lands depends on where the agent runs; the rules are shared with Claude Code (see [`claude-adapter.md`](claude-adapter.md#k2-navigation)):
