@@ -10,6 +10,8 @@ struct Rules {
     question_at_end: Regex,
     question_then_reply: Regex,
     direct_reply_request: Regex,
+    english_ask: Regex,
+    english_sign_off: Regex,
     choice_list: Regex,
     optional_offer: Regex,
     paragraph_break: Regex,
@@ -27,10 +29,20 @@ fn rules() -> &'static Rules {
             r"(?is)[?？].{0,100}(?:回复|回答|确认|选择|告诉|reply|respond|confirm|choose)|[?？]\s*(?:just\s+)?(?:let me know|tell me)[.!]*\s*$",
         )
         .expect("regex"),
-        // English "let me know" / "tell me" only asks for an answer when it names what it wants
-        // ("which…", "whether…", "your…"); "let me know if…" or a bare "just let me know" is an offer.
         direct_reply_request: Regex::new(
-            r"(?i)(?:^|[。.!！]\s*)(?:(?:请(?:你)?(?:直接)?)|直接)(?:回复|回答|确认|选择|告诉)|(?:^|[.!]\s*)(?:please\s+)?(?:reply|respond|confirm|choose)\b|(?:\blet me know|(?:^|[.!]\s*)(?:please\s+)?tell me)\s+(?:which|what|whether|your|how\s+you(?:'d|\s+would)?\s+(?:like|want|prefer)|how\s+to\s+proceed)\b",
+            r"(?i)(?:^|[。.!！]\s*)(?:(?:请(?:你)?(?:直接)?)|直接)(?:回复|回答|确认|选择|告诉)|(?:^|[.!]\s*)(?:please\s+)?(?:reply|respond|confirm|choose)\b",
+        )
+        .expect("regex"),
+        // English "let me know" / "tell me" and the rest of its sentence. It asks for an answer
+        // ("let me know the database name") unless the rest is a sign-off, see english_sign_off.
+        english_ask: Regex::new(
+            r"(?i)(?:\blet me know|(?:^|[.!]\s*)(?:please\s+|just\s+)?tell me)\b([^.!?\n]*)",
+        )
+        .expect("regex"),
+        // What follows "let me know" in an offer: nothing ("just let me know!"), "if…", "when…",
+        // "how it goes", "what you think". Chinese offers are covered by optional_offer instead.
+        english_sign_off: Regex::new(
+            r"(?i)^[\s\p{So}\p{Sk}\u{FE0F}\u{200D})]*$|^\s*(?:if|when|whenever|anytime|any\s+time|how\s+(?:it|that|this|things)\s+go(?:es)?|what\s+you\s+think|your\s+thoughts)\b",
         )
         .expect("regex"),
         choice_list: Regex::new(r"(?m)^\s*(?:[-*]|\d+[.)])\s+").expect("regex"),
@@ -65,13 +77,21 @@ pub fn requires_user_input(message: Option<&str>) -> bool {
     {
         return true;
     }
-    if rules.direct_reply_request.is_match(final_paragraph) {
+    if rules.direct_reply_request.is_match(final_paragraph) || asks_in_english(rules, final_paragraph) {
         return !rules.optional_offer.is_match(final_paragraph);
     }
     if paragraphs.len() >= 2 && rules.choice_list.is_match(final_paragraph) {
         return rules.question_at_end.is_match(paragraphs[paragraphs.len() - 2]);
     }
     false
+}
+
+/// A "let me know" / "tell me" that names what it needs, as opposed to a sign-off.
+fn asks_in_english(rules: &Rules, paragraph: &str) -> bool {
+    rules
+        .english_ask
+        .captures_iter(paragraph)
+        .any(|ask| !rules.english_sign_off.is_match(&ask[1]))
 }
 
 #[cfg(test)]
@@ -109,6 +129,11 @@ mod tests {
             "Want me to go ahead? 🙂",
             "Should I continue? Let me know.",
             "Let me know which option you'd like.",
+            "Let me know the database name so I can continue.",
+            "Let me know who should receive the report.",
+            "Let me know how to configure the credentials before I continue.",
+            "Let me know once you've pasted the key.",
+            "Tell me the path to the config file.",
             "Tell me which file to start with.",
             "Please confirm before I delete these files.",
             "I've drafted two options:\n\n- A: faster\n- B: simpler\n\nWhich do you prefer?",
@@ -126,6 +151,8 @@ mod tests {
             "Let me know if you have any questions!",
             "Happy to help further — just let me know!",
             "Let me know how it goes.",
+            "Let me know what you think.",
+            "Let me know when you're ready.",
             "If you want, I can also add tests. Just let me know.",
             "I'll let you know when it's done.",
             "Why did it fail? The config was missing a key. I fixed it and the build passes now.",
