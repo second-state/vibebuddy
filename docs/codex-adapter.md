@@ -24,6 +24,8 @@ Codex 被强制结束时不会发送 `SessionEnd`，因此活动还必须能自�
 
 Codex Hook 没有直接提供“这条助手回复是否要求用户回答”的结构化字段。`Stop` 会提供 `last_assistant_message`，隐私过滤脚本仅在本机检查最后一段是否包含明确问题或回复指令，然后生成 `response_kind: input_required`。这是保守的文本规则，不是对回复正文做远端语义分析。
 
+两个 Adapter 共用的英文等待判定会忽略客套结尾中的 Markdown 强调标记，以及不含文字内容的尾随标点或表情：`**Let me know** if you need anything else.`、`Just let me know…` 和 `Just let me know :)` 不要求输入；带格式的明确请求仍要求输入。
+
 ## K2 导航与运行处
 
 K2 的落点取决于运行处，规则与 Claude Code 共用一套（见 [`claude-adapter.md`](claude-adapter.md#k2-导航)）：

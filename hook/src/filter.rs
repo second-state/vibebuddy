@@ -41,8 +41,9 @@ fn rules() -> &'static Rules {
         .expect("regex"),
         // What follows "let me know" in an offer: nothing ("just let me know!"), "if…", "when…",
         // "how it goes", "what you think". Chinese offers are covered by optional_offer instead.
+        // Emphasis markers before an offer, and punctuation or emoji alone, do not request input.
         english_sign_off: Regex::new(
-            r"(?i)^[\s\p{So}\p{Sk}\u{FE0F}\u{200D})]*$|^\s*(?:if|when|whenever|anytime|any\s+time|how\s+(?:it|that|this|things)\s+go(?:es)?|what\s+you\s+think|your\s+thoughts)\b",
+            r"(?i)^[\s\p{P}\p{So}\p{Sk}\u{FE0F}\u{200D}]*$|^[\s*_`]*(?:if|when|whenever|anytime|any\s+time|how\s+(?:it|that|this|things)\s+go(?:es)?|what\s+you\s+think|your\s+thoughts)\b",
         )
         .expect("regex"),
         choice_list: Regex::new(r"(?m)^\s*(?:[-*]|\d+[.)])\s+").expect("regex"),
@@ -158,6 +159,27 @@ mod tests {
             "Why did it fail? The config was missing a key. I fixed it and the build passes now.",
         ] {
             assert!(!requires_user_input(Some(message)), "{message:?}");
+        }
+    }
+
+    #[test]
+    fn english_sign_offs_ignore_formatting_and_punctuation() {
+        for message in [
+            "All done. **Let me know** if you need anything else.",
+            "All done. _Let me know_ if you need anything else.",
+            "All done. `Let me know` if you need anything else.",
+            "Done. Just let me know…",
+            "Done. Just let me know :)",
+            "Done. **Just let me know**",
+        ] {
+            assert!(!requires_user_input(Some(message)), "{message:?}");
+        }
+        for message in [
+            "Let me know **the database name** so I can continue.",
+            "Let me know _who should receive the report_.",
+            "Should I continue? 🙂",
+        ] {
+            assert!(requires_user_input(Some(message)), "{message:?}");
         }
     }
 
