@@ -8,6 +8,18 @@ The buddy is an original character. Codex was the first agent it supported, but 
 
 (The project used to be called VibeBuddy; the repository, the `vibebuddyd` daemon and the Vibe Buddy Protocol keep that name.)
 
+## On the box
+
+Screen captures from a real box running the Rust firmware, with example task names and daily stats.
+
+| Working | Input required |
+| --- | --- |
+| ![Working on a firmware build](docs/images/device-working.png) | ![Waiting for a review while another agent works](docs/images/device-input-required.png) |
+| **Done** | **Failed** |
+| ![A completed App test run](docs/images/device-done.png) | ![A failed App test run](docs/images/device-failed.png) |
+| **Ready** | **Multiple agents** |
+| ![The buddy waiting for activity](docs/images/device-ready.png) | ![Claude Code, Codex and CI tasks on the same screen](docs/images/device-multi-agent.png) |
+
 ## What it does
 
 - **Watches your agents.** Codex, Claude Code and GitHub Actions all feed the same stack of up to three task cards, newest on top. Each card shows which agent it is (`CX:` Codex, `CC:` Claude Code, `CI:` GitHub Actions), the session's name and the project, and how long it has been in its current state.

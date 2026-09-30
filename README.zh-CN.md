@@ -8,6 +8,18 @@ Vibe Buddy 是给 AI 编程 Agent 配的桌面宠物。它住在键盘旁一个�
 
 （项目原名 VibeBuddy，仓库、`vibebuddyd` 守护进程与 Vibe Buddy Protocol 沿用旧名。）
 
+## 盒子上的画面
+
+以下截图来自运行 Rust 固件的实机，使用示例任务名称和每日统计。
+
+| 工作中 | 等待输入 |
+| --- | --- |
+| ![正在构建固件](docs/images/device-working.png) | ![一个 Agent 等待评审，另一个继续工作](docs/images/device-input-required.png) |
+| **已完成** | **失败** |
+| ![App 测试运行完成](docs/images/device-done.png) | ![App 测试运行失败](docs/images/device-failed.png) |
+| **待机** | **多个 Agent** |
+| ![宠物等待新任务](docs/images/device-ready.png) | ![同屏显示 Claude Code、Codex 和 CI 的任务](docs/images/device-multi-agent.png) |
+
 ## 它做什么
 
 - **盯着你的 Agent。** Codex、Claude Code 与 GitHub Actions 共用同一个任务卡栈，最多 3 张，最新在最上。每张卡标明是哪个 Agent（Codex 为 `CX:`，Claude Code 为 `CC:`，GitHub Actions 为 `CI:`）、会话名和项目，以及它在当前状态里待了多久。
