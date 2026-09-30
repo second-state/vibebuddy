@@ -1,18 +1,18 @@
-# 领域文档
+# Domain docs
 
-各工程技能在探索代码库时应如何消费本仓库的领域文档。
+How engineering skills should consume this repo's domain docs when exploring the codebase.
 
-## 探索之前先读这些
+## Read these before exploring
 
-- 根目录的 **`CONTEXT.md`**；或者
-- 根目录的 **`CONTEXT-MAP.md`**（若存在）：它指向每个上下文各自的 `CONTEXT.md`，把与主题相关的都读一遍。
-- **`docs/adr/`**：读与你将要动的区域相关的 ADR。多上下文仓库里还要看 `src/<context>/docs/adr/` 下限定在该上下文的决定。
+- **`CONTEXT.md`** at the repo root; or
+- **`CONTEXT-MAP.md`** at the repo root (if it exists): it points to each context's own `CONTEXT.md`. Read every one that is relevant to the topic.
+- **`docs/adr/`**: read the ADRs relevant to the area you are about to touch. In a multi-context repo, also check `src/<context>/docs/adr/` for decisions scoped to that context.
 
-这些文件若不存在，**静默继续**。不要指出它们缺失，也不要一上来就建议创建。`/domain-modeling` 技能（经 `/grill-with-docs` 与 `/improve-codebase-architecture` 进入）会在术语或决定真正定下来时按需创建。
+If these files don't exist, **carry on silently**. Don't point out that they are missing, and don't suggest creating them up front. The `/domain-modeling` skill (reached via `/grill-with-docs` and `/improve-codebase-architecture`) creates them on demand once a term or decision is actually settled.
 
-## 文件结构
+## File structure
 
-单一上下文仓库（绝大多数仓库，本仓库也是）：
+Single-context repo (most repos, including this one):
 
 ```
 /
@@ -23,29 +23,29 @@
 └── daemon/  firmware/  protocol/
 ```
 
-多上下文仓库（根目录存在 `CONTEXT-MAP.md`）：
+Multi-context repo (a `CONTEXT-MAP.md` exists at the root):
 
 ```
 /
 ├── CONTEXT-MAP.md
-├── docs/adr/                          ← 全系统的决定
+├── docs/adr/                          ← system-wide decisions
 └── src/
     ├── ordering/
     │   ├── CONTEXT.md
-    │   └── docs/adr/                  ← 限定在该上下文的决定
+    │   └── docs/adr/                  ← decisions scoped to this context
     └── billing/
         ├── CONTEXT.md
         └── docs/adr/
 ```
 
-## 用术语表的词汇
+## Use the glossary's vocabulary
 
-输出里提到领域概念时（issue 标题、重构提案、假设、测试名），用 `CONTEXT.md` 定义的那个词，不要滑向术语表明确回避的同义词。
+When your output mentions a domain concept (issue titles, refactoring proposals, hypotheses, test names), use the term defined in `CONTEXT.md`. Don't drift into synonyms the glossary explicitly avoids.
 
-需要的概念还不在术语表里，这本身是个信号：要么你在发明项目不用的语言（重新考虑），要么确实有空缺（记下来交给 `/domain-modeling`）。
+If a concept you need isn't in the glossary yet, that is a signal in itself: either you are inventing language the project doesn't use (reconsider), or there is a real gap (note it and hand it to `/domain-modeling`).
 
-## 标出与 ADR 的冲突
+## Flag conflicts with ADRs
 
-输出与已有 ADR 相悖时，明确指出来，不要悄悄覆盖：
+When your output contradicts an existing ADR, say so explicitly instead of silently overriding it:
 
-> _与 ADR-0007（事件溯源的订单）相悖，但值得重开，因为……_
+> _Contradicts ADR-0007 (event-sourced orders), but worth reopening because…_

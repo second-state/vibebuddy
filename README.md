@@ -24,8 +24,6 @@ Pomodoro runs entirely on the box: its timer and today's tally keep going withou
 
 **Status:** the display and voice have passed on-device acceptance, and Codex, Claude Code and GitHub Actions are all connected. See [`docs/roadmap.md`](docs/roadmap.md) for what's next.
 
-> Most design docs under `docs/` are still in Chinese and are being translated.
-
 ## What you need
 
 - **The box:** ALIENTEK ATK-DNESP32S3-BOX V1.1 (ESP32-S3, 16 MB flash, 8 MB PSRAM), with LCD, speaker and three buttons. One USB-C cable powers it, flashes it and carries events. Hardware notes: [`docs/hardware.md`](docs/hardware.md).

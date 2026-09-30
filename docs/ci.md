@@ -1,42 +1,42 @@
-# CI 状态回流
+# CI Status Feedback
 
-## 为什么值得做
+## Why it's worth doing
 
-CI 出结果的时候，用户通常早就切走做别的事了。笔记本屏幕上的那个页签要主动去看才有用，而这个盒子一直在视野边缘——这是设备真正比屏幕有用的场景之一。
+By the time CI produces a result, you've usually long since switched to something else. The tab on your laptop screen only helps if you go look at it, while the box sits at the edge of your vision the whole time. This is one of the cases where the device is genuinely more useful than a screen.
 
-CI 与 Agent 共用同一套任务卡、同一只氛围小助手和同一组播报，只是来源不同：Agent 由 Hook 推送，CI 由 `vibebuddyd` 主动轮询 GitHub Actions。
+CI and agents share the same task cards, the same buddy and the same set of announcements; only the source differs: agents push through hooks, while `vibebuddyd` actively polls GitHub Actions for CI.
 
-## 映射
+## Mapping
 
-| GitHub Actions run | Vibe Buddy 状态 |
+| GitHub Actions run | Vibe Buddy state |
 | --- | --- |
-| `queued` / `in_progress` | 工作中，标题 `CI:<仓库名>` |
-| `completed` + `success` | 完成，播放一次“任务完成” |
-| `completed` + `failure` / `timed_out` / 其他 | 失败，播放一次“任务遇到问题” |
-| `completed` + `cancelled` / `skipped` / `neutral` | 安静收起卡片，不播报 |
+| `queued` / `in_progress` | Working, titled `CI:<repo name>` |
+| `completed` + `success` | Done; plays "All done!" once |
+| `completed` + `failure` / `timed_out` / other | Failed; plays "Uh-oh, something went wrong." once |
+| `completed` + `cancelled` / `skipped` / `neutral` | Quietly dismisses the card, no announcement |
 
-每个仓库最多占一张卡，取该仓库最近一次 run。轮询间隔 30 秒；CI 以分钟计，30 秒既够用，也不至于把 API 配额花在这上面。
+Each repo takes at most one card, showing that repo's most recent run. The polling interval is 30 seconds; CI is measured in minutes, so 30 seconds is plenty without spending API quota on it.
 
-**只报告亲眼见过在跑的 run。** 某次 run 已经结束、而 `vibebuddyd` 从没见过它处于运行中，就什么都不做。没有这条规则，daemon 每次重启都会把每个仓库最近一次历史结果重新宣告一遍，包括昨天那次失败。代价是：一次 run 若在两次轮询之间开始并结束，它不会被播报。
+**Only report runs actually seen running.** If a run has already finished and `vibebuddyd` never saw it in progress, nothing happens. Without this rule, every daemon restart would re-announce each repo's most recent historical result, including yesterday's failure. The cost: a run that starts and finishes between two polls won't be announced.
 
-## 关注哪些仓库
+## Which repos to watch
 
-没有配置文件，也不需要你列清单。`vibebuddyd` 关注的就是 **Agent 最近一小时工作过的 GitHub 仓库**：每个 Hook 都带 `cwd`，适配器为了生成任务卡标题本来就要把它解析成 git 项目根，CI 复用同一个事实，再从 `.git/config` 的 `origin` 远端读出 `owner/repo`。
+There's no config file, and you don't need to make a list. What `vibebuddyd` watches is **the GitHub repos an agent has worked in within the last hour**: every hook carries `cwd`, which the adapter already has to resolve to a git project root to build the task card title; CI reuses the same fact and then reads `owner/repo` from the `origin` remote in `.git/config`.
 
-这个推导只读本地文件，不调用 git 也不调用网络。子目录和 worktree 都会归到主仓库。没有 GitHub 远端的项目、以及一小时内没有 Agent 活动的项目，都不会被轮询；没有任何项目在跟踪时，整个功能不发一次请求。
+This derivation reads only local files and calls neither git nor the network. Subdirectories and worktrees all resolve to the main repo. Projects without a GitHub remote, and projects with no agent activity in the last hour, aren't polled; when no project is being tracked, the whole feature makes no requests at all.
 
-一小时这个窗口对应的是「我正在这个仓库上干活，所以我关心它的 CI」。CI 通常在推送后几分钟内出结果，而推送前总会有 Agent 活动。
+The one-hour window corresponds to "I'm working in this repo, so I care about its CI". CI usually produces results within a few minutes of a push, and there's always agent activity before a push.
 
-`VIBEBUDDY_CI_REPOS`（逗号分隔）可以覆盖自动推导，用于观察本机没有检出的仓库。
+`VIBEBUDDY_CI_REPOS` (comma-separated) overrides the automatic derivation, for watching repos that aren't checked out on this machine.
 
-## `gh` 的位置
+## Where `gh` lives
 
-`vibebuddyd` 通过 `gh run list` 读取状态，沿用你已有的 GitHub 登录，不自己保存 token。
+`vibebuddyd` reads status via `gh run list`, reusing your existing GitHub login instead of storing a token of its own.
 
-launchd 启动的进程只有一个很短的 `PATH`（`/usr/bin:/bin:/usr/sbin:/sbin`），`gh` 通常不在里面，所以 `vibebuddyd` 会依次尝试 `~/bin`、`/opt/homebrew/bin`、`/usr/local/bin`、`/usr/bin`，都找不到才回退到 `PATH`。装在别处可以用 `VIBEBUDDY_GH` 指定绝对路径。不需要改 plist。
+Processes started by launchd get only a very short `PATH` (`/usr/bin:/bin:/usr/sbin:/sbin`), which usually doesn't include `gh`, so `vibebuddyd` tries `~/bin`, `/opt/homebrew/bin`, `/usr/local/bin` and `/usr/bin` in turn, and falls back to `PATH` only if none of them has it. If it's installed elsewhere, set its absolute path with `VIBEBUDDY_GH`. No plist changes needed.
 
-## 边界
+## Boundaries
 
-只请求 run 的 `databaseId`、`status` 和 `conclusion`。不读取日志、不读取 diff、不读取 commit message；设备上只出现仓库名和状态。
+Only a run's `databaseId`, `status` and `conclusion` are requested. No logs, no diffs, no commit messages are read; only the repo name and status ever appear on the device.
 
-一个仓库连续读取失败时只记录第一次，恢复后记录一次恢复。每 30 秒一条告警一天就是几千行，会把真正有用的日志淹掉。
+When reads for a repo keep failing, only the first failure is logged, and recovery is logged once. One warning every 30 seconds adds up to thousands of lines a day, burying the logs that actually matter.

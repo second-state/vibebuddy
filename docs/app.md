@@ -1,124 +1,124 @@
 # Vibe Buddy App
 
-App 是 Vibe Buddy 在 Mac 上的图形界面：一个菜单栏图标加一扇设置窗。它负责首次引导、设置、播报音色与固件，并看管 daemon。它不是第二个提醒出口：Agent 的事都由盒子上的氛围小助手来讲，App 只在盒子自己没法开口的时候（链路异常）出声。本文记录 2026-09-16 的设计定案；三个难逆转的取舍另见 ADR-0003、0004、0005。
+The app is Vibe Buddy's graphical interface on the Mac: a menu bar icon plus a settings window. It handles onboarding, settings, the announcement voice and firmware, and it supervises the daemon. It is not a second channel for alerts: agent events are all told by the buddy on the box, and the app speaks up only when the box can't (when the link breaks). This document records the design as settled on 2026-09-16; the three hard-to-reverse trade-offs are covered separately in ADR-0003, 0004 and 0005.
 
-## 角色与生命周期
+## Role and lifecycle
 
-- **菜单栏常驻，不上 Dock。** `LSUIElement` 为真，设置窗从菜单打开。
-- **看管 daemon。** `vibebuddyd` 作为 helper 打包在 App 内，App 启动时拉起它，崩溃后按 1、2、5 秒退避重启，连续三次失败就停手、弹通知，菜单第一行变成「daemon 异常 · 点击重启」。
-- **退出即离线。** 退出 App 就退出 daemon，菜单项写明「退出 Vibe Buddy（盒子将离线）」。不再有独立于 App 的 daemon 生命周期。
-- **取代 LaunchAgent。** 首次启动发现旧的 `com.vibebuddy.vibebuddyd` LaunchAgent，或 7331 端口已被占用，就提议卸掉旧的并接管。
-- **登录时启动**用 SMAppService 注册，引导的最后一步询问，之后在「通用」页可改；系统会提示"已添加后台项目"，这是唯一会遇到的系统权限交互。
+- **Lives in the menu bar, not the Dock.** `LSUIElement` is true; the settings window opens from the menu.
+- **Supervises the daemon.** `vibebuddyd` is bundled inside the app as a helper. The app launches it on startup and restarts it after a crash with 1, 2 and 5 second backoff; after three consecutive failures it stops trying, posts a notification, and the menu's first line becomes "daemon not responding · click to restart".
+- **Quitting takes the box offline.** Quitting the app quits the daemon, and the menu item says so: "Quit Vibe Buddy (the box goes offline)". The daemon no longer has a lifecycle independent of the app.
+- **Replaces the LaunchAgent.** If on first launch the app finds the old `com.vibebuddy.vibebuddyd` LaunchAgent, or port 7331 is already taken, it offers to remove the old one and take over.
+- **Launch at login** is registered with SMAppService. Onboarding asks about it in its last step, and it can be changed later on the General tab. The system will say "background item added"; this is the only system permission interaction the user will run into.
 
-## 技术栈与仓库布局
+## Tech stack and repo layout
 
-- SwiftUI 界面，菜单栏用 AppKit 的 `NSStatusItem` 加标准 `NSMenu`；daemon 与 Hook 仍是 Rust。
-- `app/` 目录放 Xcode 工程，`.xcodeproj` 直接入库，不用生成器。一个 Build Phase 跑 `cargo build --release -p vibebuddyd -p vibebuddy-hook`，把两个二进制拷进 App 包。
-- 最低 macOS 14。界面中英双语，跟随系统语言：系统首选简体或繁体中文都显示中文（繁体系统暂用简体译文，装包时把 `zh-Hans.lproj` 复制成 `zh-Hant.lproj`），其余一律英文。
-- 文案以英文为 key 写在 Swift 源码里（SwiftUI 字面量与 `String(localized:)`），中文译文在 `app/Localization/zh-Hans.lproj/Localizable.strings`；英文不需要表，`en.lproj` 只是声明 App 支持英文。装包时两个 lproj 拷进 `Contents/Resources`，`Info.plist` 的开发语言是 `en`。
-- `tools/check-localization.py` 从源码抽出全部 key 与中文表对账：缺译、多余条目、译文与 key 的占位符类型或参数顺序不一致都会让 `build-app.sh` 失败（类型不一致时运行时查不到译文，会悄悄显示英文）。新增或改动文案后先跑它。插值是 Int 的在表里写 `%lld`，其余写 `%@`，多个占位符的译文用 `%1$@` 这类位置写法。
-- daemon 回给 App 的提示（操作进度、失败原因、HTTP 拒绝理由）统一英文。设置页的进度行由 App 按操作类型和状态自己出界面语言的一句，失败时才附上 daemon 的原文（悬停提示也只在失败时出现）。daemon 与固件的日志、报错同样是英文。
-- 显示名 `Vibe Buddy`，包名 `Vibe Buddy.app`，bundle id `com.vibebuddy.app`，helper 叫 `vibebuddyd`。与"显示名改、内部名不改"的约定一致。
-- App 自身不做更新检查（没有 Sparkle），关于页只显示版本号。
+- SwiftUI interface, with AppKit's `NSStatusItem` plus a standard `NSMenu` for the menu bar; the daemon and hook stay in Rust.
+- The `app/` directory holds the Xcode project, with the `.xcodeproj` checked in directly rather than generated. A Build Phase runs `cargo build --release -p vibebuddyd -p vibebuddy-hook` and copies both binaries into the app bundle.
+- Minimum macOS 14. The interface is bilingual (English and Chinese) and follows the system language: if the system's preferred language is Simplified or Traditional Chinese it shows Chinese (Traditional Chinese systems temporarily get the Simplified translation; packaging copies `zh-Hans.lproj` to `zh-Hant.lproj`), and everything else gets English.
+- UI strings are written in the Swift sources with English as the key (SwiftUI literals and `String(localized:)`), and the Chinese translations live in `app/Localization/zh-Hans.lproj/Localizable.strings`. English needs no table; `en.lproj` only declares that the app supports English. Packaging copies both lproj folders into `Contents/Resources`, and the development language in `Info.plist` is `en`.
+- `tools/check-localization.py` extracts every key from the sources and reconciles them against the Chinese table: a missing translation, an extra entry, or a translation whose placeholder types or argument order don't match the key all make `build-app.sh` fail (with a type mismatch the translation can't be found at runtime and English silently shows instead). Run it after adding or changing any UI string. Int interpolations are written as `%lld` in the table, everything else as `%@`, and translations with several placeholders use positional forms like `%1$@`.
+- Messages the daemon sends back to the app (operation progress, failure reasons, HTTP rejection reasons) are all in English. The progress line on the settings page is phrased by the app itself in the interface language, based on the operation type and state; the daemon's original text is attached only on failure (and the hover tooltip likewise appears only on failure). Daemon and firmware logs and errors are in English too.
+- Display name `Vibe Buddy`, bundle name `Vibe Buddy.app`, bundle id `com.vibebuddy.app`, helper named `vibebuddyd`. This follows the convention of "change display names, not internal names".
+- The app doesn't check for its own updates (no Sparkle); the About page only shows the version number.
 
-## App 与 daemon 怎么说话
+## How the app talks to the daemon
 
-沿用本机 HTTP `127.0.0.1:7331`。新增：
+It keeps using local HTTP on `127.0.0.1:7331`. New additions:
 
-- `GET /v1/status`：链路、当前模式、固件与 daemon 构建标识、当日战绩、Hook 最近一次事件时间。
-- `GET /v1/status/stream`：SSE，状态一变就推。
-- 写操作：写语音包、更新固件、截图、重启 daemon 自身。
+- `GET /v1/status`: link, current mode, firmware and daemon build identifiers, today's stats, and the time of the most recent hook event.
+- `GET /v1/status/stream`: SSE, pushed whenever the status changes.
+- Write operations: write a voice pack, update firmware, take a screenshot, restart the daemon itself.
 
-配置由 daemon 持有，存在 `~/Library/Application Support/VibeBuddy/config.json`（当前音色、通知开关等），App 通过接口读写，不直接碰文件；现有环境变量保留为开发时的覆盖手段。App 自己只用 UserDefaults 存窗口位置一类的界面状态。
+Config is owned by the daemon and stored in `~/Library/Application Support/VibeBuddy/config.json` (current voice, notification toggle and so on). The app reads and writes it through the API and never touches the file directly; the existing environment variables remain as a development-time override. The app itself uses UserDefaults only for interface state such as window position.
 
-## 菜单栏
+## Menu bar
 
-图标是氛围小助手的像素脸：设备已连接时正常，链路断开或 daemon 没起来时灰色闭眼。点开是标准菜单：
+The icon is the buddy's pixel face: normal while the device is connected, grayed out with eyes closed when the link is down or the daemon isn't up. Clicking it opens a standard menu:
 
-1. 设备状态：`已连接 · 固件 abc1234` / `未找到盒子` / `daemon 异常 · 点击重启`
-2. 当前模式：值班 / 番茄钟 / 休闲
-3. 当日战绩一行，只读
-4. 设置…
-5. 退出 Vibe Buddy（盒子将离线）
+1. Device status: `Box online · firmware abc1234` / `Box not found` / `daemon not responding · click to restart`
+2. Current mode: On duty / Pomodoro / Leisure
+3. A read-only line with today's stats
+4. Settings…
+5. Quit Vibe Buddy (the box goes offline)
 
-菜单里不放任务卡，盒子才是看任务的地方。
+Task cards don't go in the menu; the box is where you look at tasks.
 
-## 通知
+## Notifications
 
-只在链路异常时弹 macOS 通知：设备断开超过 30 秒（拔一下线不弹），或 daemon 三次重启失败。Agent 事件一律不弹，避免与盒子重复。通知权限在第一次需要弹的时候才申请，不在引导里要。
+macOS notifications appear only when the link breaks: the device has been disconnected for more than 30 seconds (a quick unplug doesn't trigger one), or the daemon has failed to restart three times. Agent events never produce a notification, to avoid duplicating the box. Notification permission is requested the first time a notification actually needs to be shown, not during onboarding.
 
-## 设置窗
+## Settings window
 
-五页，外观走系统设置那一套：顶部标签、分组表单、系统字体与配色。品牌只出现在引导页、关于页和菜单栏图标。
+Five tabs, styled like System Settings: tabs across the top, grouped forms, system font and colors. Branding appears only in onboarding, the About page and the menu bar icon.
 
-**通用**：登录时启动、链路异常通知开关。
+**General**: Launch at login, and the toggle for link-failure notifications.
 
-**声音**：最上面是音量滑块（20 到 100，步进 5）：值来自盒子的状态，松手才写进盒子的 NVS，重启不丢；旁边「在盒子上试一句」让盒子用新音量播"任务完成"，Mac 上的试听与它无关。不做静音也不允许调到零，静音只在盒子上长按 K2。下面是播报音色的卡片列表，每张卡有名字、口音或来源标签、一个播放键（五句连播，约十秒，再点停止）、「使用」按钮和「已写入」标记。点「使用」后卡片上出进度条，其它卡片与设备页操作禁用；桥接时最长约三分钟，写完盒子回校验结果才标记「已写入」。写到一半拔线，分区在固件看来就是空的，自动回落内置音色，App 提示重新写入，不做断点续传。
+**Sound**: At the top is a volume slider (20 to 100, in steps of 5). Its value comes from the box's status, and it's written to the box's NVS only on release, so it survives restarts. Next to it, "Play a line on the box" has the box play "All done!" at the new volume; previews on the Mac are unrelated to it. There's no mute, and the volume can't go to zero; muting happens only on the box, by long-pressing K2. Below that is a list of announcement voice cards. Each card has a name, an accent or source tag, a play button (plays all five lines back to back, about ten seconds; click again to stop), a "Use" button and an "In use" badge. After you click "Use", a progress bar appears on the card and the other cards and the Device tab's actions are disabled; over the bridge this takes up to about three minutes, and the card is marked "In use" only after the write finishes and the box reports its verification result. If the cable is pulled partway through, the firmware sees the partition as empty and automatically falls back to the built-in voice; the app prompts you to write it again. No resumable writes.
 
-**接入**：Codex、Claude Code 两行，各显示状态与最近一次事件时间，配「安装」「修复」「移除」。GitHub CLI 这一版不出现在界面上，CI 轮询照旧沿用已登录的 `gh`，没登录就静默没有 CI 卡。写入的是用户级 `~/.claude/settings.json` 与 `~/.codex/hooks.json`，只合并 Vibe Buddy 自己的条目，不动别人的 Hook，写前展示差异确认。写的是用户级配置，因此装一次两处都算数：桌面应用里的会话，和终端里跑的同一个 Agent，界面上要说这件事，否则用户会以为终端还得再装一遍。写完显示「等待第一次事件…」，收到即变绿。Codex 的 `/hooks` 信任只能人做，App 只提示，但提示要能分出好坏：Codex 对改过的 hook 会静默停用直到重新信任，所以配置文件比 daemon 报的最近一次事件新时，这一行标红并直说去 Codex 输入 `/hooks`；App 自己改写 Codex 配置（包括改名迁移）时当场弹一条通知。App 不重算 Codex 的信任哈希，只看写入之后有没有收到过事件。项目级配置不碰。
+**Agents**: Two rows, Codex and Claude Code, each showing its status and the time of its most recent event, with "Connect", "Repair" and "Remove". GitHub CLI doesn't appear in the interface in this version; CI polling keeps using the already signed-in `gh`, and if you're not signed in there are simply no CI cards, silently. What gets written is the user-level `~/.claude/settings.json` and `~/.codex/hooks.json`, merging only Vibe Buddy's own entries and leaving other hooks alone, with a diff shown for confirmation before writing. Because it's user-level config, one install covers both places: sessions in the desktop app, and the same agent running in a terminal. The interface has to say this, or users will think the terminal needs a separate install. After writing, the row shows "Waiting for the first event…" and turns green as soon as one arrives. Trusting Codex's `/hooks` can only be done by a person, so the app just prompts for it, but the prompt must be able to tell good from bad: Codex silently disables a changed hook until it's re-trusted, so when the config file is newer than the most recent event the daemon reports, the row turns red and says plainly to go type `/hooks` in Codex. When the app itself rewrites Codex's config (including a rename migration), it posts a notification right away. The app doesn't recompute Codex's trust hash; it only checks whether any event has arrived since the write. Project-level config is never touched.
 
-**设备**：连接状态与串口名；「盒子固件 x · App 附带 y」，哈希不同就出「更新到 App 附带版本」；盒子当前画面，按「刷新」才截一张（桥接下一张要占串口几秒，不自动轮询），配「保存图片」。
+**Device**: Connection status and serial port name; "Box firmware x · Bundled with app y", with "Update to bundled version" shown when the hashes differ; the box's current screen, captured only when you click "Refresh" (over the bridge one capture ties up the serial port for a few seconds, so there's no automatic polling), with "Save image".
 
-**高级**：打开日志、重启 daemon、导出诊断（日志、配置、两边构建标识打成一个包）。
+**Advanced**: Open logs, restart the daemon, export diagnostics (logs, config and both sides' build identifiers bundled into one package).
 
-## 首次引导
+## Onboarding
 
-1. 欢迎。
-2. 找设备：提示插上盒子，列出找到的口，连上后让盒子眨一下眼确认。可跳过，之后菜单栏一直提示「未找到盒子」。
-3. 接入 Agent：检测 Codex、Claude Code，一键写 Hook，Codex 提示去 `/hooks` 信任。可以「先不接」，不能跳过这一页。
-4. 选音色：试听并写入盒子。可跳过。
-5. 登录时启动。
-6. 完成。
+1. Welcome.
+2. Find the box: prompts you to plug in the box, lists the ports it finds, and once connected has the box blink to confirm. Can be skipped, after which the menu bar keeps showing "Box not found".
+3. Connect agents: detects Codex and Claude Code, writes the hooks in one click, and prompts you to trust them in Codex's `/hooks`. You can choose "Not now", but you can't skip this page.
+4. Pick a voice: preview and write it to the box. Can be skipped.
+5. Launch at login.
+6. Done.
 
-找设备放在接入之前：先让人看到盒子活了，再配别的，信心足。
+Finding the box comes before connecting agents: seeing the box come alive first, before configuring anything else, builds confidence.
 
-## 播报音色与语音包
+## Announcement voices and voice packs
 
-固件不再把五句 PCM 编进程序。分区表新增 2 MB 的 `voices` 数据分区，固件启动时从那里读；分区为空或校验不过就用出厂内置音色（现为英文的 Jessica）。
+The firmware no longer compiles the five PCM lines into the program. The partition table gains a 2 MB `voices` data partition that the firmware reads at boot; if the partition is empty or fails verification, the factory built-in voice is used (currently Jessica, in English).
 
-语音包是自定义的小格式，不上文件系统：魔数、版本、音色 id、五条 `[偏移, 长度]`，后面跟五段与现有资产同格式的 PCM。包头最后写，写到一半的包等于没写。
+A voice pack is a small custom format with no file system: magic number, version, voice id, five `[offset, length]` entries, followed by five PCM segments in the same format as the existing assets. The header is written last, so a half-written pack counts as not written.
 
-写入走现有串口协议：Mac 分块 base64 发，固件自己写分区并校验回报，不复位、不抢串口，两种接法行为一样；桥接 115200 波特下 1.5 MB 约三分钟，原生 USB 口几秒。esptool 路径只留给固件升级。
+Writing goes over the existing serial protocol: the Mac sends base64 in chunks, and the firmware writes the partition itself, verifies it and reports back, without resetting or grabbing the serial port; both connection types behave the same. Over the bridge at 115200 baud, 1.5 MB takes about three minutes; the native USB port takes a few seconds. The esptool path is reserved for firmware updates.
 
-四个语音包（两个中文、两个英文）不入库，构建时由脚本从 `voices/*/` 打出，随 App 分发，约 4.5 MB。
+The four voice packs (two Chinese, two English) aren't checked in; a script builds them from `voices/*/` at build time and they ship with the app, about 4.5 MB.
 
-音色目录 `VoiceCatalogEntry.all` 给每个音色标了台词语言（`VoiceLanguage.zh` / `.en`）。选音色的列表只列本次构建真正带了包的音色（启动时按文件是否存在算一次），并把与界面语言一致的排在前面。目录里有两个英文音色 `jessica`、`chris`（ElevenLabs），`voices/` 下有了它们的 PCM 才会显示；生成方法见 `voices/README.md`。固件内置音色是英文的 Jessica，中文界面的引导页会提示用户挑一个中文音色。
+The voice catalog `VoiceCatalogEntry.all` tags each voice with the language of its lines (`VoiceLanguage.zh` / `.en`). The voice picker lists only the voices this build actually ships a pack for (computed once at startup from whether the file exists), and puts voices matching the interface language first. The catalog has two English voices, `jessica` and `chris` (ElevenLabs), which show up only once their PCM is in `voices/`; see `voices/README.md` for how to generate it. The firmware's built-in voice is Jessica, in English, so onboarding in the Chinese interface suggests picking a Chinese voice.
 
-设备协议要新增的事件（草案，实现时写进 `protocol.md`）：`device.identify`（眨眼）、`voice.begin` / `voice.chunk` / `voice.end`、设备回报 `voice.written` 与校验结果。
+New events the device protocol needs (a draft, to be written into `protocol.md` at implementation time): `device.identify` (blink), `voice.begin` / `voice.chunk` / `voice.end`, and the device reporting `voice.written` with the verification result.
 
-## 固件升级
+## Firmware updates
 
-App 附带与之配套的固件三件套（bootloader、分区表、app）。Release 构建要求 `firmware/build` 里有它们，缺了就构建失败并提示先构建固件；Debug 构建允许不带，设备页隐藏「更新」。
+The app bundles the matching firmware trio (bootloader, partition table, app). A Release build requires them in `firmware/build` and fails with a prompt to build the firmware first if they're missing; a Debug build can go without them, in which case the Device tab hides "Update".
 
-版本只比哈希：不同就显示「更新到 App 附带版本」，不判断新旧，带 `-dirty` 的照实显示。固件没有语义版本号，加一个反而要维护。
+Versions are compared by hash only: if they differ, "Update to bundled version" is shown, with no judgment of newer or older, and a `-dirty` build is shown as is. The firmware has no semantic version number; adding one would just be something else to maintain.
 
-流程：确认 → daemon 断开串口 → espflash 烧录（桥接时自动 no-stub）→ 盒子重启 → 重连，进度全程可见；失败给出重试和「按住 K0 再插线」的兜底说明。升级不抹 `voices` 与 `nvs` 分区，换固件不丢音色和当日战绩。永远不自动升级。
+Flow: confirm → daemon releases the serial port → espflash flashes (automatically no-stub over the bridge) → box restarts → reconnect, with progress visible throughout. On failure it offers a retry and a fallback instruction to "hold K0 and replug the cable". Updates don't erase the `voices` and `nvs` partitions, so changing firmware keeps the voice and today's stats. Never updates automatically.
 
-固件也单独分发：CI 发版时把包里那份打成 `VibeBuddy-firmware-vX.Y.Z.zip`（三件套加 `build.txt`）挂在 Release 上，设备页「从文件刷入…」选它：解到临时目录，验三个镜像的魔数，读出构建标识，确认框并排显示「固件包」与「盒子现在」，然后走同一条烧录路。不做更新检查，也不从网上拉固件，用户拿到文件自己选。
+The firmware is also distributed on its own: at release time CI packages the copy inside the app bundle as `VibeBuddy-firmware-vX.Y.Z.zip` (the trio plus `build.txt`) and attaches it to the Release. Choosing it via "Flash from file…" on the Device tab unzips it to a temporary directory, checks the magic numbers of the three images, reads out the build identifier, shows "Firmware package" and "Box now" side by side in a confirmation dialog, and then goes down the same flashing path. No update checks and no downloading firmware from the internet; users get the file and choose it themselves.
 
-出厂机（跑着别的固件）走同一条烧录路，只是入口不同：daemon 每次开口都把构建号清零并发 hello，串口开了 5 秒还没报构建号，就判定盒子不是我们的固件，引导页「找盒子」和设备页都改出「刷入 Vibe Buddy 固件」，确认框明说会清掉现有固件与数据。ROM 下载协议不管盒子里原来跑什么；但原生 USB 口只在对方固件保留 USB Serial/JTAG 时才认得出（VID/PID `303A:1001`），认不出就让用户改接 UART 口，那是硬件桥，与固件无关。
+A factory-fresh box (running some other firmware) goes down the same flashing path, just from a different entry point. Every time the daemon opens the port it resets the build number and sends hello; if the port has been open for 5 seconds with no build number reported, it concludes the box isn't running our firmware, and both the onboarding "Find the box" page and the Device tab switch to offering "Flash Vibe Buddy firmware", with a confirmation dialog that says plainly the existing firmware and data will be erased. The ROM download protocol doesn't care what the box was running before; but the native USB port is only recognized if the other firmware kept USB Serial/JTAG (VID/PID `303A:1001`). If it isn't recognized, the user is told to switch to the UART port, which is a hardware bridge and independent of the firmware.
 
-## 设备页脚
+## Device footer
 
-页脚第二行标签从 `DAEMON` 改为 `APP`，值是 App 版本加构建号。链路断开时不清掉，跟着整屏变灰：断开时最有价值的信息恰恰是"上次连的是哪个版本"。
+The label on the footer's second line changes from `DAEMON` to `APP`, and its value is the app version plus build number. It isn't cleared when the link drops; it goes gray along with the rest of the screen, because when disconnected the most valuable information is precisely "which version was connected last".
 
-## 实现记录（2026-09-16）
+## Implementation notes (2026-09-16)
 
-- 日常使用的 App 装在 `/Applications/Vibe Buddy.app`，用 `app/scripts/build-app.sh --install` 送过去并启动；登录项与 Hook 路径都绑在包的位置上，worktree 里的 `app/build` 只是开发中间产物。
-- 构建用 SwiftPM 加装包脚本，不是 Xcode 工程：本机只有命令行工具，`xcodebuild` 不可用，而 `swift build` 能编 SwiftUI 与 AppKit；装了 Xcode 可直接打开 `app/Package.swift`。命令行工具也没有 XCTest 和 swift-testing，视图模型的缝用 `swift run --package-path app SelfTest` 的断言自检守着。
-- 固件烧录不用 espflash：它的 ROM 写块固定 1 KB、串口对象是具体类型没法包装，过不了 UART 桥；daemon 自己实现 ROM 下载协议，块 256 字节、桥接时按线速分段，MD5 校验后硬复位。
-- 语音包分块写入在桥上约 5 KB/s（1.2 MB 四分钟），比设计里估的慢一些；瓶颈是停等回执加 115200 波特，原生 USB 口快得多。
-- 设备连上先收 `device.hello`，把模式、固件构建号、音色重报一遍；否则 daemon 重启后什么都不知道。
-- App 把自己的 pid 放在 `VIBEBUDDY_PARENT_PID` 里传给 daemon；App 被强杀（SIGKILL）时 daemon 两秒内自己退出，不会变成孤儿占着串口和端口。SIGTERM 则由 App 接住走正常退出。
-- 装包脚本做的是 ad-hoc 签名，只为让登录项与通知认得这个包的身份，不是分发用的 Developer ID 签名与公证——那仍在「明确不做」里。
-- 固件三件套的偏移（0x0、0x8000、0x10000）由分区布局决定，daemon 写死，App 只传文件路径。
+- The app for daily use is installed at `/Applications/Vibe Buddy.app`, delivered and launched with `app/scripts/build-app.sh --install`. The login item and hook paths are both tied to the bundle's location; `app/build` in a worktree is just a development artifact.
+- The build uses SwiftPM plus a packaging script, not an Xcode project: this machine has only the Command Line Tools, so `xcodebuild` isn't available, while `swift build` can compile SwiftUI and AppKit. With Xcode installed you can open `app/Package.swift` directly. The Command Line Tools also lack XCTest and swift-testing, so the view models' seams are guarded by assertion self-checks in `swift run --package-path app SelfTest`.
+- Firmware flashing doesn't use espflash: its ROM write block is fixed at 1 KB and its serial port object is a concrete type that can't be wrapped, so it can't get through the UART bridge. The daemon implements the ROM download protocol itself, with 256-byte blocks, segmented at line speed over the bridge, and a hard reset after MD5 verification.
+- Chunked voice pack writes run at about 5 KB/s over the bridge (1.2 MB in four minutes), somewhat slower than the design estimated; the bottleneck is stop-and-wait acknowledgments plus 115200 baud. The native USB port is much faster.
+- Once the device connects, the daemon first gets `device.hello`, which re-reports mode, firmware build number and voice; otherwise the daemon would know nothing after restarting.
+- The app passes its own pid to the daemon in `VIBEBUDDY_PARENT_PID`; if the app is force-killed (SIGKILL), the daemon exits on its own within two seconds instead of becoming an orphan that holds the serial port and the network port. SIGTERM is caught by the app, which goes through a normal quit.
+- The packaging script does ad-hoc signing only so the login item and notifications can recognize the bundle's identity; it isn't Developer ID signing and notarization for distribution, which are still under "Explicitly out of scope".
+- The offsets of the firmware trio (0x0, 0x8000, 0x10000) are determined by the partition layout and hard-coded in the daemon; the app only passes file paths.
 
-## 明确不做
+## Explicitly out of scope
 
-- **静音**：只在设备上长按 K2，Mac 不记、不显示、不代切。
-- 菜单里的任务卡、Agent 事件的 macOS 通知。
-- 自动升级固件、App 自更新、安静时段、项目级 Hook 配置。
+- **Mute**: only by long-pressing K2 on the device; the Mac doesn't record it, show it or toggle it.
+- Task cards in the menu, and macOS notifications for agent events.
+- Automatic firmware updates, app self-updates, quiet hours, project-level hook config.
 
-## 验收
+## Acceptance
 
-实机走完：引导六步；换一次音色并听到新声音；固件更新一次且音色与战绩仍在；拔线 30 秒后收到通知、插回后图标恢复；一键写 Hook 后接入页在下一次 Agent 事件时变绿。
+Walk through on real hardware: all six onboarding steps; change the voice once and hear the new voice; update the firmware once with the voice and stats still intact; get a notification 30 seconds after unplugging, and see the icon recover after plugging back in; after writing the hooks in one click, the Agents tab turns green on the next agent event.

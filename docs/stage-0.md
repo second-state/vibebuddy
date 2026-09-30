@@ -1,142 +1,142 @@
-# Stage 0 — Hardware Probe 记录
+# Stage 0 — Hardware Probe record
 
-更新时间：2026-09-14（Asia/Singapore）
+Updated: 2026-09-14 (Asia/Singapore)
 
-## 当前结论
+## Current conclusion
 
-Stage 0 **已通过**。开发主机、USB 插拔差异、运行时串口和 ROM 下载链路已经实机确认；芯片、Flash/PSRAM 容量、PCB 版本以及当前运行固件的板型标识也已确认。
+Stage 0 **has passed**. The development host, the USB plug/unplug diff, the runtime serial port and the ROM download link have been confirmed on the device; the chip, Flash/PSRAM capacity, PCB revision and the board identifier of the currently running firmware are also confirmed.
 
-2026-09-14 的实物照片显示 PCB `V1.1` 丝印、ATK-MWS3S `N16R8` 模组、`B0/K1/K2`、`USB-SLAVE`、`HOST` 和 `UART` 接口，以及麦克风、扬声器、蜂鸣器和 TF 卡座。结合当前固件自报的 `atk-dnesp32s3-box`，实机可识别为 **正点原子 ATK-DNESP32S3-BOX V1.1**，不是 DNESP32S3 开发板、BOX0、BOX2 或 BOX3。
+Photos of the hardware taken on 2026-09-14 show the PCB silkscreen `V1.1`, an ATK-MWS3S `N16R8` module, `B0/K1/K2`, the `USB-SLAVE`, `HOST` and `UART` ports, plus a microphone, speaker, buzzer and TF card slot. Combined with the `atk-dnesp32s3-box` identifier the current firmware reports, the device is identified as the **ALIENTEK ATK-DNESP32S3-BOX V1.1**, not the DNESP32S3 development board, BOX0, BOX2 or BOX3.
 
-厂家针对这款老 BOX V1.1 的原理图/BSP 仍未从当前官方站点或 GitHub 组织取得。这个缺口不阻塞仅使用芯片原生 USB Serial/JTAG、且不访问外设 GPIO 的 Stage 1；它继续阻塞 LCD、音频、蜂鸣器和按键实现。未取得厂家依据前，不冻结这些外设的 GPIO。
+The vendor schematic/BSP for this older BOX V1.1 still has not been obtained from the current official site or GitHub organization. This gap does not block Stage 1, which uses only the chip's native USB Serial/JTAG and touches no peripheral GPIOs; it still blocks the LCD, audio, buzzer and button implementation. Until vendor evidence is in hand, the GPIOs for these peripherals stay unfrozen.
 
-Stage 1 所需的最小 USB 前置条件已经满足：同一根 USB-C 线可供电、读取运行时日志，并让 `esptool` 进入 ESP32-S3 ROM 下载链路。这里的“下载链路已确认”不等于“Vibe Buddy 固件已烧录”；本阶段没有擦除或写入 Flash。
+The minimal USB prerequisites for Stage 1 are met: a single USB-C cable can supply power, read runtime logs and get `esptool` into the ESP32-S3 ROM download link. "Download link confirmed" here does not mean "Vibe Buddy firmware flashed"; this stage neither erased nor wrote Flash.
 
-## 主机身份
+## Host identity
 
-| 项目 | 实测结果 |
+| Item | Measured result |
 | --- | --- |
 | Hostname | `Michaels-Mac-Studio.local` |
 | Model Name | Mac Studio |
 | Model Identifier | `Mac14,14` |
 | Chip | Apple M2 Ultra |
 | Architecture | `arm64` |
-| macOS | 26.6.2（25G83） |
+| macOS | 26.6.2 (25G83) |
 
-主机满足“只在 Mac Studio 创建项目”的前置条件。
+The host meets the prerequisite "create the project only on the Mac Studio".
 
-## 开发环境
+## Development environment
 
-### 初始探测
+### Initial probe
 
-| 工具 | 初始状态 | 初始版本/路径 | 对当前阶段的影响 |
+| Tool | Initial state | Initial version/path | Impact on the current stage |
 | --- | --- | --- | --- |
-| Homebrew | 已安装 | 6.0.22，`/opt/homebrew/bin/brew` | 满足安装依赖所需条件 |
-| Python 3 | 已安装 | 3.14.5，`/opt/homebrew/bin/python3` | 满足 ESP-IDF 6.x 官方最低 Python 3.10 要求 |
-| CMake | 未安装 | 不在 PATH，Homebrew 无 installed keg | 固件构建前必须补齐 |
-| Ninja | 未安装 | 不在 PATH，Homebrew 无 installed keg | EIM/ESP-IDF 前置依赖，必须补齐 |
-| Rust | 已安装 | 1.98.0，`/Users/dragon/.cargo/bin/rustc` | 满足后续 Mac daemon 开发 |
-| Cargo | 已安装 | 1.98.0，`/Users/dragon/.cargo/bin/cargo` | 满足后续 Rust workspace 构建 |
-| ESP-IDF / `idf.py` | 未发现 | PATH、`~/esp`、`~/.espressif` 常见位置均未找到 | Stage 1 固件构建前必须安装 |
-| `esptool` / `esptool.py` | 未发现 | 命令与当前 Python 环境均未找到 | 识别芯片/烧录前必须由选定 IDF 环境补齐 |
+| Homebrew | Installed | 6.0.22, `/opt/homebrew/bin/brew` | Enough to install dependencies |
+| Python 3 | Installed | 3.14.5, `/opt/homebrew/bin/python3` | Meets ESP-IDF 6.x's official minimum of Python 3.10 |
+| CMake | Not installed | Not on PATH, no installed Homebrew keg | Must be added before building firmware |
+| Ninja | Not installed | Not on PATH, no installed Homebrew keg | EIM/ESP-IDF prerequisite, must be added |
+| Rust | Installed | 1.98.0, `/Users/dragon/.cargo/bin/rustc` | Enough for later Mac daemon development |
+| Cargo | Installed | 1.98.0, `/Users/dragon/.cargo/bin/cargo` | Enough for later Rust workspace builds |
+| ESP-IDF / `idf.py` | Not found | Not found on PATH, `~/esp` or `~/.espressif`, the usual locations | Must be installed before building Stage 1 firmware |
+| `esptool` / `esptool.py` | Not found | Neither the command nor the current Python environment has it | Must come from the chosen IDF environment before chip identification/flashing |
 
-### 已执行安装与验证
+### Installed and verified
 
-按 Espressif 当前 macOS 官方安装路线，已通过 Homebrew 安装：
+Following Espressif's current official macOS installation route, the following were installed via Homebrew:
 
 - CMake 4.4.3
 - Ninja 1.13.2
 - dfu-util 0.11
 - libslirp 4.9.4
-- ESP-IDF Installation Manager（EIM）0.19.0
+- ESP-IDF Installation Manager (EIM) 0.19.0
 
-安装 EIM 时，Homebrew 自动从 6.0.22 更新到 7.0.0，并要求显式信任第三方 tap。仅对 Espressif 官方 `espressif/eim` tap 建立了信任；没有处理或信任其他 tap。
+While installing EIM, Homebrew auto-updated from 6.0.22 to 7.0.0 and required explicit trust for third-party taps. Trust was granted only to Espressif's official `espressif/eim` tap; no other tap was touched or trusted.
 
-实机日志显示当前固件由 ESP-IDF v5.5 构建；同一固件的 `xiaozhi` v1.9.4 源码要求 ESP-IDF 5.4 或以上。基于这两条依据，已用 EIM 安装固定稳定版 ESP-IDF v5.5.3，而不是追踪 `master` 或切换到 6.x。
+The device log shows the current firmware was built with ESP-IDF v5.5; the `xiaozhi` v1.9.4 source for the same firmware requires ESP-IDF 5.4 or later. On these two grounds, EIM was used to install the pinned stable ESP-IDF v5.5.3, rather than tracking `master` or switching to 6.x.
 
-安装过程出现 `compote cooking` 命令缺失及 component cache 下载失败警告，因此没有把安装器的成功提示直接当作验收。重新激活环境后独立验证结果如下：
+The install printed warnings about a missing `compote cooking` command and failed component cache downloads, so the installer's success message was not taken as acceptance. After re-activating the environment, independent verification gave:
 
-| 工具 | 实测版本/路径 |
+| Tool | Measured version/path |
 | --- | --- |
-| ESP-IDF | v5.5.3，`/Users/dragon/.espressif/v5.5.3/esp-idf` |
+| ESP-IDF | v5.5.3, `/Users/dragon/.espressif/v5.5.3/esp-idf` |
 | `idf.py` | ESP-IDF v5.5.3 |
 | `esptool` | v4.12.0 |
 | Xtensa GCC | 14.2.0_20251107 |
 | IDF CMake | 3.30.2 |
 | IDF Ninja | 1.12.1 |
 
-EIM 在仓库根目录生成了包含本机绝对路径的 `eim_config.toml`。它是本机安装状态，不是项目构建配置，已加入 `.gitignore`，不提交到仓库。
+EIM generated an `eim_config.toml` in the repository root containing absolute paths on this machine. It is local install state, not project build configuration; it has been added to `.gitignore` and is not committed.
 
-官方依据：
+Official sources:
 
-- [ESP-IDF v6.0 macOS 安装说明](https://docs.espressif.com/projects/esp-idf/en/stable/esp32p4/get-started/macos-setup.html)
-- [EIM 官方说明与 macOS Homebrew 安装方式](https://docs.espressif.com/projects/idf-im-ui/en/latest/)
-- [EIM 前置依赖](https://docs.espressif.com/projects/idf-im-cli/en/latest/prerequisites.html)
-- [ESP-IDF v5.5.3 官方 release](https://github.com/espressif/esp-idf/releases/tag/v5.5.3)
+- [ESP-IDF v6.0 macOS installation guide](https://docs.espressif.com/projects/esp-idf/en/stable/esp32p4/get-started/macos-setup.html)
+- [EIM official docs and macOS Homebrew installation](https://docs.espressif.com/projects/idf-im-ui/en/latest/)
+- [EIM prerequisites](https://docs.espressif.com/projects/idf-im-cli/en/latest/prerequisites.html)
+- [ESP-IDF v5.5.3 official release](https://github.com/espressif/esp-idf/releases/tag/v5.5.3)
 
-## USB 未连接基线
+## USB baseline, not connected
 
-用户确认开发板尚未接入 Mac Studio 后，已保存 `.probe/baseline`。该快照中：
+After the user confirmed the board was not yet connected to the Mac Studio, `.probe/baseline` was saved. In that snapshot:
 
-- `system_profiler SPUSBDataType` 退出码为 0，但在 macOS 26.6.2 上返回空结果。
-- `ioreg -p IOUSB -l -w 0` 正常返回 USB 树。
-- `/dev/cu.*` 与 `/dev/tty.*` 只出现 Bluetooth、Bose QC Earbuds 和系统 debug 节点。
-- 未观察到名称包含 ESP、CP210、CH34、FTDI、USB Serial/JTAG 或 CDC 的设备/串口。
+- `system_profiler SPUSBDataType` exits with code 0 but returns empty output on macOS 26.6.2.
+- `ioreg -p IOUSB -l -w 0` returns the USB tree normally.
+- `/dev/cu.*` and `/dev/tty.*` show only Bluetooth, Bose QC Earbuds and system debug nodes.
+- No device or serial port with ESP, CP210, CH34, FTDI, USB Serial/JTAG or CDC in its name was seen.
 
-这构成开发板未连接时的正式基线，但仍不能推导目标板采用哪种 USB 实现。原始 `ioreg` 包含不断变化的统计计数器；探测脚本同时生成只保留设备树、VID/PID、产品名、厂商名、序列号和 location ID 的归一化摘要，后续差异以摘要为主、原始输出为证据补充。
+This is the formal baseline for the board being disconnected, but it still says nothing about which USB implementation the target board uses. Raw `ioreg` output contains constantly changing statistics counters; the probe script therefore also produces a normalized summary that keeps only the device tree, VID/PID, product name, vendor name, serial number and location ID. Later diffs rely primarily on the summary, with the raw output as supporting evidence.
 
-## USB 连接后对比
+## USB diff after connecting
 
-2026-09-14，用户把开发板通过计划采用的 USB-C 线接到 Mac Studio 后，已保存 `.probe/connected` 并与基线比较。连接期间同时出现一台 iPhone；它不符合 ESP/串口筛选条件，已从目标设备判断中排除。
+On 2026-09-14, after the user connected the board to the Mac Studio with the USB-C cable planned for use, `.probe/connected` was saved and compared with the baseline. An iPhone also appeared during the connection; it did not match the ESP/serial filter and was excluded from the target device judgment.
 
-| 项目 | 实测结果 |
+| Item | Measured result |
 | --- | --- |
 | USB product | `USB JTAG/serial debug unit` |
 | Manufacturer | Espressif |
-| VID:PID | `303A:1001`（十进制 `12346:4097`） |
+| VID:PID | `303A:1001` (decimal `12346:4097`) |
 | USB serial | `98:88:E0:06:8B:CC` |
 | Location ID | `138412032` |
 | Runtime callout device | `/dev/cu.usbmodem8401` |
 | Runtime tty device | `/dev/tty.usbmodem8401` |
-| USB implementation | ESP32-S3 原生 USB Serial/JTAG；不是 CH340、CP210 或 FTDI bridge |
+| USB implementation | ESP32-S3 native USB Serial/JTAG; not a CH340, CP210 or FTDI bridge |
 
-`system_profiler SPUSBDataType` 在本机仍以退出码 0 返回空内容，因此本次结论由 `ioreg` 插拔差异和新增 serial device node 共同支撑。
+`system_profiler SPUSBDataType` still returns empty output with exit code 0 on this machine, so this conclusion rests on the `ioreg` plug/unplug diff together with the newly added serial device node.
 
-## 运行日志与 ROM 下载链路
+## Runtime log and ROM download link
 
-以 115200 baud 打开 `/dev/cu.usbmodem8401` 后，设备因原生 USB 串口打开动作发生 `USB_UART_CHIP_RESET`。这不是完全被动的读取，但没有擦除或写入 Flash。启动日志确认：
+Opening `/dev/cu.usbmodem8401` at 115200 baud caused a `USB_UART_CHIP_RESET` on the device, triggered by opening the native USB serial port. This is not a fully passive read, but no Flash was erased or written. The boot log confirms:
 
-- ESP32-S3 ROM 标识 `esp32s3-20210327`，芯片 revision v0.2。
-- 16 MB QIO Flash，80 MHz。
-- AP 64 Mbit（8 MB）Octal PSRAM，80 MHz。
-- 当前应用项目 `xiaozhi`，版本 1.9.4，ESP-IDF v5.5。
-- 当前固件板型标识 `atk-dnesp32s3-box`。
-- 当前固件成功初始化 LCD/LVGL、ES8311 codec 和 Wi-Fi；这些日志只证明现有固件可驱动实机，不自动证明 Vibe Buddy 可复用其全部板级参数。
+- ESP32-S3 ROM identifier `esp32s3-20210327`, chip revision v0.2.
+- 16 MB QIO Flash, 80 MHz.
+- AP 64 Mbit (8 MB) Octal PSRAM, 80 MHz.
+- Current application project `xiaozhi`, version 1.9.4, ESP-IDF v5.5.
+- Current firmware board identifier `atk-dnesp32s3-box`.
+- The current firmware successfully initialized LCD/LVGL, the ES8311 codec and Wi-Fi; these logs only prove the existing firmware can drive the device, not that Vibe Buddy can reuse all of its board parameters.
 
-随后执行只读 `esptool flash_id` 探测：
+A read-only `esptool flash_id` probe followed:
 
-- 成功连接 ESP32-S3 QFN56 revision v0.2。
-- 确认 USB mode 为 `USB-Serial/JTAG`，40 MHz crystal，8 MB embedded PSRAM。
-- Flash manufacturer/device 为 `68:4018`，探测容量 16 MB，3.3 V。
-- RAM stub 上传、460800 baud 切换和 hard reset 均成功。
+- Connected successfully to an ESP32-S3 QFN56 revision v0.2.
+- Confirmed USB mode `USB-Serial/JTAG`, 40 MHz crystal, 8 MB embedded PSRAM.
+- Flash manufacturer/device `68:4018`, detected capacity 16 MB, 3.3 V.
+- RAM stub upload, switch to 460800 baud and hard reset all succeeded.
 
-该探测证明 ROM 下载通路工作，但未执行 erase、write 或 Vibe Buddy 固件烧录。实际写入后的重新枚举和运行时通信仍属于 Stage 1 实机验收。
+This probe proves the ROM download path works, but no erase, write or Vibe Buddy firmware flash was performed. Re-enumeration after an actual write and runtime communication remain part of Stage 1 on-device acceptance.
 
-## 当前固件源码旁证
+## Corroboration from the current firmware source
 
-启动日志中的 `xiaozhi` 1.9.4 与板型标识可对应到该固件的固定源码版本。其 `atk-dnesp32s3-box` board 目录记录了 ST7789 i80、XL9555 和 ES8311 等配置，可用于下一步核对实物，但它是当前运行固件的上游源码，不是正点原子的官方原理图/BSP，不能单独作为最终 GPIO 依据。
+The `xiaozhi` 1.9.4 and board identifier in the boot log map to a pinned source version of that firmware. Its `atk-dnesp32s3-box` board directory records configuration such as ST7789 i80, XL9555 and ES8311, which can be used to cross-check the hardware next. But it is the upstream source of the currently running firmware, not ALIENTEK's official schematic/BSP, and cannot on its own serve as the final GPIO source.
 
-- [`xiaozhi-esp32` v1.9.4 固定提交](https://github.com/78/xiaozhi-esp32/tree/3ced7709c65a39494f5684e99111854a5bcbd8c7)
-- [该版本的 `atk-dnesp32s3-box/config.h`](https://github.com/78/xiaozhi-esp32/blob/3ced7709c65a39494f5684e99111854a5bcbd8c7/main/boards/atk-dnesp32s3-box/config.h)
+- [`xiaozhi-esp32` v1.9.4 pinned commit](https://github.com/78/xiaozhi-esp32/tree/3ced7709c65a39494f5684e99111854a5bcbd8c7)
+- [`atk-dnesp32s3-box/config.h` in that version](https://github.com/78/xiaozhi-esp32/blob/3ced7709c65a39494f5684e99111854a5bcbd8c7/main/boards/atk-dnesp32s3-box/config.h)
 
-## Stage 0 门禁
+## Stage 0 gate
 
-- [x] 经用户确认的未连接 USB 基线。
-- [x] 连接后快照及拔插前后 USB 差异。
-- [x] VID/PID 与设备名称。
-- [x] native USB 或 USB-UART bridge 的证据。
-- [x] ROM 下载路径与当前固件运行时串口路径；实际 Vibe Buddy 烧录后仍需复验。
-- [x] PCB 完整型号/版本：ATK-DNESP32S3-BOX V1.1。
-- [x] 已整理 DNESP32S3 开发板和 BOX3 两套候选官方资料，并明确不可混用。
-- [x] 确定实机版本；厂家 schematic、BSP 和 examples 仍缺失并继续锁定外设阶段。
-- [ ] LCD、touch、audio、microphone、buzzer、K0/K1/K2 的官方引脚/器件依据。
+- [x] User-confirmed USB baseline with the board disconnected.
+- [x] Snapshot after connecting and the USB diff before and after plugging in.
+- [x] VID/PID and device name.
+- [x] Evidence of native USB versus a USB-UART bridge.
+- [x] ROM download path and the current firmware's runtime serial path; must be re-verified after actually flashing Vibe Buddy.
+- [x] Full PCB model/revision: ATK-DNESP32S3-BOX V1.1.
+- [x] Collected the two candidate sets of official material, DNESP32S3 development board and BOX3, and made clear they must not be mixed.
+- [x] Determined the device revision; the vendor schematic, BSP and examples are still missing and continue to block the peripheral stages.
+- [ ] Official pin/part evidence for the LCD, touch, audio, microphone, buzzer and K0/K1/K2.

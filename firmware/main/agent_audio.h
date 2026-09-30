@@ -23,7 +23,7 @@ typedef enum {
 esp_err_t agent_audio_init(void);
 esp_err_t agent_audio_play(agent_audio_prompt_t prompt);
 /// Sets the volume and saves it to NVS, clamping out-of-range values; boards without a codec return
-/// ESP_ERR_NOT_SUPPORTED。
+/// ESP_ERR_NOT_SUPPORTED.
 esp_err_t agent_audio_set_volume(unsigned level);
 unsigned agent_audio_volume(void);
 const char *agent_audio_status(void);
