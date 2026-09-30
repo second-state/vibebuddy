@@ -19,6 +19,10 @@ on:
       - "voices/**"
       - "tools/make_voice_pack.py"
       - "tools/check-localization.py"
+      - "tools/package-licenses.py"
+      - "packaging/**"
+      - "LICENSE"
+      - "LICENSE-ASSETS"
       - "Cargo.toml"
       - "Cargo.lock"
       - ".github/workflows/release-app.yml"
@@ -122,6 +126,7 @@ jobs:
           echo "CODESIGN_IDENTITY=${identity}" >> "${GITHUB_ENV}"
       - name: Build app bundle
         run: |
+          cargo install cargo-about --version 0.9.2 --locked --features cli
           app/scripts/build-app.sh
           app/scripts/make-dmg.sh "VibeBuddy-${{ steps.version.outputs.label }}-arm64.dmg"
           # Firmware is also distributed on its own: the three images plus build.txt, which users pick via Flash from file… on the Device tab.

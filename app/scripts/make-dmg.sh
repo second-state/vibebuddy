@@ -14,6 +14,7 @@ output="${1:?usage: make-dmg.sh <output.dmg>}"
 staging="$(mktemp -d)"
 trap 'rm -rf "${staging}"' EXIT
 ditto "${bundle}" "${staging}/Vibe Buddy.app"
+ditto "${bundle}/Contents/Resources/licenses" "${staging}/Licenses"
 ln -s /Applications "${staging}/Applications"
 
 rm -f "${output}"
