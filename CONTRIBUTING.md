@@ -4,7 +4,7 @@ Thanks for your interest in Vibe Buddy. Bug reports, fixes, new agent integratio
 
 ## Reporting bugs and ideas
 
-Open an issue on [GitHub Issues](https://github.com/longzhi/vibe-buddy/issues). For a bug, include:
+Open an issue on [GitHub Issues](https://github.com/second-state/vibebuddy/issues). For a bug, include:
 
 - what you did, what you expected and what happened;
 - your macOS version, the app version (Settings → General) and the box's firmware build (the menu's first line);
