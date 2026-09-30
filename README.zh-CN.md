@@ -20,7 +20,7 @@ Vibe Buddy 是给 AI 编程 Agent 配的桌面宠物。它住在键盘旁一个�
 - **番茄钟**：给你计时，专注 25 分钟、休息 5 分钟。K0 开始、暂停、继续，长按放弃；K1 在值班与番茄钟之间切换；K2 照旧带你回到 Agent 所在的窗口，长按静音。阶段结束响铃并播报，下一阶段等你按 K0 再开始。今天完成了几次、专注了多久记在盒子上，按日清零，重启不丢。
 - **休闲**：值班空闲够久之后它自己去玩。五分钟后开始演小剧目（巡逻、踢球、看书、数星星、躲猫猫、被自己吓醒、梦话），半小时后困了转暗睡觉，夜里睡够 90 分钟关背光。Agent 一有动静或按任何键，立刻回来值班。
 
-番茄钟与休闲的状态都在固件里，不依赖 Mac 端。设计见 [`docs/pomodoro.md`](docs/pomodoro.md) 与 [`docs/leisure.md`](docs/leisure.md)。
+番茄钟完全在盒子上运行，计时和当日次数不依赖 Mac 端。休闲的状态同样在固件里，但它需要与 daemon 的链路在线：盒子 15 秒收不到 Mac 的消息就判定链路断开，休闲随即回到值班，链路恢复前不会再进入。设计见 [`docs/pomodoro.md`](docs/pomodoro.md) 与 [`docs/leisure.md`](docs/leisure.md)。
 
 **当前状态：** 显示与语音已通过实机验收，Codex、Claude Code 与 GitHub Actions 均已接入。接下来做什么见 [`docs/roadmap.md`](docs/roadmap.md)。
 
@@ -97,7 +97,7 @@ curl -H 'content-type: application/json' \
 
 ## 开发
 
-日常操作都收在根目录的 [`justfile`](justfile) 里，`just` 列出全部。先读这些：[`docs/architecture.md`](docs/architecture.md)（边界与决定）、[`CONTEXT.md`](CONTEXT.md)（领域词汇）、[`docs/pet.md`](docs/pet.md)（氛围小助手设计）、[`docs/protocol.md`](docs/protocol.md)（协议决定）、[`docs/references.md`](docs/references.md)（外部项目的借鉴边界）和 [`LESSONS.md`](LESSONS.md)（经验教训）。
+日常操作都收在根目录的 [`justfile`](justfile) 里，`just` 列出全部。如何搭环境、跑测试、提交改动见 [`CONTRIBUTING.md`](CONTRIBUTING.md)（英文）。先读这些：[`docs/architecture.md`](docs/architecture.md)（边界与决定）、[`CONTEXT.md`](CONTEXT.md)（领域词汇）、[`docs/pet.md`](docs/pet.md)（氛围小助手设计）、[`docs/protocol.md`](docs/protocol.md)（协议决定）、[`docs/references.md`](docs/references.md)（外部项目的借鉴边界）和 [`LESSONS.md`](LESSONS.md)（经验教训）。
 
 ### 仓库布局
 

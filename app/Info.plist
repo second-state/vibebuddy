@@ -15,7 +15,7 @@
     <key>CFBundleVersion</key><string>__BUILD__</string>
     <key>LSMinimumSystemVersion</key><string>14.0</string>
     <key>LSUIElement</key><true/>
-    <key>NSHumanReadableCopyright</key><string>MIT</string>
+    <key>NSHumanReadableCopyright</key><string>Licensed under GPL-3.0-or-later</string>
     <key>NSPrincipalClass</key><string>NSApplication</string>
 </dict>
 </plist>

@@ -20,7 +20,7 @@ It has three modes:
 - **Pomodoro**: a focus timer, 25 minutes of focus and 5 of break. K0 starts, pauses and resumes, and a long press gives up; K1 switches between On duty and Pomodoro; K2 still takes you to the agent's window, and a long press mutes. Each phase ends with a chime and a spoken line, and the next one waits for you to press K0. Today's finished sessions and focus time are kept on the box, reset daily, and survive a restart.
 - **Leisure**: after On duty has been idle long enough, the buddy goes off to play. After five minutes it starts little skits (patrolling, kicking a ball, reading, counting stars, hide-and-seek, startling itself awake, talking in its sleep); after half an hour it gets sleepy and dims; at night, after 90 minutes of sleep, it turns the backlight off. Any agent activity or button press brings it straight back on duty.
 
-Pomodoro and Leisure run entirely on the box and don't need the Mac. Design notes: [`docs/pomodoro.md`](docs/pomodoro.md) and [`docs/leisure.md`](docs/leisure.md).
+Pomodoro runs entirely on the box: its timer and today's tally keep going without the Mac. Leisure's state also lives in the firmware, but it needs a live link to the daemon: if the box hears nothing from the Mac for 15 seconds it counts the link as lost, and Leisure returns to On duty until the link is back. Design notes: [`docs/pomodoro.md`](docs/pomodoro.md) and [`docs/leisure.md`](docs/leisure.md).
 
 **Status:** the display and voice have passed on-device acceptance, and Codex, Claude Code and GitHub Actions are all connected. See [`docs/roadmap.md`](docs/roadmap.md) for what's next.
 
@@ -97,7 +97,7 @@ See [`docs/protocol.md`](docs/protocol.md) for the events.
 
 ## Development
 
-Everyday tasks live in the [`justfile`](justfile); run `just` to list them. The docs to start with are [`docs/architecture.md`](docs/architecture.md) (boundaries and decisions), [`CONTEXT.md`](CONTEXT.md) (domain terms), [`docs/pet.md`](docs/pet.md) (the buddy's design), [`docs/protocol.md`](docs/protocol.md) (protocol decisions), [`docs/references.md`](docs/references.md) (what we borrow from other projects, and where we stop) and [`LESSONS.md`](LESSONS.md) (lessons learned).
+Everyday tasks live in the [`justfile`](justfile); run `just` to list them. See [`CONTRIBUTING.md`](CONTRIBUTING.md) for how to set up, test and send changes. The docs to start with are [`docs/architecture.md`](docs/architecture.md) (boundaries and decisions), [`CONTEXT.md`](CONTEXT.md) (domain terms), [`docs/pet.md`](docs/pet.md) (the buddy's design), [`docs/protocol.md`](docs/protocol.md) (protocol decisions), [`docs/references.md`](docs/references.md) (what we borrow from other projects, and where we stop) and [`LESSONS.md`](LESSONS.md) (lessons learned).
 
 ### Repository layout
 
