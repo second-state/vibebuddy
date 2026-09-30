@@ -103,6 +103,10 @@ for dir in "${repo_root}"/voices/*/; do
     fi
 done
 
+# Both the App and its separately downloadable firmware carry these notices.
+echo "== Licenses and corresponding source"
+python3 "${repo_root}/tools/package-licenses.py" "${contents}/Resources"
+
 # Login items and notifications key on the bundle's identity, so an unsigned bundle looks like a new app after every change. Locally we sign ad hoc;
 # for releases CI passes a Developer ID in CODESIGN_IDENTITY, and notarization requires the hardened runtime
 # and a timestamp, so on that path a signing failure fails the build.

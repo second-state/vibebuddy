@@ -19,6 +19,7 @@ You need a Mac with Apple silicon on macOS 14 or later, plus:
 
 - the Rust toolchain (`rustup`) and the Xcode command-line tools; a full Xcode install isn't needed;
 - [`just`](https://github.com/casey/just), which runs the everyday tasks (`just` lists them);
+- for App packaging: `cargo install cargo-about --version 0.9.2 --locked --features cli` to collect third-party license texts;
 - for firmware work: the Xtensa toolchain (`cargo install espup espflash --locked`, then `espup install --targets esp32s3`) and, to flash, the box itself (ALIENTEK ATK-DNESP32S3-BOX V1.1);
 - for voice work: `ffmpeg`, and `uv` for the edge-tts previews.
 
