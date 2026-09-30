@@ -59,7 +59,7 @@
 "Announcement voice" = "播报音色";
 "The box is using “%@”. Preview a voice, then click Use to write it to the box — no firmware flash needed. Over the UART port this takes a few minutes; when it's done the box says a line in the new voice." = "盒子现在用的是「%@」。挑一个试听，点「使用」写进盒子；不用刷固件。UART 口上要写几分钟，写完盒子会用新音色说一句。";
 "Didn't finish, so the box keeps its built-in voice. Reconnect the cable and click Use again." = "没写完，盒子先用内置音色；插好线后重新点「使用」。";
-"Built-in voice (Wanwan Xiaohe)" = "内置音色（湾湾小何）";
+"Built-in voice (Jessica)" = "内置音色（Jessica）";
 "In use" = "已写入";
 "Use" = "使用";
 "Writing voice pack… %@" = "正在写入语音包… %@";
@@ -73,12 +73,7 @@
 "Chinese · Taiwanese accent · Doubao · same voice as Xiaozhi" = "中文 · 台湾口音 · 豆包语音 · 小智同款";
 "Xiaohe 2.0" = "小何 2.0";
 "Chinese · Mandarin · Doubao" = "中文 · 普通话 · 豆包语音";
-"HsiaoYu" = "晓雨";
-"HsiaoChen" = "晓臻";
-"Chinese · Taiwanese accent · Microsoft" = "中文 · 台湾口音 · 微软";
-"Xiaoxiao" = "晓晓";
-"Chinese · Mandarin · Microsoft" = "中文 · 普通话 · 微软";
-"English · US · Microsoft" = "英文 · 美式 · 微软";
+"English · US · ElevenLabs" = "英文 · 美式 · ElevenLabs";
 
 /* Settings: Agents */
 "Connect agents" = "接入 Agent";
@@ -163,8 +158,8 @@
 "Connect your agents so their progress shows up on the box." = "接入 Agent：让它们的进展传到盒子上。";
 "Only session IDs, event names and working directories are forwarded. After writing Codex's config, trust it once on its /hooks page." = "只转发会话标识、事件名和工作目录。Codex 写入后要在它的 /hooks 页面信任一次。";
 "Pick an announcement voice." = "挑一个播报音色。";
-"The box's built-in voice speaks Chinese (Wanwan Xiaohe); pick an English voice above to hear announcements in English." = "盒子内置的是中文音色（湾湾小何）；想听英文播报，在上面挑一个英文音色。";
-"If you skip this, the box uses its built-in voice, Wanwan Xiaohe (Chinese)." = "不选就用盒子内置的湾湾小何。";
+"The box's built-in voice speaks English (Jessica); pick a Chinese voice above to hear announcements in Chinese." = "盒子内置的是英文音色（Jessica）；想听中文播报，在上面挑一个中文音色。";
+"If you skip this, the box uses its built-in voice, Jessica (English)." = "不选就用盒子内置的英文音色 Jessica。";
 "Start Vibe Buddy automatically when you log in?" = "登录时自动启动 Vibe Buddy？";
 "macOS may say a background item was added — that's expected." = "系统可能会提示「已添加后台项目」，那是 macOS 的正常提示。";
 "All set." = "好了。";

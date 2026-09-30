@@ -62,11 +62,8 @@ public struct VoiceCatalogEntry: Equatable, Identifiable, Sendable {
     public static let all: [VoiceCatalogEntry] = [
         VoiceCatalogEntry(id: "wanwanxiaohe", name: String(localized: "Wanwan Xiaohe"), tag: String(localized: "Chinese · Taiwanese accent · Doubao · same voice as Xiaozhi"), language: .zh),
         VoiceCatalogEntry(id: "xiaohe2", name: String(localized: "Xiaohe 2.0"), tag: String(localized: "Chinese · Mandarin · Doubao"), language: .zh),
-        VoiceCatalogEntry(id: "hsiaoyu", name: String(localized: "HsiaoYu"), tag: String(localized: "Chinese · Taiwanese accent · Microsoft"), language: .zh),
-        VoiceCatalogEntry(id: "hsiaochen", name: String(localized: "HsiaoChen"), tag: String(localized: "Chinese · Taiwanese accent · Microsoft"), language: .zh),
-        VoiceCatalogEntry(id: "xiaoxiao", name: String(localized: "Xiaoxiao"), tag: String(localized: "Chinese · Mandarin · Microsoft"), language: .zh),
-        VoiceCatalogEntry(id: "jenny", name: "Jenny", tag: String(localized: "English · US · Microsoft"), language: .en),
-        VoiceCatalogEntry(id: "guy", name: "Guy", tag: String(localized: "English · US · Microsoft"), language: .en),
+        VoiceCatalogEntry(id: "jessica", name: "Jessica", tag: String(localized: "English · US · ElevenLabs"), language: .en),
+        VoiceCatalogEntry(id: "chris", name: "Chris", tag: String(localized: "English · US · ElevenLabs"), language: .en),
     ]
 
     /// Voices in `language` first, catalog order otherwise preserved.

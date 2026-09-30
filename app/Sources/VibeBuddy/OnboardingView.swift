@@ -127,13 +127,13 @@ struct OnboardingView: View {
         }
     }
 
-    /// The firmware's built-in voice speaks Chinese; point English users at an English pack.
+    /// The firmware's built-in voice speaks English; point Chinese users at a Chinese pack.
     private var voiceFootnote: String {
-        let englishBundled = Resources.bundledVoices.contains { $0.language == .en }
-        if Resources.uiLanguage == .en && englishBundled {
-            return String(localized: "The box's built-in voice speaks Chinese (Wanwan Xiaohe); pick an English voice above to hear announcements in English.")
+        let chineseBundled = Resources.bundledVoices.contains { $0.language == .zh }
+        if Resources.uiLanguage == .zh && chineseBundled {
+            return String(localized: "The box's built-in voice speaks English (Jessica); pick a Chinese voice above to hear announcements in Chinese.")
         }
-        return String(localized: "If you skip this, the box uses its built-in voice, Wanwan Xiaohe (Chinese).")
+        return String(localized: "If you skip this, the box uses its built-in voice, Jessica (English).")
     }
 
     private var loginItem: some View {
