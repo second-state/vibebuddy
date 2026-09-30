@@ -32,7 +32,7 @@ Pomodoro runs entirely on the box: its timer and today's tally keep going withou
 
 ## Getting started
 
-1. Download `VibeBuddy-<version>-arm64.dmg` from the [latest release](https://github.com/longzhi/vibe-buddy/releases/latest) and drag Vibe Buddy to Applications.
+1. Download `VibeBuddy-<version>-arm64.dmg` from the [latest release](https://github.com/second-state/vibebuddy/releases/latest) and drag Vibe Buddy to Applications.
 2. Plug the box into the Mac.
 3. Open Vibe Buddy. First-run setup walks you through:
    - finding the box (it blinks so you know it's the right one);

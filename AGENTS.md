@@ -14,7 +14,7 @@ The project is switching to English as it goes open source:
 
 ### Issue tracker
 
-Issues and specs both live in GitHub Issues (longzhi/vibe-buddy), managed with `gh`. See `docs/agents/issue-tracker.md`.
+Issues and specs both live in GitHub Issues (second-state/vibebuddy), managed with `gh`. See `docs/agents/issue-tracker.md`.
 
 ### Triage labels
 

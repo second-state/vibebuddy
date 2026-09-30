@@ -32,7 +32,7 @@ Vibe Buddy 是给 AI 编程 Agent 配的桌面宠物。它住在键盘旁一个�
 
 ## 上手
 
-1. 从[最新 Release](https://github.com/longzhi/vibe-buddy/releases/latest) 下载 `VibeBuddy-<版本>-arm64.dmg`，把 Vibe Buddy 拖进「应用程序」。
+1. 从[最新 Release](https://github.com/second-state/vibebuddy/releases/latest) 下载 `VibeBuddy-<版本>-arm64.dmg`，把 Vibe Buddy 拖进「应用程序」。
 2. 把盒子插上 Mac。
 3. 打开 Vibe Buddy，首次启动的引导会带你：
    - 找到盒子（它会眨眼，确认是这一台）；
