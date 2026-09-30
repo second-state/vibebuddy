@@ -9,6 +9,7 @@
 - 代码、注释、日志、报错信息、脚本输出、commit message 一律英文。
 - App 界面文案以英文为 key 写在源码里，中文译文放 `app/Localization/zh-Hans.lproj`，改文案后跑 `tools/check-localization.py`。界面里的英文说法以 `CONTEXT.md` 的「英文界面用语」为准。
 - 文档（`*.md`）：新建的文档一律用英文；已有的中文文档之后整体迁移，迁移前在其中增补的内容沿用中文，避免同一个文件中英混排。
+- `README.md` 是英文版，`README.zh-CN.md` 是它的中文版，两份结构一一对应：改一份就同步改另一份。
 
 ## Agent skills
 
