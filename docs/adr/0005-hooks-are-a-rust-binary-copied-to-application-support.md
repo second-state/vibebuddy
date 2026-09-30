@@ -2,14 +2,14 @@
 status: accepted
 ---
 
-# Hook 改为 Rust 单二进制，复制到 Application Support
+# Hooks become a single Rust binary, copied to Application Support
 
-Codex 与 Claude Code 的 Hook 目前是仓库里的两个 Python 脚本，用户配置写死其绝对路径。macOS 不保证有 `python3`，App 包一旦挪动路径也会失效。我们决定把两个脚本合成一个 Rust 二进制 `vibebuddy-hook`（隐私过滤规则照搬，测试沿用），App 启动时复制到 `~/Library/Application Support/VibeBuddy/bin/`，Hook 配置指向那里。
+The Codex and Claude Code hooks are currently two Python scripts in the repository, and the user's configuration hard-codes their absolute paths. macOS doesn't guarantee `python3`, and the path also breaks as soon as the App bundle moves. We decided to merge the two scripts into one Rust binary, `vibebuddy-hook` (the privacy-filter rules are carried over as is, and the tests are kept), which the App copies to `~/Library/Application Support/VibeBuddy/bin/` at launch; the hook configuration points there.
 
-## 被拒绝的方案
+## Rejected option
 
-配置直接引用 App 包内的脚本或二进制：用户把 App 从下载目录拖进应用程序文件夹后 Hook 就断了，而 Hook 的失败是静默的。
+Have the configuration reference a script or binary inside the App bundle directly: once the user drags the App from Downloads into the Applications folder, the hooks break, and hook failures are silent.
 
-## 后果
+## Consequences
 
-Hook 的行为变化要同时改 Rust 与文档；Python 脚本在 App 接管后退役。Codex 的 `/hooks` 信任仍只能由人完成。
+Changes to hook behavior must update both the Rust code and the docs; the Python scripts are retired once the App takes over. Codex's `/hooks` trust still can only be granted by a person.

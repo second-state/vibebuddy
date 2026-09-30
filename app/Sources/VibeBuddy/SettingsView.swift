@@ -99,7 +99,7 @@ struct VoicesView: View {
 
     private var currentVoiceName: String {
         let id = model.status?.device.voice ?? "builtin"
-        if id == "builtin" { return String(localized: "Built-in voice (Wanwan Xiaohe)") }
+        if id == "builtin" { return String(localized: "Built-in voice (Jessica)") }
         return VoiceCatalogEntry.all.first { $0.id == id }?.name ?? id
     }
 }

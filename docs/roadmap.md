@@ -1,63 +1,63 @@
-# Vibe Buddy 路线图
+# Vibe Buddy roadmap
 
-## 阶段门禁
+## Stage gates
 
-### Stage 0 — Hardware Probe（已完成，2026-09-14）
+### Stage 0 — Hardware Probe (done, 2026-09-14)
 
-完成条件：
+Exit criteria:
 
-- 当前开发主机确认为 Mac Studio。
-- 记录开发工具路径与版本，明确缺失项和安装方案。
-- 保存 ESP32S3-BOX 插拔前后的 USB、IOKit 和串口枚举，并形成差异。
-- 确认 VID/PID、设备名、串口节点、USB 类型、烧录路径和运行时路径，或把尚不能证明的项目明确标记为待验证。
-- 精确识别 PCB 型号/版本，并调查匹配的官方 schematic、BSP 和 examples；无法取得的资料必须记录证据边界，并继续锁定依赖它们的外设阶段。
+- The current development host is confirmed to be a Mac Studio.
+- Development tool paths and versions are recorded, with missing items and install plans spelled out.
+- USB, IOKit, and serial enumeration of the ESP32S3-BOX are saved before and after plugging it in, and diffed.
+- VID/PID, device name, serial node, USB type, flashing path, and runtime path are confirmed, or anything not yet provable is explicitly marked as pending verification.
+- The PCB model/revision is identified precisely, and matching official schematics, BSP, and examples are researched; for any material that can't be obtained, the evidence boundary must be recorded, and the peripheral stages that depend on it stay locked.
 
-最小 USB/烧录路径未确认前，Stage 0 不通过。
+Stage 0 does not pass until the minimal USB/flashing path is confirmed.
 
-实机结论：ATK-DNESP32S3-BOX V1.1 通过 `303A:1001` 原生 USB Serial/JTAG 枚举；同一 `USB-SLAVE` 连接已完成 ROM 探测、烧录和运行时通信。老款 BOX V1.1 的厂家原理图/BSP 仍未取得，因此 Stage 3～5 的外设 GPIO 不得按相似板卡猜测。
+Hardware findings: the ATK-DNESP32S3-BOX V1.1 enumerates via `303A:1001` native USB Serial/JTAG; ROM probing, flashing, and runtime communication have all been done over the same `USB-SLAVE` connection. The vendor schematic/BSP for the old BOX V1.1 has still not been obtained, so peripheral GPIOs for Stages 3–5 must not be guessed from similar boards.
 
-### Stage 1 — Serial Hello（已完成，2026-09-14）
+### Stage 1 — Serial Hello (done, 2026-09-14)
 
-只实现串口逐行读取和 JSON 解析，不实现 LCD/audio。验收必须是 Mac → USB → ESP32 → JSON parse 的实机链路，不能用本机模拟或仅编译通过代替。
+Implements only line-by-line serial reading and JSON parsing, no LCD/audio. Acceptance must be the real hardware path Mac → USB → ESP32 → JSON parse; local simulation or merely compiling is not a substitute.
 
-实机结论：ESP-IDF v5.5.3 构建和烧录成功；Mac 发送 `{"version":1,"event":"task.done","title":"Hello"}` 后，ESP32 实际返回 `EVENT task.done` 与 `TITLE Hello`。原厂 16 MB Flash 已在写入前完成本地受限权限备份。
+Hardware findings: ESP-IDF v5.5.3 built and flashed successfully; after the Mac sent `{"version":1,"event":"task.done","title":"Hello"}`, the ESP32 actually returned `EVENT task.done` and `TITLE Hello`. The stock 16 MB flash was backed up locally with restricted permissions before writing.
 
-### Stage 2 — `vibebuddyd`（已完成，2026-09-14）
+### Stage 2 — `vibebuddyd` (done, 2026-09-14)
 
-实现 `POST /v1/events`、最小 Transport 抽象、`SerialTransport` 和断线重连；用 HTTP 请求完成实机验收。
+Implements `POST /v1/events`, a minimal Transport abstraction, `SerialTransport`, and reconnect on disconnect; hardware acceptance is done with HTTP requests.
 
-实机结论：`vibebuddyd` 按 `303A:1001` 自动发现 `/dev/cu.usbmodem8401`；HTTP 事件到达 ESP32 并得到对应诊断输出。真实拔掉 `USB-SLAVE` 后记录到 `Device not configured`，插回后自动重新连接；重连后的 `task.done` 事件成功到达设备。
+Hardware findings: `vibebuddyd` auto-discovers `/dev/cu.usbmodem8401` by `303A:1001`; HTTP events reach the ESP32 and produce the corresponding diagnostic output. After physically unplugging `USB-SLAVE`, `Device not configured` was logged; after plugging it back in it reconnected automatically, and a `task.done` event after reconnecting reached the device successfully.
 
-### Stage 3 — LCD（已完成，2026-09-14）
+### Stage 3 — LCD (done, 2026-09-14)
 
-实机确认 320×240 ST7789 i80 与 XL9555 背光控制后，实现氛围小助手的 Ready、Working、Input Required、Done、Failed 动画。Mac 端多任务快照可绘制最多 3 张卡片，最新在最上。
+After confirming the 320×240 ST7789 i80 and XL9555 backlight control on the hardware, implement the buddy's Ready, Working, Input Required, Done, and Failed animations. The Mac-side multi-task snapshot can draw up to 3 cards, newest on top.
 
-### Stage 4 — Audio（已完成，2026-09-14）
+### Stage 4 — Audio (done, 2026-09-14)
 
-实机探测到 ES8311，并确认 I2S 与扬声器使能链路。需要确认、完成和失败使用固件内置的 24 kHz PCM 中文短语音；工作中与空闲保持静音。用户已听觉确认“需要你确认”。
+The ES8311 was detected on the hardware, and the I2S and speaker-enable chain confirmed. Needs input, done, and failed use short Chinese voice lines built into the firmware as 24 kHz PCM; working and idle stay silent. The user has confirmed by ear hearing "需要你确认" ("I need you to confirm").
 
-### Stage 5 — Buttons（K2 已完成，2026-09-14）
+### Stage 5 — Buttons (K2 done, 2026-09-14)
 
-K2“打开当前来源”的按键与 Mac 激活链路已经通过实机验收：探针确认 K2 为 XL9555 P0.3、低电平有效（`P0: 0xFF → 0xF7 → 0xFF`）；设备通过 NDJSON 上报单击，用户短按后 `vibebuddyd` 能拉起目标应用。精确路由已修正两处：Codex 子 Agent 映射到父 thread；Claude Code 不再聚焦 Ghostty，而是打开 Claude App 的对应 Code 会话。2026-09-15 修正了其中的定位错误：CLI `session_id` 到桌面会话不是一对一，原先的 `claude://resume` 会打开一个内容陈旧的影子会话，现改为先解析桌面会话 id 再用 `claude://code/continue` 跳转。2026-09-22 把落点改为按运行处分派，并完成了实机短按验收：Claude App 的 Code 会话跳 `claude://code/continue?session=local_44d42f48…`（桌面会话 id 取自 `CLAUDE_CODE_HOST_SESSION_ID`，不再去磁盘上按 cwd 猜）；Ghostty 里的 claude CLI 与 codex 都落在 `com.mitchellh.ghostty`；跑在 Claude App 里的 codex 落在 `com.anthropic.claudefordesktop`。终端会话不再被导入成 App 里的副本。无宿主的会话（SSH、后台进程）跳过下一个候选，这一支只有单元测试与 Hook 端到端验证，没有实机场景。
+K2's "open the current source" button and the Mac activation path have passed hardware acceptance: a probe confirmed K2 is XL9555 P0.3, active-low (`P0: 0xFF → 0xF7 → 0xFF`); the device reports a single press over NDJSON, and after the user presses it `vibebuddyd` brings up the target app. Precise routing was fixed in two places: Codex sub-agents map to their parent thread; Claude Code no longer focuses Ghostty, but opens the corresponding Code session in the Claude App. On 2026-09-15 a targeting bug in this was fixed: CLI `session_id` to desktop session is not one-to-one, and the old `claude://resume` opened a shadow session with stale content; it now resolves the desktop session id first and then jumps with `claude://code/continue`. On 2026-09-22 the destination was changed to dispatch by where the session runs, and a short-press hardware acceptance was completed: a Code session in the Claude App jumps to `claude://code/continue?session=local_44d42f48…` (the desktop session id is taken from `CLAUDE_CODE_HOST_SESSION_ID`, no longer guessed on disk by cwd); the claude CLI and codex in Ghostty both land on `com.mitchellh.ghostty`; codex running inside the Claude App lands on `com.anthropic.claudefordesktop`. Terminal sessions are no longer imported as copies into the App. Sessions with no host (SSH, background processes) skip to the next candidate; this branch has only unit tests and hook end-to-end verification, with no hardware scenario.
 
-2026-09-15 加入第二个场景：番茄钟（专注 25 分钟、休息 5 分钟，表盘仿 Focus To-Do）。三个键各管一件事：K0 短按开始/暂停/继续、长按放弃，K1 切换场景，K2 照旧打开来源；阶段结束播钟声加语音并自动切到番茄钟，下一阶段等用户按 K0 才开始。状态机有主机测试，画面有主机预览。同日经 UART 桥烧录后实机确认三个键都工作：K0 为 GPIO0，K1 由候选位探针定为 XL9555 P0.4，K2 照旧打开来源；场景切换、开始、暂停、继续均有设备回报。第一次实机也暴露出短促轻点会被 100 ms 的采样加两次一致去抖丢掉，已改为 20 ms 采样、翻转即生效。专注结束与休息结束的钟声、语音和自动切场景尚待一次完整的 25 分钟实机验收。设计见 [`pomodoro.md`](pomodoro.md)。
+On 2026-09-15 a second scene was added: Pomodoro (25-minute focus, 5-minute break, dial modeled on Focus To-Do). Each of the three buttons does one thing: K0 short press starts/pauses/resumes and long press abandons, K1 switches scenes, and K2 still opens the source; the end of a phase plays a chime plus voice line and switches to Pomodoro automatically, and the next phase waits for the user to press K0. The state machine has host tests and the screen has a host preview. The same day, after flashing over the UART bridge, all three buttons were confirmed working on the hardware: K0 is GPIO0, K1 was pinned down by the candidate-bit probe as XL9555 P0.4, and K2 still opens the source; scene switching, start, pause, and resume all produce device reports. The first hardware run also revealed that quick light taps were being dropped by 100 ms sampling plus two-sample-agreement debouncing; this was changed to 20 ms sampling that takes effect on the first flip. The chime, voice line, and automatic scene switch at the end of focus and the end of break still await one full 25-minute hardware acceptance run. Design in [`pomodoro.md`](pomodoro.md).
 
-同日再加入第三个模式：休闲。值班空闲 5 分钟进无聊档随机演七出小剧目，30 分钟进困倦档转暗睡觉，夜里 23 点到 7 点睡够 90 分钟关背光；Agent 一有动静、任何按键、链路断开都立刻回值班；番茄钟待开始放五分钟、暂停放半小时视为人走了。心跳新增本地小时数。导演有主机测试，剧目有 GIF 预览。实机验收用时间压缩 60 倍的固件走完整条链：无聊、剧目轮换、困倦、熄灯、被 Agent 事件唤醒并点亮、再次入睡，设备回报与预期一致。设计见 [`leisure.md`](leisure.md)。
+The same day a third mode was added: Leisure. After 5 minutes idle on duty it enters the Bored tier and randomly performs seven skits; at 30 minutes it enters the Sleepy tier, dims, and sleeps; between 23:00 and 07:00 at night, after 90 minutes of sleep the backlight turns off; any agent activity, any button press, or a link drop brings it straight back to On duty; a Pomodoro left ready to start for five minutes or paused for half an hour is treated as the person having left. The heartbeat gained the local hour. The director has host tests and the skits have GIF previews. Hardware acceptance used firmware time-compressed 60× to walk the whole chain: bored, skit rotation, sleepy, lights out, woken and lit up by an agent event, and falling asleep again, with device reports matching expectations. Design in [`leisure.md`](leisure.md).
 
-Stage 5 整体尚未完成：K2 在无活动/已完成状态下的扩展行为仍未实现；原计划的 K0 静音已让位给番茄钟。
+Stage 5 as a whole is not yet done: K2's extended behavior in the no-activity/done state is still unimplemented; the originally planned K0 mute has given way to the Pomodoro.
 
 ### Stage 6 — `beacon`
 
-实现 `start`、`done`、`error` 和 `run`；CLI 只调用 `vibebuddyd`。
+Implement `start`, `done`, `error`, and `run`; the CLI only calls `vibebuddyd`.
 
-### Stage 7 — App（已实现，2026-09-16；待人工过一遍界面）
+### Stage 7 — App (implemented, 2026-09-16; UI awaits a human walkthrough)
 
-原生 SwiftUI 菜单栏 App 看管 `vibebuddyd`、首次引导、接入 Agent、挑选播报音色并写入设备的 `voices` 分区、更新固件、看设备画面。设计见 [`app.md`](app.md)。
+A native SwiftUI menu bar App that supervises `vibebuddyd`, handles first-run onboarding, connects agents, picks the announcement voice and writes it to the device's `voices` partition, updates firmware, and shows the device screen. Design in [`app.md`](app.md).
 
-实机结论：固件加了 2 MB `voices` 分区，语音包经串口协议分块写入并回读校验，换音色不刷固件；`device.hello`、`device.identify`、`device.echo` 事件到位。daemon 有状态接口与 SSE、配置文件、截图、语音包写入、ROM 协议烧录（块 256 字节、桥接分段，MD5 校验后硬复位，在 App 看管下约 38 ms 一块，1.5 MB 四分钟）。`vibebuddy-hook` 取代两个 Python 脚本。App 在 dragon 的 Mac 上取代了 LaunchAgent：拉起 daemon、SSE 驱动菜单、SIGTERM 与 SIGKILL 下 daemon 都跟着退出。经 App 走通：写语音包、烧固件、Hook 转发。尚未由人过目的是界面本身（引导六步、设置五页、通知）。
+Hardware findings: the firmware gained a 2 MB `voices` partition; voice packs are written in chunks over the serial protocol and read back for verification, so changing voices doesn't require reflashing firmware; the `device.hello`, `device.identify`, and `device.echo` events are in place. The daemon has a status endpoint and SSE, a config file, screenshots, voice pack writing, and ROM-protocol flashing (256-byte blocks, segmented for the bridge, hard reset after MD5 verification; about 38 ms per block under the App's supervision, 1.5 MB in four minutes). `vibebuddy-hook` replaces the two Python scripts. On dragon's Mac the App has replaced the LaunchAgent: it launches the daemon, drives the menu via SSE, and the daemon exits along with it under both SIGTERM and SIGKILL. Verified end-to-end through the App: writing voice packs, flashing firmware, and hook forwarding. What hasn't yet been looked over by a human is the UI itself (six onboarding steps, five settings pages, notifications).
 
-途中查明 CH343 UART 桥吞不下超过两百字节的连续数据（见 `LESSONS.md`），daemon 改为按线速分段发送，顺带修掉了长事件行偶发 `invalid_json` 的老毛病。
+Along the way it turned out that the CH343 UART bridge can't swallow more than about two hundred bytes of continuous data (see `LESSONS.md`), so the daemon was changed to send in segments at line rate, which also fixed the old problem of long event lines occasionally producing `invalid_json`.
 
 ## Later
 
-可选任务标题、microphone、voice interaction、长期任务历史、Wi-Fi、WebSocket transport、progress、多设备。多 Agent 的三任务实时卡片已提前进入 Stage 4。
+Optional task titles, microphone, voice interaction, long-term task history, Wi-Fi, WebSocket transport, progress, multiple devices. Real-time three-task cards for multiple agents have already moved forward into Stage 4.

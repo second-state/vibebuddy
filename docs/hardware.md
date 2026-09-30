@@ -1,65 +1,65 @@
-# Vibe Buddy 硬件记录
+# Vibe Buddy hardware notes
 
-本文只记录带证据边界的硬件事实。相似名称或同系列开发板不能作为 GPIO、codec、LCD 或 USB 路径的依据。
+This document records only hardware facts with an evidence boundary. Similar names or boards from the same series cannot serve as the basis for GPIO, codec, LCD, or USB paths.
 
-## 用户提供，尚未由实物或原理图验证
+## Provided by the user, not yet verified against the hardware or a schematic
 
-- 名称：正点原子 ESP32S3-BOX。
-- 模组：ATK-MWS3S / ESP32-S3。
-- 资源：16 MB Flash、8 MB PSRAM。
-- 外设：LCD、Speaker、Microphone、Buzzer、K0/K1/K2、TF/microSD、USB-C、USB-A Host、UART。
-- 期望：一根 USB-C 线同时供电、烧录和运行时通信。
+- Name: ALIENTEK ESP32S3-BOX.
+- Module: ATK-MWS3S / ESP32-S3.
+- Resources: 16 MB flash, 8 MB PSRAM.
+- Peripherals: LCD, speaker, microphone, buzzer, K0/K1/K2, TF/microSD, USB-C, USB-A host, UART.
+- Expectation: a single USB-C cable handles power, flashing, and runtime communication at once.
 
-同一根 USB-C 线完成供电、运行时串口、ROM 下载、Vibe Buddy 固件写入和写入后的重新枚举已经实测成立。
+Using the same USB-C cable for power, the runtime serial port, ROM download, writing the Vibe Buddy firmware, and re-enumeration after writing has been verified in practice.
 
-## 当前主机确认
+## Current host confirmed
 
-- 主机名：`Michaels-Mac-Studio.local`。
-- 型号：Mac Studio，Model Identifier `Mac14,14`，Apple M2 Ultra。
-- 证据：2026-09-13 在本机执行 `hostname` 和 `system_profiler SPHardwareDataType`。
+- Hostname: `Michaels-Mac-Studio.local`.
+- Model: Mac Studio, Model Identifier `Mac14,14`, Apple M2 Ultra.
+- Evidence: `hostname` and `system_profiler SPHardwareDataType` run on this machine on 2026-09-13.
 
-## 官方资料确认
+## Confirmed from official sources
 
-详细来源与候选板差异见 [`hardware-research.md`](hardware-research.md)。当前能够确认的是：
+Detailed sources and differences between candidate boards are in [`hardware-research.md`](hardware-research.md). What can currently be confirmed:
 
-- `ATK-MWS3S` 是模组标识，不足以识别底板；正点原子的 DNESP32S3 开发板和老款 ESP32S3 BOX 都可能使用该模组。
-- 官方 `ATK-DNESP32S3-Board` 仓库对应 DNESP32S3 开发板，不是 BOX 的通用 BSP。它公开的是 `ATK_DNESP32S3 V1.2` 原理图、KEY0～KEY3 + BOOT、ES8388、XL9555、CH340C 和原生 USB Serial/JTAG 两条烧录路径。
-- 当前官方 Wiki 完整覆盖的是 `ATK-DNESP32S3B3 V1`（BOX3）：K0 直连 GPIO0，K1/K2 经过 AW9523B，屏幕为 320×240 ST7789V2，触摸为 CHSC5432，音频链路包含 ES8311、ES7210 与 NS4150B，并公开原生 USB/TinyUSB 资料。
-- 用户给出的硬件组合与上述任一候选都不完全闭合。老款 BOX 的官方资料入口当前无法读取，不能拿 BOX3 或 DNESP32S3 开发板引脚补齐。
+- `ATK-MWS3S` is a module identifier and isn't enough to identify the carrier board; both ALIENTEK's DNESP32S3 development board and the old ESP32S3 BOX may use this module.
+- The official `ATK-DNESP32S3-Board` repository corresponds to the DNESP32S3 development board, not a general BSP for the BOX. What it publishes is the `ATK_DNESP32S3 V1.2` schematic, KEY0–KEY3 + BOOT, ES8388, XL9555, CH340C, and two flashing paths: CH340C and native USB Serial/JTAG.
+- What the current official Wiki fully covers is the `ATK-DNESP32S3B3 V1` (BOX3): K0 wired directly to GPIO0, K1/K2 via an AW9523B, a 320×240 ST7789V2 screen, a CHSC5432 touch controller, an audio chain including ES8311, ES7210, and NS4150B, and published native USB/TinyUSB material.
+- The hardware combination the user gave doesn't fully match any of the candidates above. The official documentation entry point for the old BOX currently can't be read, and BOX3 or DNESP32S3 development board pinouts can't be used to fill the gaps.
 
-因此，在 PCB 丝印确认前不选择 BSP、不冻结 GPIO。ESP-IDF v5.5.3 已根据实机当前固件的 v5.5 构建信息和对应上游源码要求安装；该选择不代表已经接受某个候选板的 GPIO 定义。
+Therefore, no BSP is chosen and no GPIOs are frozen until the PCB silkscreen is confirmed. ESP-IDF v5.5.3 was installed based on the v5.5 build info of the firmware currently on the hardware and the requirements of the corresponding upstream source; that choice does not mean any candidate board's GPIO definitions have been accepted.
 
-## 实机确认
+## Confirmed on the hardware
 
-- 用户确认开发板尚未连接后，已于 2026-09-13 保存 Mac Studio 的未连接 USB 基线；基线未出现 ESP32、常见 USB-UART bridge 或新增 USB modem 串口。
-- 2026-09-14 连接开发板后，新增 Espressif `USB JTAG/serial debug unit`，VID:PID `303A:1001`，USB serial `98:88:E0:06:8B:CC`。
-- 新增节点为 `/dev/cu.usbmodem8401` 与 `/dev/tty.usbmodem8401`，证明目标板当前通过 ESP32-S3 原生 USB Serial/JTAG 枚举，而不是外置 CH340/CP210/FTDI bridge。
-- 运行日志确认 ESP32-S3 revision v0.2、16 MB QIO Flash、8 MB Octal PSRAM，以及当前固件板型标识 `atk-dnesp32s3-box`。
-- 只读 `esptool flash_id` 成功连接 ROM 下载通路并复核 16 MB Flash、8 MB embedded PSRAM 和 USB-Serial/JTAG mode；未擦除或写入 Flash。
-- 打开原生 USB 串口会触发 `USB_UART_CHIP_RESET`，因此运行时重连设计必须容忍设备复位和重新枚举。
-- 2026-09-14 的背面照片显示 PCB `V1.1` 丝印、ATK-MWS3S `N16R8` 模组、`B0/K1/K2`、`USB-SLAVE`、`HOST`、`UART`、麦克风、扬声器、蜂鸣器和 TF 卡座。
-- 实物布局与当前固件自报标识共同确认板型为 **ATK-DNESP32S3-BOX V1.1**；不是 DNESP32S3 开发板、BOX0、BOX2 或 BOX3。
-- Stage 2 真实拔掉 `USB-SLAVE` 后，`vibebuddyd` 记录到 `Device not configured`；插回后自动重新发现同一串口节点并恢复通信。
-- 完整 USB 断电后，原小智固件遗留画面消失而屏幕保持黑色；这证明旧画面是 LCD 残留状态，不代表旧固件仍在运行，也不证明 Vibe Buddy 已有 LCD 驱动。
-- LCD 已由 Vibe Buddy 实机驱动并通过视觉验收：320×240 ST7789、8 位 i80，总线数据 GPIO40/39/38/12/11/10/9/46，CS/DC/RD/WR 为 GPIO1/2/41/42，背光由 XL9555 P0.7 控制。
-- I2C 在 7 位地址 `0x18` 探测到 ES8311；音频 I2S BCLK/WS/DOUT 为 GPIO21/13/14，采样率 24 kHz，扬声器使能由 XL9555 P0.5 控制。
-- 固件启动已回报 `AUDIO READY` 与 `AUDIO CODEC ES8311`；用户已实际听到“需要你确认”语音。
-- 2026-09-14 实机验证失联指示：停止 `vibebuddyd` 超过 15 秒后，设备转为闭眼、画面转灰并显示 `NO LINK`，任务卡保留但同样转灰；恢复 daemon 后自动退出该状态。用户已实机确认。
-- 2026-09-14 提高播报响度：语音资产以统一增益归一化到约 90% 满量程（+5.5 dB，无削波），codec 输出音量由 45 调至 65。用户实机确认音量已足够。
-- 2026-09-14 实机探针确认 K2 接在 XL9555 P0.3，低电平有效：松开时 `P0=0xFF`，按下时变为 `P0=0xF7`，随后恢复为 `0xFF`，期间 P1 保持 `0xFF`。写入正式固件后，用户短按 K2，设备能上报 K2 单击事件并由 Mac 端 `vibebuddyd` 拉起目标应用；Codex 子 Agent 到父会话的精确路由修复仍待最后一次实机确认。
-- 2026-09-15 用户确认外壳上的按键为 K0、K1、K2 与 RST。PCB 丝印上的 `B0` 对应外壳的 K0：它是 ESP32-S3 的 BOOT 键，直连 GPIO0、低电平有效、内部上拉。依据是同板上游固件 `xiaozhi` 的 `atk-dnesp32s3-box/config.h` 定义 `BOOT_BUTTON_GPIO GPIO_NUM_0`；同日实机按压确认：按 K0 后设备回报 `POMODORO PAUSED` / `RESUMED`。运行时按 K0 不影响启动模式，只有复位瞬间按住才会进下载模式；`vibebuddyd` 打开串口会触发复位，那一瞬间恰好按着 K0 的概率可以忽略，但要知道有这回事。
-- 2026-09-15 实机探针确认 K1 接在 XL9555 P0.4，低电平有效：按下时 `P0=0xEF`，松开恢复 `0xFF`，P1 始终 `0xFF`。探针的候选范围来自同板上游固件 `atk_dnesp32s3_box.cc` 的方向寄存器写法（`0x06=0x1B`、`0x07=0xFE`，即 P0.0、P0.1、P0.4 与 P1.1～P1.7 为输入），实机只有 P0.4 随 K1 变化。
+- After the user confirmed the board was not yet connected, an unconnected USB baseline of the Mac Studio was saved on 2026-09-13; the baseline showed no ESP32, no common USB-UART bridge, and no new USB modem serial port.
+- After connecting the board on 2026-09-14, a new Espressif `USB JTAG/serial debug unit` appeared, VID:PID `303A:1001`, USB serial `98:88:E0:06:8B:CC`.
+- The new nodes are `/dev/cu.usbmodem8401` and `/dev/tty.usbmodem8401`, proving the target board currently enumerates via the ESP32-S3's native USB Serial/JTAG rather than an external CH340/CP210/FTDI bridge.
+- The runtime log confirms ESP32-S3 revision v0.2, 16 MB QIO flash, 8 MB Octal PSRAM, and the current firmware's board identifier `atk-dnesp32s3-box`.
+- A read-only `esptool flash_id` successfully connected over the ROM download path and rechecked the 16 MB flash, 8 MB embedded PSRAM, and USB-Serial/JTAG mode; flash was neither erased nor written.
+- Opening the native USB serial port triggers `USB_UART_CHIP_RESET`, so the runtime reconnect design must tolerate device resets and re-enumeration.
+- A photo of the back taken on 2026-09-14 shows the PCB silkscreen `V1.1`, an ATK-MWS3S `N16R8` module, `B0/K1/K2`, `USB-SLAVE`, `HOST`, `UART`, the microphone, speaker, buzzer, and TF card slot.
+- The physical layout together with the current firmware's self-reported identifier confirm the board is the **ATK-DNESP32S3-BOX V1.1**; it is not the DNESP32S3 development board, BOX0, BOX2, or BOX3.
+- In Stage 2, after physically unplugging `USB-SLAVE`, `vibebuddyd` logged `Device not configured`; after plugging it back in, it automatically rediscovered the same serial node and resumed communication.
+- After fully cutting USB power, the leftover screen from the original xiaozhi firmware disappeared and the screen stayed black; this proves the old image was residual LCD state, not a sign the old firmware was still running, nor proof that Vibe Buddy already had an LCD driver.
+- The LCD is now driven by Vibe Buddy on the hardware and has passed visual acceptance: 320×240 ST7789, 8-bit i80, bus data on GPIO40/39/38/12/11/10/9/46, CS/DC/RD/WR on GPIO1/2/41/42, backlight controlled by XL9555 P0.7.
+- The ES8311 was detected over I2C at 7-bit address `0x18`; audio I2S BCLK/WS/DOUT are GPIO21/13/14, sample rate 24 kHz, and speaker enable is controlled by XL9555 P0.5.
+- Firmware startup has reported `AUDIO READY` and `AUDIO CODEC ES8311`; the user has actually heard the "需要你确认" ("I need you to confirm") voice line.
+- On 2026-09-14 the disconnection indicator was verified on the hardware: after stopping `vibebuddyd` for more than 15 seconds, the device closed its eyes, the screen went gray, and it showed `NO LINK`, with the task cards kept but also grayed out; after the daemon was restored it left that state automatically. Confirmed by the user on the hardware.
+- On 2026-09-14 announcement loudness was raised: the voice assets were normalized with a uniform gain to about 90% of full scale (+5.5 dB, no clipping), and the codec output volume was raised from 45 to 65. The user confirmed on the hardware that the volume is now sufficient.
+- On 2026-09-14 a hardware probe confirmed K2 is wired to XL9555 P0.3, active-low: `P0=0xFF` when released, `P0=0xF7` when pressed, then back to `0xFF`, with P1 staying at `0xFF` throughout. After writing the production firmware, when the user short-pressed K2, the device reported a K2 press event and the Mac-side `vibebuddyd` brought up the target app; the fix for precise routing from Codex sub-agents to the parent session still awaits one final hardware confirmation.
+- On 2026-09-15 the user confirmed the buttons on the case are K0, K1, K2, and RST. `B0` on the PCB silkscreen corresponds to K0 on the case: it is the ESP32-S3's BOOT button, wired directly to GPIO0, active-low, with an internal pull-up. The basis is that the same board's upstream firmware `xiaozhi` defines `BOOT_BUTTON_GPIO GPIO_NUM_0` in `atk-dnesp32s3-box/config.h`; a press on the hardware the same day confirmed it: after pressing K0 the device reported `POMODORO PAUSED` / `RESUMED`. Pressing K0 at runtime doesn't affect the boot mode; only holding it at the instant of reset enters download mode. `vibebuddyd` opening the serial port triggers a reset, and the chance of K0 being held at exactly that instant is negligible, but it's worth knowing this can happen.
+- On 2026-09-15 a hardware probe confirmed K1 is wired to XL9555 P0.4, active-low: `P0=0xEF` when pressed, back to `0xFF` on release, with P1 always `0xFF`. The probe's candidate range came from the direction register writes in the same board's upstream firmware `atk_dnesp32s3_box.cc` (`0x06=0x1B`, `0x07=0xFE`, i.e. P0.0, P0.1, P0.4, and P1.1–P1.7 as inputs); on the hardware only P0.4 changed with K1.
 
-## 当前运行固件旁证
+## Corroboration from the currently running firmware
 
-实机运行 `xiaozhi` 1.9.4。固定版本源码中存在 `atk-dnesp32s3-box` board 目录，并记录了 ST7789 i80、XL9555、ES8311 和一组板级引脚。这与启动日志相互印证，可作为核对候选，但该仓库不是正点原子官方原理图/BSP，不能越过 PCB 版本门禁直接冻结引脚。
+The hardware runs `xiaozhi` 1.9.4. The source at that pinned version contains an `atk-dnesp32s3-box` board directory that records the ST7789 i80, XL9555, ES8311, and a set of board-level pins. This corroborates the boot log and can be used as a candidate for cross-checking, but that repository is not ALIENTEK's official schematic/BSP and cannot bypass the PCB revision gate to freeze pins directly.
 
-- [`xiaozhi-esp32` v1.9.4 固定提交](https://github.com/78/xiaozhi-esp32/tree/3ced7709c65a39494f5684e99111854a5bcbd8c7)
+- [`xiaozhi-esp32` v1.9.4 pinned commit](https://github.com/78/xiaozhi-esp32/tree/3ced7709c65a39494f5684e99111854a5bcbd8c7)
 - [`atk-dnesp32s3-box/config.h`](https://github.com/78/xiaozhi-esp32/blob/3ced7709c65a39494f5684e99111854a5bcbd8c7/main/boards/atk-dnesp32s3-box/config.h)
 
-## 待验证
+## Pending verification
 
-- 与准确 PCB 版本匹配的厂家 schematic、BSP 和 examples。
-- 触摸控制器（如有）。
-- 麦克风输入链路。
-- buzzer 的 GPIO 和有效电平。
+- Vendor schematic, BSP, and examples matching the exact PCB revision.
+- Touch controller (if any).
+- Microphone input chain.
+- Buzzer GPIO and active level.

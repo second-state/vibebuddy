@@ -1,67 +1,67 @@
-# Stage 1 — Serial Hello 验收记录
+# Stage 1 — Serial Hello acceptance record
 
-验收时间：2026-09-14（Asia/Singapore）
+Accepted: 2026-09-14 (Asia/Singapore)
 
-## 结论
+## Conclusion
 
-Stage 1 **已通过实机验收**。证据链是 Mac Studio → `/dev/cu.usbmodem8401` → ESP32-S3 原生 USB Serial/JTAG → `vibebuddy-fw` → cJSON parse → USB 返回结果，不是本机模拟或仅编译通过。
+Stage 1 **has passed on-device acceptance**. The evidence chain is Mac Studio → `/dev/cu.usbmodem8401` → ESP32-S3 native USB Serial/JTAG → `vibebuddy-fw` → cJSON parse → result returned over USB; not a local simulation, and not merely a successful build.
 
-本阶段没有初始化 LCD、audio、microphone、buzzer 或 buttons。实机烧录后，LCD 继续显示原小智固件最后留下的配网页面；这不是旧固件仍在运行，而是 LCD 控制器显存和背光在 ESP32 软件复位后保持，且 Stage 1 固件没有覆盖画面。随后重复执行 Serial Hello 仍通过，直接证明当前运行的是 Vibe Buddy 固件。LCD 清屏和新 UI 必须等待 Stage 3 及厂家硬件依据。
+This stage did not initialize the LCD, audio, microphone, buzzer or buttons. After flashing, the LCD kept showing the Wi-Fi setup page last left by the original Xiaozhi firmware. This does not mean the old firmware is still running: the LCD controller's frame memory and the backlight persist across an ESP32 software reset, and the Stage 1 firmware does not overwrite the screen. Repeating Serial Hello afterwards still passed, which directly proves the Vibe Buddy firmware is what is running. Clearing the LCD and the new UI must wait for Stage 3 and vendor hardware evidence.
 
-## 构建
+## Build
 
-- ESP-IDF：v5.5.3。
-- Target：`esp32s3`。
-- 固件项目名：`vibebuddy-fw`。
-- 应用镜像：183,616 bytes（`0x2cd40`）。
-- 默认应用分区：1 MiB，剩余 82%。
-- 首次构建发现并移除了一个无效 Kconfig symbol 和一个 C qualifier warning；重新构建无编译警告。
+- ESP-IDF: v5.5.3.
+- Target: `esp32s3`.
+- Firmware project name: `vibebuddy-fw`.
+- Application image: 183,616 bytes (`0x2cd40`).
+- Default application partition: 1 MiB, 82% free.
+- The first build uncovered and removed an invalid Kconfig symbol and a C qualifier warning; the rebuild has no compiler warnings.
 
-构建和烧录入口：
+Build and flash entry point:
 
 ```bash
 ./tools/flash.sh /dev/cu.usbmodem8401
 ```
 
-## 原厂固件备份
+## Factory firmware backup
 
-写入 Vibe Buddy 前，使用 `esptool read_flash` 读取了完整 16 MiB Flash：
+Before writing Vibe Buddy, the full 16 MiB Flash was read out with `esptool read_flash`:
 
-- 本机文件：`.probe/factory/atk-dnesp32s3-box-v1.1-xiaozhi-1.9.4-2026-09-14.bin`
-- 大小：16,777,216 bytes。
-- SHA-256：`7e0ae33002423eaca46a6e6c1f8cc6d92a2a04babd99fe7aa2a4ede788a01ec2`。
-- 权限：`600`。
-- Git 状态：`.probe/` 已忽略，不进入仓库。
+- Local file: `.probe/factory/atk-dnesp32s3-box-v1.1-xiaozhi-1.9.4-2026-09-14.bin`
+- Size: 16,777,216 bytes.
+- SHA-256: `7e0ae33002423eaca46a6e6c1f8cc6d92a2a04babd99fe7aa2a4ede788a01ec2`.
+- Permissions: `600`.
+- Git status: `.probe/` is ignored and does not enter the repository.
 
-整片备份可能包含原固件的配网或设备状态，因此按敏感本机证据处理，不复制到文档或远程仓库。
+The full-chip backup may contain the original firmware's Wi-Fi setup or device state, so it is treated as sensitive local evidence and is not copied into docs or any remote repository.
 
-## 烧录
+## Flashing
 
-`idf.py flash` 通过同一 `/dev/cu.usbmodem8401` 成功写入：
+`idf.py flash` wrote successfully over the same `/dev/cu.usbmodem8401`:
 
-| Offset | 内容 | 写入大小 |
+| Offset | Content | Bytes written |
 | --- | --- | --- |
 | `0x0000` | bootloader | 20,832 bytes |
 | `0x8000` | partition table | 3,072 bytes |
 | `0x10000` | `vibebuddy-fw` | 183,616 bytes |
 
-三段写入均由 esptool 报告 hash verified，随后完成 hard reset；设备仍以 `/dev/cu.usbmodem8401` 重新枚举。
+esptool reported hash verified for all three segments and then performed a hard reset; the device re-enumerated as `/dev/cu.usbmodem8401` again.
 
-## Mac → USB → ESP32 验收
+## Mac → USB → ESP32 acceptance
 
-执行：
+Run:
 
 ```bash
 uv run --with pyserial python tools/serial-hello.py /dev/cu.usbmodem8401
 ```
 
-Mac 实际发送：
+What the Mac actually sent:
 
 ```json
 {"version":1,"event":"task.done","title":"Hello"}
 ```
 
-ESP32 实际返回：
+What the ESP32 actually returned:
 
 ```text
 EVENT task.done
@@ -69,9 +69,9 @@ TITLE Hello
 PASS Stage 1 Mac -> USB -> ESP32-S3 -> JSON parse
 ```
 
-在用户观察到旧小智画面仍停留后，同一命令再次得到完全相同的 PASS，排除了“烧录未生效或仍在运行旧固件”。Hello 没有 `id`，验证了 Stage 1 对可选 `id` 的实际兼容。NDJSON framing、版本策略、未知字段/事件和输入上限见 [`protocol.md`](protocol.md)。
+After the user observed that the old Xiaozhi screen was still showing, the same command produced exactly the same PASS again, ruling out "the flash didn't take, or the old firmware is still running". Hello has no `id`, which verifies in practice that Stage 1 accepts an optional `id`. NDJSON framing, version policy, unknown fields/events and the input limit are covered in [`protocol.md`](protocol.md).
 
-同一实机还补测了非法 JSON、`version: 2`、带未知字段的 `custom.event`、CRLF framing 和 1025-byte 超限输入，依次得到：
+On the same device, invalid JSON, `version: 2`, `custom.event` with unknown fields, CRLF framing and a 1025-byte oversized input were also tested, giving in order:
 
 ```text
 ERROR invalid_json
@@ -81,8 +81,8 @@ ERROR input_too_large
 PASS protocol error, version, extension, CRLF, and size handling
 ```
 
-## 未证明的事项
+## Not proven
 
-- 这次验收没有证明 LCD、audio、buzzer、buttons 或 TF 卡可由 Vibe Buddy 驱动。
-- 这次验收没有实现 `vibebuddyd`、HTTP API 或 serial reconnect；这些属于 Stage 2。
-- 当前串口节点编号可能随 macOS 枚举变化，后续 daemon 不能写死 `usbmodem8401`，应使用 VID/PID 与 USB serial 发现设备。
+- This acceptance does not prove that Vibe Buddy can drive the LCD, audio, buzzer, buttons or TF card.
+- This acceptance did not implement `vibebuddyd`, the HTTP API or serial reconnect; those belong to Stage 2.
+- The serial node number may change with macOS enumeration, so the future daemon must not hard-code `usbmodem8401`; it should discover the device by VID/PID and USB serial.
