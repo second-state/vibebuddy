@@ -10,7 +10,7 @@ Vibe Buddy 是给 AI 编程 Agent 配的桌面宠物。它住在键盘旁一个�
 
 ## 盒子上的画面
 
-以下截图来自运行 Rust 固件的实机，使用示例任务名称和每日统计。
+以下截图来自运行 Rust 固件的实机。状态场景使用示例任务名称和每日统计，番茄钟场景展示实际运行中的计时器。
 
 | 工作中 | 等待输入 |
 | --- | --- |
@@ -19,6 +19,8 @@ Vibe Buddy 是给 AI 编程 Agent 配的桌面宠物。它住在键盘旁一个�
 | ![App 测试运行完成](docs/images/device-done.png) | ![App 测试运行失败](docs/images/device-failed.png) |
 | **待机** | **多个 Agent** |
 | ![宠物等待新任务](docs/images/device-ready.png) | ![同屏显示 Claude Code、Codex 和 CI 的任务](docs/images/device-multi-agent.png) |
+| **番茄钟专注** | **番茄钟暂停** |
+| ![25 分钟专注计时](docs/images/device-pomodoro-focus.png) | ![按 K0 暂停专注计时](docs/images/device-pomodoro-paused.png) |
 
 ## 它做什么
 

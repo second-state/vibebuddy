@@ -10,7 +10,7 @@ The buddy is an original character. Codex was the first agent it supported, but 
 
 ## On the box
 
-Screen captures from a real box running the Rust firmware, with example task names and daily stats.
+Screen captures from a real box running the Rust firmware. Status scenes use example task names and daily stats; Pomodoro scenes show the live timer.
 
 | Working | Input required |
 | --- | --- |
@@ -19,6 +19,8 @@ Screen captures from a real box running the Rust firmware, with example task nam
 | ![A completed App test run](docs/images/device-done.png) | ![A failed App test run](docs/images/device-failed.png) |
 | **Ready** | **Multiple agents** |
 | ![The buddy waiting for activity](docs/images/device-ready.png) | ![Claude Code, Codex and CI tasks on the same screen](docs/images/device-multi-agent.png) |
+| **Pomodoro focus** | **Pomodoro paused** |
+| ![The 25-minute focus timer running](docs/images/device-pomodoro-focus.png) | ![The focus timer paused with K0](docs/images/device-pomodoro-paused.png) |
 
 ## What it does
 
