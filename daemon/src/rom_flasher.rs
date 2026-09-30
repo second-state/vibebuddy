@@ -82,6 +82,7 @@ struct Response {
 pub struct RomFlasher {
     port: Box<dyn SerialPort>,
     paced: bool,
+    usb_jtag: bool,
 }
 
 impl RomFlasher {
@@ -90,10 +91,17 @@ impl RomFlasher {
             .timeout(Duration::from_millis(100))
             .open()
             .map_err(|error| format!("failed to open serial port: {error}"))?;
-        Ok(Self { port, paced })
+        let usb_jtag = serialport::available_ports()
+            .map_err(|error| format!("failed to inspect serial ports: {error}"))?
+            .into_iter()
+            .any(|candidate| {
+                candidate.port_name == port_name
+                    && matches!(candidate.port_type, serialport::SerialPortType::UsbPort(info) if (info.vid, info.pid) == (0x303A, 0x1001))
+            });
+        Ok(Self { port, paced, usb_jtag })
     }
 
-    /// The classic DTR/RTS sequence pulls the chip into download mode, then syncs.
+    /// Selects the reset sequence for the port, enters download mode, then syncs.
     pub fn connect(&mut self) -> Result<(), String> {
         let mut last_error = String::new();
         for _ in 0..5 {
@@ -118,12 +126,27 @@ impl RomFlasher {
     }
 
     fn enter_bootloader(&mut self) -> Result<(), String> {
-        // esptool's default_reset: pull EN low, then release EN while holding IO0 low.
-        self.set_lines(false, true)?;
-        std::thread::sleep(Duration::from_millis(100));
-        self.set_lines(true, false)?;
-        std::thread::sleep(Duration::from_millis(50));
-        self.set_lines(false, false)?;
+        if self.usb_jtag {
+            // Espressif USB Serial/JTAG must pass through DTR=RTS=true when resetting into download mode.
+            // Match espflash's UsbJtagSerialReset; the UART bridge's classic sequence only restarts this port.
+            self.set_rts(false)?;
+            self.set_dtr(false)?;
+            std::thread::sleep(Duration::from_millis(100));
+            self.set_lines(true, false)?;
+            std::thread::sleep(Duration::from_millis(100));
+            self.set_rts(true)?;
+            self.set_dtr(false)?;
+            self.set_rts(true)?;
+            std::thread::sleep(Duration::from_millis(100));
+            self.set_lines(false, false)?;
+        } else {
+            // esptool's default_reset: pull EN low, then release EN while holding IO0 low.
+            self.set_lines(false, true)?;
+            std::thread::sleep(Duration::from_millis(100));
+            self.set_lines(true, false)?;
+            std::thread::sleep(Duration::from_millis(50));
+            self.set_lines(false, false)?;
+        }
         std::thread::sleep(Duration::from_millis(50));
         self.drain();
         Ok(())
@@ -138,10 +161,16 @@ impl RomFlasher {
     }
 
     fn set_lines(&mut self, dtr: bool, rts: bool) -> Result<(), String> {
-        self.port
-            .write_data_terminal_ready(dtr)
-            .and_then(|()| self.port.write_request_to_send(rts))
-            .map_err(|error| format!("failed to set DTR/RTS: {error}"))
+        self.set_dtr(dtr)?;
+        self.set_rts(rts)
+    }
+
+    fn set_dtr(&mut self, dtr: bool) -> Result<(), String> {
+        self.port.write_data_terminal_ready(dtr).map_err(|error| format!("failed to set DTR: {error}"))
+    }
+
+    fn set_rts(&mut self, rts: bool) -> Result<(), String> {
+        self.port.write_request_to_send(rts).map_err(|error| format!("failed to set RTS: {error}"))
     }
 
     fn drain(&mut self) {
@@ -363,6 +392,15 @@ pub fn flash(port_name: &str, paced: bool, segments: &[Segment], on_progress: &m
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    #[ignore = "requires exclusive access to an ESP32-S3 native USB device"]
+    fn native_usb_enters_rom_download_mode() {
+        let port = std::env::var("VIBEBUDDY_TEST_PORT").expect("set VIBEBUDDY_TEST_PORT to the native USB port");
+        let mut flasher = RomFlasher::open(&port, false).expect("open the device");
+        flasher.connect().expect("enter ROM download mode and read the ESP32-S3 chip ID");
+        flasher.hard_reset().expect("restart the device after the check");
+    }
 
     #[test]
     fn slip_escapes_end_and_escape_bytes() {
