@@ -133,7 +133,7 @@
 "Running · %@" = "运行中 · %@";
 "Not running" = "未运行";
 "Restart daemon" = "重启 daemon";
-"Logs: %@" = "日志：%@";
+"Show daemon log" = "查看 daemon 日志";
 "Export diagnostics…" = "导出诊断…";
 "Config file: %@" = "配置文件：%@";
 

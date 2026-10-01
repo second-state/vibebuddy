@@ -76,7 +76,11 @@ enum Message {
     SaveScreenshot,
     RestartDaemon,
     Hooks(&'static str),
-    HooksDone(Result<String, String>),
+    /// A finished action whose outcome is worth a line at the bottom of the window.
+    Notice(Result<String, String>),
+    OpenLogsFolder,
+    ShowDaemonLog,
+    ExportDiagnostics,
     Done(Result<(), String>),
     Quit,
 }
@@ -262,8 +266,24 @@ impl App {
                 }
             }
             Message::RestartDaemon => return Task::perform(client::restart_daemon(), Message::Done),
-            Message::Hooks(action) => return Task::perform(run_hook_tool(action), Message::HooksDone),
-            Message::HooksDone(result) => self.notice = Some(result),
+            Message::Hooks(action) => return Task::perform(run_hook_tool(action), Message::Notice),
+            Message::Notice(result) => self.notice = Some(result),
+            Message::OpenLogsFolder => {
+                if let Err(error) = state_dir().ok_or("HOME is not set".to_owned()).and_then(|dir| launch("xdg-open", &[dir.as_os_str()])) {
+                    self.notice = Some(Err(error));
+                }
+            }
+            Message::ShowDaemonLog => {
+                let args = ["journalctl", "--user", "-u", "vibebuddyd", "-f"].map(std::ffi::OsStr::new);
+                if let Err(error) = launch("xdg-terminal-exec", &args) {
+                    self.notice = Some(Err(error));
+                }
+            }
+            Message::ExportDiagnostics => {
+                let summary = self.diagnostics_summary();
+                let config = self.status.as_ref().map(|status| status.config.clone());
+                return Task::perform(export_diagnostics(summary, config), Message::Notice);
+            }
             Message::Done(result) => {
                 // The box answers a volume change through the status stream; drop the dragged value then.
                 self.volume = None;
@@ -525,45 +545,121 @@ impl App {
             Some(status) => tr("Running · %@", &[&status.daemon.build]),
             None => tr("Not running", &[]),
         };
+        let config = config_dir()
+            .map(|dir| dir.join("config.json").display().to_string())
+            .unwrap_or_default();
         column![
             row![text("daemon").width(140), text(daemon)].spacing(12),
             button(text(tr("Restart daemon", &[]))).on_press_maybe(self.status.is_some().then_some(Message::RestartDaemon)),
-            text(tr("Logs: %@", &[&"journalctl --user -u vibebuddyd -f"])).size(13),
+            // The daemon logs to the journal here, not a file; the folder holds the hook's log.
+            row![
+                button(text(tr("Show daemon log", &[]))).on_press(Message::ShowDaemonLog),
+                button(text(tr("Open logs folder", &[]))).style(button::secondary).on_press(Message::OpenLogsFolder),
+                button(text(tr("Export diagnostics…", &[]))).style(button::secondary).on_press(Message::ExportDiagnostics),
+            ]
+            .spacing(8),
+            text(tr("Config file: %@", &[&config])).size(13),
         ]
         .spacing(12)
         .into()
     }
+
+    /// Both sides' build IDs and the voice, as in the Mac app's summary.txt.
+    fn diagnostics_summary(&self) -> String {
+        let device = self.status.as_ref().map(|status| &status.device);
+        format!(
+            "App {}\ndaemon {}\nfirmware {}\nbundled firmware {}\nvoice {}\n",
+            env!("CARGO_PKG_VERSION"),
+            self.status.as_ref().map_or("not connected", |status| status.daemon.build.as_str()),
+            device.and_then(|device| device.firmware_build.as_deref()).unwrap_or("—"),
+            self.firmware.as_ref().map_or("—", |firmware| firmware.build.as_str()),
+            device.and_then(|device| device.voice.as_deref()).unwrap_or("—"),
+        )
+    }
+}
+
+/// Starts a desktop helper and lets it run on its own.
+fn launch(program: &str, args: &[&std::ffi::OsStr]) -> Result<(), String> {
+    std::process::Command::new(program)
+        .args(args)
+        .spawn()
+        .map(drop)
+        .map_err(|error| format!("cannot run {program}: {error}"))
+}
+
+/// Logs, config and both sides' build IDs in one folder under Downloads, with no hook payloads; the folder opens when
+/// it's ready. The daemon's log comes from the journal, two days of it.
+async fn export_diagnostics(summary: String, config: Option<Config>) -> Result<String, String> {
+    let seconds = SystemTime::now()
+        .duration_since(SystemTime::UNIX_EPOCH)
+        .map(|elapsed| elapsed.as_secs())
+        .unwrap_or_default();
+    let target = user_dir("DOWNLOAD", "Downloads")?.join(format!("vibe-buddy-diagnostics-{seconds}"));
+    let fail = |error: std::io::Error| format!("{}: {error}", target.display());
+    tokio::fs::create_dir_all(&target).await.map_err(fail)?;
+    let journal = tokio::process::Command::new("journalctl")
+        .args(["--user", "-u", "vibebuddyd", "--since", "-2d", "--no-pager", "-o", "short-iso"])
+        .output()
+        .await
+        .map_err(|error| format!("cannot run journalctl: {error}"))?;
+    tokio::fs::write(target.join("vibebuddyd.log"), journal.stdout).await.map_err(fail)?;
+    if let Some(hooks) = state_dir().map(|dir| dir.join("codex-hooks.log")).filter(|path| path.is_file()) {
+        tokio::fs::copy(hooks, target.join("codex-hooks.log")).await.map_err(fail)?;
+    }
+    if let Some(config) = config {
+        let text = serde_json::to_string_pretty(&config).map_err(|error| error.to_string())?;
+        tokio::fs::write(target.join("config.json"), text).await.map_err(fail)?;
+    }
+    tokio::fs::write(target.join("summary.txt"), summary).await.map_err(fail)?;
+    launch("xdg-open", &[target.as_os_str()])?;
+    Ok(tr("Saved to %@", &[&target.display()]))
+}
+
+/// The daemon's XDG directories (see `daemon/src/config.rs`), where it keeps state and config and the hook its log.
+fn state_dir() -> Option<std::path::PathBuf> {
+    xdg_dir("XDG_STATE_HOME", ".local/state")
+}
+
+fn config_dir() -> Option<std::path::PathBuf> {
+    xdg_dir("XDG_CONFIG_HOME", ".config")
+}
+
+fn xdg_dir(variable: &str, default: &str) -> Option<std::path::PathBuf> {
+    std::env::var_os(variable)
+        .map(std::path::PathBuf::from)
+        .filter(|dir| dir.is_absolute())
+        .or_else(|| std::env::var_os("HOME").map(|home| std::path::PathBuf::from(home).join(default)))
+        .map(|dir| dir.join("vibebuddy"))
+}
+
+/// A folder from `xdg-user-dir` (Pictures, Downloads…), or the usual name under HOME when that tool is missing.
+fn user_dir(kind: &str, fallback: &str) -> Result<std::path::PathBuf, String> {
+    std::process::Command::new("xdg-user-dir")
+        .arg(kind)
+        .output()
+        .ok()
+        .map(|output| String::from_utf8_lossy(&output.stdout).trim().to_owned())
+        .filter(|dir| !dir.is_empty())
+        .map(std::path::PathBuf::from)
+        .or_else(|| std::env::var_os("HOME").map(|home| std::path::PathBuf::from(home).join(fallback)))
+        .ok_or_else(|| "HOME is not set".to_owned())
 }
 
 /// True only the first time the app starts for this user; a marker in the state directory remembers it.
 fn first_launch() -> bool {
-    let Some(state) = std::env::var_os("XDG_STATE_HOME")
-        .map(std::path::PathBuf::from)
-        .filter(|dir| dir.is_absolute())
-        .or_else(|| std::env::var_os("HOME").map(|home| std::path::PathBuf::from(home).join(".local/state")))
-    else {
-        return false;
-    };
-    let marker = state.join("vibebuddy/desktop-launched");
+    let Some(state) = state_dir() else { return false };
+    let marker = state.join("desktop-launched");
     if marker.exists() {
         return false;
     }
-    let _ = std::fs::create_dir_all(state.join("vibebuddy")).and_then(|()| std::fs::write(&marker, ""));
+    let _ = std::fs::create_dir_all(&state).and_then(|()| std::fs::write(&marker, ""));
     true
 }
 
 /// Saves into the user's Pictures directory, where Omarchy's own screenshots go: there is no save dialog
 /// to borrow on a tiling desktop, and the path is shown afterwards.
 fn save_screenshot(png: &[u8]) -> Result<String, String> {
-    let pictures = std::process::Command::new("xdg-user-dir")
-        .arg("PICTURES")
-        .output()
-        .ok()
-        .map(|output| String::from_utf8_lossy(&output.stdout).trim().to_owned())
-        .filter(|dir| !dir.is_empty())
-        .map(std::path::PathBuf::from)
-        .or_else(|| std::env::var_os("HOME").map(|home| std::path::PathBuf::from(home).join("Pictures")))
-        .ok_or("HOME is not set")?;
+    let pictures = user_dir("PICTURES", "Pictures")?;
     let seconds = SystemTime::now()
         .duration_since(SystemTime::UNIX_EPOCH)
         .map(|elapsed| elapsed.as_secs())
