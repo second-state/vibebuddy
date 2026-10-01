@@ -6,6 +6,7 @@ use std::time::Duration;
 use futures::{SinkExt, Stream, StreamExt};
 use serde::Deserialize;
 
+use crate::assets::Firmware;
 use crate::status::{Config, Status};
 
 const BASE: &str = "http://127.0.0.1:7331";
@@ -71,6 +72,25 @@ pub async fn set_volume(level: u8, preview: bool) -> Result<(), String> {
     post("/v1/device/volume", Some(serde_json::json!({ "level": level, "preview": preview }))).await
 }
 
+/// The daemon accepts the pack and writes it in the background; progress arrives in the status stream.
+pub async fn write_voice_pack(pack: Vec<u8>) -> Result<(), String> {
+    let request = reqwest::Client::new()
+        .post(format!("{BASE}/v1/device/voice-pack"))
+        .header("content-type", "application/octet-stream")
+        .body(pack);
+    accepted(request).await
+}
+
+/// Like the voice pack, flashing runs in the background; the daemon reads the three images from these paths.
+pub async fn flash_firmware(firmware: Firmware) -> Result<(), String> {
+    let body = serde_json::json!({
+        "bootloader": firmware.bootloader,
+        "partition_table": firmware.partition_table,
+        "app": firmware.app,
+    });
+    post("/v1/device/firmware", Some(body)).await
+}
+
 pub async fn identify() -> Result<(), String> {
     post("/v1/device/identify", None).await
 }
@@ -101,6 +121,10 @@ async fn post(path: &str, body: Option<serde_json::Value>) -> Result<(), String>
     if let Some(body) = body {
         request = request.json(&body);
     }
+    accepted(request).await
+}
+
+async fn accepted(request: reqwest::RequestBuilder) -> Result<(), String> {
     let response = request.send().await.map_err(|error| error.to_string())?;
     if response.status().is_success() {
         return Ok(());

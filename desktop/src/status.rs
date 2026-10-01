@@ -12,7 +12,62 @@ pub struct Status {
     pub device: Device,
     pub today: Today,
     pub hooks: Hooks,
+    pub operation: Option<Operation>,
     pub config: Config,
+}
+
+/// Writing a voice pack or flashing firmware; the daemon runs one at a time and reports progress here.
+#[derive(Clone, Debug, Deserialize, PartialEq)]
+pub struct Operation {
+    pub kind: OperationKind,
+    pub state: OperationState,
+    /// 0 to 1.
+    pub progress: f32,
+    pub message: String,
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum OperationKind {
+    VoicePack,
+    Firmware,
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum OperationState {
+    Running,
+    Done,
+    Failed,
+}
+
+impl Operation {
+    pub fn running(&self) -> bool {
+        self.state == OperationState::Running
+    }
+
+    /// Said in the UI language; the daemon's own (English) message only shows when something failed.
+    pub fn summary(&self) -> String {
+        let percent = format!("{:.0}%", self.progress * 100.0);
+        match (self.kind, self.state) {
+            (_, OperationState::Failed) => tr("Failed: %@", &[&self.message]),
+            (OperationKind::VoicePack, OperationState::Running) => tr("Writing voice pack… %@", &[&percent]),
+            (OperationKind::VoicePack, OperationState::Done) => tr("Voice pack written", &[]),
+            (OperationKind::Firmware, OperationState::Running) => tr("Flashing firmware… %@", &[&percent]),
+            (OperationKind::Firmware, OperationState::Done) => tr("Firmware flashed, the box is restarting", &[]),
+        }
+    }
+}
+
+/// Builds are reported as "hash date time"; only the hash says which firmware it is.
+pub fn firmware_hash(build: Option<&str>) -> Option<&str> {
+    build.and_then(|build| build.split(' ').next()).filter(|hash| !hash.is_empty())
+}
+
+/// Offered whenever the hashes differ, without judging which is newer, as on the Mac (docs/app.md). Nothing is offered
+/// before the box has reported its build.
+pub fn firmware_update_available(device: Option<&str>, bundled: Option<&str>) -> bool {
+    matches!((firmware_hash(device), firmware_hash(bundled)), (Some(device), Some(bundled)) if device != bundled)
 }
 
 #[derive(Clone, Debug, Default, Deserialize, PartialEq)]
@@ -169,6 +224,27 @@ mod tests {
         let offline = Status::default();
         assert_eq!(MenuState::derive(Some(&offline)).icon, Icon::Offline);
         assert_eq!(MenuState::derive(Some(&offline)).device_line, "Box not found");
+    }
+
+    #[test]
+    fn progress_reads_in_percent_and_failures_quote_the_daemon() {
+        let mut operation: Operation = serde_json::from_str(
+            r#"{"kind": "voice_pack", "state": "running", "progress": 0.426, "message": "chunk 12/40"}"#,
+        )
+        .expect("operation");
+        assert!(operation.running());
+        assert_eq!(operation.summary(), "Writing voice pack… 43%");
+        operation.state = OperationState::Failed;
+        assert_eq!(operation.summary(), "Failed: chunk 12/40");
+    }
+
+    #[test]
+    fn firmware_is_compared_by_hash_only() {
+        let device = Some("v0.2.1-38-ga0bffc7 2026-09-30 16:29");
+        assert!(firmware_update_available(device, Some("v0.2.2 2026-09-30 09:13")));
+        assert!(!firmware_update_available(Some("v0.2.2 2026-10-01 10:00"), Some("v0.2.2 2026-09-30 09:13")));
+        assert!(!firmware_update_available(None, Some("v0.2.2 2026-09-30 09:13")));
+        assert!(!firmware_update_available(device, None));
     }
 
     #[test]

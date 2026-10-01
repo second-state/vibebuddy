@@ -5,6 +5,7 @@
 // The tray, and the face it draws, exist only on Linux; other builds are for working on the window.
 #![cfg_attr(not(target_os = "linux"), allow(dead_code))]
 
+mod assets;
 mod client;
 mod face;
 mod i18n;
@@ -15,7 +16,7 @@ mod tray;
 
 use std::time::{Duration, SystemTime};
 
-use iced::widget::{button, column, container, image, row, slider, space, text, toggler};
+use iced::widget::{button, column, container, image, row, scrollable, slider, space, text, toggler};
 use iced::{Element, Font, Length, Subscription, Task, Theme, window};
 
 use i18n::tr;
@@ -67,6 +68,9 @@ enum Message {
     VolumeReleased,
     PlayLine,
     Identify,
+    UseVoice(&'static str),
+    AskFirmwareUpdate(bool),
+    FlashFirmware,
     TakeScreenshot,
     Screenshot(Result<Vec<u8>, String>),
     SaveScreenshot,
@@ -100,6 +104,11 @@ struct App {
     /// The last screen grabbed from the box, as PNG, and whether a grab is under way.
     screenshot: Option<(Vec<u8>, image::Handle)>,
     screenshot_busy: bool,
+    /// Installed alongside the app; read once, since only reinstalling changes them.
+    voices: Vec<assets::Voice>,
+    firmware: Option<assets::Firmware>,
+    /// The firmware update waits for a second click, since the box restarts.
+    confirm_firmware: bool,
     /// The outcome of the last action, shown at the bottom of the window.
     notice: Option<Result<String, String>>,
     #[cfg(target_os = "linux")]
@@ -117,12 +126,17 @@ impl App {
             volume: None,
             screenshot: None,
             screenshot_busy: false,
+            voices: assets::voices(),
+            firmware: assets::firmware(),
+            confirm_firmware: false,
             notice: None,
             #[cfg(target_os = "linux")]
             tray: None,
         };
-        // Without a tray (macOS builds, for development) the window is how you get in.
-        let task = if cfg!(target_os = "linux") { Task::none() } else { Task::done(Message::OpenSettings) };
+        // The first launch shows the window, so it's clear where the app went; later ones stay in the tray. Without a
+        // tray (macOS builds, for development) the window is the only way in.
+        let open = first_launch() || !cfg!(target_os = "linux");
+        let task = if open { Task::done(Message::OpenSettings) } else { Task::none() };
         (app, task)
     }
 
@@ -220,6 +234,17 @@ impl App {
                 return Task::perform(client::set_volume(level, true), Message::Done);
             }
             Message::Identify => return Task::perform(client::identify(), Message::Done),
+            Message::UseVoice(id) => {
+                let write = async move { client::write_voice_pack(assets::read_voice_pack(id).await?).await };
+                return Task::perform(write, Message::Done);
+            }
+            Message::AskFirmwareUpdate(asking) => self.confirm_firmware = asking,
+            Message::FlashFirmware => {
+                self.confirm_firmware = false;
+                if let Some(firmware) = self.firmware.clone() {
+                    return Task::perform(client::flash_firmware(firmware), Message::Done);
+                }
+            }
             Message::TakeScreenshot => {
                 self.screenshot_busy = true;
                 return Task::perform(client::screenshot(), Message::Screenshot);
@@ -325,17 +350,45 @@ impl App {
         if online {
             volume = volume.on_release(Message::VolumeReleased);
         }
-        column![
+        let operation = self.status.as_ref().and_then(|status| status.operation.as_ref());
+        let busy = operation.is_some_and(status::Operation::running);
+        let current = self.status.as_ref().and_then(|status| status.device.voice.clone());
+        let cards = self.voices.iter().map(|voice| {
+            let action: Element<'_, Message> = if current.as_deref() == Some(voice.id) {
+                text(tr("In use", &[])).style(text::success).into()
+            } else {
+                button(text(tr("Use", &[])))
+                    .on_press_maybe((online && !busy).then_some(Message::UseVoice(voice.id)))
+                    .into()
+            };
+            row![column![text(voice.name.clone()), text(voice.tag.clone()).size(13)], space::horizontal(), action]
+                .spacing(12)
+                .into()
+        });
+        let progress = operation.filter(|operation| operation.kind == status::OperationKind::VoicePack).map(|operation| {
+            let failed = operation.state == status::OperationState::Failed;
+            column![text(operation.summary()).size(13)].push(failed.then(|| {
+                text(tr("Didn't finish, so the box keeps its built-in voice. Reconnect the cable and click Use again.", &[]))
+                    .size(13)
+            }))
+        });
+        let using = assets::voice_name(current.as_deref().unwrap_or("builtin"));
+        let page = column![
             row![text(tr("Volume", &[])), volume, text(level.to_string())].spacing(12),
             button(text(tr("Play a line on the box", &[]))).on_press_maybe(online.then_some(Message::PlayLine)),
+            text(tr("Saved on the box and kept across restarts. To mute, long-press K2 on the box.", &[])).size(13),
+            space().height(8),
+            text(tr("Announcement voice", &[])).size(18),
             text(tr(
-                "Saved on the box and kept across restarts. Previews on this Mac aren't affected; to mute, long-press K2 on the box.",
-                &[]
+                "The box is using “%@”. Click Use to write another voice to it — no firmware flash needed. Over the UART port this takes a few minutes; when it's done the box says a line in the new voice.",
+                &[&using]
             ))
             .size(13),
+            column(cards).spacing(10),
         ]
-        .spacing(12)
-        .into()
+        .push(progress)
+        .spacing(12);
+        scrollable(page).into()
     }
 
     fn agents(&self) -> Element<'_, Message> {
@@ -385,6 +438,45 @@ impl App {
         };
         let firmware = device.and_then(|device| device.firmware_build.clone()).unwrap_or_else(|| "—".to_owned());
         let online = device.is_some_and(|device| device.connected);
+        let bundled = self
+            .firmware
+            .as_ref()
+            .map(|firmware| firmware.build.clone())
+            .unwrap_or_else(|| tr("This build has no bundled firmware", &[]));
+        let operation = self.status.as_ref().and_then(|status| status.operation.as_ref());
+        let busy = operation.is_some_and(status::Operation::running);
+        let outdated = status::firmware_update_available(
+            device.and_then(|device| device.firmware_build.as_deref()),
+            self.firmware.as_ref().map(|firmware| firmware.build.as_str()),
+        );
+        let update: Option<Element<'_, Message>> = (outdated && online).then(|| {
+            if self.confirm_firmware {
+                column![
+                    text(tr("Update the box firmware?", &[])),
+                    text(tr(
+                        "The box restarts once; its voice pack and today's stats are kept. Over the UART bridge this takes a few minutes.",
+                        &[]
+                    ))
+                    .size(13),
+                    row![
+                        button(text(tr("Update", &[]))).on_press_maybe((!busy).then_some(Message::FlashFirmware)),
+                        button(text(tr("Cancel", &[])))
+                            .style(button::secondary)
+                            .on_press(Message::AskFirmwareUpdate(false)),
+                    ]
+                    .spacing(8),
+                ]
+                .spacing(8)
+                .into()
+            } else {
+                button(text(tr("Update to bundled version", &[])))
+                    .on_press_maybe((!busy).then_some(Message::AskFirmwareUpdate(true)))
+                    .into()
+            }
+        });
+        let flashing = operation
+            .filter(|operation| operation.kind == status::OperationKind::Firmware)
+            .map(|operation| text(operation.summary()).size(13));
         // The frame is dark whatever the theme, so its text is light: in a light theme the theme's own text color
         // vanished there, and a grab in progress looked like a button that did nothing.
         let on_frame = |label: String| text(label).size(13).color(iced::Color::from_rgb8(0xd0, 0xd0, 0xd0));
@@ -400,6 +492,11 @@ impl App {
         column![
             row![text(tr("Link", &[])).width(140), text(link)].spacing(12),
             row![text(tr("Box firmware", &[])).width(140), text(firmware)].spacing(12),
+            row![text(tr("Bundled with app", &[])).width(140), text(bundled)].spacing(12),
+        ]
+        .push(update)
+        .push(flashing)
+        .push(column![
             button(text(tr("Make the box blink", &[]))).on_press_maybe(online.then_some(Message::Identify)),
             row![
                 text(tr("Box screen", &[])),
@@ -418,6 +515,7 @@ impl App {
                 .center(Length::Fill)
                 .style(|_| container::background(iced::Color::from_rgb8(0x16, 0x16, 0x16))),
         ]
+        .spacing(12))
         .spacing(12)
         .into()
     }
@@ -435,6 +533,23 @@ impl App {
         .spacing(12)
         .into()
     }
+}
+
+/// True only the first time the app starts for this user; a marker in the state directory remembers it.
+fn first_launch() -> bool {
+    let Some(state) = std::env::var_os("XDG_STATE_HOME")
+        .map(std::path::PathBuf::from)
+        .filter(|dir| dir.is_absolute())
+        .or_else(|| std::env::var_os("HOME").map(|home| std::path::PathBuf::from(home).join(".local/state")))
+    else {
+        return false;
+    };
+    let marker = state.join("vibebuddy/desktop-launched");
+    if marker.exists() {
+        return false;
+    }
+    let _ = std::fs::create_dir_all(state.join("vibebuddy")).and_then(|()| std::fs::write(&marker, ""));
+    true
 }
 
 /// Saves into the user's Pictures directory, where Omarchy's own screenshots go: there is no save dialog

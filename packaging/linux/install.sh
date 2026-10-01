@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Builds Vibe Buddy from this checkout and installs it for the current Linux user: the binaries in ~/.local/bin,
 # the daemon as a systemd user service, the tray app in the launcher and at login, and the hooks for whichever of
-# Claude Code and Codex this machine has. Run it again to upgrade. To remove: `vibebuddy-hook uninstall`,
+# Claude Code and Codex this machine has, plus the voice packs and the release's firmware the app offers to write to
+# the box. Needs python3 and, for the firmware, network access to GitHub. Run it again to upgrade. To remove: `vibebuddy-hook uninstall`,
 # `systemctl --user disable --now vibebuddyd`, then delete the files this script installs.
 set -euo pipefail
 
@@ -31,6 +32,36 @@ systemctl --user daemon-reload
 systemctl --user enable --now vibebuddyd.service
 
 "${bin}/vibebuddy-hook" install
+
+# What the Mac app carries in its bundle lives here instead: voice packs and firmware for the Sound and Device tabs.
+assets="${data}/vibebuddy"
+mkdir -p "${assets}/voices"
+for dir in "${repo}"/voices/*/; do
+    if [[ -f "${dir}/done.pcm" ]]; then
+        python3 "${repo}/tools/make_voice_pack.py" "${dir}" "$(basename "${dir}")" "${assets}/voices/$(basename "${dir}").bin" >/dev/null
+    fi
+done
+
+# Firmware isn't built here (that takes the Xtensa toolchain): it comes from the GitHub release of this version, checked
+# against the sha256 GitHub records for the asset. Without it the Device tab simply offers no update.
+version="$(sed -n 's/^version = "\(.*\)"$/\1/p' "${repo}/Cargo.toml" | head -n1)"
+zip="VibeBuddy-firmware-v${version}.zip"
+download="$(mktemp -d)"
+trap 'rm -rf "${download}"' EXIT
+if curl -fsSL -o "${download}/${zip}" "https://github.com/second-state/vibebuddy/releases/download/v${version}/${zip}"; then
+    expected="$(curl -fsSL "https://api.github.com/repos/second-state/vibebuddy/releases/tags/v${version}" \
+        | python3 -c 'import json, sys; print(next(a["digest"] for a in json.load(sys.stdin)["assets"] if a["name"] == sys.argv[1]))' "${zip}" || true)"
+    actual="sha256:$(sha256sum "${download}/${zip}" | cut -d' ' -f1)"
+    if [[ "${expected}" == "${actual}" ]]; then
+        rm -rf "${assets}/firmware"
+        python3 -m zipfile -e "${download}/${zip}" "${assets}/firmware"
+        echo "Firmware for the Device tab: $(cat "${assets}/firmware/build.txt")"
+    else
+        echo "warning: ${zip} doesn't match the checksum GitHub lists (${expected}); firmware left out" >&2
+    fi
+else
+    echo "No firmware release for v${version} on GitHub; the Device tab won't offer updates."
+fi
 
 # Start the tray now rather than at the next login. systemd-run hands it the graphical session's environment,
 # which a shell over SSH doesn't have.

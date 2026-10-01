@@ -24,6 +24,11 @@ fn chinese() -> Option<&'static HashMap<String, String>> {
         .as_ref()
 }
 
+/// Whether the UI speaks Chinese, which also decides which voices are listed first.
+pub fn is_chinese() -> bool {
+    chinese().is_some()
+}
+
 /// The first of the POSIX locale variables that is set decides, as it does for every other program.
 fn wants_chinese() -> bool {
     ["LC_ALL", "LC_MESSAGES", "LANG"]
