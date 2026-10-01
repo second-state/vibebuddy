@@ -213,6 +213,10 @@ jobs:
     env:
       SIGNED: ${{ secrets.MACOS_CERT_P12 != '' && secrets.APPLE_APP_PASSWORD != '' }}
     steps:
+      # Only for docs/releases/<tag>.md, the hand-written part of the notes.
+      - uses: actions/checkout@v4
+        with:
+          sparse-checkout: docs/releases
       - uses: actions/download-artifact@v4
         with:
           name: mac
@@ -224,7 +228,11 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           label="${GITHUB_REF_NAME}"
-          cat > notes.md <<NOTES
+          # What the release does is written by hand before tagging; just release refuses to tag without it.
+          summary="docs/releases/${label}.md"
+          [[ -f "${summary}" ]] || { echo "missing ${summary}: say what this release does" >&2; exit 1; }
+          { cat "${summary}"; printf '\n## Downloads\n\n'; } > notes.md
+          cat >> notes.md <<NOTES
           - **macOS** (Apple silicon, macOS 14+): open the DMG and drag Vibe Buddy into Applications.
           - **Linux** (x86_64, tested on Omarchy): \`tar xf VibeBuddy-${label}-linux-x86_64.tar.gz && cd VibeBuddy-${label}-linux-x86_64 && ./install.sh\`
           - **Firmware**: \`VibeBuddy-firmware-${label}.zip\`, for flashing a box by hand.

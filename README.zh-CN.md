@@ -224,13 +224,14 @@ daemon 平时由 App 看管。没有 App 的开发机可以用 [`packaging/com.v
 
 ### 发布
 
-发布由 CI 完成，见 [`release-app`](.github/workflows/release-app.yml)：在 Linux 上构建固件、在 Apple 芯片的 runner 上跑测试、装包、用 `app/scripts/make-dmg.sh` 打成 DMG。
+发布由 CI 完成，见 [`release-app`](.github/workflows/release-app.yml)：先在 Linux 上构建固件，再分别在 Apple 芯片的 runner 上构建 Mac App（用 `app/scripts/make-dmg.sh` 打成 DMG）、在 Ubuntu 22.04 上构建 Linux 包（`packaging/linux/make-tarball.sh`），两边都跑测试。
 
-- main 上动到装包内容（`app/`、`daemon/`、`hook/`、`protocol/`、`firmware/`、`voices/`）的提交只出一个保留 7 天的 artifact 供自测。
-- 打 `vX.Y.Z` 标签才公证并发 GitHub Release，标签必须与 `Cargo.toml` 的 `version` 一致，否则构建失败。
-- 发版一条命令：在干净的 main 上 `just release 0.2.0`，它改 `Cargo.toml`、提交、打标签、推送。
-- 同一次发布还挂一个 `VibeBuddy-firmware-vX.Y.Z.zip`（固件三件套加 `build.txt`），拿到它的人在设置 → 设备「从文件刷入…」里选它即可烧进盒子。
-- 目前只出 arm64。
+- main 上动到装包内容（`app/`、`daemon/`、`desktop/`、`hook/`、`protocol/`、`firmware/`、`voices/`、`packaging/`）的提交只出保留 7 天的 artifact 供自测。
+- 打 `vX.Y.Z` 标签才公证并发 GitHub Release，同一个 Release 里有 DMG、Linux 包和固件 zip。标签必须与 `Cargo.toml` 的 `version` 一致，否则构建失败。
+- 发版前先写 `docs/releases/vX.Y.Z.md`：用几条要点说这个版本做了什么。它是发布说明的开头，CI 会在后面接上下载说明。
+- 然后发版一条命令：在干净的 main 上 `just release 0.3.0`，它检查那份文件，更新 `Cargo.toml` 和两份锁文件里的版本号，提交、打标签、推送。
+- `VibeBuddy-firmware-vX.Y.Z.zip` 是固件三件套加 `build.txt`，拿到它的人在 Mac 上的设置 → 设备「从文件刷入…」里选它即可烧进盒子。
+- Mac 出 arm64，Linux 出 x86_64。发布后怎么更新 AUR 包，见 `packaging/aur/README.md`。
 
 仓库配齐五个签名 secrets 后用 Developer ID 签名并公证，下载即可打开；没配时退回 ad-hoc 签名，首次打开要在「隐私与安全性」里放行。secrets 用 [`tools/setup-release-signing.sh`](tools/setup-release-signing.sh) 配：它带着走完申请证书、打包 p12、生成 App 专用密码，并逐项验证后写进 GitHub。
 
