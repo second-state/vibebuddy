@@ -33,6 +33,8 @@ pub struct CodexHook {
     pub surface: Option<String>,
     #[serde(default)]
     pub host_bundle_id: Option<String>,
+    #[serde(default)]
+    pub host_pids: Option<Vec<u32>>,
 }
 
 pub fn apply(
@@ -66,7 +68,12 @@ pub fn apply(
             .thread_id
             .clone()
             .unwrap_or_else(|| hook.session_id.clone()),
-        surface: Surface::from_hook(hook.surface.as_deref(), hook.host_bundle_id.clone(), None),
+        surface: Surface::from_hook(
+            hook.surface.as_deref(),
+            hook.host_bundle_id.clone(),
+            hook.host_pids.clone(),
+            None,
+        ),
     };
     let event = match hook.hook_event_name.as_str() {
         "UserPromptSubmit" => {
@@ -133,6 +140,7 @@ mod tests {
             response_kind: None,
             surface: None,
             host_bundle_id: None,
+            host_pids: None,
         };
         assert!(apply(&mut tracker, &mut titles, ghost).is_none());
         assert!(tracker.focus_source().is_none());
@@ -147,6 +155,7 @@ mod tests {
             response_kind: None,
             surface: None,
             host_bundle_id: None,
+            host_pids: None,
         };
         assert!(apply(&mut tracker, &mut titles, fresh).is_some());
 
@@ -160,6 +169,7 @@ mod tests {
             response_kind: None,
             surface: None,
             host_bundle_id: None,
+            host_pids: None,
         };
         let event = apply(&mut tracker, &mut titles, known).expect("known thread should be visible");
         assert_eq!(event.title.as_deref(), Some("CX:REVIEW"));
@@ -179,6 +189,7 @@ mod tests {
             response_kind: None,
             surface: None,
             host_bundle_id: None,
+            host_pids: None,
         }
     }
 

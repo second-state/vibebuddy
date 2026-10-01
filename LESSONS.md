@@ -203,3 +203,9 @@ Anything that relies on what a host process happens to provide "in passing", suc
 On 2026-10-01, bringing up Linux on Omarchy, the user was added to `uucp` so the daemon could open `/dev/ttyACM0`. A daemon started from a fresh SSH login talked to the box fine; the same binary started by `systemctl --user` got `Permission denied`. The systemd user manager had started at boot, before the `usermod`, and every service it launches inherits its group list, not the one in `/etc/group`. Only a reboot, or logging out of every session, restarts it.
 
 The installer had checked `id -nG` in its own shell, which was the one place guaranteed to look healthy. When a permission comes from a group, check the process that actually needs it (`Groups:` in `/proc/<pid>/status`), not the shell that installed it. The same install run also died silently because `getent group uucp dialout` fails when either group is missing, and under `pipefail` that ended the script before any message was printed; each distro has only one of the two.
+
+## A command-line tool can change its language under you and still exit cleanly
+
+On 2026-10-01, K2 on Omarchy did nothing, and the daemon logged only `hyprctl failed:` with nothing after it. Hyprland 0.56 had turned `hyprctl dispatch` into Lua: `dispatch focuswindow address:0x…` is now parsed as a Lua expression and rejected, and the error goes to stdout, not stderr. Our wrapper only printed stderr, so the one line that explained everything was thrown away. Running the same command by hand in the daemon's environment showed it at once.
+
+Two rules came out of it. When wrapping another tool, keep both streams in the error, and decide success by what the tool says it did (`ok` here), not only by the exit code. And when a host's command syntax changes between versions, try the new form first and fall back to the old one, rather than guessing the version from a string.
