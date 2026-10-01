@@ -35,7 +35,10 @@ done
 for file in bootloader.bin partition-table.bin vibebuddy-fw.bin build.txt; do
     install -m644 "${firmware}/${file}" "${stage}/share/firmware/${file}"
 done
-python3 "${repo}/tools/package-licenses.py" "${stage}" x86_64-unknown-linux-gnu
+# The script lays licenses out as the Mac bundle does, with a copy beside the firmware; here that is share/firmware,
+# so the installed firmware carries them as the release's firmware zip does.
+python3 "${repo}/tools/package-licenses.py" "${stage}/share" x86_64-unknown-linux-gnu
+mv "${stage}/share/licenses" "${stage}/licenses"
 install -m755 "${repo}/packaging/linux/install.sh" "${stage}/install.sh"
 
 tar -C "$(dirname "${stage}")" -czf "${repo}/${name}.tar.gz" "${name}"

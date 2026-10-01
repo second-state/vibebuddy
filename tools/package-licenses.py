@@ -60,6 +60,11 @@ def main():
         (licenses / name).write_text(dependency_notices(manifest, target))
     shutil.copyfile(ROOT / "packaging/BOOTLOADER-NOTICES.txt", licenses / "BOOTLOADER-NOTICES.txt")
     revision = run("git", "rev-parse", "HEAD")
+    system_note = (
+        " The app uses Apple's system frameworks, supplied\nby macOS rather than redistributed in this download."
+        if "apple" in app_target
+        else ""
+    )
     (licenses / "SOURCE.txt").write_text(f"""Vibe Buddy corresponding source
 ================================
 
@@ -78,8 +83,7 @@ MPL-2.0-covered serialport dependency. Cargo's cache contains the complete
 crate sources; cargo vendor --locked can copy them for offline builds.
 
 The bootloader's upstream source and build configuration are identified
-in BOOTLOADER-NOTICES.txt. The app uses Apple's system frameworks, supplied
-by macOS rather than redistributed in this download.
+in BOOTLOADER-NOTICES.txt.{system_note}
 
 The project source is GPL-3.0-or-later. See LICENSE-ASSETS for the scope
 of the asset license and excluded third-party audio. Third-party
