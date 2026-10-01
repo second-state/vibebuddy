@@ -60,13 +60,22 @@ If a release isn't signed yet, macOS blocks the first launch; allow it under Sys
 
 ### Linux (experimental)
 
-Tested on Omarchy (Arch, Hyprland). From a checkout, with a Rust toolchain installed:
+For x86_64 Linux with systemd; tested on Omarchy (Arch, Hyprland). Download `VibeBuddy-<version>-linux-x86_64.tar.gz` from the [latest release](https://github.com/second-state/vibebuddy/releases/latest), then:
 
 ```bash
-packaging/linux/install.sh
+tar xf VibeBuddy-<version>-linux-x86_64.tar.gz
+cd VibeBuddy-<version>-linux-x86_64 && ./install.sh
 ```
 
-It builds the binaries into `~/.local/bin`, runs `vibebuddyd` as a systemd user service, puts the Vibe Buddy app in the launcher and at login, and adds the hooks to Claude Code and Codex, whichever this machine has (Codex then wants you to trust them in `/hooks`). Run it again to upgrade. The daemon needs to be in the group that owns `/dev/ttyACM*` (`uucp` on Arch, `dialout` on Debian and Ubuntu); the script tells you if it isn't. Config lives in `~/.config/vibebuddy`, stats in `~/.local/state/vibebuddy`, and when the box is gone for 30 seconds you get a desktop notification through `notify-send`.
+On Arch and Omarchy you can install the same release as a pacman package instead. It goes in system-wide, and a udev rule gives you access to the box without joining a group:
+
+```bash
+git clone https://github.com/second-state/vibebuddy
+cd vibebuddy/packaging/aur/vibebuddy-bin && makepkg -si
+systemctl --user enable --now vibebuddyd && vibebuddy-hook install
+```
+
+It will be on the AUR as `vibebuddy-bin` once AUR registration reopens. To build from source instead, run `packaging/linux/install.sh` in a checkout with a Rust toolchain and python3; it builds everything and fetches the release's firmware from GitHub. Either way, the script installs the binaries into `~/.local/bin`, runs `vibebuddyd` as a systemd user service, puts the Vibe Buddy app in the launcher and at login, and adds the hooks to Claude Code and Codex, whichever this machine has (Codex then wants you to trust them in `/hooks`). Run it again to upgrade. The daemon needs to be in the group that owns `/dev/ttyACM*` (`uucp` on Arch, `dialout` on Debian and Ubuntu); the script tells you if it isn't. Config lives in `~/.config/vibebuddy`, stats in `~/.local/state/vibebuddy`, and when the box is gone for 30 seconds you get a desktop notification through `notify-send`.
 
 On Hyprland, K2 brings back the terminal window the session runs in, on whatever workspace it is; a session inside tmux or over SSH has no window to go back to. The app is a tray icon (the buddy's face; click it for settings) plus a settings window with the same tabs as on the Mac. It takes its colors and font from the Omarchy theme and follows theme switches. It is only a client: quitting it leaves the daemon, and the box, running. Device → Refresh shows what the box's screen shows, and Save image puts it in your Pictures folder. Sound lists the voice packs the script built and writes the one you pick to the box; Device offers the firmware of this release (downloaded by the script and checked against GitHub's sha256) when the box runs a different build. The first launch opens the settings window; there is no separate onboarding, since the script does that work. To make the settings window float on Omarchy, add `o.window("^vibebuddy$", { tag = "+floating-window" })` and `o.window("^vibebuddy$", { tag = "-default-opacity" })` to `~/.config/hypr/hyprland.lua` (one tag per rule: Hyprland reads a space as part of the tag name); like every Hyprland window it moves with Super + drag. To remove everything, run `vibebuddy-hook uninstall`, then `systemctl --user disable --now vibebuddyd`, then delete the files the script installed.
 

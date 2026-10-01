@@ -1,0 +1,26 @@
+# pacman installs for the whole system; the daemon and the agent hooks are per user, so each user turns them on.
+post_install() {
+  cat <<'MSG'
+==> To start Vibe Buddy for your user:
+      systemctl --user enable --now vibebuddyd
+      vibebuddy-hook install
+    The tray app starts at your next login, or run vibebuddy-desktop now.
+    Codex runs new hooks only after you trust them: open /hooks in Codex.
+    The box is usable by whoever is logged in at the seat; no group needed.
+MSG
+}
+
+post_upgrade() {
+  cat <<'MSG'
+==> Restart the daemon to run the new version:
+      systemctl --user restart vibebuddyd
+MSG
+}
+
+pre_remove() {
+  cat <<'MSG'
+==> Each user should remove the agent hooks first, while vibebuddy-hook still exists:
+      vibebuddy-hook uninstall
+      systemctl --user disable --now vibebuddyd
+MSG
+}

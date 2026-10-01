@@ -1,5 +1,5 @@
-# Apple-silicon DMG. Only a vX.Y.Z tag notarizes and publishes a GitHub Release; commits
-# to main that touch packaged content only build, test and sign, keeping the DMG as a 7-day artifact for self-testing.
+# Apple-silicon DMG and x86_64 Linux tarball. Only a vX.Y.Z tag notarizes and publishes a GitHub Release; commits
+# to main that touch packaged content only build, test and sign, keeping both packages as 7-day artifacts for self-testing.
 # Firmware ships with the app (the Device tab's Update uses the copy in the bundle), so firmware/ is a trigger path too.
 name: release-app
 
@@ -10,6 +10,7 @@ on:
     paths:
       - "app/**"
       - "daemon/**"
+      - "desktop/**"
       - "hook/**"
       - "protocol/**"
       - "firmware/**"
@@ -47,6 +48,9 @@ jobs:
           # build.rs uses git describe --tags for the firmware build ID, so tags must be visible.
           fetch-depth: 0
       - uses: esp-rs/xtensa-toolchain@v1.7
+        env:
+          # espup asks the GitHub API for the latest toolchain; unauthenticated, a shared runner IP gets 403 rate limits.
+          GITHUB_TOKEN: ${{ github.token }}
         with:
           default: true
           buildtargets: esp32s3
@@ -132,15 +136,6 @@ jobs:
           # Firmware is also distributed on its own: the three images plus build.txt, which users pick via Flash from file… on the Device tab.
           ditto -c -k --norsrc "app/build/Vibe Buddy.app/Contents/Resources/firmware" \
             "VibeBuddy-firmware-${{ steps.version.outputs.label }}.zip"
-      - name: Keep self-test build
-        if: env.RELEASE != 'true'
-        uses: actions/upload-artifact@v4
-        with:
-          name: VibeBuddy-${{ steps.version.outputs.label }}-arm64
-          path: |
-            VibeBuddy-${{ steps.version.outputs.label }}-arm64.dmg
-            VibeBuddy-firmware-${{ steps.version.outputs.label }}.zip
-          retention-days: 7
       - name: Notarize
         if: env.RELEASE == 'true' && env.SIGNED == 'true'
         env:
@@ -156,23 +151,93 @@ jobs:
           # then confirm once more with Gatekeeper's own assessment, and don't publish if it fails.
           xcrun stapler staple "${dmg}"
           spctl --assess --type open --context context:primary-signature --verbose "${dmg}"
+      # The publish job releases this, and it stays for a week either way for self-testing.
+      - uses: actions/upload-artifact@v4
+        with:
+          name: mac
+          path: |
+            VibeBuddy-${{ steps.version.outputs.label }}-arm64.dmg
+            VibeBuddy-firmware-${{ steps.version.outputs.label }}.zip
+          retention-days: 7
+
+  linux:
+    needs: firmware
+    # The oldest Ubuntu runner, so the binaries ask for an old glibc; Arch and Omarchy are far newer.
+    runs-on: ubuntu-22.04
+    env:
+      RELEASE: ${{ startsWith(github.ref, 'refs/tags/') }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # The daemon's build ID uses git describe --tags, so tags must be visible.
+          fetch-depth: 0
+      - uses: actions/download-artifact@v4
+        with:
+          name: firmware
+          path: firmware-rs/device/build
+      - name: Determine version
+        id: version
+        run: |
+          version="$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -n 1)"
+          if [[ "${RELEASE}" == "true" ]]; then
+            [[ "${GITHUB_REF_NAME}" == "v${version}" ]] || {
+              echo "tag ${GITHUB_REF_NAME} does not match Cargo.toml version ${version}" >&2; exit 1; }
+            label="${GITHUB_REF_NAME}"
+          else
+            label="$(git describe --tags --always)"
+          fi
+          echo "label=${label}" >> "${GITHUB_OUTPUT}"
+      - name: Install build dependencies
+        # The serial port library reads USB IDs through libudev.
+        run: sudo apt-get update && sudo apt-get install -y libudev-dev pkg-config
+      - name: Test
+        run: |
+          rustup update stable --no-self-update
+          cargo test --workspace
+          python3 tools/check-localization.py
+      - name: Build package
+        run: |
+          cargo install cargo-about --version 0.9.2 --locked --features cli
+          packaging/linux/make-tarball.sh "${{ steps.version.outputs.label }}"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: linux
+          path: VibeBuddy-${{ steps.version.outputs.label }}-linux-x86_64.tar.gz
+          retention-days: 7
+
+  publish:
+    # One release for both platforms, made only once both packages exist.
+    needs: [app, linux]
+    if: startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-latest
+    env:
+      SIGNED: ${{ secrets.MACOS_CERT_P12 != '' && secrets.APPLE_APP_PASSWORD != '' }}
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: mac
+      - uses: actions/download-artifact@v4
+        with:
+          name: linux
       - name: Publish
-        if: env.RELEASE == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          echo "Apple silicon Macs only (macOS 14 or later). Open the DMG and drag Vibe Buddy into Applications." > notes.md
+          label="${GITHUB_REF_NAME}"
+          cat > notes.md <<NOTES
+          - **macOS** (Apple silicon, macOS 14+): open the DMG and drag Vibe Buddy into Applications.
+          - **Linux** (x86_64, tested on Omarchy): \`tar xf VibeBuddy-${label}-linux-x86_64.tar.gz && cd VibeBuddy-${label}-linux-x86_64 && ./install.sh\`
+          - **Firmware**: \`VibeBuddy-firmware-${label}.zip\`, for flashing a box by hand.
+          NOTES
           if [[ "${SIGNED}" != "true" ]]; then
             cat >> notes.md <<'NOTES'
 
-          This build isn't signed with an Apple Developer ID or notarized, so Gatekeeper blocks the first launch. Allow it either way:
-
-          - System Settings → Privacy & Security → find the Vibe Buddy notice and click Open Anyway;
-          - or run `xattr -dr com.apple.quarantine "/Applications/Vibe Buddy.app"` in Terminal.
+          The macOS build isn't notarized, so Gatekeeper blocks the first launch: allow it under System Settings → Privacy & Security, or run `xattr -dr com.apple.quarantine "/Applications/Vibe Buddy.app"`.
           NOTES
           fi
-          gh release create "${{ steps.version.outputs.label }}" \
-            "VibeBuddy-${{ steps.version.outputs.label }}-arm64.dmg" \
-            "VibeBuddy-firmware-${{ steps.version.outputs.label }}.zip" \
-            --title "Vibe Buddy ${{ steps.version.outputs.label }}" \
-            --notes-file notes.md --generate-notes
+          gh release create "${label}" --repo "${GITHUB_REPOSITORY}" \
+            "VibeBuddy-${label}-arm64.dmg" \
+            "VibeBuddy-${label}-linux-x86_64.tar.gz" \
+            "VibeBuddy-firmware-${label}.zip" \
+            --title "Vibe Buddy ${label}" \
+            --notes-file notes.md
