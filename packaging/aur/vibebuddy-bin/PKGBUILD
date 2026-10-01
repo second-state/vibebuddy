@@ -17,8 +17,10 @@ optdepends=(
 provides=('vibebuddy')
 conflicts=('vibebuddy')
 install=vibebuddy-bin.install
+# Prebuilt release binaries: there's nothing for a -debug package to hold.
+options=('!debug')
 source=("https://github.com/second-state/vibebuddy/releases/download/v${pkgver}/VibeBuddy-v${pkgver}-linux-x86_64.tar.gz")
-sha256sums=('SKIP')
+sha256sums=('920df9f714101b79a8ed68fc1d1366f4b71d3831659bc63726533a944b7b7d5b')
 
 package() {
   cd "VibeBuddy-v${pkgver}-linux-x86_64"
