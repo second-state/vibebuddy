@@ -217,3 +217,9 @@ On 2026-10-01, screenshots from the Linux app failed about two times in three: t
 The cause was the `flush()` after each native-USB write. tokio-serial implements it as `tcdrain()`, a blocking system call that waits until the device has taken the bytes. While the box dumps a screenshot it takes nothing, so the flush held a runtime thread for seconds. Nobody read the port meanwhile, the kernel stopped taking the box's output, and the box, which waits only 3 ms for a full FIFO, dropped the rest of the frame. Without the flush, twenty screenshots in a row took 2.5 s each.
 
 On the way there, three theories looked right and were wrong: firmware dropping output, a heartbeat corrupting the next command, and reads waiting behind writes. Splitting the port into read and write halves changed nothing, because the blocking call still froze the thread both halves ran on. What settled it was a control experiment: copy the daemon's traffic exactly into a minimal script, and compare. When the two disagree, the difference is in the program, not the device. And any "async" call that ends in a system call can still block: check what `flush`, `drain` and `sync` really do on that kind of file.
+
+## A release rehearsal has to bump the version too
+
+v0.3.0's first tag failed in CI: bumping the version left `firmware-rs/device/Cargo.lock` recording the shared crates at 0.2.2, and the license step runs `cargo about --locked`. Three rehearsal runs on the release branch had all passed, because none of them changed the version; the one step that only happens at release time was the one that broke. `just release` updated the root lockfile and never knew the firmware had its own.
+
+When rehearsing a release, rehearse the release commit too: on a scratch branch, make the same version bump `just release` makes, then dispatch the workflow. A rehearsal that skips the step the real thing starts with proves less than it looks.

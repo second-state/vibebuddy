@@ -1,0 +1,23 @@
+pkgbase = vibebuddy-bin
+	pkgdesc = A desk pet that shows and announces what your AI coding agents are doing (daemon, agent hooks, tray app)
+	pkgver = 0.3.0
+	pkgrel = 1
+	url = https://github.com/second-state/vibebuddy
+	install = vibebuddy-bin.install
+	arch = x86_64
+	license = GPL-3.0-or-later
+	license = CC-BY-SA-4.0
+	depends = gcc-libs
+	depends = glibc
+	depends = systemd-libs
+	optdepends = libnotify: a notification when the box disconnects
+	optdepends = xdg-utils: opening the logs and diagnostics folders
+	optdepends = xdg-terminal-exec: showing the daemon log in a terminal
+	optdepends = xdg-user-dirs: saving screenshots and diagnostics in your usual folders
+	provides = vibebuddy
+	conflicts = vibebuddy
+	options = !debug
+	source = https://github.com/second-state/vibebuddy/releases/download/v0.3.0/VibeBuddy-v0.3.0-linux-x86_64.tar.gz
+	sha256sums = 920df9f714101b79a8ed68fc1d1366f4b71d3831659bc63726533a944b7b7d5b
+
+pkgname = vibebuddy-bin
