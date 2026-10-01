@@ -108,7 +108,9 @@
 "Make the box blink" = "让盒子眨眼";
 "Box screen" = "盒子画面";
 "Refresh" = "刷新";
+"Refreshing…" = "正在刷新…";
 "Save image" = "保存图片";
+"Saved to %@" = "已保存到 %@";
 "Click Refresh to see what the box is showing" = "点「刷新」看看盒子在干什么";
 "daemon isn't running" = "daemon 没起来";
 "UART bridge" = "UART 桥";

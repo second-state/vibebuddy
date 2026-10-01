@@ -15,7 +15,7 @@ mod tray;
 
 use std::time::{Duration, SystemTime};
 
-use iced::widget::{button, column, container, row, slider, space, text, toggler};
+use iced::widget::{button, column, container, image, row, slider, space, text, toggler};
 use iced::{Element, Font, Length, Subscription, Task, Theme, window};
 
 use i18n::tr;
@@ -67,6 +67,9 @@ enum Message {
     VolumeReleased,
     PlayLine,
     Identify,
+    TakeScreenshot,
+    Screenshot(Result<Vec<u8>, String>),
+    SaveScreenshot,
     RestartDaemon,
     Hooks(&'static str),
     HooksDone(Result<String, String>),
@@ -94,6 +97,9 @@ struct App {
     tab: Tab,
     /// The slider's position while it is being dragged; the box's own value otherwise.
     volume: Option<u8>,
+    /// The last screen grabbed from the box, as PNG, and whether a grab is under way.
+    screenshot: Option<(Vec<u8>, image::Handle)>,
+    screenshot_busy: bool,
     /// The outcome of the last action, shown at the bottom of the window.
     notice: Option<Result<String, String>>,
     #[cfg(target_os = "linux")]
@@ -109,6 +115,8 @@ impl App {
             settings: None,
             tab: Tab::General,
             volume: None,
+            screenshot: None,
+            screenshot_busy: false,
             notice: None,
             #[cfg(target_os = "linux")]
             tray: None,
@@ -212,6 +220,22 @@ impl App {
                 return Task::perform(client::set_volume(level, true), Message::Done);
             }
             Message::Identify => return Task::perform(client::identify(), Message::Done),
+            Message::TakeScreenshot => {
+                self.screenshot_busy = true;
+                return Task::perform(client::screenshot(), Message::Screenshot);
+            }
+            Message::Screenshot(result) => {
+                self.screenshot_busy = false;
+                match result {
+                    Ok(png) => self.screenshot = Some((png.clone(), image::Handle::from_bytes(png))),
+                    Err(error) => self.notice = Some(Err(error)),
+                }
+            }
+            Message::SaveScreenshot => {
+                if let Some((png, _)) = &self.screenshot {
+                    self.notice = Some(save_screenshot(png));
+                }
+            }
             Message::RestartDaemon => return Task::perform(client::restart_daemon(), Message::Done),
             Message::Hooks(action) => return Task::perform(run_hook_tool(action), Message::HooksDone),
             Message::HooksDone(result) => self.notice = Some(result),
@@ -361,10 +385,38 @@ impl App {
         };
         let firmware = device.and_then(|device| device.firmware_build.clone()).unwrap_or_else(|| "—".to_owned());
         let online = device.is_some_and(|device| device.connected);
+        // The frame is dark whatever the theme, so its text is light: in a light theme the theme's own text color
+        // vanished there, and a grab in progress looked like a button that did nothing.
+        let on_frame = |label: String| text(label).size(13).color(iced::Color::from_rgb8(0xd0, 0xd0, 0xd0));
+        let screen: Element<'_, Message> = match (&self.screenshot, self.screenshot_busy) {
+            (_, true) => on_frame(tr("Refreshing…", &[])).into(),
+            // Nearest-neighbour keeps the box's pixels crisp when scaled up.
+            (Some((_, handle)), false) => image(handle.clone())
+                .filter_method(image::FilterMethod::Nearest)
+                .width(Length::Fill)
+                .into(),
+            (None, false) => on_frame(tr("Click Refresh to see what the box is showing", &[])).into(),
+        };
         column![
             row![text(tr("Link", &[])).width(140), text(link)].spacing(12),
             row![text(tr("Box firmware", &[])).width(140), text(firmware)].spacing(12),
             button(text(tr("Make the box blink", &[]))).on_press_maybe(online.then_some(Message::Identify)),
+            row![
+                text(tr("Box screen", &[])),
+                space::horizontal(),
+                button(text(tr("Refresh", &[])))
+                    .on_press_maybe((online && !self.screenshot_busy).then_some(Message::TakeScreenshot)),
+                button(text(tr("Save image", &[])))
+                    .style(button::secondary)
+                    .on_press_maybe(self.screenshot.is_some().then_some(Message::SaveScreenshot)),
+            ]
+            .spacing(8),
+            container(screen)
+                .padding(4)
+                .width(Length::Fill)
+                .height(Length::Fill)
+                .center(Length::Fill)
+                .style(|_| container::background(iced::Color::from_rgb8(0x16, 0x16, 0x16))),
         ]
         .spacing(12)
         .into()
@@ -383,6 +435,29 @@ impl App {
         .spacing(12)
         .into()
     }
+}
+
+/// Saves into the user's Pictures directory, where Omarchy's own screenshots go: there is no save dialog
+/// to borrow on a tiling desktop, and the path is shown afterwards.
+fn save_screenshot(png: &[u8]) -> Result<String, String> {
+    let pictures = std::process::Command::new("xdg-user-dir")
+        .arg("PICTURES")
+        .output()
+        .ok()
+        .map(|output| String::from_utf8_lossy(&output.stdout).trim().to_owned())
+        .filter(|dir| !dir.is_empty())
+        .map(std::path::PathBuf::from)
+        .or_else(|| std::env::var_os("HOME").map(|home| std::path::PathBuf::from(home).join("Pictures")))
+        .ok_or("HOME is not set")?;
+    let seconds = SystemTime::now()
+        .duration_since(SystemTime::UNIX_EPOCH)
+        .map(|elapsed| elapsed.as_secs())
+        .unwrap_or_default();
+    let path = pictures.join(format!("vibe-buddy-{seconds}.png"));
+    std::fs::create_dir_all(&pictures)
+        .and_then(|()| std::fs::write(&path, png))
+        .map_err(|error| format!("{}: {error}", path.display()))?;
+    Ok(tr("Saved to %@", &[&path.display()]))
 }
 
 /// `2026-10-01T17:06:59.003+08:00` → `2026-10-01 17:06`, in the daemon's own (local) offset.

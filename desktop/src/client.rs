@@ -75,6 +75,23 @@ pub async fn identify() -> Result<(), String> {
     post("/v1/device/identify", None).await
 }
 
+/// The box's current screen as PNG. It holds the serial port for a few seconds over the UART bridge, so it is only
+/// ever taken on request.
+pub async fn screenshot() -> Result<Vec<u8>, String> {
+    let response = reqwest::Client::new()
+        .post(format!("{BASE}/v1/device/screenshot"))
+        .send()
+        .await
+        .map_err(|error| error.to_string())?;
+    let status = response.status();
+    let body = response.bytes().await.map_err(|error| error.to_string())?;
+    if status.is_success() {
+        Ok(body.to_vec())
+    } else {
+        Err(String::from_utf8_lossy(&body).trim().to_owned())
+    }
+}
+
 pub async fn restart_daemon() -> Result<(), String> {
     post("/v1/daemon/restart", None).await
 }
