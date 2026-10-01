@@ -1,5 +1,5 @@
-/* Simplified Chinese for the Mac app. Keys are the English text in the Swift
-   sources; tools/check-localization.py keeps this table in sync with them. */
+/* Simplified Chinese for the Mac app and the Linux app (desktop/). Keys are the English text in the
+   Swift and Rust sources; tools/check-localization.py keeps this table in sync with them. */
 
 /* Menu bar */
 "daemon not responding · click to restart" = "daemon 异常 · 点击重启";
@@ -14,6 +14,7 @@
 "%lld min" = "%lld 分";
 "Settings…" = "设置…";
 "Quit Vibe Buddy (the box goes offline)" = "退出 Vibe Buddy（盒子将离线）";
+"Quit" = "退出";
 
 /* Windows and alerts */
 "Vibe Buddy Settings" = "Vibe Buddy 设置";
@@ -128,6 +129,7 @@
 "Running · %@" = "运行中 · %@";
 "Not running" = "未运行";
 "Restart daemon" = "重启 daemon";
+"Logs: %@" = "日志：%@";
 "Export diagnostics…" = "导出诊断…";
 "Config file: %@" = "配置文件：%@";
 

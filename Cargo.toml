@@ -1,5 +1,5 @@
 [workspace]
-members = ["daemon", "firmware-rs/core", "hook", "protocol"]
+members = ["daemon", "desktop", "firmware-rs/core", "hook", "protocol"]
 # The device firmware builds separately with the Xtensa toolchain; see firmware-rs/device.
 exclude = ["firmware-rs/device"]
 resolver = "3"

@@ -60,15 +60,15 @@ If a release isn't signed yet, macOS blocks the first launch; allow it under Sys
 
 ### Linux (experimental)
 
-There's no app on Linux yet; the daemon and the hook run on their own. Tested on Omarchy (Arch, Hyprland). From a checkout, with a Rust toolchain installed:
+Tested on Omarchy (Arch, Hyprland). From a checkout, with a Rust toolchain installed:
 
 ```bash
 packaging/linux/install.sh
 ```
 
-It builds both binaries into `~/.local/bin`, runs `vibebuddyd` as a systemd user service, and adds the hooks to Claude Code and Codex, whichever this machine has (Codex then wants you to trust them in `/hooks`). Run it again to upgrade. The daemon needs to be in the group that owns `/dev/ttyACM*` (`uucp` on Arch, `dialout` on Debian and Ubuntu); the script tells you if it isn't. Config lives in `~/.config/vibebuddy`, stats in `~/.local/state/vibebuddy`, and when the box is gone for 30 seconds you get a desktop notification through `notify-send`.
+It builds the binaries into `~/.local/bin`, runs `vibebuddyd` as a systemd user service, puts the Vibe Buddy app in the launcher and at login, and adds the hooks to Claude Code and Codex, whichever this machine has (Codex then wants you to trust them in `/hooks`). Run it again to upgrade. The daemon needs to be in the group that owns `/dev/ttyACM*` (`uucp` on Arch, `dialout` on Debian and Ubuntu); the script tells you if it isn't. Config lives in `~/.config/vibebuddy`, stats in `~/.local/state/vibebuddy`, and when the box is gone for 30 seconds you get a desktop notification through `notify-send`.
 
-On Hyprland, K2 brings back the terminal window the session runs in, on whatever workspace it is; a session inside tmux or over SSH has no window to go back to. What's missing for now: voices, volume and firmware updates have no UI. To remove it, run `vibebuddy-hook uninstall`, then `systemctl --user disable --now vibebuddyd`.
+On Hyprland, K2 brings back the terminal window the session runs in, on whatever workspace it is; a session inside tmux or over SSH has no window to go back to. The app is a tray icon (the buddy's face; click it for settings) plus a settings window with the same tabs as on the Mac. It takes its colors and font from the Omarchy theme and follows theme switches. It is only a client: quitting it leaves the daemon, and the box, running. Not there yet: changing the voice, firmware updates, screenshots and onboarding. To make the settings window float on Hyprland, add a window rule for the class `vibebuddy`. To remove everything, run `vibebuddy-hook uninstall`, then `systemctl --user disable --now vibebuddyd`, then delete the files the script installed.
 
 ## How it works
 
@@ -129,6 +129,7 @@ Everyday tasks live in the [`justfile`](justfile); run `just` to list them. See 
 
 ```text
 app/       # the macOS menu bar app (SwiftPM)
+desktop/   # the Linux tray app and settings window (iced)
 daemon/    # vibebuddyd
 hook/      # vibebuddy-hook, the Codex and Claude Code hook
 protocol/  # Vibe Buddy Protocol types and codec

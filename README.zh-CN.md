@@ -60,15 +60,15 @@ Release 若还没签名，macOS 会拦下第一次打开，到「系统设置 �
 
 ### Linux（实验性）
 
-Linux 上暂时没有 App，daemon 和 hook 单独运行。已在 Omarchy（Arch、Hyprland）上验证。装好 Rust 工具链后，在仓库里运行：
+已在 Omarchy（Arch、Hyprland）上验证。装好 Rust 工具链后，在仓库里运行：
 
 ```bash
 packaging/linux/install.sh
 ```
 
-脚本把两个程序编译装进 `~/.local/bin`，把 `vibebuddyd` 注册成 systemd 用户服务，再给本机有的 Claude Code 和 Codex 加上 Hook（Codex 之后需要你在 `/hooks` 里信任它们）。升级时重新运行即可。daemon 要在 `/dev/ttyACM*` 所属的组里（Arch 是 `uucp`，Debian 和 Ubuntu 是 `dialout`），不在的话脚本会提示。配置放在 `~/.config/vibebuddy`，统计放在 `~/.local/state/vibebuddy`；盒子断开 30 秒后会通过 `notify-send` 弹一条桌面通知。
+脚本把程序编译装进 `~/.local/bin`，把 `vibebuddyd` 注册成 systemd 用户服务，把 Vibe Buddy App 放进启动器并设为登录时启动，再给本机有的 Claude Code 和 Codex 加上 Hook（Codex 之后需要你在 `/hooks` 里信任它们）。升级时重新运行即可。daemon 要在 `/dev/ttyACM*` 所属的组里（Arch 是 `uucp`，Debian 和 Ubuntu 是 `dialout`），不在的话脚本会提示。配置放在 `~/.config/vibebuddy`，统计放在 `~/.local/state/vibebuddy`；盒子断开 30 秒后会通过 `notify-send` 弹一条桌面通知。
 
-在 Hyprland 上，K2 会切回会话所在的终端窗口，不管它在哪个工作区；跑在 tmux 里或通过 SSH 的会话没有窗口可回。目前还缺的：音色、音量和固件更新没有界面。卸载时先运行 `vibebuddy-hook uninstall`，再运行 `systemctl --user disable --now vibebuddyd`。
+在 Hyprland 上，K2 会切回会话所在的终端窗口，不管它在哪个工作区；跑在 tmux 里或通过 SSH 的会话没有窗口可回。App 是一个托盘图标（氛围小助手的脸，点一下打开设置）加一个设置窗口，标签页和 Mac 版一样。它从 Omarchy 主题取配色和字体，切换主题时会跟着变。它只是个客户端：退出它，daemon 和盒子照常在线。目前还没有的：换音色、固件更新、截屏和首次引导。想让设置窗口在 Hyprland 上浮动显示，给 class `vibebuddy` 加一条窗口规则。卸载时先运行 `vibebuddy-hook uninstall`，再运行 `systemctl --user disable --now vibebuddyd`，然后删掉脚本装的文件。
 
 ## 工作原理
 
@@ -129,6 +129,7 @@ curl -H 'content-type: application/json' \
 
 ```text
 app/       # macOS 菜单栏 App（SwiftPM）
+desktop/   # Linux 托盘 App 和设置窗口（iced）
 daemon/    # vibebuddyd
 hook/      # vibebuddy-hook，Codex 与 Claude Code 的 Hook
 protocol/  # Vibe Buddy Protocol 类型与编解码

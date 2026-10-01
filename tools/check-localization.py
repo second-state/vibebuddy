@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Check that every localizable string in the Mac app has a zh-Hans translation.
+"""Check that every localizable string in the Mac and Linux apps has a zh-Hans translation.
 
 The app's copy is keyed in English: SwiftUI literals (Text, Label, Button, Toggle,
 LabeledContent) and String(localized:) calls. English needs no table because the
@@ -15,6 +15,9 @@ types in the same argument order as its key (positional `%2$@` forms are ordered
 by index), because a mismatch makes the runtime lookup miss and silently show
 English.
 
+The Linux app (desktop/src) shares the table: its keys are the first argument of
+`tr("...")`, written already in table form (`%@`, `%lld`).
+
 Usage: tools/check-localization.py   (exit 1 on any problem)
 """
 
@@ -26,6 +29,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 SOURCES = [ROOT / "app/Sources/VibeBuddy", ROOT / "app/Sources/VibeBuddyCore"]
+RUST_SOURCES = ROOT / "desktop/src"
 TABLE = ROOT / "app/Localization/zh-Hans.lproj/Localizable.strings"
 
 # SwiftUI initialisers whose first argument is a LocalizedStringKey.
@@ -128,6 +132,12 @@ def source_keys() -> dict[str, str]:
                     continue
                 line = code.count("\n", 0, offset) + 1
                 keys.setdefault(text, f"{path.relative_to(ROOT)}:{line}")
+    for path in sorted(RUST_SOURCES.glob("*.rs")):
+        code = path.read_text(encoding="utf-8")
+        for match in re.finditer(r'(?<![\w.])tr\(\s*"((?:[^"\\]|\\.)*)"', code):
+            text = SPECIFIER.sub(PLACEHOLDER, unescape(match.group(1)))
+            line = code.count("\n", 0, match.start()) + 1
+            keys.setdefault(text, f"{path.relative_to(ROOT)}:{line}")
     return keys
 
 
