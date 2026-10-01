@@ -44,6 +44,9 @@ pub enum Surface {
     Host { bundle_id: String },
     /// No host app: SSH, daemons, sessions started by launchd. K2 has nowhere to go.
     Headless,
+    /// Outside macOS: the agent's ancestor pids, nearest first. K2 focuses the window owned by the first of
+    /// them that has one; with none (SSH, tmux) it is headless after all.
+    Window { pids: Vec<u32> },
 }
 
 impl Default for Surface {
@@ -55,7 +58,12 @@ impl Default for Surface {
 
 impl Surface {
     /// Combine the flat fields reported by the hook into a surface.
-    pub fn from_hook(kind: Option<&str>, host_bundle_id: Option<String>, desktop_session_id: Option<String>) -> Self {
+    pub fn from_hook(
+        kind: Option<&str>,
+        host_bundle_id: Option<String>,
+        host_pids: Option<Vec<u32>>,
+        desktop_session_id: Option<String>,
+    ) -> Self {
         match kind {
             // Claims a host but gave no bundle id: nowhere to go, and falling back to App would jump to the wrong place.
             Some("host") => match host_bundle_id {
@@ -63,6 +71,10 @@ impl Surface {
                 None => Self::Headless,
             },
             Some("headless") => Self::Headless,
+            Some("window") => match host_pids {
+                Some(pids) if !pids.is_empty() => Self::Window { pids },
+                _ => Self::Headless,
+            },
             // Unrecognized values come from a hook newer than the daemon; treat them the old way.
             _ => Self::App { desktop_session_id },
         }

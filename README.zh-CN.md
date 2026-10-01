@@ -68,7 +68,7 @@ packaging/linux/install.sh
 
 脚本把两个程序编译装进 `~/.local/bin`，把 `vibebuddyd` 注册成 systemd 用户服务，再给本机有的 Claude Code 和 Codex 加上 Hook（Codex 之后需要你在 `/hooks` 里信任它们）。升级时重新运行即可。daemon 要在 `/dev/ttyACM*` 所属的组里（Arch 是 `uucp`，Debian 和 Ubuntu 是 `dialout`），不在的话脚本会提示。配置放在 `~/.config/vibebuddy`，统计放在 `~/.local/state/vibebuddy`；盒子断开 30 秒后会通过 `notify-send` 弹一条桌面通知。
 
-目前还缺的：K2 不能跳回会话所在的窗口，音色、音量和固件更新也没有界面。卸载时先运行 `vibebuddy-hook uninstall`，再运行 `systemctl --user disable --now vibebuddyd`。
+在 Hyprland 上，K2 会切回会话所在的终端窗口，不管它在哪个工作区；跑在 tmux 里或通过 SSH 的会话没有窗口可回。目前还缺的：音色、音量和固件更新没有界面。卸载时先运行 `vibebuddy-hook uninstall`，再运行 `systemctl --user disable --now vibebuddyd`。
 
 ## 工作原理
 

@@ -68,7 +68,7 @@ packaging/linux/install.sh
 
 It builds both binaries into `~/.local/bin`, runs `vibebuddyd` as a systemd user service, and adds the hooks to Claude Code and Codex, whichever this machine has (Codex then wants you to trust them in `/hooks`). Run it again to upgrade. The daemon needs to be in the group that owns `/dev/ttyACM*` (`uucp` on Arch, `dialout` on Debian and Ubuntu); the script tells you if it isn't. Config lives in `~/.config/vibebuddy`, stats in `~/.local/state/vibebuddy`, and when the box is gone for 30 seconds you get a desktop notification through `notify-send`.
 
-What's missing for now: K2 doesn't jump back to the session's window, and voices, volume and firmware updates have no UI. To remove it, run `vibebuddy-hook uninstall`, then `systemctl --user disable --now vibebuddyd`.
+On Hyprland, K2 brings back the terminal window the session runs in, on whatever workspace it is; a session inside tmux or over SSH has no window to go back to. What's missing for now: voices, volume and firmware updates have no UI. To remove it, run `vibebuddy-hook uninstall`, then `systemctl --user disable --now vibebuddyd`.
 
 ## How it works
 
