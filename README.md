@@ -41,7 +41,7 @@ Pomodoro runs entirely on the box: its timer and today's tally keep going withou
 ## What you need
 
 - **The box:** ALIENTEK ATK-DNESP32S3-BOX V1.1 (ESP32-S3, 16 MB flash, 8 MB PSRAM), with LCD, speaker and three buttons. One USB-C cable powers it, flashes it and carries events. Hardware notes: [`docs/hardware.md`](docs/hardware.md).
-- **A Mac** with Apple silicon and macOS 14 or later.
+- **A Mac** with Apple silicon and macOS 14 or later, or a Linux machine (experimental, see below).
 - **At least one agent:** Codex or Claude Code. GitHub Actions support uses the `gh` CLI you're already signed in to.
 
 ## Getting started
@@ -57,6 +57,18 @@ Pomodoro runs entirely on the box: its timer and today's tally keep going withou
 After that Vibe Buddy lives in the menu bar. Its icon tells you whether the box is online, which mode it's in and how much got done today. Settings has five tabs: General, Sound, Agents, Device (firmware updates, screenshots) and Advanced. If the box's firmware differs from the one bundled with the app, Settings → Device offers to update it.
 
 If a release isn't signed yet, macOS blocks the first launch; allow it under System Settings → Privacy & Security.
+
+### Linux (experimental)
+
+There's no app on Linux yet; the daemon and the hook run on their own. Tested on Omarchy (Arch, Hyprland). From a checkout, with a Rust toolchain installed:
+
+```bash
+packaging/linux/install.sh
+```
+
+It builds both binaries into `~/.local/bin`, runs `vibebuddyd` as a systemd user service, and adds the hooks to Claude Code and Codex, whichever this machine has (Codex then wants you to trust them in `/hooks`). Run it again to upgrade. The daemon needs to be in the group that owns `/dev/ttyACM*` (`uucp` on Arch, `dialout` on Debian and Ubuntu); the script tells you if it isn't. Config lives in `~/.config/vibebuddy`, stats in `~/.local/state/vibebuddy`, and when the box is gone for 30 seconds you get a desktop notification through `notify-send`.
+
+What's missing for now: K2 doesn't jump back to the session's window, and voices, volume and firmware updates have no UI. To remove it, run `vibebuddy-hook uninstall`, then `systemctl --user disable --now vibebuddyd`.
 
 ## How it works
 
