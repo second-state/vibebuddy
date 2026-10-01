@@ -47,12 +47,14 @@ def dependency_notices(manifest, target):
 
 def main():
     resources = Path(sys.argv[1])
+    # The Rust target the app's binaries are built for: the Mac app by default, the Linux package passes its own.
+    app_target = sys.argv[2] if len(sys.argv) > 2 else "aarch64-apple-darwin"
     licenses = resources / "licenses"
     licenses.mkdir(parents=True, exist_ok=True)
     for name in ["LICENSE", "LICENSE-ASSETS"]:
         shutil.copyfile(ROOT / name, licenses / name)
     for manifest, target, name in [
-        ("Cargo.toml", "aarch64-apple-darwin", "THIRD-PARTY-APP.txt"),
+        ("Cargo.toml", app_target, "THIRD-PARTY-APP.txt"),
         ("firmware-rs/device/Cargo.toml", "xtensa-esp32s3-none-elf", "THIRD-PARTY-FIRMWARE.txt"),
     ]:
         (licenses / name).write_text(dependency_notices(manifest, target))

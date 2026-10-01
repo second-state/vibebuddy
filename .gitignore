@@ -14,3 +14,6 @@ build-*/
 __pycache__/
 app/.build/
 app/build/
+/VibeBuddy-*.tar.gz
+/VibeBuddy-*.dmg
+/VibeBuddy-*.zip
