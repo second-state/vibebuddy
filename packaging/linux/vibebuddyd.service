@@ -1,0 +1,11 @@
+[Unit]
+Description=Vibe Buddy daemon
+Documentation=https://github.com/second-state/vibebuddy
+
+[Service]
+ExecStart=%h/.local/bin/vibebuddyd
+Restart=always
+RestartSec=2
+
+[Install]
+WantedBy=default.target

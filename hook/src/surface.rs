@@ -44,6 +44,10 @@ pub fn detect(own_bundle_id: &str) -> Surface {
 /// The bundle id of the app launchd started at the top of this process chain, if it is an app.
 /// Only runs when `__CFBundleIdentifier` is missing, so the common path spawns nothing.
 fn launched_app_bundle_id() -> Option<String> {
+    // App bundles exist only on macOS; elsewhere this would spawn `ps` on every hook for nothing.
+    if !cfg!(target_os = "macos") {
+        return None;
+    }
     let table = Command::new("/bin/ps").args(["-A", "-o", "pid=,ppid=,comm="]).output().ok()?;
     let table = String::from_utf8(table.stdout).ok()?;
     let app = launched_app(&table, std::process::id())?;

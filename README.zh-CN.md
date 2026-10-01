@@ -41,7 +41,7 @@ Vibe Buddy 是给 AI 编程 Agent 配的桌面宠物。它住在键盘旁一个�
 ## 需要准备
 
 - **盒子：** 正点原子 ATK-DNESP32S3-BOX V1.1（ESP32-S3，16 MB Flash，8 MB PSRAM），带 LCD、扬声器和三个按键。一根 USB-C 线同时供电、烧录和传事件。硬件记录见 [`docs/hardware.md`](docs/hardware.md)。
-- **一台 Mac：** Apple 芯片，macOS 14 或更新。
+- **一台 Mac：** Apple 芯片，macOS 14 或更新；也可以是一台 Linux 机器（实验性，见下文）。
 - **至少一个 Agent：** Codex 或 Claude Code。GitHub Actions 用的是你已经登录好的 `gh` 命令行。
 
 ## 上手
@@ -57,6 +57,18 @@ Vibe Buddy 是给 AI 编程 Agent 配的桌面宠物。它住在键盘旁一个�
 之后 Vibe Buddy 住在菜单栏：图标告诉你盒子在不在线、什么模式、今天干了多少。设置窗有五页：通用、声音、接入、设备（固件更新、截图）、高级。盒子上的固件与 App 附带的不一致时，设置 → 设备会提供更新。
 
 Release 若还没签名，macOS 会拦下第一次打开，到「系统设置 → 隐私与安全性」里放行即可。
+
+### Linux（实验性）
+
+Linux 上暂时没有 App，daemon 和 hook 单独运行。已在 Omarchy（Arch、Hyprland）上验证。装好 Rust 工具链后，在仓库里运行：
+
+```bash
+packaging/linux/install.sh
+```
+
+脚本把两个程序编译装进 `~/.local/bin`，把 `vibebuddyd` 注册成 systemd 用户服务，再给本机有的 Claude Code 和 Codex 加上 Hook（Codex 之后需要你在 `/hooks` 里信任它们）。升级时重新运行即可。daemon 要在 `/dev/ttyACM*` 所属的组里（Arch 是 `uucp`，Debian 和 Ubuntu 是 `dialout`），不在的话脚本会提示。配置放在 `~/.config/vibebuddy`，统计放在 `~/.local/state/vibebuddy`；盒子断开 30 秒后会通过 `notify-send` 弹一条桌面通知。
+
+目前还缺的：K2 不能跳回会话所在的窗口，音色、音量和固件更新也没有界面。卸载时先运行 `vibebuddy-hook uninstall`，再运行 `systemctl --user disable --now vibebuddyd`。
 
 ## 工作原理
 

@@ -197,3 +197,9 @@ Anything that relies on what a host process happens to provide "in passing", suc
 
 - **A second basis**: when the primary basis is missing, fall back to a fact guaranteed by the operating system itself, here the process tree and bundle structure.
 - **Failures must be visible to a human**: when the result changes from "can jump" to "nowhere to go", someone should know, instead of there being only a WARN line. This one isn't done yet.
+
+## A new group reaches your shell long before it reaches your services
+
+On 2026-10-01, bringing up Linux on Omarchy, the user was added to `uucp` so the daemon could open `/dev/ttyACM0`. A daemon started from a fresh SSH login talked to the box fine; the same binary started by `systemctl --user` got `Permission denied`. The systemd user manager had started at boot, before the `usermod`, and every service it launches inherits its group list, not the one in `/etc/group`. Only a reboot, or logging out of every session, restarts it.
+
+The installer had checked `id -nG` in its own shell, which was the one place guaranteed to look healthy. When a permission comes from a group, check the process that actually needs it (`Groups:` in `/proc/<pid>/status`), not the shell that installed it. The same install run also died silently because `getent group uucp dialout` fails when either group is missing, and under `pipefail` that ended the script before any message was printed; each distro has only one of the two.

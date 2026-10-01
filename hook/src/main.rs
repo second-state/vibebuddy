@@ -1,15 +1,18 @@
 //! `vibebuddy-hook codex` / `vibebuddy-hook claude`: reads the hook payload from stdin, minimizes it and
 //! POSTs it to the local daemon; a missing daemon, invalid input or network failure all exit 0 silently, so it never
 //! holds up the agent. The app copies it into the bin directory under Application Support and the hook config points
-//! there (ADR-0005), so it doesn't depend on python3 and survives the app being moved.
+//! there (ADR-0005), so it doesn't depend on python3 and survives the app being moved. Where there is no app (Linux),
+//! `vibebuddy-hook install` writes the hook config itself.
 
 mod claude;
 mod codex;
 mod filter;
+mod install;
 mod surface;
 
 use std::io::{Read, Write};
 use std::net::{SocketAddr, TcpStream};
+use std::path::PathBuf;
 use std::time::Duration;
 
 use serde_json::{Map, Value};
@@ -36,8 +39,30 @@ fn post_json(endpoint: &str, payload: &Map<String, Value>) -> std::io::Result<()
     Ok(())
 }
 
+/// `~/Library/Logs/VibeBuddy` on macOS; elsewhere the daemon's XDG state directory.
+fn log_dir() -> Option<PathBuf> {
+    let home = std::env::var_os("HOME").map(PathBuf::from);
+    if cfg!(target_os = "macos") {
+        return home.map(|home| home.join("Library/Logs/VibeBuddy"));
+    }
+    std::env::var_os("XDG_STATE_HOME")
+        .map(PathBuf::from)
+        .filter(|dir| dir.is_absolute())
+        .or_else(|| home.map(|home| home.join(".local/state")))
+        .map(|dir| dir.join("vibebuddy"))
+}
+
 fn main() {
     let agent = std::env::args().nth(1).unwrap_or_default();
+    if let "install" | "uninstall" = agent.as_str() {
+        match install::run(agent == "install") {
+            Ok(()) => return,
+            Err(error) => {
+                eprintln!("vibebuddy-hook: {error}");
+                std::process::exit(1);
+            }
+        }
+    }
     let mut input = String::new();
     if std::io::stdin().read_to_string(&mut input).is_err() {
         return;
@@ -50,8 +75,7 @@ fn main() {
             let Some(payload) = codex::sanitized_payload(&source) else {
                 return;
             };
-            if let Some(home) = std::env::var_os("HOME") {
-                let log_dir = std::path::PathBuf::from(home).join("Library/Logs/VibeBuddy");
+            if let Some(log_dir) = log_dir() {
                 codex::trace(&source, &payload, &log_dir);
             }
             (codex::ENDPOINT, payload)
@@ -62,6 +86,7 @@ fn main() {
         },
         _ => {
             eprintln!("usage: vibebuddy-hook codex|claude  (reads the hook payload from stdin)");
+            eprintln!("       vibebuddy-hook install|uninstall  (adds or removes the hooks, where there is no app)");
             return;
         }
     };
