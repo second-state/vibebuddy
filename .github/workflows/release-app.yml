@@ -48,6 +48,9 @@ jobs:
           # build.rs uses git describe --tags for the firmware build ID, so tags must be visible.
           fetch-depth: 0
       - uses: esp-rs/xtensa-toolchain@v1.7
+        env:
+          # espup asks the GitHub API for the latest toolchain; unauthenticated, a shared runner IP gets 403 rate limits.
+          GITHUB_TOKEN: ${{ github.token }}
         with:
           default: true
           buildtargets: esp32s3
