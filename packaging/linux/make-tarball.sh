@@ -24,7 +24,7 @@ mkdir -p "${stage}/bin" "${stage}/share/voices" "${stage}/share/firmware"
 for binary in vibebuddyd vibebuddy-hook vibebuddy-desktop; do
     install -m755 "${repo}/target/release/${binary}" "${stage}/bin/${binary}"
 done
-for file in vibebuddyd.service vibebuddy.desktop vibebuddy.svg; do
+for file in vibebuddyd.service vibebuddy.desktop vibebuddy.svg 70-vibebuddy.rules; do
     install -m644 "${repo}/packaging/linux/${file}" "${stage}/share/${file}"
 done
 for dir in "${repo}"/voices/*/; do

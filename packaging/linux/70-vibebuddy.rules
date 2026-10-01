@@ -1,0 +1,6 @@
+# Lets whoever is logged in at the seat open the Vibe Buddy box, with no group membership and no new login: systemd
+# grants the active session's user access to devices tagged uaccess. Matched by USB ID, the same ones vibebuddyd looks
+# for: the ESP32-S3's native USB Serial/JTAG port (303a:1001, shared by every ESP32-S3 board) and the box's CH343
+# UART bridge (1a86:55d3).
+SUBSYSTEM=="tty", ATTRS{idVendor}=="303a", ATTRS{idProduct}=="1001", TAG+="uaccess"
+SUBSYSTEM=="tty", ATTRS{idVendor}=="1a86", ATTRS{idProduct}=="55d3", TAG+="uaccess"

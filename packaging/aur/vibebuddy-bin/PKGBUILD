@@ -1,0 +1,36 @@
+# Maintainer: MAINTAINER_TBD
+# Built from the Linux tarball each GitHub release ships; packaging/aur/README.md says how to update it.
+pkgname=vibebuddy-bin
+pkgver=0.3.0
+pkgrel=1
+pkgdesc="A desk pet that shows and announces what your AI coding agents are doing (daemon, agent hooks, tray app)"
+arch=('x86_64')
+url="https://github.com/second-state/vibebuddy"
+license=('GPL-3.0-or-later' 'CC-BY-SA-4.0')
+depends=('gcc-libs' 'glibc' 'systemd-libs')
+optdepends=(
+  'libnotify: a notification when the box disconnects'
+  'xdg-utils: opening the logs and diagnostics folders'
+  'xdg-terminal-exec: showing the daemon log in a terminal'
+  'xdg-user-dirs: saving screenshots and diagnostics in your usual folders'
+)
+provides=('vibebuddy')
+conflicts=('vibebuddy')
+install=vibebuddy-bin.install
+source=("https://github.com/second-state/vibebuddy/releases/download/v${pkgver}/VibeBuddy-v${pkgver}-linux-x86_64.tar.gz")
+sha256sums=('SKIP')
+
+package() {
+  cd "VibeBuddy-v${pkgver}-linux-x86_64"
+  install -Dm755 bin/vibebuddyd bin/vibebuddy-hook bin/vibebuddy-desktop -t "${pkgdir}/usr/bin/"
+  # The tarball's unit points at ~/.local/bin, where install.sh puts the daemon.
+  install -dm755 "${pkgdir}/usr/lib/systemd/user"
+  sed 's|^ExecStart=.*|ExecStart=/usr/bin/vibebuddyd|' share/vibebuddyd.service > "${pkgdir}/usr/lib/systemd/user/vibebuddyd.service"
+  install -Dm644 share/vibebuddy.desktop -t "${pkgdir}/usr/share/applications/"
+  install -Dm644 share/vibebuddy.desktop -t "${pkgdir}/etc/xdg/autostart/"
+  install -Dm644 share/vibebuddy.svg -t "${pkgdir}/usr/share/icons/hicolor/scalable/apps/"
+  install -Dm644 share/70-vibebuddy.rules -t "${pkgdir}/usr/lib/udev/rules.d/"
+  install -Dm644 share/voices/*.bin -t "${pkgdir}/usr/share/vibebuddy/voices/"
+  install -Dm644 share/firmware/{bootloader.bin,partition-table.bin,vibebuddy-fw.bin,build.txt} -t "${pkgdir}/usr/share/vibebuddy/firmware/"
+  install -Dm644 licenses/* -t "${pkgdir}/usr/share/licenses/${pkgname}/"
+}
