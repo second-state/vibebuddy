@@ -95,6 +95,8 @@ pub enum OperationState {
     Running,
     Done,
     Failed,
+    /// Firmware written, but the box didn't start it; it needs unplugging and plugging back in.
+    Replug,
 }
 
 #[derive(Clone, Debug, Serialize)]

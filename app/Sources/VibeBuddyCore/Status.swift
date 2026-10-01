@@ -58,7 +58,7 @@ public struct HooksSeen: Codable, Equatable {
 /// Named DeviceOperation rather than Operation, which clashes with Foundation's.
 public struct DeviceOperation: Codable, Equatable {
     public enum Kind: String, Codable { case voicePack = "voice_pack", firmware }
-    public enum State: String, Codable { case running, done, failed }
+    public enum State: String, Codable { case running, done, failed, replug }
     public var kind: Kind
     public var state: State
     public var progress: Double

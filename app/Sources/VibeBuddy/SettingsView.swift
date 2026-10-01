@@ -142,6 +142,7 @@ struct OperationRow: View {
             case .running: ProgressView(value: operation.progress)
             case .done: Image(systemName: "checkmark.circle.fill").foregroundStyle(.green)
             case .failed: Image(systemName: "xmark.octagon.fill").foregroundStyle(.red)
+            case .replug: Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.orange)
             }
             Text(summary).font(.callout).lineLimit(1)
                 .help(operation.state == .failed ? operation.message : "")
@@ -156,7 +157,8 @@ struct OperationRow: View {
         case (.voicePack, .running): return String(localized: "Writing voice pack… \(percent)")
         case (.voicePack, .done): return String(localized: "Voice pack written")
         case (.firmware, .running): return String(localized: "Flashing firmware… \(percent)")
-        case (.firmware, .done): return String(localized: "Firmware flashed, the box is restarting")
+        case (.firmware, .done): return String(localized: "Firmware flashed, the box has restarted")
+        case (_, .replug): return String(localized: "Firmware flashed, but the box didn't start it. Unplug the box and plug it back in.")
         case (_, .failed): return String(localized: "Failed: \(operation.message)")
         }
     }
