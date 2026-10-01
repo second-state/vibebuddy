@@ -45,7 +45,10 @@ impl DeviceState {
             DeviceMessage::Line(line) => {
                 if let Some(mode) = line.strip_prefix("MODE ") {
                     self.mode = Some(mode.trim().to_ascii_lowercase());
-                } else if let Some(build) = line.strip_prefix("DISPLAY READY BUILD ") {
+                // Anywhere in the line: a line the box wrote before the port was opened can lose its newline and
+                // arrive glued in front ("LEISURE SKIT DISPLAY READY BUILD …", seen 2026-10-01), and missing the
+                // build hides the firmware update.
+                } else if let Some((_, build)) = line.split_once("DISPLAY READY BUILD ") {
                     self.firmware_build = Some(build.trim().to_owned());
                 } else if let Some(voice) = line.strip_prefix("VOICES ") {
                     let voice = voice.trim();
@@ -120,6 +123,13 @@ mod tests {
 
     fn line(text: &str) -> DeviceMessage {
         DeviceMessage::Line(text.to_owned())
+    }
+
+    #[test]
+    fn a_build_glued_behind_a_stray_line_is_still_read() {
+        let mut state = DeviceState::default();
+        state.apply(&line("LEISURE SKIT DISPLAY READY BUILD v0.2.1-38-ga0bffc7 2026-09-30 16:29"));
+        assert_eq!(state.firmware_build.as_deref(), Some("v0.2.1-38-ga0bffc7 2026-09-30 16:29"));
     }
 
     #[test]
