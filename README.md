@@ -224,13 +224,14 @@ When sending through the box's CH343 UART bridge, the daemon writes in line-rate
 
 ### Releases
 
-CI builds releases; see [`release-app`](.github/workflows/release-app.yml). It builds the firmware on Linux, runs the tests on an Apple silicon runner, assembles the app and packs it into a DMG with `app/scripts/make-dmg.sh`.
+CI builds releases; see [`release-app`](.github/workflows/release-app.yml). It builds the firmware on Linux, then the Mac app on an Apple silicon runner (packed into a DMG with `app/scripts/make-dmg.sh`) and the Linux tarball on Ubuntu 22.04 (`packaging/linux/make-tarball.sh`), testing on both.
 
-- Commits on main that touch what goes into the app (`app/`, `daemon/`, `hook/`, `protocol/`, `firmware/`, `voices/`) only produce a test artifact kept for 7 days.
-- A `vX.Y.Z` tag notarizes the app and publishes a GitHub Release. The tag must match `version` in `Cargo.toml`, or the build fails.
-- Releasing is one command on a clean main: `just release 0.2.0` updates `Cargo.toml`, commits, tags and pushes.
-- Each release also carries `VibeBuddy-firmware-vX.Y.Z.zip` (the three firmware images plus `build.txt`). Anyone with it can flash a box from Settings → Device → Flash from file….
-- Only arm64 builds are published for now.
+- Commits on main that touch what goes into the packages (`app/`, `daemon/`, `desktop/`, `hook/`, `protocol/`, `firmware/`, `voices/`, `packaging/`) only produce test artifacts kept for 7 days.
+- A `vX.Y.Z` tag notarizes the app and publishes one GitHub Release with the DMG, the Linux tarball and the firmware zip. The tag must match `version` in `Cargo.toml`, or the build fails.
+- Before releasing, write `docs/releases/vX.Y.Z.md`: a few bullets on what the version does. It opens the release notes, and CI adds the downloads after it.
+- Then releasing is one command on a clean main: `just release 0.3.0` checks that file, updates the versions in `Cargo.toml` and both lockfiles, commits, tags and pushes.
+- `VibeBuddy-firmware-vX.Y.Z.zip` holds the three firmware images plus `build.txt`. Anyone with it can flash a box from Settings → Device → Flash from file… on the Mac.
+- Builds are arm64 for the Mac and x86_64 for Linux. After a release, `packaging/aur/README.md` says how to update the AUR package.
 
 With the five signing secrets set on the repository, releases are signed with a Developer ID and notarized, so they open straight after download. Without them the build falls back to ad-hoc signing, and the first launch has to be allowed under Privacy & Security. [`tools/setup-release-signing.sh`](tools/setup-release-signing.sh) sets the secrets up: it walks you through requesting the certificate, packing the p12 and creating an app-specific password, then checks each one before writing it to GitHub.
 
