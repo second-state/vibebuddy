@@ -1,0 +1,22 @@
+[package]
+name = "vibebuddy-desktop"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Vibe Buddy's tray icon and settings window outside macOS"
+
+[[bin]]
+name = "vibebuddy-desktop"
+path = "src/main.rs"
+
+[dependencies]
+futures = "0.3"
+# The CPU renderer is plenty for a settings window and spares the wgpu build.
+iced = { version = "0.14", default-features = false, features = ["crisp", "image", "tiny-skia", "tokio", "wayland", "x11"] }
+reqwest = { version = "0.13", default-features = false, features = ["json", "stream"] }
+serde.workspace = true
+serde_json.workspace = true
+tokio = { workspace = true, features = ["process"] }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+ksni = "0.3"
