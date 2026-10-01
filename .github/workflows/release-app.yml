@@ -225,26 +225,14 @@ jobs:
         run: |
           label="${GITHUB_REF_NAME}"
           cat > notes.md <<NOTES
-          **macOS:** Apple silicon Macs only (macOS 14 or later). Open the DMG and drag Vibe Buddy into Applications.
-
-          **Linux:** x86_64 with systemd, tested on Omarchy (Arch, Hyprland). Unpack and run the installer; it sets up the daemon, the tray app and the agent hooks for your user:
-
-          \`\`\`bash
-          tar xf VibeBuddy-${label}-linux-x86_64.tar.gz
-          cd VibeBuddy-${label}-linux-x86_64 && ./install.sh
-          \`\`\`
-
-          The daemon needs your user in the group that owns \`/dev/ttyACM*\` (\`uucp\` on Arch, \`dialout\` on Debian and Ubuntu); the installer tells you if it isn't.
-
-          **Firmware:** \`VibeBuddy-firmware-${label}.zip\` is the firmware both apps ship, for flashing a box by hand.
+          - **macOS** (Apple silicon, macOS 14+): open the DMG and drag Vibe Buddy into Applications.
+          - **Linux** (x86_64, tested on Omarchy): \`tar xf VibeBuddy-${label}-linux-x86_64.tar.gz && cd VibeBuddy-${label}-linux-x86_64 && ./install.sh\`
+          - **Firmware**: \`VibeBuddy-firmware-${label}.zip\`, for flashing a box by hand.
           NOTES
           if [[ "${SIGNED}" != "true" ]]; then
             cat >> notes.md <<'NOTES'
 
-          The macOS build isn't signed with an Apple Developer ID or notarized, so Gatekeeper blocks the first launch. Allow it either way:
-
-          - System Settings → Privacy & Security → find the Vibe Buddy notice and click Open Anyway;
-          - or run `xattr -dr com.apple.quarantine "/Applications/Vibe Buddy.app"` in Terminal.
+          The macOS build isn't notarized, so Gatekeeper blocks the first launch: allow it under System Settings → Privacy & Security, or run `xattr -dr com.apple.quarantine "/Applications/Vibe Buddy.app"`.
           NOTES
           fi
           gh release create "${label}" --repo "${GITHUB_REPOSITORY}" \
@@ -252,4 +240,4 @@ jobs:
             "VibeBuddy-${label}-linux-x86_64.tar.gz" \
             "VibeBuddy-firmware-${label}.zip" \
             --title "Vibe Buddy ${label}" \
-            --notes-file notes.md --generate-notes
+            --notes-file notes.md
