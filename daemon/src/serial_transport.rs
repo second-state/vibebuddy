@@ -3,9 +3,9 @@ use std::env;
 use std::time::Duration;
 
 use vibebuddy_protocol::Event;
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 use tokio::sync::{mpsc, watch};
-use tokio_serial::{SerialPortBuilderExt, SerialPortType, SerialStream};
+use tokio_serial::{ClearBuffer, SerialPort, SerialPortBuilderExt, SerialPortType, SerialStream};
 use tracing::{info, warn};
 
 const ESPRESSIF_VID: u16 = 0x303a;
@@ -141,53 +141,13 @@ async fn serial_worker(
             .send(DeviceMessage::Connected { port: port_name.clone(), bridge: paced })
             .await;
 
-        let mut read_buffer = [0_u8; 256];
-        let mut line_buffer = Vec::new();
-
-        loop {
-            if let Some(frame) = pending.pop_front() {
-                if let Err(error) = write_frame(&mut port, &frame, paced).await {
-                    pending.push_front(frame);
-                    warn!(port = %port_name, %error, "serial write failed, reconnecting");
-                    break;
-                }
-                continue;
-            }
-
-            tokio::select! {
-                frame = receiver.recv() => {
-                    match frame {
-                        Some(frame) => pending.push_back(frame),
-                        None => return,
-                    }
-                }
-                changed = suspend.changed() => {
-                    if changed.is_err() {
-                        return;
-                    }
-                    if *suspend.borrow() {
-                        info!(port = %port_name, "serial port released for flashing");
-                        break;
-                    }
-                }
-                result = port.read(&mut read_buffer) => {
-                    match result {
-                        Ok(0) => {
-                            warn!(port = %port_name, "serial port closed, reconnecting");
-                            break;
-                        }
-                        Ok(count) => process_device_bytes(
-                            &read_buffer[..count],
-                            &mut line_buffer,
-                            &device_event_sender,
-                        ),
-                        Err(error) => {
-                            warn!(port = %port_name, %error, "serial read failed, reconnecting");
-                            break;
-                        }
-                    }
-                }
-            }
+        match run_session(&mut port, &port_name, paced, &mut pending, &mut receiver, &device_event_sender, &mut suspend)
+            .await
+        {
+            SessionEnd::Shutdown => return,
+            SessionEnd::Reconnect => {}
+            // Closing a tty waits for unsent output to drain, which never happens if the peer doesn't read.
+            SessionEnd::Released => drop(port.clear(ClearBuffer::Output)),
         }
 
         drop(port);
@@ -196,8 +156,93 @@ async fn serial_worker(
     }
 }
 
+/// How one connected session ended.
+#[derive(Debug, PartialEq)]
+enum SessionEnd {
+    Reconnect,
+    /// The flasher asked for the port.
+    Released,
+    /// The daemon is shutting down.
+    Shutdown,
+}
+
+/// Shuttles frames and device output over one open port until it fails or is handed to the flasher.
+async fn run_session<P: AsyncRead + AsyncWrite + Unpin>(
+    port: &mut P,
+    port_name: &str,
+    paced: bool,
+    pending: &mut VecDeque<Vec<u8>>,
+    receiver: &mut mpsc::Receiver<Vec<u8>>,
+    device_event_sender: &mpsc::Sender<DeviceMessage>,
+    suspend: &mut watch::Receiver<bool>,
+) -> SessionEnd {
+    let mut read_buffer = [0_u8; 256];
+    let mut line_buffer = Vec::new();
+
+    loop {
+        if let Some(frame) = pending.pop_front() {
+            // A peer that never reads (e.g. firmware that isn't ours) blocks the write forever; the flasher must still get the port.
+            tokio::select! {
+                result = write_frame(port, &frame, paced) => {
+                    if let Err(error) = result {
+                        pending.push_front(frame);
+                        warn!(port = %port_name, %error, "serial write failed, reconnecting");
+                        return SessionEnd::Reconnect;
+                    }
+                }
+                changed = suspend.changed() => {
+                    if changed.is_err() {
+                        return SessionEnd::Shutdown;
+                    }
+                    if *suspend.borrow() {
+                        info!(port = %port_name, "serial port released for flashing");
+                        return SessionEnd::Released;
+                    }
+                    pending.push_front(frame);
+                }
+            }
+            continue;
+        }
+
+        tokio::select! {
+            frame = receiver.recv() => {
+                match frame {
+                    Some(frame) => pending.push_back(frame),
+                    None => return SessionEnd::Shutdown,
+                }
+            }
+            changed = suspend.changed() => {
+                if changed.is_err() {
+                    return SessionEnd::Shutdown;
+                }
+                if *suspend.borrow() {
+                    info!(port = %port_name, "serial port released for flashing");
+                    return SessionEnd::Released;
+                }
+            }
+            result = port.read(&mut read_buffer) => {
+                match result {
+                    Ok(0) => {
+                        warn!(port = %port_name, "serial port closed, reconnecting");
+                        return SessionEnd::Reconnect;
+                    }
+                    Ok(count) => process_device_bytes(
+                        &read_buffer[..count],
+                        &mut line_buffer,
+                        device_event_sender,
+                    ),
+                    Err(error) => {
+                        warn!(port = %port_name, %error, "serial read failed, reconnecting");
+                        return SessionEnd::Reconnect;
+                    }
+                }
+            }
+        }
+    }
+}
+
 /// Bridge ports are written in line-rate chunks; native USB ports get the whole frame at once.
-async fn write_frame(port: &mut SerialStream, frame: &[u8], paced: bool) -> std::io::Result<()> {
+async fn write_frame<P: AsyncWrite + Unpin>(port: &mut P, frame: &[u8], paced: bool) -> std::io::Result<()> {
     if !paced {
         port.write_all(frame).await?;
         return port.flush().await;
@@ -424,5 +469,31 @@ mod tests {
             other => panic!("a diagnostic line should not be {other:?}"),
         }
         assert!(buffer.is_empty());
+    }
+
+    #[tokio::test]
+    async fn a_peer_that_never_reads_cannot_keep_the_port_from_the_flasher() {
+        // Firmware that isn't ours may never drain the USB serial, so a write can block forever.
+        let (mut port, _peer_never_reads) = tokio::io::duplex(16);
+        let mut pending = VecDeque::from([vec![b'x'; 256]]);
+        let (_frame_sender, mut receiver) = mpsc::channel(1);
+        let (device_sender, _device_receiver) = mpsc::channel(1);
+        let (suspend_sender, mut suspend) = watch::channel(false);
+
+        let session = run_session(&mut port, "test", false, &mut pending, &mut receiver, &device_sender, &mut suspend);
+        let release = async {
+            tokio::time::sleep(Duration::from_millis(50)).await;
+            suspend_sender.send(true).unwrap();
+            std::future::pending::<()>().await;
+        };
+        let end = tokio::time::timeout(Duration::from_secs(1), async {
+            tokio::select! {
+                end = session => end,
+                _ = release => unreachable!(),
+            }
+        })
+        .await
+        .expect("a stuck write must not stop the worker from releasing the port");
+        assert_eq!(end, SessionEnd::Released);
     }
 }

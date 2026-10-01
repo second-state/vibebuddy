@@ -78,6 +78,9 @@ struct OnboardingView: View {
                 if operation.state == .failed {
                     Text("Hold K0 on the box and replug the cable to put it in download mode, then retry.").font(.caption).foregroundStyle(.secondary)
                     Button("Retry") { model.updateFirmware() }
+                } else if operation.state == .replug {
+                    // A box put into download mode by hand ignores the reset after flashing; only a power cycle starts the new firmware.
+                    Text("Don't hold K0 this time. This page will show the box as found once it starts.").font(.caption).foregroundStyle(.secondary)
                 } else {
                     Text("The box screen stays dark for a few minutes — don't unplug it. It restarts on its own when done, and this page will show it as found.")
                         .font(.caption).foregroundStyle(.secondary)
