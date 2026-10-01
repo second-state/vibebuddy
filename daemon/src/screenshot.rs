@@ -11,8 +11,17 @@ use crate::serial_transport::{DeviceMessage, Transport};
 
 pub const WIDTH: usize = 320;
 pub const HEIGHT: usize = 240;
-/// Over the bridge one frame takes over ten seconds; leave some headroom for whatever the device is busy with.
-const TIMEOUT: Duration = Duration::from_secs(60);
+/// How long a frame may take in all. Over the bridge one takes over ten seconds, so the cap is generous.
+const TOTAL_TIMEOUT: Duration = Duration::from_secs(60);
+/// How long the box may stay silent. A slow frame keeps sending rows and is worth waiting for; a box that sends
+/// nothing at all isn't going to, and over the native port it would have started within a second. Giving up on a
+/// frame that is still arriving was worse than waiting: the next request then landed mid-dump and was lost too.
+const NATIVE_SILENCE: Duration = Duration::from_secs(10);
+const BRIDGE_SILENCE: Duration = Duration::from_secs(30);
+
+pub fn silence_timeout(bridge: bool) -> Duration {
+    if bridge { BRIDGE_SILENCE } else { NATIVE_SILENCE }
+}
 
 pub struct Frame {
     /// RGB888, row by row.
@@ -72,13 +81,15 @@ pub fn encode_png(frame: &Frame) -> Result<Vec<u8>, String> {
 pub async fn capture(
     transport: Arc<dyn Transport>,
     mut bus: broadcast::Receiver<DeviceMessage>,
+    silence: Duration,
 ) -> Result<Frame, String> {
     let frame = Event::named("device.screenshot")
         .to_ndjson()
         .map_err(|error| error.to_string())?;
     transport.send(frame).map_err(|error| format!("{error:?}"))?;
 
-    let deadline = tokio::time::Instant::now() + TIMEOUT;
+    let cap = tokio::time::Instant::now() + TOTAL_TIMEOUT;
+    let mut deadline = (tokio::time::Instant::now() + silence).min(cap);
     let mut pixels = Vec::with_capacity(WIDTH * HEIGHT * 3);
     let mut started = false;
     let mut backlight_on = true;
@@ -87,9 +98,16 @@ pub async fn capture(
             Ok(Ok(message)) => message,
             Ok(Err(broadcast::error::RecvError::Lagged(_))) => return Err("device messages backed up, screenshot rows lost".to_owned()),
             Ok(Err(broadcast::error::RecvError::Closed)) => return Err("device message channel closed".to_owned()),
-            Err(_) => return Err("timed out waiting for the screenshot".to_owned()),
+            Err(_) => {
+                let rows = pixels.len() / 3 / WIDTH;
+                return Err(format!("timed out waiting for the screenshot ({rows} of {HEIGHT} rows arrived)"));
+            }
         };
         let line = match message {
+            DeviceMessage::Line(line) if line.starts_with("SHOT") => {
+                deadline = (tokio::time::Instant::now() + silence).min(cap);
+                line
+            }
             DeviceMessage::Line(line) => line,
             DeviceMessage::Disconnected => return Err("link lost".to_owned()),
             _ => continue,
@@ -111,6 +129,10 @@ pub async fn capture(
         }
         if started && let Some(runs) = line.strip_prefix("SHOT ") {
             decode_runs(runs, &mut pixels)?;
+            // A full frame is a full frame; `SHOT END` only confirms it, so there's no reason to wait for one more line.
+            if pixels.len() == WIDTH * HEIGHT * 3 {
+                return Ok(Frame { pixels, backlight_on });
+            }
         }
     }
 }

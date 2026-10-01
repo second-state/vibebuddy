@@ -344,12 +344,17 @@ async fn post_screenshot(State(state): State<AppState>) -> axum::response::Respo
         return (StatusCode::CONFLICT, "another device operation is in progress").into_response();
     }
     let bus = state.device_bus.subscribe();
-    match screenshot::capture(state.transport.clone(), bus).await {
+    let silence = screenshot::silence_timeout(state.device.lock().await.bridge);
+    match screenshot::capture(state.transport.clone(), bus, silence).await {
         Ok(frame) => match screenshot::encode_png(&frame) {
             Ok(png) => ([(axum::http::header::CONTENT_TYPE, "image/png")], png).into_response(),
             Err(error) => (StatusCode::INTERNAL_SERVER_ERROR, error).into_response(),
         },
-        Err(error) => (StatusCode::BAD_GATEWAY, error).into_response(),
+        Err(error) => {
+            // Without this line a box that ignores the request leaves no trace at all.
+            warn!(%error, "screenshot failed");
+            (StatusCode::BAD_GATEWAY, error).into_response()
+        }
     }
 }
 
