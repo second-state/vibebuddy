@@ -64,11 +64,12 @@ pub fn apply(
     };
     let event = match hook.hook_event_name.as_str() {
         "UserPromptSubmit" => {
-            tracker.clear_session(&hook.session_id);
+            tracker.clear_turns(&hook.session_id);
             tracker.observe(&id, &title, ActivityStatus::Working)
         }
         "PermissionRequest" => tracker.require_input(&id, &title),
-        "PostToolUse" | "SubagentStart" => tracker.observe(&id, &title, ActivityStatus::Working),
+        "PostToolUse" | "SubagentStart" if hook.agent_id.is_some() => tracker.observe_child(&id, &title),
+        "PostToolUse" => tracker.observe(&id, &title, ActivityStatus::Working),
         "Stop" => {
             if hook.response_kind.as_deref() == Some("input_required") {
                 tracker.require_input(&id, &title)
@@ -76,7 +77,8 @@ pub fn apply(
                 tracker.finish(&id, &title)
             }
         }
-        "SubagentStop" => tracker.finish(&id, &title),
+        // A subagent reports to its parent session, not to the user: drop its card without announcing.
+        "SubagentStop" => tracker.discard(&id, "ALL QUIET"),
         // The turn ended on an API error: neither a success nor a task failure.
         "StopFailure" => tracker.discard(&id, "STOPPED"),
         "SessionEnd" => tracker.discard_session(&hook.session_id, "ALL QUIET"),
@@ -163,16 +165,81 @@ mod tests {
 
         let tasks = two.extra["tasks"].as_array().expect("tasks should be an array");
         assert_eq!(tasks.len(), 3, "parent session and two subagents should each get a card");
+    }
 
-        let first = apply(&mut tracker, &mut SessionTitles::disabled(), subagent_hook("SubagentStop", "agent-1"))
-            .expect("subagent stop should produce an event");
-        assert_eq!(
-            first.extra.get("announcement").and_then(|v| v.as_str()),
-            Some("done"),
-            "one subagent stopping must not swallow the announcement"
-        );
-        let remaining = first.extra["tasks"].as_array().expect("tasks should be an array");
-        assert_eq!(remaining.len(), 2);
+    #[test]
+    fn a_subagent_finishing_is_not_announced() {
+        // Its result goes to the parent session, not to the user: there is nothing to come back for yet.
+        let mut tracker = ActivityTracker::default();
+        apply(&mut tracker, &mut SessionTitles::disabled(), hook("UserPromptSubmit", "/work/vibe-buddy"));
+        apply(&mut tracker, &mut SessionTitles::disabled(), subagent_hook("SubagentStart", "agent-1"));
+
+        let stopped = apply(&mut tracker, &mut SessionTitles::disabled(), subagent_hook("SubagentStop", "agent-1"))
+            .expect("the subagent's card should leave the stack");
+        assert_eq!(stopped.event, "task.start", "the parent session is still working");
+        assert!(!stopped.extra.contains_key("announcement"));
+        assert_eq!(stopped.extra["tasks"].as_array().map(Vec::len), Some(1));
+    }
+
+    #[test]
+    fn work_with_background_subagents_is_announced_once_when_it_is_all_done() {
+        // Recorded on 2026-10-05: one request with two background reviewers used to say "done" five times.
+        let mut tracker = ActivityTracker::default();
+        let mut events = Vec::new();
+        let turn = |name: &str, prompt: &str| ClaudeHook {
+            prompt_id: Some(prompt.to_owned()),
+            ..hook(name, "/work/vibe-buddy")
+        };
+        let send = |tracker: &mut ActivityTracker, events: &mut Vec<Event>, hook: ClaudeHook| {
+            if let Some(event) = apply(tracker, &mut SessionTitles::disabled(), hook) {
+                events.push(event);
+            }
+        };
+
+        send(&mut tracker, &mut events, turn("UserPromptSubmit", "ask"));
+        send(&mut tracker, &mut events, subagent_hook("SubagentStart", "reviewer-1"));
+        send(&mut tracker, &mut events, subagent_hook("SubagentStart", "reviewer-2"));
+        // The parent ends its turn to wait for them.
+        send(&mut tracker, &mut events, turn("Stop", "ask"));
+        // An injected message (a CI event) wakes it and it ends again right away.
+        send(&mut tracker, &mut events, turn("UserPromptSubmit", "ci-event"));
+        send(&mut tracker, &mut events, turn("Stop", "ci-event"));
+        // The first reviewer finishes; its notification wakes the parent, which says it is still waiting.
+        send(&mut tracker, &mut events, subagent_hook("PostToolUse", "reviewer-2"));
+        send(&mut tracker, &mut events, subagent_hook("SubagentStop", "reviewer-1"));
+        send(&mut tracker, &mut events, turn("UserPromptSubmit", "notification-1"));
+        send(&mut tracker, &mut events, turn("Stop", "notification-1"));
+        let announced: Vec<_> = events.iter().filter(|event| event.extra.contains_key("announcement")).collect();
+        assert!(announced.is_empty(), "nothing is done while a reviewer still runs: {announced:?}");
+        assert_eq!(events.last().map(|event| event.event.as_str()), Some("task.start"));
+
+        // The second reviewer finishes, and the parent wraps up the work.
+        send(&mut tracker, &mut events, subagent_hook("SubagentStop", "reviewer-2"));
+        send(&mut tracker, &mut events, turn("UserPromptSubmit", "notification-2"));
+        send(&mut tracker, &mut events, turn("PostToolUse", "notification-2"));
+        send(&mut tracker, &mut events, turn("Stop", "notification-2"));
+        let announced: Vec<_> = events.iter().filter(|event| event.extra.contains_key("announcement")).collect();
+        assert_eq!(announced.len(), 1);
+        assert_eq!(announced[0].event, "task.done");
+    }
+
+    #[test]
+    fn a_new_prompt_keeps_the_cards_of_subagents_still_running() {
+        let mut tracker = ActivityTracker::default();
+        apply(&mut tracker, &mut SessionTitles::disabled(), hook("UserPromptSubmit", "/work/vibe-buddy"));
+        apply(&mut tracker, &mut SessionTitles::disabled(), subagent_hook("SubagentStart", "agent-1"));
+        let next = ClaudeHook {
+            prompt_id: Some("turn-b".to_owned()),
+            ..hook("UserPromptSubmit", "/work/vibe-buddy")
+        };
+        apply(&mut tracker, &mut SessionTitles::disabled(), next);
+        let stop = ClaudeHook {
+            prompt_id: Some("turn-b".to_owned()),
+            ..hook("Stop", "/work/vibe-buddy")
+        };
+        let stopped = apply(&mut tracker, &mut SessionTitles::disabled(), stop).expect("the stack should refresh");
+        assert!(!stopped.extra.contains_key("announcement"), "the subagent from the earlier turn still runs");
+        assert_eq!(stopped.extra["tasks"].as_array().map(Vec::len), Some(1));
     }
 
     #[test]
