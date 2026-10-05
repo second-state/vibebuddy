@@ -328,7 +328,8 @@ struct DeviceView: View {
         Form {
             Section {
                 LabeledContent("Link", value: connectionText)
-                if model.daemonAlive, !connected, !model.operationRunning {
+                // Not while a flash waits for a replug: that row says not to hold K0 this time.
+                if model.daemonAlive, !connected, !model.operationRunning, model.operation?.state != .replug {
                     BoxNotFoundHelp()
                 }
                 LabeledContent("Box firmware", value: model.status?.device.firmwareBuild ?? "—")
