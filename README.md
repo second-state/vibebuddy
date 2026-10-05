@@ -8,6 +8,8 @@ The buddy is an original character. Codex was the first agent it supported, but 
 
 (The project used to be called VibeBuddy; the repository, the `vibebuddyd` daemon and the Vibe Buddy Protocol keep that name.)
 
+[![Watch the 2-minute intro](docs/images/intro-poster.jpg)](https://www.youtube.com/watch?v=lLEFGSrcwDA)
+
 ## On the box
 
 Screen captures from a real box running the Rust firmware. Status scenes use example task names and daily stats; Pomodoro scenes show the live timer.

@@ -8,6 +8,8 @@ Vibe Buddy 是给 AI 编程 Agent 配的桌面宠物。它住在键盘旁一个�
 
 （项目原名 VibeBuddy，仓库、`vibebuddyd` 守护进程与 Vibe Buddy Protocol 沿用旧名。）
 
+[![观看 2 分钟产品介绍](docs/images/intro-poster.zh-CN.jpg)](https://www.youtube.com/watch?v=lLEFGSrcwDA)
+
 ## 盒子上的画面
 
 以下截图来自运行 Rust 固件的实机。状态场景使用示例任务名称和每日统计，番茄钟场景展示实际运行中的计时器。
