@@ -6,13 +6,13 @@ Claude Code's public lifecycle hooks provide everything Vibe Buddy needs, so the
 
 | Claude Code Hook | Vibe Buddy state |
 | --- | --- |
-| `UserPromptSubmit` | Working |
+| `UserPromptSubmit` | Working; replaces the session's previous turn, but subagents still running keep their cards |
 | `PermissionRequest` | Needs input |
 | `PostToolUse` | Back to working |
 | `SubagentStart` | Working; the subagent gets its own card |
-| `SubagentStop` | That subagent is done |
+| `SubagentStop` | That subagent's card goes away; not announced |
 | `Stop` (the reply is waiting for the user to answer) | Needs input |
-| `Stop` (any other reply) | Done |
+| `Stop` (any other reply) | Done; if the session still has subagents running, the turn ends quietly instead |
 | `StopFailure` | Idle, titled `STOPPED`; not falsely reported as success |
 | `SessionEnd` | Idle |
 
@@ -23,6 +23,14 @@ The rule for deciding whether the assistant is waiting for an answer is shared w
 Claude Code's `prompt_id` lines up semantically with Codex's `turn_id`: both identify a Turn.
 
 Note that **background agents share the parent session's `session_id` and `prompt_id`**: a 2026-09-14 test showed that for the `SubagentStart` and `SubagentStop` fired by a subagent, and the tool events inside it, both fields are the same as the parent session's; only `agent_id` differs. So an activity's identity must be `session_id + prompt_id + agent_id`, or parallel subagents overwrite each other.
+
+## Subagents are not the user's tasks
+
+A subagent reports to its parent session, not to the user, so its end is never announced; its card just leaves the stack. The parent's work isn't done while any of its subagents still runs, either. With background agents, the parent often ends its turn to wait for them, and each completion notification (or other injected message) wakes it for another short turn. Each of those turns ends in a `Stop`, so before this rule one request with two background reviewers said "All done" five times (2026-10-05). Now a `Stop` with subagents still running ends the turn quietly, and only the turn that wraps up after the last subagent is announced.
+
+The cost is that a lost `SubagentStop` would mute the parent until the card expires, so subagent cards expire after 10 minutes without an event instead of 30.
+
+Background shell commands and scheduled wake-ups have no hooks, so the daemon can't see them: a turn that ends while one runs is still announced. Seeing them would mean parsing the transcript, which [ADR-0001](adr/0001-claude-adapter-does-not-parse-transcript.md) rules out.
 
 ## Coexisting with Codex
 
