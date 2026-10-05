@@ -1,4 +1,5 @@
-//! Navigates from an aggregated activity back to its source window on the Mac.
+//! Navigates from an aggregated activity back to its source window: through LaunchServices on the Mac, through
+//! the compositor (Hyprland) on Linux.
 //!
 //! All arguments go straight to the process API, never through a shell. Source data comes from hooks and is still treated
 //! as untrusted input: Codex thread ids, Claude session ids and GitHub repos are narrowed to a safe character set first.
@@ -27,6 +28,9 @@ struct CommandSpec {
 
 /// On success returns the link actually opened, so the log can say where K2 went.
 pub async fn open(source: ActivitySource) -> Result<String, String> {
+    if let Some(Surface::Window { pids }) = surface_of(&source) {
+        return focus_window(pids).await;
+    }
     let desktop = reported_desktop_session(&source)
         .map(str::to_owned)
         .or_else(|| fallback_desktop_session(&source));
@@ -52,6 +56,7 @@ fn command_for(source: &ActivitySource, desktop: Option<&str>) -> Result<Command
     match surface_of(source) {
         Some(Surface::Host { bundle_id }) => return activate(bundle_id),
         Some(Surface::Headless) => return Err("session has no host window (SSH or background process)".to_owned()),
+        Some(Surface::Window { .. }) => return Err("a window is focused through the compositor, not a command".to_owned()),
         _ => {}
     }
     match source {
@@ -98,7 +103,7 @@ fn command_for(source: &ActivitySource, desktop: Option<&str>) -> Result<Command
                 return Err("invalid GitHub repo".to_owned());
             }
             Ok(CommandSpec {
-                program: "/usr/bin/open",
+                program: if cfg!(target_os = "macos") { "/usr/bin/open" } else { "xdg-open" },
                 args: vec![format!("https://github.com/{repo}/actions/runs/{run_id}")],
             })
         }
@@ -141,6 +146,63 @@ fn activate(bundle_id: &str) -> Result<CommandSpec, String> {
         program: "/usr/bin/open",
         args: vec!["-b".to_owned(), bundle_id.to_owned()],
     })
+}
+
+/// Focuses the window that owns the nearest of the agent's ancestors. Only Hyprland is supported: it's the one
+/// compositor here, and it can both list windows with their pids and focus one by address.
+async fn focus_window(pids: &[u32]) -> Result<String, String> {
+    let clients = run_hyprctl(&["clients", "-j"]).await?;
+    let address = window_for(&clients, pids)
+        .ok_or_else(|| "session has no host window (SSH, tmux or a background process)".to_owned())?;
+    let target = format!("address:{address}");
+    // Hyprland 0.56 made dispatch take Lua and rejects the old syntax; older releases only know the old one.
+    // The address is plain hex (checked above), so it can't break out of the Lua string.
+    let lua = format!("hl.dsp.focus({{ window = \"{target}\" }})");
+    if let Err(lua_error) = run_hyprctl(&["dispatch", &lua]).await {
+        run_hyprctl(&["dispatch", "focuswindow", &target])
+            .await
+            .map_err(|legacy_error| format!("{lua_error}; legacy syntax: {legacy_error}"))?;
+    }
+    Ok(target)
+}
+
+/// hyprctl reports dispatch errors on stdout, sometimes with a zero exit code; a dispatch that worked says `ok`.
+async fn run_hyprctl(args: &[&str]) -> Result<String, String> {
+    let output = tokio::time::timeout(OPEN_TIMEOUT, Command::new("hyprctl").args(args).output())
+        .await
+        .map_err(|_| "hyprctl timed out".to_owned())?
+        .map_err(|error| format!("cannot run hyprctl (is this Hyprland?): {error}"))?;
+    let stdout = String::from_utf8_lossy(&output.stdout).into_owned();
+    let failed = !output.status.success() || (args.first() == Some(&"dispatch") && stdout.trim() != "ok");
+    if failed {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        return Err(format!("hyprctl failed: {} {}", stdout.trim(), stderr.trim()).trim_end().to_owned());
+    }
+    Ok(stdout)
+}
+
+/// Picks the window owned by the nearest ancestor. When one process owns several windows (a single-instance
+/// terminal), the first one Hyprland lists wins: pids alone can't tell them apart.
+fn window_for(clients_json: &str, pids: &[u32]) -> Option<String> {
+    #[derive(Deserialize)]
+    struct Client {
+        address: String,
+        pid: i64,
+    }
+    let clients: Vec<Client> = serde_json::from_str(clients_json).ok()?;
+    pids.iter().find_map(|&pid| {
+        clients
+            .iter()
+            .find(|client| client.pid == i64::from(pid) && valid_address(&client.address))
+            .map(|client| client.address.clone())
+    })
+}
+
+/// Hyprland window addresses look like `0x618656fe7aa0`; anything else never reaches the dispatcher.
+fn valid_address(address: &str) -> bool {
+    address
+        .strip_prefix("0x")
+        .is_some_and(|hex| !hex.is_empty() && hex.bytes().all(|byte| byte.is_ascii_hexdigit()))
 }
 
 /// Claude App stores one record per Code session. Only the fields needed for navigation are read here.
@@ -350,13 +412,13 @@ mod tests {
     #[test]
     fn a_host_without_a_bundle_id_has_nowhere_to_go() {
         // The hook says there's a host but gave no target: skip it, rather than fall back to importing the session into the app.
-        assert_eq!(Surface::from_hook(Some("host"), None, None), Surface::Headless);
+        assert_eq!(Surface::from_hook(Some("host"), None, None, None), Surface::Headless);
     }
 
     #[test]
     fn an_older_hook_keeps_the_desktop_behaviour() {
         // Old hooks and old state files report no surface; back then only the desktop app was supported.
-        assert_eq!(Surface::from_hook(None, None, None), Surface::default());
+        assert_eq!(Surface::from_hook(None, None, None, None), Surface::default());
         assert!(matches!(Surface::default(), Surface::App { .. }));
     }
 
@@ -576,6 +638,41 @@ mod tests {
             picked.as_deref(),
             Some("local_cccccccc-0000-0000-0000-000000000000")
         );
+    }
+
+    const CLIENTS: &str = r#"[
+        {"address": "0x618656fe7aa0", "pid": 3534, "class": "org.omarchy.agent"},
+        {"address": "0x618657e07910", "pid": 5487, "class": "org.omarchy.agent"},
+        {"address": "not-an-address", "pid": 9000, "class": "evil"}
+    ]"#;
+
+    #[test]
+    fn the_nearest_ancestor_with_a_window_wins() {
+        // The hook's chain on Omarchy: claude, then the Ghostty that owns the window, then the user's systemd.
+        assert_eq!(window_for(CLIENTS, &[3620, 3534, 1017]).as_deref(), Some("0x618656fe7aa0"));
+        assert_eq!(window_for(CLIENTS, &[5576, 5487]).as_deref(), Some("0x618657e07910"));
+    }
+
+    #[test]
+    fn a_chain_without_a_window_has_nowhere_to_go() {
+        // tmux and SSH sessions climb to a server or sshd, never to a window.
+        assert_eq!(window_for(CLIENTS, &[4000, 3999, 1017]), None);
+        assert_eq!(window_for("not json", &[3534]), None);
+    }
+
+    #[test]
+    fn a_malformed_address_never_reaches_the_dispatcher() {
+        assert_eq!(window_for(CLIENTS, &[9000]), None);
+    }
+
+    #[test]
+    fn a_window_surface_is_never_turned_into_a_command() {
+        let source = ActivitySource::ClaudeCode {
+            session_id: "s".to_owned(),
+            cwd: None,
+            surface: Surface::Window { pids: vec![3534] },
+        };
+        assert!(command_for(&source, None).is_err());
     }
 
     #[test]

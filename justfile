@@ -66,11 +66,17 @@ release version:
     git fetch -q origin main
     [[ "$(git rev-parse HEAD)" == "$(git rev-parse origin/main)" ]] || { echo "local main differs from origin/main" >&2; exit 2; }
     ! git rev-parse -q --verify "refs/tags/v${v}" >/dev/null || { echo "v${v} already exists" >&2; exit 2; }
+    # The release notes start with what the version does, written by hand; CI adds the downloads after it.
+    [[ -s "docs/releases/v${v}.md" ]] || { echo "write docs/releases/v${v}.md (what this release does) and commit it first" >&2; exit 2; }
     # Always write ${v}, not $v: a character right after $v can be read as part of the name
     # (full-width punctuation in the old Chinese messages did exactly that).
     perl -pi -e 'BEGIN{$new=shift} s/^version = ".*"/version = "$new"/ && ($done++) unless $done' "${v}" Cargo.toml
     cargo update --workspace --offline -q
-    git add Cargo.toml Cargo.lock
+    # The firmware has its own lockfile, which also records these crates' versions; a stale one fails the
+    # release's --locked license step (v0.3.0's first tag did). Stable is enough to rewrite a lockfile.
+    RUSTUP_TOOLCHAIN=stable cargo update --manifest-path firmware-rs/device/Cargo.toml \
+        -p vibebuddy-firmware-core -p vibebuddy-protocol --offline -q
+    git add Cargo.toml Cargo.lock firmware-rs/device/Cargo.lock
     git commit -q -m "release: v${v}"
     git tag -a "v${v}" -m "Vibe Buddy v${v}"
     git push -q origin main "v${v}"

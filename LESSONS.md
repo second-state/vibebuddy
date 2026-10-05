@@ -199,3 +199,29 @@ Anything that relies on what a host process happens to provide "in passing", suc
 
 - **A second basis**: when the primary basis is missing, fall back to a fact guaranteed by the operating system itself, here the process tree and bundle structure.
 - **Failures must be visible to a human**: when the result changes from "can jump" to "nowhere to go", someone should know, instead of there being only a WARN line. This one isn't done yet.
+
+## A new group reaches your shell long before it reaches your services
+
+On 2026-10-01, bringing up Linux on Omarchy, the user was added to `uucp` so the daemon could open `/dev/ttyACM0`. A daemon started from a fresh SSH login talked to the box fine; the same binary started by `systemctl --user` got `Permission denied`. The systemd user manager had started at boot, before the `usermod`, and every service it launches inherits its group list, not the one in `/etc/group`. Only a reboot, or logging out of every session, restarts it.
+
+The installer had checked `id -nG` in its own shell, which was the one place guaranteed to look healthy. When a permission comes from a group, check the process that actually needs it (`Groups:` in `/proc/<pid>/status`), not the shell that installed it. The same install run also died silently because `getent group uucp dialout` fails when either group is missing, and under `pipefail` that ended the script before any message was printed; each distro has only one of the two.
+
+## A command-line tool can change its language under you and still exit cleanly
+
+On 2026-10-01, K2 on Omarchy did nothing, and the daemon logged only `hyprctl failed:` with nothing after it. Hyprland 0.56 had turned `hyprctl dispatch` into Lua: `dispatch focuswindow address:0x…` is now parsed as a Lua expression and rejected, and the error goes to stdout, not stderr. Our wrapper only printed stderr, so the one line that explained everything was thrown away. Running the same command by hand in the daemon's environment showed it at once.
+
+Two rules came out of it. When wrapping another tool, keep both streams in the error, and decide success by what the tool says it did (`ok` here), not only by the exit code. And when a host's command syntax changes between versions, try the new form first and fall back to the old one, rather than guessing the version from a string.
+
+## On a serial port, `flush()` is a blocking `tcdrain()`
+
+On 2026-10-01, screenshots from the Linux app failed about two times in three: the daemon waited for `SHOT END`, which never came. The box was fine. A script reading the raw port, with the daemon's heartbeat every five seconds and requests back to back, got a full frame in 2.5 s every time. Logging `SHOT BEGIN` and `SHOT END` showed the daemon's frames stopping partway, and timing the writes showed a 117-byte heartbeat taking 0.8 to 2.3 s.
+
+The cause was the `flush()` after each native-USB write. tokio-serial implements it as `tcdrain()`, a blocking system call that waits until the device has taken the bytes. While the box dumps a screenshot it takes nothing, so the flush held a runtime thread for seconds. Nobody read the port meanwhile, the kernel stopped taking the box's output, and the box, which waits only 3 ms for a full FIFO, dropped the rest of the frame. Without the flush, twenty screenshots in a row took 2.5 s each.
+
+On the way there, three theories looked right and were wrong: firmware dropping output, a heartbeat corrupting the next command, and reads waiting behind writes. Splitting the port into read and write halves changed nothing, because the blocking call still froze the thread both halves ran on. What settled it was a control experiment: copy the daemon's traffic exactly into a minimal script, and compare. When the two disagree, the difference is in the program, not the device. And any "async" call that ends in a system call can still block: check what `flush`, `drain` and `sync` really do on that kind of file.
+
+## A release rehearsal has to bump the version too
+
+v0.3.0's first tag failed in CI: bumping the version left `firmware-rs/device/Cargo.lock` recording the shared crates at 0.2.2, and the license step runs `cargo about --locked`. Three rehearsal runs on the release branch had all passed, because none of them changed the version; the one step that only happens at release time was the one that broke. `just release` updated the root lockfile and never knew the firmware had its own.
+
+When rehearsing a release, rehearse the release commit too: on a scratch branch, make the same version bump `just release` makes, then dispatch the workflow. A rehearsal that skips the step the real thing starts with proves less than it looks.

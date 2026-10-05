@@ -47,17 +47,24 @@ def dependency_notices(manifest, target):
 
 def main():
     resources = Path(sys.argv[1])
+    # The Rust target the app's binaries are built for: the Mac app by default, the Linux package passes its own.
+    app_target = sys.argv[2] if len(sys.argv) > 2 else "aarch64-apple-darwin"
     licenses = resources / "licenses"
     licenses.mkdir(parents=True, exist_ok=True)
     for name in ["LICENSE", "LICENSE-ASSETS"]:
         shutil.copyfile(ROOT / name, licenses / name)
     for manifest, target, name in [
-        ("Cargo.toml", "aarch64-apple-darwin", "THIRD-PARTY-APP.txt"),
+        ("Cargo.toml", app_target, "THIRD-PARTY-APP.txt"),
         ("firmware-rs/device/Cargo.toml", "xtensa-esp32s3-none-elf", "THIRD-PARTY-FIRMWARE.txt"),
     ]:
         (licenses / name).write_text(dependency_notices(manifest, target))
     shutil.copyfile(ROOT / "packaging/BOOTLOADER-NOTICES.txt", licenses / "BOOTLOADER-NOTICES.txt")
     revision = run("git", "rev-parse", "HEAD")
+    system_note = (
+        " The app uses Apple's system frameworks, supplied\nby macOS rather than redistributed in this download."
+        if "apple" in app_target
+        else ""
+    )
     (licenses / "SOURCE.txt").write_text(f"""Vibe Buddy corresponding source
 ================================
 
@@ -76,8 +83,7 @@ MPL-2.0-covered serialport dependency. Cargo's cache contains the complete
 crate sources; cargo vendor --locked can copy them for offline builds.
 
 The bootloader's upstream source and build configuration are identified
-in BOOTLOADER-NOTICES.txt. The app uses Apple's system frameworks, supplied
-by macOS rather than redistributed in this download.
+in BOOTLOADER-NOTICES.txt.{system_note}
 
 The project source is GPL-3.0-or-later. See LICENSE-ASSETS for the scope
 of the asset license and excluded third-party audio. Third-party

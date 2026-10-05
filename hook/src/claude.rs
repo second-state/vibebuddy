@@ -56,7 +56,7 @@ mod tests {
     /// The surface comes from environment variables, so in a test process it depends on where the test runs, unrelated to the filter under test.
     /// The decision itself is covered by resolve_surface and the pure-function tests in the surface module.
     fn without_surface(mut payload: Map<String, Value>) -> Map<String, Value> {
-        for key in ["surface", "host_bundle_id", "desktop_session_id"] {
+        for key in ["surface", "host_bundle_id", "host_pids", "desktop_session_id"] {
             payload.remove(key);
         }
         payload

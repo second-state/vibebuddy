@@ -41,7 +41,7 @@ Vibe Buddy 是给 AI 编程 Agent 配的桌面宠物。它住在键盘旁一个�
 ## 需要准备
 
 - **盒子：** 正点原子 ATK-DNESP32S3-BOX V1.1（ESP32-S3，16 MB Flash，8 MB PSRAM），带 LCD、扬声器和三个按键。一根 USB-C 线同时供电、烧录和传事件。硬件记录见 [`docs/hardware.md`](docs/hardware.md)。
-- **一台 Mac：** Apple 芯片，macOS 14 或更新。
+- **一台 Mac：** Apple 芯片，macOS 14 或更新；也可以是一台 Linux 机器（实验性，见下文）。
 - **至少一个 Agent：** Codex 或 Claude Code。GitHub Actions 用的是你已经登录好的 `gh` 命令行。
 
 ## 上手
@@ -57,6 +57,27 @@ Vibe Buddy 是给 AI 编程 Agent 配的桌面宠物。它住在键盘旁一个�
 之后 Vibe Buddy 住在菜单栏：图标告诉你盒子在不在线、什么模式、今天干了多少。设置窗有五页：通用、声音、接入、设备（固件更新、截图）、高级。盒子上的固件与 App 附带的不一致时，设置 → 设备会提供更新。
 
 Release 若还没签名，macOS 会拦下第一次打开，到「系统设置 → 隐私与安全性」里放行即可。
+
+### Linux（实验性）
+
+适用于带 systemd 的 x86_64 Linux，已在 Omarchy（Arch、Hyprland）上验证。从[最新 Release](https://github.com/second-state/vibebuddy/releases/latest) 下载 `VibeBuddy-<版本>-linux-x86_64.tar.gz`，然后：
+
+```bash
+tar xf VibeBuddy-<版本>-linux-x86_64.tar.gz
+cd VibeBuddy-<版本>-linux-x86_64 && ./install.sh
+```
+
+在 Arch 和 Omarchy 上，也可以把同一个版本装成 pacman 包。它装在系统目录里，并附带一条 udev 规则，不用加组就能访问盒子：
+
+```bash
+git clone https://github.com/second-state/vibebuddy
+cd vibebuddy/packaging/aur/vibebuddy-bin && makepkg -si
+systemctl --user enable --now vibebuddyd && vibebuddy-hook install
+```
+
+等 AUR 重新开放注册后，它会以 `vibebuddy-bin` 上架。想从源码编译的话，在装好 Rust 工具链和 python3 的仓库里运行 `packaging/linux/install.sh`，它会编译所有程序，并从 GitHub 下载这个版本的固件。两种方式都一样：脚本把程序装进 `~/.local/bin`，把 `vibebuddyd` 注册成 systemd 用户服务，把 Vibe Buddy App 放进启动器并设为登录时启动，再给本机有的 Claude Code 和 Codex 加上 Hook（Codex 之后需要你在 `/hooks` 里信任它们）。升级时重新运行即可。daemon 要在 `/dev/ttyACM*` 所属的组里（Arch 是 `uucp`，Debian 和 Ubuntu 是 `dialout`），不在的话脚本会提示。配置放在 `~/.config/vibebuddy`，统计放在 `~/.local/state/vibebuddy`；盒子断开 30 秒后会通过 `notify-send` 弹一条桌面通知。
+
+在 Hyprland 上，K2 会切回会话所在的终端窗口，不管它在哪个工作区；跑在 tmux 里或通过 SSH 的会话没有窗口可回。App 是一个托盘图标（氛围小助手的脸，点一下打开设置）加一个设置窗口，标签页和 Mac 版一样。它从 Omarchy 主题取配色和字体，切换主题时会跟着变。它只是个客户端：退出它，daemon 和盒子照常在线。设备页点「刷新」能看到盒子当前的屏幕，「保存图片」会存进你的图片文件夹。声音页列出脚本生成的音色包，选中的会写进盒子；盒子上的固件和这个版本不同时，设备页会提供更新，固件由脚本下载并按 GitHub 记录的 sha256 校验。首次启动会打开设置窗口；没有单独的首次引导，那些事脚本已经做了。想让设置窗口在 Omarchy 上浮动显示，在 `~/.config/hypr/hyprland.lua` 里加两行 `o.window("^vibebuddy$", { tag = "+floating-window" })` 和 `o.window("^vibebuddy$", { tag = "-default-opacity" })`（每条规则只能写一个标签：Hyprland 会把空格当成标签名的一部分）；和所有 Hyprland 窗口一样，按住 Super 拖动就能移动它。卸载时先运行 `vibebuddy-hook uninstall`，再运行 `systemctl --user disable --now vibebuddyd`，然后删掉脚本装的文件。
 
 ## 工作原理
 
@@ -117,6 +138,7 @@ curl -H 'content-type: application/json' \
 
 ```text
 app/       # macOS 菜单栏 App（SwiftPM）
+desktop/   # Linux 托盘 App 和设置窗口（iced）
 daemon/    # vibebuddyd
 hook/      # vibebuddy-hook，Codex 与 Claude Code 的 Hook
 protocol/  # Vibe Buddy Protocol 类型与编解码
@@ -202,13 +224,14 @@ daemon 平时由 App 看管。没有 App 的开发机可以用 [`packaging/com.v
 
 ### 发布
 
-发布由 CI 完成，见 [`release-app`](.github/workflows/release-app.yml)：在 Linux 上构建固件、在 Apple 芯片的 runner 上跑测试、装包、用 `app/scripts/make-dmg.sh` 打成 DMG。
+发布由 CI 完成，见 [`release-app`](.github/workflows/release-app.yml)：先在 Linux 上构建固件，再分别在 Apple 芯片的 runner 上构建 Mac App（用 `app/scripts/make-dmg.sh` 打成 DMG）、在 Ubuntu 22.04 上构建 Linux 包（`packaging/linux/make-tarball.sh`），两边都跑测试。
 
-- main 上动到装包内容（`app/`、`daemon/`、`hook/`、`protocol/`、`firmware/`、`voices/`）的提交只出一个保留 7 天的 artifact 供自测。
-- 打 `vX.Y.Z` 标签才公证并发 GitHub Release，标签必须与 `Cargo.toml` 的 `version` 一致，否则构建失败。
-- 发版一条命令：在干净的 main 上 `just release 0.2.0`，它改 `Cargo.toml`、提交、打标签、推送。
-- 同一次发布还挂一个 `VibeBuddy-firmware-vX.Y.Z.zip`（固件三件套加 `build.txt`），拿到它的人在设置 → 设备「从文件刷入…」里选它即可烧进盒子。
-- 目前只出 arm64。
+- main 上动到装包内容（`app/`、`daemon/`、`desktop/`、`hook/`、`protocol/`、`firmware/`、`voices/`、`packaging/`）的提交只出保留 7 天的 artifact 供自测。
+- 打 `vX.Y.Z` 标签才公证并发 GitHub Release，同一个 Release 里有 DMG、Linux 包和固件 zip。标签必须与 `Cargo.toml` 的 `version` 一致，否则构建失败。
+- 发版前先写 `docs/releases/vX.Y.Z.md`：用几条要点说这个版本做了什么。它是发布说明的开头，CI 会在后面接上下载说明。
+- 然后发版一条命令：在干净的 main 上 `just release 0.3.0`，它检查那份文件，更新 `Cargo.toml` 和两份锁文件里的版本号，提交、打标签、推送。
+- `VibeBuddy-firmware-vX.Y.Z.zip` 是固件三件套加 `build.txt`，拿到它的人在 Mac 上的设置 → 设备「从文件刷入…」里选它即可烧进盒子。
+- Mac 出 arm64，Linux 出 x86_64。发布后怎么更新 AUR 包，见 `packaging/aur/README.md`。
 
 仓库配齐五个签名 secrets 后用 Developer ID 签名并公证，下载即可打开；没配时退回 ad-hoc 签名，首次打开要在「隐私与安全性」里放行。secrets 用 [`tools/setup-release-signing.sh`](tools/setup-release-signing.sh) 配：它带着走完申请证书、打包 p12、生成 App 专用密码，并逐项验证后写进 GitHub。
 

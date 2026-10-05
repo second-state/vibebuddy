@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=Vibe Buddy
+Comment=Tray icon and settings for the Vibe Buddy box
+Exec=vibebuddy-desktop
+Icon=vibebuddy
+Terminal=false
+Categories=Utility;
+StartupWMClass=vibebuddy

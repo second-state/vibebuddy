@@ -41,7 +41,7 @@ Pomodoro runs entirely on the box: its timer and today's tally keep going withou
 ## What you need
 
 - **The box:** ALIENTEK ATK-DNESP32S3-BOX V1.1 (ESP32-S3, 16 MB flash, 8 MB PSRAM), with LCD, speaker and three buttons. One USB-C cable powers it, flashes it and carries events. Hardware notes: [`docs/hardware.md`](docs/hardware.md).
-- **A Mac** with Apple silicon and macOS 14 or later.
+- **A Mac** with Apple silicon and macOS 14 or later, or a Linux machine (experimental, see below).
 - **At least one agent:** Codex or Claude Code. GitHub Actions support uses the `gh` CLI you're already signed in to.
 
 ## Getting started
@@ -57,6 +57,27 @@ Pomodoro runs entirely on the box: its timer and today's tally keep going withou
 After that Vibe Buddy lives in the menu bar. Its icon tells you whether the box is online, which mode it's in and how much got done today. Settings has five tabs: General, Sound, Agents, Device (firmware updates, screenshots) and Advanced. If the box's firmware differs from the one bundled with the app, Settings → Device offers to update it.
 
 If a release isn't signed yet, macOS blocks the first launch; allow it under System Settings → Privacy & Security.
+
+### Linux (experimental)
+
+For x86_64 Linux with systemd; tested on Omarchy (Arch, Hyprland). Download `VibeBuddy-<version>-linux-x86_64.tar.gz` from the [latest release](https://github.com/second-state/vibebuddy/releases/latest), then:
+
+```bash
+tar xf VibeBuddy-<version>-linux-x86_64.tar.gz
+cd VibeBuddy-<version>-linux-x86_64 && ./install.sh
+```
+
+On Arch and Omarchy you can install the same release as a pacman package instead. It goes in system-wide, and a udev rule gives you access to the box without joining a group:
+
+```bash
+git clone https://github.com/second-state/vibebuddy
+cd vibebuddy/packaging/aur/vibebuddy-bin && makepkg -si
+systemctl --user enable --now vibebuddyd && vibebuddy-hook install
+```
+
+It will be on the AUR as `vibebuddy-bin` once AUR registration reopens. To build from source instead, run `packaging/linux/install.sh` in a checkout with a Rust toolchain and python3; it builds everything and fetches the release's firmware from GitHub. Either way, the script installs the binaries into `~/.local/bin`, runs `vibebuddyd` as a systemd user service, puts the Vibe Buddy app in the launcher and at login, and adds the hooks to Claude Code and Codex, whichever this machine has (Codex then wants you to trust them in `/hooks`). Run it again to upgrade. The daemon needs to be in the group that owns `/dev/ttyACM*` (`uucp` on Arch, `dialout` on Debian and Ubuntu); the script tells you if it isn't. Config lives in `~/.config/vibebuddy`, stats in `~/.local/state/vibebuddy`, and when the box is gone for 30 seconds you get a desktop notification through `notify-send`.
+
+On Hyprland, K2 brings back the terminal window the session runs in, on whatever workspace it is; a session inside tmux or over SSH has no window to go back to. The app is a tray icon (the buddy's face; click it for settings) plus a settings window with the same tabs as on the Mac. It takes its colors and font from the Omarchy theme and follows theme switches. It is only a client: quitting it leaves the daemon, and the box, running. Device → Refresh shows what the box's screen shows, and Save image puts it in your Pictures folder. Sound lists the voice packs the script built and writes the one you pick to the box; Device offers the firmware of this release (downloaded by the script and checked against GitHub's sha256) when the box runs a different build. The first launch opens the settings window; there is no separate onboarding, since the script does that work. To make the settings window float on Omarchy, add `o.window("^vibebuddy$", { tag = "+floating-window" })` and `o.window("^vibebuddy$", { tag = "-default-opacity" })` to `~/.config/hypr/hyprland.lua` (one tag per rule: Hyprland reads a space as part of the tag name); like every Hyprland window it moves with Super + drag. To remove everything, run `vibebuddy-hook uninstall`, then `systemctl --user disable --now vibebuddyd`, then delete the files the script installed.
 
 ## How it works
 
@@ -117,6 +138,7 @@ Everyday tasks live in the [`justfile`](justfile); run `just` to list them. See 
 
 ```text
 app/       # the macOS menu bar app (SwiftPM)
+desktop/   # the Linux tray app and settings window (iced)
 daemon/    # vibebuddyd
 hook/      # vibebuddy-hook, the Codex and Claude Code hook
 protocol/  # Vibe Buddy Protocol types and codec
@@ -202,13 +224,14 @@ When sending through the box's CH343 UART bridge, the daemon writes in line-rate
 
 ### Releases
 
-CI builds releases; see [`release-app`](.github/workflows/release-app.yml). It builds the firmware on Linux, runs the tests on an Apple silicon runner, assembles the app and packs it into a DMG with `app/scripts/make-dmg.sh`.
+CI builds releases; see [`release-app`](.github/workflows/release-app.yml). It builds the firmware on Linux, then the Mac app on an Apple silicon runner (packed into a DMG with `app/scripts/make-dmg.sh`) and the Linux tarball on Ubuntu 22.04 (`packaging/linux/make-tarball.sh`), testing on both.
 
-- Commits on main that touch what goes into the app (`app/`, `daemon/`, `hook/`, `protocol/`, `firmware/`, `voices/`) only produce a test artifact kept for 7 days.
-- A `vX.Y.Z` tag notarizes the app and publishes a GitHub Release. The tag must match `version` in `Cargo.toml`, or the build fails.
-- Releasing is one command on a clean main: `just release 0.2.0` updates `Cargo.toml`, commits, tags and pushes.
-- Each release also carries `VibeBuddy-firmware-vX.Y.Z.zip` (the three firmware images plus `build.txt`). Anyone with it can flash a box from Settings → Device → Flash from file….
-- Only arm64 builds are published for now.
+- Commits on main that touch what goes into the packages (`app/`, `daemon/`, `desktop/`, `hook/`, `protocol/`, `firmware/`, `voices/`, `packaging/`) only produce test artifacts kept for 7 days.
+- A `vX.Y.Z` tag notarizes the app and publishes one GitHub Release with the DMG, the Linux tarball and the firmware zip. The tag must match `version` in `Cargo.toml`, or the build fails.
+- Before releasing, write `docs/releases/vX.Y.Z.md`: a few bullets on what the version does. It opens the release notes, and CI adds the downloads after it.
+- Then releasing is one command on a clean main: `just release 0.3.0` checks that file, updates the versions in `Cargo.toml` and both lockfiles, commits, tags and pushes.
+- `VibeBuddy-firmware-vX.Y.Z.zip` holds the three firmware images plus `build.txt`. Anyone with it can flash a box from Settings → Device → Flash from file… on the Mac.
+- Builds are arm64 for the Mac and x86_64 for Linux. After a release, `packaging/aur/README.md` says how to update the AUR package.
 
 With the five signing secrets set on the repository, releases are signed with a Developer ID and notarized, so they open straight after download. Without them the build falls back to ad-hoc signing, and the first launch has to be allowed under Privacy & Security. [`tools/setup-release-signing.sh`](tools/setup-release-signing.sh) sets the secrets up: it walks you through requesting the certificate, packing the p12 and creating an app-specific password, then checks each one before writing it to GitHub.
 

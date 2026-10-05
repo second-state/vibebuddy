@@ -244,8 +244,11 @@ async fn run_session<P: AsyncRead + AsyncWrite + Unpin>(
 /// Bridge ports are written in line-rate chunks; native USB ports get the whole frame at once.
 async fn write_frame<P: AsyncWrite + Unpin>(port: &mut P, frame: &[u8], paced: bool) -> std::io::Result<()> {
     if !paced {
-        port.write_all(frame).await?;
-        return port.flush().await;
+        // No flush: on a serial port it is tcdrain(), a blocking call that waits until the box has taken the bytes.
+        // While the box dumps a screenshot it takes nothing, so a heartbeat's flush held this worker for two seconds;
+        // nobody read the port meanwhile, the kernel stopped taking the box's output, and the box dropped the rest of
+        // the frame (seen on Omarchy, 2026-10-01). The kernel queues the frame either way.
+        return port.write_all(frame).await;
     }
     for piece in frame.chunks(PACE_PIECE_BYTES) {
         port.write_all(piece).await?;
@@ -393,8 +396,10 @@ fn process_device_line(line: &[u8], event_sender: &mpsc::Sender<DeviceMessage>) 
         }
     } else {
         let line = String::from_utf8_lossy(line).into_owned();
-        // Screenshot lines (hundreds of them) stay out of the log; other diagnostic lines are still logged.
-        if !line.starts_with("SHOT ") && !line.starts_with("ECHO ") {
+        // Screenshot rows (hundreds of them) stay out of the log; their BEGIN and END lines and every other
+        // diagnostic line are still logged, so a screenshot that never finishes shows where it stopped.
+        let screenshot_row = line.starts_with("SHOT ") && !line.starts_with("SHOT BEGIN") && line != "SHOT END";
+        if !screenshot_row && !line.starts_with("ECHO ") {
             info!(message = %line, "device message");
         }
         DeviceMessage::Line(line)

@@ -3,6 +3,7 @@ mod ci;
 mod claude_hooks;
 mod codex_hooks;
 mod config;
+mod link_alert;
 mod rom_flasher;
 mod screenshot;
 mod serial_transport;
@@ -182,6 +183,10 @@ async fn main() {
     tokio::spawn(send_heartbeats(state.clone()));
     tokio::spawn(poll_ci(state.clone()));
     tokio::spawn(handle_device_events(state.clone(), device_events));
+    // On macOS the app reports a lost link; elsewhere there is no app, so the daemon does it.
+    if !cfg!(target_os = "macos") {
+        tokio::spawn(link_alert::watch(state.clone()));
+    }
     let app = app(state);
     let listener = tokio::net::TcpListener::bind(bind_address)
         .await
@@ -313,8 +318,7 @@ fn stats_file() -> Option<PathBuf> {
     if let Ok(path) = env::var("VIBEBUDDY_STATS_FILE") {
         return Some(PathBuf::from(path));
     }
-    let home = env::var("HOME").ok()?;
-    Some(PathBuf::from(home).join("Library/Application Support/VibeBuddy/stats.json"))
+    Some(config::state_dir()?.join("stats.json"))
 }
 
 fn app(state: AppState) -> Router {
@@ -344,12 +348,17 @@ async fn post_screenshot(State(state): State<AppState>) -> axum::response::Respo
         return (StatusCode::CONFLICT, "another device operation is in progress").into_response();
     }
     let bus = state.device_bus.subscribe();
-    match screenshot::capture(state.transport.clone(), bus).await {
+    let silence = screenshot::silence_timeout(state.device.lock().await.bridge);
+    match screenshot::capture(state.transport.clone(), bus, silence).await {
         Ok(frame) => match screenshot::encode_png(&frame) {
             Ok(png) => ([(axum::http::header::CONTENT_TYPE, "image/png")], png).into_response(),
             Err(error) => (StatusCode::INTERNAL_SERVER_ERROR, error).into_response(),
         },
-        Err(error) => (StatusCode::BAD_GATEWAY, error).into_response(),
+        Err(error) => {
+            // Without this line a box that ignores the request leaves no trace at all.
+            warn!(%error, "screenshot failed");
+            (StatusCode::BAD_GATEWAY, error).into_response()
+        }
     }
 }
 

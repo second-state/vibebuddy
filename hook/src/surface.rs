@@ -14,6 +14,9 @@
 //! named — and reads the bundle id of the outermost `.app` it lives in. Outermost, because
 //! ChatGPT.app nests `CodexCLI.app` (`com.openai.codex.cli`) inside itself, and that inner bundle
 //! has no window to bring forward.
+//!
+//! Outside macOS there is no such variable, so the hook reports its ancestor pids instead and leaves
+//! finding their window to the daemon, which asks the compositor when K2 is pressed.
 
 use std::collections::HashMap;
 use std::process::Command;
@@ -31,9 +34,15 @@ pub enum Surface {
     Host(String),
     /// No host app: sessions started over SSH, by a daemon, or by launchd. K2 has nowhere to go.
     Headless,
+    /// Outside macOS there are no bundle ids: the hook's ancestor process ids, nearest first. The daemon
+    /// looks for a window owned by one of them when K2 is pressed; finding none means headless.
+    Window(Vec<u32>),
 }
 
 pub fn detect(own_bundle_id: &str) -> Surface {
+    if !cfg!(target_os = "macos") {
+        return Surface::Window(ancestor_pids());
+    }
     let found = std::env::var(BUNDLE_ID)
         .ok()
         .filter(|id| !id.is_empty())
@@ -86,6 +95,31 @@ fn outermost_app(path: &str) -> Option<&str> {
     Some(&path[..end])
 }
 
+/// The process chain above this hook, read from `/proc`, so the common path still spawns nothing.
+/// Stops at init, or after 16 levels.
+fn ancestor_pids() -> Vec<u32> {
+    let mut pids = Vec::new();
+    let mut current = std::os::unix::process::parent_id();
+    while current > 1 && pids.len() < 16 {
+        pids.push(current);
+        let Some(parent) = std::fs::read_to_string(format!("/proc/{current}/stat"))
+            .ok()
+            .and_then(|stat| parent_from_stat(&stat))
+        else {
+            break;
+        };
+        current = parent;
+    }
+    pids
+}
+
+/// The parent pid in `/proc/<pid>/stat`. The command name in parentheses may hold spaces and
+/// parentheses itself, so fields are counted after the last `)`.
+fn parent_from_stat(stat: &str) -> Option<u32> {
+    let (_, rest) = stat.rsplit_once(')')?;
+    rest.split_whitespace().nth(1)?.parse().ok()
+}
+
 fn from_bundle_id(found: Option<&str>, own_bundle_id: &str) -> Surface {
     match found {
         Some(id) if id == own_bundle_id => Surface::App,
@@ -102,6 +136,10 @@ pub fn write_into(payload: &mut Map<String, Value>, surface: &Surface) {
             "host"
         }
         Surface::Headless => "headless",
+        Surface::Window(pids) => {
+            payload.insert("host_pids".to_owned(), Value::from(pids.clone()));
+            "window"
+        }
     };
     payload.insert("surface".to_owned(), Value::String(name.to_owned()));
 }
@@ -109,6 +147,21 @@ pub fn write_into(payload: &mut Map<String, Value>, surface: &Surface) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_parent_pid_survives_odd_command_names() {
+        assert_eq!(parent_from_stat("3620 (claude) S 3534 3620 3534 34816"), Some(3534));
+        assert_eq!(parent_from_stat("42 (a) b (c)) R 7 42 42 0"), Some(7));
+        assert_eq!(parent_from_stat("garbage"), None);
+    }
+
+    #[test]
+    fn window_pids_are_reported_for_the_daemon() {
+        let mut payload = Map::new();
+        write_into(&mut payload, &Surface::Window(vec![3620, 3534]));
+        assert_eq!(payload["surface"], "window");
+        assert_eq!(payload["host_pids"], serde_json::json!([3620, 3534]));
+    }
 
     #[test]
     fn the_agents_own_app_is_not_a_host() {

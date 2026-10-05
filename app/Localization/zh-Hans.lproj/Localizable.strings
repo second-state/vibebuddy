@@ -1,5 +1,5 @@
-/* Simplified Chinese for the Mac app. Keys are the English text in the Swift
-   sources; tools/check-localization.py keeps this table in sync with them. */
+/* Simplified Chinese for the Mac app and the Linux app (desktop/). Keys are the English text in the
+   Swift and Rust sources; tools/check-localization.py keeps this table in sync with them. */
 
 /* Menu bar */
 "daemon not responding · click to restart" = "daemon 异常 · 点击重启";
@@ -14,6 +14,7 @@
 "%lld min" = "%lld 分";
 "Settings…" = "设置…";
 "Quit Vibe Buddy (the box goes offline)" = "退出 Vibe Buddy（盒子将离线）";
+"Quit" = "退出";
 
 /* Windows and alerts */
 "Vibe Buddy Settings" = "Vibe Buddy 设置";
@@ -57,6 +58,8 @@
 "Play a line on the box" = "在盒子上试一句";
 "Saved on the box and kept across restarts. Previews on this Mac aren't affected; to mute, long-press K2 on the box." = "存在盒子里，重启不丢。Mac 上的试听不受它影响；静音只在盒子上长按 K2。";
 "Announcement voice" = "播报音色";
+"Saved on the box and kept across restarts. To mute, long-press K2 on the box." = "存在盒子里，重启不丢；静音只在盒子上长按 K2。";
+"The box is using “%@”. Click Use to write another voice to it — no firmware flash needed. Over the UART port this takes a few minutes; when it's done the box says a line in the new voice." = "盒子现在用的是「%@」。点「使用」把另一个音色写进盒子，不用刷固件。UART 口上要写几分钟，写完盒子会用新音色说一句。";
 "The box is using “%@”. Preview a voice, then click Use to write it to the box — no firmware flash needed. Over the UART port this takes a few minutes; when it's done the box says a line in the new voice." = "盒子现在用的是「%@」。挑一个试听，点「使用」写进盒子；不用刷固件。UART 口上要写几分钟，写完盒子会用新音色说一句。";
 "Didn't finish, so the box keeps its built-in voice. Reconnect the cable and click Use again." = "没写完，盒子先用内置音色；插好线后重新点「使用」。";
 "Built-in voice (Jessica)" = "内置音色（Jessica）";
@@ -109,7 +112,9 @@
 "Make the box blink" = "让盒子眨眼";
 "Box screen" = "盒子画面";
 "Refresh" = "刷新";
+"Refreshing…" = "正在刷新…";
 "Save image" = "保存图片";
+"Saved to %@" = "已保存到 %@";
 "Click Refresh to see what the box is showing" = "点「刷新」看看盒子在干什么";
 "daemon isn't running" = "daemon 没起来";
 "UART bridge" = "UART 桥";
@@ -130,6 +135,7 @@
 "Running · %@" = "运行中 · %@";
 "Not running" = "未运行";
 "Restart daemon" = "重启 daemon";
+"Show daemon log" = "查看 daemon 日志";
 "Export diagnostics…" = "导出诊断…";
 "Config file: %@" = "配置文件：%@";
 

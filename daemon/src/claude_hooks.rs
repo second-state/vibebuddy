@@ -34,6 +34,8 @@ pub struct ClaudeHook {
     #[serde(default)]
     pub host_bundle_id: Option<String>,
     #[serde(default)]
+    pub host_pids: Option<Vec<u32>>,
+    #[serde(default)]
     pub desktop_session_id: Option<String>,
 }
 
@@ -53,7 +55,12 @@ pub fn apply(
     let source = ActivitySource::ClaudeCode {
         session_id: hook.session_id.clone(),
         cwd: hook.cwd.clone(),
-        surface: Surface::from_hook(hook.surface.as_deref(), hook.host_bundle_id.clone(), hook.desktop_session_id.clone()),
+        surface: Surface::from_hook(
+            hook.surface.as_deref(),
+            hook.host_bundle_id.clone(),
+            hook.host_pids.clone(),
+            hook.desktop_session_id.clone(),
+        ),
     };
     let event = match hook.hook_event_name.as_str() {
         "UserPromptSubmit" => {
@@ -113,6 +120,7 @@ mod tests {
             response_kind: None,
             surface: None,
             host_bundle_id: None,
+            host_pids: None,
             desktop_session_id: None,
         }
     }
@@ -226,6 +234,7 @@ mod tests {
             response_kind: None,
             surface: None,
             host_bundle_id: None,
+            host_pids: None,
         };
         let mixed = codex_hooks::apply(&mut tracker, &mut SessionTitles::disabled(), codex).expect("another agent should refresh the card stack");
 
