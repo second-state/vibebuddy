@@ -69,3 +69,15 @@ impl Flash for SharedFlash {
         Ok(())
     }
 }
+
+/// The flash offset of the app the bootloader started, read from the MMU.
+pub fn running_app_offset() -> Option<u32> {
+    use esp_bootloader_esp_idf::partitions::{PARTITION_TABLE_MAX_LEN, read_partition_table};
+    critical_section::with(|cs| {
+        let mut slot = FLASH.borrow_ref_mut(cs);
+        let flash = slot.as_mut()?;
+        let mut table = [0u8; PARTITION_TABLE_MAX_LEN];
+        let table = read_partition_table(flash, &mut table).ok()?;
+        table.booted_partition().ok().flatten().map(|entry| entry.offset())
+    })
+}

@@ -164,6 +164,63 @@ impl SettingsStore {
     }
 }
 
+/// On a box shared with Muse, the otadata partition and the number of the slot this firmware
+/// isn't running from (`running` is the running app's flash offset), if that slot holds an app.
+pub fn other_app(flash: &mut dyn Flash, running: u32) -> Result<Option<(Region, u32)>, FlashError> {
+    let (Some(otadata), Some(ota_0), Some(ota_1)) =
+        (find_partition(flash, "otadata"), find_partition(flash, "ota_0"), find_partition(flash, "ota_1"))
+    else {
+        return Ok(None);
+    };
+    let (target, slot) = if running == ota_0.offset { (ota_1, 1) } else { (ota_0, 0) };
+    // An app image starts with the 0xE9 magic byte; an empty slot reads 0xFF.
+    let mut magic = [0u8; 4];
+    flash.read(target.offset, &mut magic)?;
+    Ok((magic[0] == 0xE9).then_some((otadata, slot)))
+}
+
+/// On a box shared with Muse (ota_0 and ota_1), makes the bootloader start the slot this firmware
+/// isn't running from: `running` is the flash offset of the running app. Returns false, writing
+/// nothing, on a single-firmware layout or when the other slot holds no app image.
+///
+/// otadata is written the way ESP-IDF's esp_ota_set_boot_partition does it, since its bootloader
+/// reads it: two 32-byte entries, one per 4 KB sector, each `seq, 20-byte label, state, crc`; the
+/// valid entry with the highest seq wins and boots ota_((seq - 1) % 2). esp-bootloader-esp-idf
+/// 0.6 can't be used for this: from blank otadata it selects ota_0 when asked for the next slot,
+/// and writes seq 0, which is invalid, when asked for ota_1.
+pub fn boot_other_app(flash: &mut dyn Flash, running: u32) -> Result<bool, FlashError> {
+    let Some((otadata, slot)) = other_app(flash, running)? else {
+        return Ok(false);
+    };
+
+    const ENTRY_BYTES: usize = 32;
+    let mut active: Option<(usize, u32)> = None;
+    for sector in 0..2 {
+        let mut entry = [0u8; ENTRY_BYTES];
+        flash.read(otadata.offset + sector as u32 * SECTOR_BYTES, &mut entry)?;
+        let word = |at: usize| u32::from_le_bytes([entry[at], entry[at + 1], entry[at + 2], entry[at + 3]]);
+        let (seq, state, crc) = (word(0), word(24), word(28));
+        // ESP_OTA_IMG_INVALID and ESP_OTA_IMG_ABORTED entries don't count.
+        let valid = seq != u32::MAX && state != 3 && state != 4 && crc == crc32(u32::MAX, &seq.to_le_bytes());
+        if valid && active.is_none_or(|(_, best)| seq > best) {
+            active = Some((sector, seq));
+        }
+    }
+    let mut seq = active.map_or(0, |(_, seq)| seq) + 1;
+    while (seq - 1) % 2 != slot {
+        seq += 1;
+    }
+    let sector = active.map_or(0, |(sector, _)| 1 - sector);
+    let mut entry = [0xFFu8; ENTRY_BYTES];
+    entry[0..4].copy_from_slice(&seq.to_le_bytes());
+    // State stays 0xFFFFFFFF (ESP_OTA_IMG_UNDEFINED): the bootloader doesn't do rollback.
+    entry[28..32].copy_from_slice(&crc32(u32::MAX, &seq.to_le_bytes()).to_le_bytes());
+    let at = otadata.offset + sector as u32 * SECTOR_BYTES;
+    flash.erase(at, at + SECTOR_BYTES)?;
+    flash.write(at, &entry)?;
+    Ok(true)
+}
+
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
@@ -283,5 +340,71 @@ pub(crate) mod tests {
         assert_eq!(find_partition(&mut flash, "voices"), Some(Region { offset: 0x410000, size: 0x200000 }));
         assert_eq!(find_partition(&mut flash, "nvs"), Some(NVS));
         assert_eq!(find_partition(&mut flash, "missing"), None);
+    }
+
+    /// The layout of a box shared with Muse, with an app image in ota_0 and, if `muse`, in ota_1.
+    fn shared_box(muse: bool) -> MemoryFlash {
+        let mut flash = MemoryFlash::new(0x430000);
+        let entries = [("otadata", 0x15000u32, 0x2000u32), ("ota_0", 0x20000, 0x400000), ("ota_1", 0x420000, 0x400000)];
+        for (index, (label, offset, size)) in entries.iter().enumerate() {
+            let at = 0x8000 + index * 32;
+            let bytes = &mut flash.bytes[at..at + 32];
+            bytes.fill(0);
+            bytes[0] = 0xAA;
+            bytes[1] = 0x50;
+            bytes[4..8].copy_from_slice(&offset.to_le_bytes());
+            bytes[8..12].copy_from_slice(&size.to_le_bytes());
+            bytes[12..12 + label.len()].copy_from_slice(label.as_bytes());
+        }
+        flash.bytes[0x20000] = 0xE9;
+        if muse {
+            flash.bytes[0x420000] = 0xE9;
+        }
+        flash
+    }
+
+    /// The slot ESP-IDF's bootloader would boot, as its bootloader_utility_get_selected_boot_partition does.
+    fn booted_slot(flash: &MemoryFlash) -> Option<u32> {
+        let entry = |at: usize| {
+            let word = |i: usize| u32::from_le_bytes(flash.bytes[at + i..at + i + 4].try_into().unwrap());
+            let seq = word(0);
+            (seq != u32::MAX && word(28) == crc32(u32::MAX, &seq.to_le_bytes())).then_some(seq)
+        };
+        entry(0x15000).max(entry(0x16000)).map(|seq| (seq - 1) % 2)
+    }
+
+    #[test]
+    fn switching_from_blank_otadata_boots_muse_then_back() {
+        let mut flash = shared_box(true);
+        assert_eq!(booted_slot(&flash), None, "blank otadata boots ota_0");
+        assert_eq!(boot_other_app(&mut flash, 0x20000), Ok(true));
+        assert_eq!(booted_slot(&flash), Some(1));
+        // The CRC is ESP-IDF's: the bootloader accepts seq 1 with crc 0x4743989a.
+        assert_eq!(crc32(u32::MAX, &1u32.to_le_bytes()), 0x4743_989A);
+        assert_eq!(boot_other_app(&mut flash, 0x420000), Ok(true));
+        assert_eq!(booted_slot(&flash), Some(0));
+        assert_eq!(boot_other_app(&mut flash, 0x20000), Ok(true));
+        assert_eq!(booted_slot(&flash), Some(1));
+    }
+
+    #[test]
+    fn otadata_left_by_esp_idf_is_carried_on() {
+        // What the box held after the 0.6 crate's attempt: seq 1 (ota_0) in the first sector.
+        let mut flash = shared_box(true);
+        flash.bytes[0x15000..0x15004].copy_from_slice(&1u32.to_le_bytes());
+        flash.bytes[0x15018..0x1501C].copy_from_slice(&2u32.to_le_bytes());
+        flash.bytes[0x1501C..0x15020].copy_from_slice(&0x4743_989Au32.to_le_bytes());
+        assert_eq!(boot_other_app(&mut flash, 0x20000), Ok(true));
+        assert_eq!(booted_slot(&flash), Some(1));
+        assert_eq!(&flash.bytes[0x16000..0x16004], &2u32.to_le_bytes(), "the next seq, in the other sector");
+    }
+
+    #[test]
+    fn no_switch_without_a_second_app() {
+        let mut flash = shared_box(false);
+        assert_eq!(boot_other_app(&mut flash, 0x20000), Ok(false));
+        assert_eq!(booted_slot(&flash), None);
+        let mut single = MemoryFlash::new(0x10000);
+        assert_eq!(boot_other_app(&mut single, 0x10000), Ok(false));
     }
 }

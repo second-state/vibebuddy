@@ -74,6 +74,12 @@ pub trait Board: Screen {
     /// Still making sound: something is queued, playing, or not yet flushed to silence in DMA.
     fn audio_busy(&self) -> bool;
     fn set_volume(&mut self, level: u32) -> Result<(), VolumeError>;
+
+    /// Boots the other app slot when the box shares its flash with one (Muse); returns false, without
+    /// rebooting, on a box that has only this firmware.
+    fn boot_other_app(&mut self) -> bool {
+        false
+    }
 }
 
 pub struct Firmware {
@@ -201,7 +207,8 @@ impl Firmware {
     pub fn boot<B: Board>(&mut self, board: &mut B) {
         let now = board.now_ms();
         // Restore yesterday's record too: whether the day changed is only known once a heartbeat brings the date.
-        let settings_region = find_partition(board.flash(), "nvs");
+        // On a box shared with Muse, nvs is Muse's own NVS and the log lives in vb_cfg.
+        let settings_region = find_partition(board.flash(), "vb_cfg").or_else(|| find_partition(board.flash(), "nvs"));
         let loaded = settings_region.map(|region| SettingsStore::open(board.flash(), region));
         match loaded {
             Some(Ok((store, found))) => {
@@ -404,6 +411,13 @@ impl Firmware {
     /// open the source. In leisure mode any key first calls the buddy back to duty and then does
     /// its own job: leisure hides nothing that needs a look first.
     fn on_button<B: Board>(&mut self, board: &mut B, event: ButtonEvent) {
+        if event == ButtonEvent::SwitchApp {
+            Self::write_literal(board, "SWITCH APP\n");
+            if !board.boot_other_app() {
+                Self::write_literal(board, "SWITCH APP UNAVAILABLE\n");
+            }
+            return;
+        }
         let now = board.now_ms();
         let mode_before = self.display.mode();
         self.leisure.note_activity(now);
@@ -434,7 +448,7 @@ impl Firmware {
                 self.set_mode(board, Mode::Leisure);
                 return;
             }
-            ButtonEvent::K0Short | ButtonEvent::K0Long => {}
+            ButtonEvent::K0Short | ButtonEvent::K0Long | ButtonEvent::SwitchApp => {}
         }
 
         let before = self.pomodoro.view(now);

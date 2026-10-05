@@ -242,6 +242,30 @@ impl Board for DeviceBoard {
         }
         codec::set_es8311_volume(&mut self.codec(), level).map_err(|_| VolumeError::Failed)
     }
+
+    fn boot_other_app(&mut self) -> bool {
+        let Some(running) = storage::running_app_offset() else {
+            self.write(b"SWITCH APP NO RUNNING PARTITION\n");
+            return false;
+        };
+        match vibebuddy_firmware_core::storage::boot_other_app(&mut SharedFlash, running) {
+            Ok(true) => {}
+            Ok(false) => {
+                let line = vibebuddy_firmware_core::text!(48, "SWITCH APP NO OTHER APP RUNNING {:x}\n", running);
+                self.write(line.as_bytes());
+                return false;
+            }
+            Err(_) => {
+                self.write(b"SWITCH APP FLASH ERROR\n");
+                return false;
+            }
+        }
+        // Let the SWITCH APP line out before the reset.
+        let start = self.now_ms();
+        while self.now_ms().wrapping_sub(start) < 50 {}
+        esp_hal::system::software_reset()
+    }
+
 }
 
 #[allow(clippy::large_stack_frames, reason = "main has to hold a lot of peripherals and buffers anyway")]

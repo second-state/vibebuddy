@@ -5,10 +5,15 @@
 //! On the board (ATK-DNESP32S3-BOX V1.1) K0 is the BOOT key, wired straight to GPIO0; K1 and
 //! K2 are P0.4 and P0.3 on the XL9555 expander. All three are active low. Reading the pins is
 //! the device layer's job; this module only handles debouncing and short vs. long presses.
+//!
+//! K1 and K2 held together are a chord, not two presses: neither fires its own short or long
+//! press, and holding both for SWITCH_HOLD_MS boots the other app on a box that has one (Muse,
+//! sharing the flash).
 
 /// After a flip takes effect, no second flip is accepted for this long.
 const DEBOUNCE_MS: u32 = 40;
 const LONG_PRESS_MS: u32 = 1000;
+const SWITCH_HOLD_MS: u32 = 3000;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ButtonEvent {
@@ -24,6 +29,8 @@ pub enum ButtonEvent {
     K2Short,
     /// K2 long press: mute toggle.
     K2Long,
+    /// K1 and K2 held together: boot the other app.
+    SwitchApp,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -79,6 +86,9 @@ pub struct Buttons {
     k0: Button,
     k1: Button,
     k2: Button,
+    /// When K1 and K2 were both down, while they still are.
+    chord_since: Option<u32>,
+    chord_fired: bool,
 }
 
 /// The pressed state of each of the three keys in one sample (true means pressed).
@@ -91,7 +101,13 @@ pub struct Levels {
 
 impl Buttons {
     pub fn new(levels: Levels, now: u32) -> Self {
-        Self { k0: Button::new(levels.k0, now), k1: Button::new(levels.k1, now), k2: Button::new(levels.k2, now) }
+        Self {
+            k0: Button::new(levels.k0, now),
+            k1: Button::new(levels.k1, now),
+            k2: Button::new(levels.k2, now),
+            chord_since: None,
+            chord_fired: false,
+        }
     }
 
     /// K0 and the expander are read separately: when the expander read fails only K0 is updated, as in the C firmware.
@@ -108,6 +124,21 @@ impl Buttons {
         if let Some((k1, k2)) = expander {
             events[1] = emit(self.k1.update(k1, now), ButtonEvent::K1Short, ButtonEvent::K1Long);
             events[2] = emit(self.k2.update(k2, now), ButtonEvent::K2Short, ButtonEvent::K2Long);
+            if self.k1.pressed && self.k2.pressed {
+                // Marking both as long-fired silences their own long press and the release.
+                self.k1.long_fired = true;
+                self.k2.long_fired = true;
+                events[1] = None;
+                events[2] = None;
+                let since = *self.chord_since.get_or_insert(now);
+                if !self.chord_fired && now.wrapping_sub(since) as i32 >= SWITCH_HOLD_MS as i32 {
+                    self.chord_fired = true;
+                    events[1] = Some(ButtonEvent::SwitchApp);
+                }
+            } else {
+                self.chord_since = None;
+                self.chord_fired = false;
+            }
         }
         events
     }
@@ -154,5 +185,30 @@ mod tests {
         assert_eq!(buttons.update(false, Some((false, false)), 200), [None, Some(ButtonEvent::K1Short), None]);
         buttons.update(false, Some((false, true)), 300);
         assert_eq!(buttons.update(false, Some((false, true)), 1300), [None, None, Some(ButtonEvent::K2Long)]);
+    }
+
+    #[test]
+    fn holding_k1_and_k2_switches_apps_once_and_nothing_else() {
+        let mut buttons = Buttons::new(Levels::default(), 0);
+        assert_eq!(buttons.update(false, Some((true, false)), 100), [None; 3]);
+        assert_eq!(buttons.update(false, Some((true, true)), 300), [None; 3]);
+        // Past the long-press threshold of either key: still nothing.
+        assert_eq!(buttons.update(false, Some((true, true)), 1500), [None; 3]);
+        assert_eq!(buttons.update(false, Some((true, true)), 3299), [None; 3]);
+        assert_eq!(buttons.update(false, Some((true, true)), 3300), [None, Some(ButtonEvent::SwitchApp), None]);
+        assert_eq!(buttons.update(false, Some((true, true)), 6000), [None; 3]);
+        // Letting go fires no short presses.
+        assert_eq!(buttons.update(false, Some((false, true)), 6100), [None; 3]);
+        assert_eq!(buttons.update(false, Some((false, false)), 6200), [None; 3]);
+    }
+
+    #[test]
+    fn a_chord_let_go_early_does_nothing() {
+        let mut buttons = Buttons::new(Levels::default(), 0);
+        buttons.update(false, Some((true, true)), 100);
+        assert_eq!(buttons.update(false, Some((false, false)), 2000), [None; 3]);
+        // The keys work on their own again afterwards.
+        buttons.update(false, Some((true, false)), 2100);
+        assert_eq!(buttons.update(false, Some((false, false)), 2200), [None, Some(ButtonEvent::K1Short), None]);
     }
 }

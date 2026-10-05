@@ -37,10 +37,16 @@ impl Flash for MemoryFlash {
     }
 }
 
+type PartitionEntry = (&'static str, u8, u8, u32, u32);
+
 /// 16 MB flash, with a partition table matching partitions.csv.
 fn blank_flash() -> MemoryFlash {
-    let mut flash = MemoryFlash { bytes: vec![0xFF; 0x610000] };
-    let entries = [("nvs", 1u8, 2u8, 0x9000u32, 0x6000u32), ("phy_init", 1, 1, 0xF000, 0x1000), ("factory", 0, 0, 0x10000, 0x400000), ("voices", 1, 0x40, 0x410000, 0x200000)];
+    flash_with(&[("nvs", 1, 2, 0x9000, 0x6000), ("phy_init", 1, 1, 0xF000, 0x1000), ("factory", 0, 0, 0x10000, 0x400000), ("voices", 1, 0x40, 0x410000, 0x200000)])
+}
+
+fn flash_with(entries: &[PartitionEntry]) -> MemoryFlash {
+    let end = entries.iter().map(|(_, _, _, offset, size)| offset + size).max().unwrap_or(0x9000);
+    let mut flash = MemoryFlash { bytes: vec![0xFF; end as usize] };
     for (index, (label, kind, subtype, offset, size)) in entries.iter().enumerate() {
         let at = 0x8000 + index * 32;
         let entry = &mut flash.bytes[at..at + 32];
@@ -248,6 +254,29 @@ fn bad_lines_are_reported() {
     // A line ending in CRLF is accepted too.
     firmware.receive(&mut board, b"{\"version\":1,\"event\":\"device.identify\"}\r\n");
     assert_eq!(board.take_lines(), ["IDENTIFY"]);
+}
+
+#[test]
+fn on_a_box_shared_with_muse_settings_live_in_vb_cfg() {
+    // The layout of a box shared with Muse: nvs holds Muse's NVS, which must not be touched.
+    let mut flash = flash_with(&[
+        ("nvs", 1, 2, 0x9000, 0xC000),
+        ("otadata", 1, 0, 0x15000, 0x2000),
+        ("phy_init", 1, 1, 0x17000, 0x1000),
+        ("vb_cfg", 1, 0x41, 0x18000, 0x6000),
+        ("ota_0", 0, 0x10, 0x20000, 0x400000),
+        ("ota_1", 0, 0x11, 0x420000, 0x400000),
+        ("voices", 1, 0x40, 0x820000, 0x200000),
+    ]);
+    flash.bytes[0x9000..0x15000].fill(0x5A);
+    let (mut firmware, mut board, _) = booted(flash);
+    assert_eq!(send(&mut firmware, &mut board, r#"{"version":1,"event":"device.volume","level":80}"#), ["VOLUME 80"]);
+
+    let flash = board.flash;
+    assert!(flash.bytes[0x9000..0x15000].iter().all(|&byte| byte == 0x5A), "Muse's nvs was written");
+    let (_, board, lines) = booted(flash);
+    assert!(lines.contains(&"VOLUME 80".to_owned()), "{lines:?}");
+    assert_eq!(board.codec_volume, Some(80));
 }
 
 #[test]

@@ -241,3 +241,27 @@ This is the third time we modeled the agent lifecycle too literally (see the two
 The announcement has to follow the user's unit of work. A subagent reports to its parent, not to the user, so its end isn't announced. And a session isn't done while any of its subagents still runs. The real question is never "which hook fired" but "is there something for the user to come back for".
 
 What found it quickly was matching each `task.done` in the daemon log against the session transcripts by timestamp. That named the hook behind every announcement, and showed whether the turn was started by a person or by a notification. The same check cleared a burst that looked like the bug but was a person sending messages a minute apart. Before changing announcement rules, check what actually started each turn.
+
+## One flashing session per job, and never kill one halfway
+
+Putting the box into the layout it shares with Muse took three unplugs. Chained espflash calls with `--after no-reset` left the chip in its loader, and the next connection hung at "Connecting..." for minutes; killing that hung process, then trying esptool with `--before usb-reset`, didn't recover it either. RST didn't help; only pulling the USB cable did. `tools/flash.sh` chains calls the same way and has worked, so the hang depends on what the previous call left behind, which makes it worse than a steady failure.
+
+A flashing job is one esptool `write-flash` with every address in it (and an area to clear written as 0xFF in the same call): one connection, one reset at the end. If a flashing process hangs, ask for an unplug straight away instead of stacking more connection attempts on a wedged chip.
+
+## A library's "next slot" is a claim; read back what it wrote
+
+The first switch from Vibe Buddy to Muse rebooted straight back into Vibe Buddy. esp-bootloader-esp-idf 0.6 returned success, but from blank otadata its "activate next partition" selected ota_0, the slot already running, and asked for ota_1 it would write sequence 0, which the bootloader treats as invalid. Dumping otadata with esptool showed `seq=1` within a minute, while reasoning about the code would not have.
+
+When firmware writes something only the bootloader reads, the test is what the bootloader does with it: write it, read it back, and check it against the reader's rules (here ESP-IDF's `bootloader_common_ota_select_valid` and the `(seq - 1) % slots` choice), in a host test that encodes those rules rather than the writer's.
+
+## A reset into another firmware must reset the whole chip
+
+After a round trip through Muse, Vibe Buddy's menu offered MUSE but switching failed, and the volume no longer saved. Muse had come back with ESP-IDF's `esp_restart()`, which on the S3 resets the CPU only (reset reason `0xc`, RTC_SW_CPU_RST): the flash controller kept Muse's 80 MHz tuning, reads through the cache still worked, and every write through the ROM routines failed. The first switch had worked because that Vibe Buddy had started from a USB reset.
+
+Two firmwares sharing a chip each assume they start from reset defaults, so a handover goes through a full system reset (`esp_rom_software_reset_system()`, reason `0x3`), the same as esp-hal's `software_reset()`. When something works after flashing and fails after a handover, compare the reset reasons in the two boot logs first; they were the whole answer here. The diagnostic lines that found it (`SWITCH APP FLASH ERROR` and its siblings) stay in the firmware.
+
+## On a shared port, one program's output is the other's input
+
+With the box switched to Muse and vibebuddyd connected, Muse's menu scrolled by itself, it recorded empty voice notes, its mic gain dropped to 0 dB and in the end its pairing was reset. Muse's bench console reads single characters from the USB port as keys, and the daemon's heartbeat JSON is full of them: `a`, `s`, `d`, `u`, `z`, `w`. The risk had been written down ("the daemon may disturb Muse") and then tested only with the daemon stopped, which is exactly the case where it can't happen.
+
+When two firmwares share a box, everything that talks to the port has to be tried against each of them, with the Mac side running as it normally does. A firmware that might sit behind someone else's serial writer reads no keys from the port by default, and the writer stops writing once it sees the firmware isn't its own.
