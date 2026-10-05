@@ -77,7 +77,9 @@
 "Writing voice pack… %@" = "正在写入语音包… %@";
 "Voice pack written" = "语音包已写入";
 "Flashing firmware… %@" = "正在刷入固件… %@";
-"Firmware flashed, the box is restarting" = "固件已刷入，盒子重启中";
+"Firmware flashed, the box has restarted" = "固件已刷入，盒子已重启";
+"Firmware flashed, but the box didn't start it. Unplug the box and plug it back in." = "固件已刷入，但盒子没有启动新固件。请拔下盒子再插回。";
+"Don't hold K0 this time. This page will show the box as found once it starts." = "这次不要按住 K0。盒子启动后，本页会显示已找到。";
 "Failed: %@" = "失败：%@";
 
 /* Voice catalog */

@@ -39,6 +39,8 @@ pub enum OperationState {
     Running,
     Done,
     Failed,
+    /// Firmware written, but the box didn't start it; it needs unplugging and plugging back in.
+    Replug,
 }
 
 impl Operation {
@@ -54,7 +56,8 @@ impl Operation {
             (OperationKind::VoicePack, OperationState::Running) => tr("Writing voice pack… %@", &[&percent]),
             (OperationKind::VoicePack, OperationState::Done) => tr("Voice pack written", &[]),
             (OperationKind::Firmware, OperationState::Running) => tr("Flashing firmware… %@", &[&percent]),
-            (OperationKind::Firmware, OperationState::Done) => tr("Firmware flashed, the box is restarting", &[]),
+            (OperationKind::Firmware, OperationState::Done) => tr("Firmware flashed, the box has restarted", &[]),
+            (_, OperationState::Replug) => tr("Firmware flashed, but the box didn't start it. Unplug the box and plug it back in.", &[]),
         }
     }
 }
@@ -236,6 +239,17 @@ mod tests {
         assert_eq!(operation.summary(), "Writing voice pack… 43%");
         operation.state = OperationState::Failed;
         assert_eq!(operation.summary(), "Failed: chunk 12/40");
+    }
+
+    #[test]
+    fn a_flash_waiting_for_a_replug_parses_and_says_so() {
+        // An unknown state would fail the whole status and cut the app off from the daemon.
+        let operation: Operation = serde_json::from_str(
+            r#"{"kind": "firmware", "state": "replug", "progress": 1.0, "message": "firmware flashed but not started, replug the box"}"#,
+        )
+        .expect("operation");
+        assert!(!operation.running());
+        assert_eq!(operation.summary(), "Firmware flashed, but the box didn't start it. Unplug the box and plug it back in.");
     }
 
     #[test]

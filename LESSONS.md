@@ -78,6 +78,8 @@ A successful write only means the data left the local buffer, not that a peer ex
 
 The Mac side noticed nothing all night, which was the other half of the same mistake: heartbeats only went toward the device, and writing to the serial port always succeeds, so this mechanism built specifically to expose stale state ended up proving only that it was still alive itself. Liveness checks must rely on signals the peer produces, not on your own act of sending.
 
+The same mistake came back on the Mac side (2026-10-01). A new box arrived running someone else's firmware, which never drains its USB serial. `vibebuddyd` wrote a few heartbeats, then blocked in `write_all` forever. The serial worker only checked the flasher's "release the port" signal while idle, never during a write, so flashing failed with `Device or resource busy` and the box could not be rescued from the app. The lesson was written from the firmware's point of view and nobody checked whether the daemon writes to the device the same way. Any wait on a peer must also listen for the signals that ask it to stop waiting. A suspend or cancel signal that is only checked between operations does nothing while an operation hangs.
+
 The length of the fuse is worth noting too: this deadlock only triggered after about 1 KB of accumulated output, which a few minutes of desk debugging never reached, so every acceptance check passed that evening and the bug only showed itself overnight. For any defect that "only breaks once a buffer fills up", acceptance must actually fill the buffer, not just verify that the feature works end to end.
 
 ## Before flashing over the UART bridge, confirm large transfers get through
