@@ -48,8 +48,6 @@ const SWEEP_INTERVAL: Duration = Duration::from_secs(60);
 const HEARTBEAT_INTERVAL: Duration = Duration::from_secs(5);
 /// Our firmware reports `DISPLAY READY` about two seconds after a reset.
 const FIRMWARE_BOOT_TIMEOUT: Duration = Duration::from_secs(15);
-/// After asking for a replug, keep watching this long so the replugged box still finishes the flash.
-const FIRMWARE_REPLUG_WINDOW: Duration = Duration::from_secs(600);
 /// Build-time git description, written by `build.rs`.
 const BUILD_REVISION: &str = env!("VIBEBUDDY_BUILD");
 
@@ -592,7 +590,7 @@ async fn post_firmware(
         match result {
             Ok(()) => {
                 info!("firmware flashed, waiting for the device to restart");
-                await_first_boot(&task_state, FIRMWARE_BOOT_TIMEOUT, FIRMWARE_REPLUG_WINDOW).await;
+                await_first_boot(&task_state, FIRMWARE_BOOT_TIMEOUT).await;
             }
             Err(error) => {
                 warn!(%error, "firmware flash failed");
@@ -606,8 +604,9 @@ async fn post_firmware(
 
 /// The reset after flashing doesn't always start the new firmware: a box put into download mode by hand (K0 held while
 /// plugging in) stays there until it loses power, with a dark screen. Only the firmware's own `DISPLAY READY` proves it
-/// booted; until then the flash isn't done, and if it never comes the user has to replug the box.
-async fn await_first_boot(state: &AppState, boot_timeout: Duration, replug_window: Duration) {
+/// booted; until then the flash isn't done, and if it never comes the user has to replug the box. The replug wait has no
+/// deadline: a stale `replug` would keep the app's onboarding from ever showing the box as found, however late it boots.
+async fn await_first_boot(state: &AppState, boot_timeout: Duration) {
     let firmware = |state, message: &str| Some(Operation { kind: OperationKind::Firmware, state, progress: 1.0, message: message.to_owned() });
     state.set_operation(firmware(OperationState::Running, "waiting for the box to restart")).await;
     if wait_for_firmware_build(state, boot_timeout).await {
@@ -616,9 +615,7 @@ async fn await_first_boot(state: &AppState, boot_timeout: Duration, replug_windo
     }
     warn!("the box did not start the new firmware, asking for a replug");
     state.set_operation(firmware(OperationState::Replug, "firmware flashed but not started, replug the box")).await;
-    if !wait_for_firmware_build(state, replug_window).await {
-        return;
-    }
+    firmware_build_reported(state).await;
     let mut operation = state.operation.lock().await;
     // Another operation may have started in the meantime; only finish our own.
     if operation.as_ref().is_some_and(|operation| operation.kind == OperationKind::Firmware && operation.state == OperationState::Replug) {
@@ -629,13 +626,13 @@ async fn await_first_boot(state: &AppState, boot_timeout: Duration, replug_windo
 }
 
 async fn wait_for_firmware_build(state: &AppState, timeout: Duration) -> bool {
-    tokio::time::timeout(timeout, async {
-        while state.device.lock().await.firmware_build.is_none() {
-            tokio::time::sleep(Duration::from_millis(250)).await;
-        }
-    })
-    .await
-    .is_ok()
+    tokio::time::timeout(timeout, firmware_build_reported(state)).await.is_ok()
+}
+
+async fn firmware_build_reported(state: &AppState) {
+    while state.device.lock().await.firmware_build.is_none() {
+        tokio::time::sleep(Duration::from_millis(250)).await;
+    }
 }
 
 /// The app supervises the daemon: exiting means restarting. Send the response first, then exit.
@@ -883,14 +880,16 @@ mod tests {
     #[tokio::test(start_paused = true)]
     async fn a_flash_is_done_only_once_the_new_firmware_reports_ready() {
         let state = test_state(Arc::new(RecordingTransport::default()));
-        let booting = state.clone();
-        tokio::spawn(async move {
-            tokio::time::sleep(Duration::from_secs(2)).await;
-            publish_device_message(&booting, DeviceMessage::Line("DISPLAY READY BUILD v9 2026-10-01".to_owned())).await;
+        let waiting = tokio::spawn({
+            let state = state.clone();
+            async move { await_first_boot(&state, Duration::from_secs(15)).await }
         });
 
-        await_first_boot(&state, Duration::from_secs(15), Duration::from_secs(600)).await;
+        tokio::time::sleep(Duration::from_secs(2)).await;
+        assert_eq!(state.operation.lock().await.as_ref().map(|operation| operation.state), Some(OperationState::Running));
 
+        publish_device_message(&state, DeviceMessage::Line("DISPLAY READY BUILD v9 2026-10-01".to_owned())).await;
+        waiting.await.unwrap();
         assert_eq!(state.operation.lock().await.as_ref().map(|operation| operation.state), Some(OperationState::Done));
     }
 
@@ -899,10 +898,13 @@ mod tests {
         let state = test_state(Arc::new(RecordingTransport::default()));
         let waiting = tokio::spawn({
             let state = state.clone();
-            async move { await_first_boot(&state, Duration::from_secs(15), Duration::from_secs(600)).await }
+            async move { await_first_boot(&state, Duration::from_secs(15)).await }
         });
 
         tokio::time::sleep(Duration::from_secs(20)).await;
+        assert_eq!(state.operation.lock().await.as_ref().map(|operation| operation.state), Some(OperationState::Replug));
+        // No deadline on the replug: an hour later it is still waiting, not stuck in a state nothing watches.
+        tokio::time::sleep(Duration::from_secs(3600)).await;
         assert_eq!(state.operation.lock().await.as_ref().map(|operation| operation.state), Some(OperationState::Replug));
 
         publish_device_message(&state, DeviceMessage::Line("DISPLAY READY BUILD v9 2026-10-01".to_owned())).await;
