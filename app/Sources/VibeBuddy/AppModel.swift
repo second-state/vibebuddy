@@ -28,8 +28,12 @@ final class AppModel: ObservableObject {
     private var connectedSince: Date?
     private var linkLostSince: Date?
     private var linkNotified = false
+    /// A voice the user asked for while changing the UI language, to write once the restarted app sees the box.
+    /// Taken out of the defaults right away, so it is tried in this run only and never surprises the user days later.
+    private var pendingVoice: String? = UserDefaults.standard.string(forKey: AppLanguage.pendingVoiceKey)
 
     init() {
+        UserDefaults.standard.removeObject(forKey: AppLanguage.pendingVoiceKey)
         preview.onFinish = { [weak self] in self?.previewingVoice = nil }
         supervisor.onStateChange = { [weak self] state in
             guard let self else { return }
@@ -98,6 +102,11 @@ final class AppModel: ObservableObject {
         daemonAlive = true
         refreshMenu()
         refreshForeignFirmware()
+        // Wait for the build ID: the box has answered, not just had its port opened (which resets it).
+        if let voice = pendingVoice, status.device.connected, status.device.firmwareBuild != nil, !operationRunning {
+            pendingVoice = nil
+            writeVoice(voice)
+        }
     }
 
     private func refreshForeignFirmware() {

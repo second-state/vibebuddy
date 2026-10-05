@@ -66,6 +66,20 @@ public struct VoiceCatalogEntry: Equatable, Identifiable, Sendable {
         VoiceCatalogEntry(id: "chris", name: "Chris", tag: String(localized: "English · US · ElevenLabs"), language: .en),
     ]
 
+    /// The language a box voice speaks, from the voice id the box reports; "builtin" is Jessica (English).
+    /// nil for an id this catalog doesn't know.
+    public static func language(ofVoice id: String) -> VoiceLanguage? {
+        id == "builtin" ? .en : all.first { $0.id == id }?.language
+    }
+
+    /// The voice to offer when the UI switches to `language`: nil when the box already speaks it,
+    /// its voice is unknown, or no voice in that language is bundled. Otherwise the first bundled
+    /// voice in catalog order.
+    public static func switchSuggestion(boxVoice: String, to language: VoiceLanguage, bundled: [VoiceCatalogEntry]) -> VoiceCatalogEntry? {
+        guard let current = self.language(ofVoice: boxVoice), current != language else { return nil }
+        return all.first { entry in entry.language == language && bundled.contains { $0.id == entry.id } }
+    }
+
     /// Voices in `language` first, catalog order otherwise preserved.
     public static func sorted(_ entries: [VoiceCatalogEntry], preferring language: VoiceLanguage) -> [VoiceCatalogEntry] {
         entries.filter { $0.language == language } + entries.filter { $0.language != language }

@@ -19,9 +19,17 @@ struct SettingsView: View {
 
 struct GeneralView: View {
     @ObservedObject var model: AppModel
+    @State private var language = AppLanguage.current
 
     var body: some View {
         Form {
+            Picker(selection: Binding(get: { language }, set: { change(to: $0) })) {
+                Text("System").tag(AppLanguage.system)
+                Text(verbatim: "English").tag(AppLanguage.en)
+                Text(verbatim: "简体中文").tag(AppLanguage.zhHans)
+            } label: {
+                Text("Language")
+            }
             Toggle("Launch at login", isOn: Binding(get: { model.launchAtLogin }, set: { model.setLaunchAtLogin($0) }))
             Toggle("Notify me when the box disconnects or the daemon fails", isOn: Binding(get: { model.status?.config.notifyLink ?? true }, set: { model.setNotifyLink($0) }))
                 .disabled(model.status == nil)
@@ -31,6 +39,37 @@ struct GeneralView: View {
             }
         }
         .formStyle(.grouped)
+    }
+
+    /// Saves the choice, then offers to restart and, when the box speaks the other language, to switch its voice too.
+    private func change(to choice: AppLanguage) {
+        guard choice != language else { return }
+        choice.save()
+        language = choice
+        let target = choice.resolved
+        guard target != Resources.uiLanguage else { return }
+        let alert = NSAlert()
+        alert.messageText = String(localized: "Restart Vibe Buddy to change the language?")
+        alert.informativeText = String(localized: "The box goes offline for a few seconds while the app restarts.")
+        var voiceSwitch: (entry: VoiceCatalogEntry, checkbox: NSButton)?
+        if let device = model.status?.device, device.connected,
+           let entry = VoiceCatalogEntry.switchSuggestion(boxVoice: device.voice ?? "builtin", to: target, bundled: Resources.bundledVoices) {
+            let checkbox = NSButton(checkboxWithTitle: String(localized: "Also switch the box's voice to \(entry.name) (takes a few minutes over the UART port)"), target: nil, action: nil)
+            checkbox.state = .on
+            alert.accessoryView = checkbox
+            voiceSwitch = (entry, checkbox)
+        }
+        alert.addButton(withTitle: String(localized: "Restart now"))
+        alert.addButton(withTitle: String(localized: "Later"))
+        let restart = alert.runModal() == .alertFirstButtonReturn
+        let voice = voiceSwitch.flatMap { $0.checkbox.state == .on ? $0.entry.id : nil }
+        if restart {
+            // A write in progress would be cut off by the restart; the restarted app writes it once it sees the box.
+            if let voice { UserDefaults.standard.set(voice, forKey: AppLanguage.pendingVoiceKey) }
+            AppRelaunch.relaunch()
+        } else if let voice {
+            model.writeVoice(voice)
+        }
     }
 }
 
@@ -276,15 +315,19 @@ struct PlanSheet: View {
 struct DeviceView: View {
     @ObservedObject var model: AppModel
 
+    // One scrolling form: a form above a fixed-height screen preview got squeezed, cutting off its last rows.
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Form {
+        Form {
+            Section {
                 LabeledContent("Link", value: connectionText)
+                if model.daemonAlive, !connected, !model.operationRunning {
+                    BoxNotFoundHelp()
+                }
                 LabeledContent("Box firmware", value: model.status?.device.firmwareBuild ?? "—")
                 LabeledContent("Bundled with app", value: model.bundledFirmwareBuild ?? String(localized: "This build has no bundled firmware"))
                 if model.firmwareUpdateAvailable {
                     Button("Update to bundled version") { confirmUpdate() }
-                        .disabled(model.operationRunning || !(model.status?.device.connected ?? false))
+                        .disabled(model.operationRunning || !connected)
                 } else if model.foreignFirmware, model.bundledFirmwareBuild != nil {
                     Text("The box isn't running Vibe Buddy firmware.").foregroundStyle(.orange)
                     Button("Flash Vibe Buddy firmware") { FlashConfirm.foreign(then: model.updateFirmware) }
@@ -294,34 +337,42 @@ struct DeviceView: View {
                     OperationRow(operation: operation)
                     if operation.state == .failed {
                         Text("Before retrying, hold K0 on the box and replug the cable to put it in download mode.").font(.caption).foregroundStyle(.secondary)
-                        Button("Retry") { model.updateFirmware() }.disabled(!(model.status?.device.connected ?? false))
+                        Button("Retry") { model.updateFirmware() }.disabled(!connected)
                     }
                 }
-                // Separately distributed firmware (VibeBuddy-firmware-*.zip on Releases) comes in here.
-                Button("Flash from file…") { flashFromFile() }
-                    .disabled(model.operationRunning || !(model.status?.device.connected ?? false))
-                Button("Make the box blink") { model.identify() }.disabled(model.operationRunning || !(model.status?.device.connected ?? false))
+                HStack {
+                    // Separately distributed firmware (VibeBuddy-firmware-*.zip on Releases) comes in here.
+                    Button("Flash from file…") { flashFromFile() }
+                    Button("Make the box blink") { model.identify() }
+                }
+                .disabled(model.operationRunning || !connected)
             }
-            .formStyle(.grouped)
-            HStack {
-                Text("Box screen").font(.headline)
-                Spacer()
-                Button("Refresh") { model.takeScreenshot() }.disabled(model.screenshotBusy || model.operationRunning || !(model.status?.device.connected ?? false))
-                Button("Save image") { model.saveScreenshot() }.disabled(model.screenshot == nil)
-            }
-            ZStack {
-                RoundedRectangle(cornerRadius: 6).fill(Color.black.opacity(0.85))
-                if let image = model.screenshot {
-                    Image(nsImage: image).interpolation(.none).resizable().aspectRatio(contentMode: .fit).padding(4)
-                } else if model.screenshotBusy {
-                    ProgressView()
-                } else {
-                    Text("Click Refresh to see what the box is showing").foregroundStyle(.secondary)
+            Section {
+                ZStack {
+                    RoundedRectangle(cornerRadius: 6).fill(Color.black.opacity(0.85))
+                    if let image = model.screenshot {
+                        Image(nsImage: image).interpolation(.none).resizable().aspectRatio(contentMode: .fit).padding(4)
+                    } else if model.screenshotBusy {
+                        ProgressView()
+                    } else {
+                        // The panel is dark in both appearances, so the hint can't use the secondary text color.
+                        Text("Click Refresh to see what the box is showing").foregroundStyle(.white.opacity(0.6))
+                    }
+                }
+                .frame(height: 150)
+            } header: {
+                HStack {
+                    Text("Box screen")
+                    Spacer()
+                    Button("Refresh") { model.takeScreenshot() }.disabled(model.screenshotBusy || model.operationRunning || !connected)
+                    Button("Save image") { model.saveScreenshot() }.disabled(model.screenshot == nil)
                 }
             }
-            .frame(height: 180)
         }
+        .formStyle(.grouped)
     }
+
+    private var connected: Bool { model.status?.device.connected ?? false }
 
     private var connectionText: String {
         guard let device = model.status?.device else { return String(localized: "daemon isn't running") }
@@ -358,6 +409,19 @@ struct DeviceView: View {
         alert.addButton(withTitle: String(localized: "Update"))
         alert.addButton(withTitle: String(localized: "Cancel"))
         if alert.runModal() == .alertFirstButtonReturn { model.updateFirmware() }
+    }
+}
+
+/// What to try when the Mac can't see the box: the everyday causes first, then download mode as the last resort.
+/// Holding K0 at power-up starts the ROM bootloader instead of the firmware, so that step always ends in a flash
+/// (the box then shows up without our firmware and the flash button appears).
+struct BoxNotFoundHelp: View {
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text("Not showing up? Use a cable that carries data, not just power, and click Allow if macOS asks whether to let the accessory connect.")
+            Text("Still nothing? Hold K0 on the box while you plug in the cable, then click Allow. The box starts in download mode with a dark screen, ready to be flashed with Vibe Buddy firmware.")
+        }
+        .font(.caption).foregroundStyle(.secondary)
     }
 }
 

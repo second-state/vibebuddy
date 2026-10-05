@@ -100,6 +100,7 @@ struct OnboardingView: View {
             } else {
                 Label(model.daemonAlive ? "No box yet — this updates once you plug it in." : "Starting the daemon…", systemImage: "cable.connector")
                     .foregroundStyle(.secondary)
+                if model.daemonAlive { BoxNotFoundHelp() }
             }
         }
     }
@@ -147,7 +148,7 @@ struct OnboardingView: View {
     private var done: some View {
         VStack(alignment: .leading, spacing: 12) {
             Text("All set.").font(.title3)
-            Text("Vibe Buddy lives in the menu bar: the icon is the buddy's face, with its eyes open while the box is online. To change anything, choose Settings… from its menu.")
+            Text("Vibe Buddy lives in the menu bar: the icon is the buddy's face, with its eyes open while the box is online. To change anything, choose Settings… from its menu, or open Vibe Buddy again.")
                 .foregroundStyle(.secondary)
         }
     }
