@@ -10,6 +10,8 @@ The buddy is an original character. Codex was the first agent it supported, but 
 
 [![Watch the 2-minute intro](docs/images/intro-poster.jpg)](https://www.youtube.com/watch?v=lLEFGSrcwDA)
 
+**Rather not build one?** A ready-to-use Vibe Buddy, assembled, flashed and tested, is available for pre-order at [vibekeys.dev](https://vibekeys.dev/vibe-buddy.html?utm_source=github&utm_medium=readme&utm_campaign=vibe-buddy-launch). Everything it runs is the open-source code in this repository.
+
 ## On the box
 
 Screen captures from a real box running the Rust firmware. Status scenes use example task names and daily stats; Pomodoro scenes show the live timer.
@@ -42,7 +44,7 @@ Pomodoro runs entirely on the box: its timer and today's tally keep going withou
 
 ## What you need
 
-- **The box:** ALIENTEK ATK-DNESP32S3-BOX V1.1 (ESP32-S3, 16 MB flash, 8 MB PSRAM), with LCD, speaker and three buttons. One USB-C cable powers it, flashes it and carries events. Hardware notes: [`docs/hardware.md`](docs/hardware.md).
+- **The box:** a Vibe Buddy (ESP32-S3, 16 MB flash, 8 MB PSRAM), with LCD, speaker and three buttons. One USB-C cable powers it, flashes it and carries events. [Pre-order one](https://vibekeys.dev/vibe-buddy.html?utm_source=github&utm_medium=readme&utm_campaign=vibe-buddy-launch) that ships assembled and flashed, or see [`docs/hardware.md`](docs/hardware.md) to build your own.
 - **A Mac** with Apple silicon and macOS 14 or later, or a Linux machine (experimental, see below).
 - **At least one agent:** Codex or Claude Code. GitHub Actions support uses the `gh` CLI you're already signed in to.
 
