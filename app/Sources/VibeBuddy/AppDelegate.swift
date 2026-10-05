@@ -18,7 +18,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // the port and the serial port. Hand off to the running one and quit before starting anything.
         if SingleInstance.handOffToRunningCopy() { exit(0) }
         DistributedNotificationCenter.default().addObserver(forName: SingleInstance.showSettings, object: nil, queue: .main) { [weak self] _ in
-            MainActor.assumeIsolated { self?.showSettings() }
+            MainActor.assumeIsolated { self?.showMainWindow() }
         }
         NSApp.mainMenu = mainMenu()
 
@@ -47,6 +47,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         if !UserDefaults.standard.bool(forKey: "onboardingDone") {
             showOnboarding()
+        } else if CommandLine.arguments.contains(AppRelaunch.showSettingsArgument) {
+            showSettings()
         }
     }
 
@@ -56,9 +58,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     /// Double-clicking the app while it runs lands here: open its window rather than doing nothing.
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
-        if onboardingWindow?.isVisible == true { showOnboarding() } else { showSettings() }
+        showMainWindow()
         return false
     }
+
+    /// Onboarding if it's still open, Settings otherwise.
+    private func showMainWindow() {
+        if onboardingWindow.map(isOpen) == true { showOnboarding() } else { showSettings() }
+    }
+
+    /// Minimized still counts: the Dock icon is how you get the window back.
+    private func isOpen(_ window: NSWindow) -> Bool { window.isVisible || window.isMiniaturized }
 
     /// Shows a window with a Dock icon, so it can be found again; the icon goes when the last window closes.
     private func present(_ window: NSWindow) {
@@ -72,7 +82,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             // willClose fires while the window is still visible; check once it's gone.
             DispatchQueue.main.async {
                 guard let self else { return }
-                if ![self.settingsWindow, self.onboardingWindow].contains(where: { $0?.isVisible == true }) {
+                if ![self.settingsWindow, self.onboardingWindow].compactMap({ $0 }).contains(where: self.isOpen) {
                     NSApp.setActivationPolicy(.accessory)
                 }
             }

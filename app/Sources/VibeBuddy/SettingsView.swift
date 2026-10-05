@@ -23,7 +23,8 @@ struct GeneralView: View {
 
     var body: some View {
         Form {
-            Picker(selection: Binding(get: { language }, set: { change(to: $0) })) {
+            // The dialog runs after this update rather than as a nested modal loop inside SwiftUI's binding setter.
+            Picker(selection: Binding(get: { language }, set: { choice in DispatchQueue.main.async { change(to: choice) } })) {
                 Text("System").tag(AppLanguage.system)
                 Text(verbatim: "English").tag(AppLanguage.en)
                 Text(verbatim: "简体中文").tag(AppLanguage.zhHans)
@@ -52,21 +53,26 @@ struct GeneralView: View {
         alert.messageText = String(localized: "Restart Vibe Buddy to change the language?")
         alert.informativeText = String(localized: "The box goes offline for a few seconds while the app restarts.")
         var voiceSwitch: (entry: VoiceCatalogEntry, checkbox: NSButton)?
-        if let device = model.status?.device, device.connected,
-           let entry = VoiceCatalogEntry.switchSuggestion(boxVoice: device.voice ?? "builtin", to: target, bundled: Resources.bundledVoices) {
-            let checkbox = NSButton(checkboxWithTitle: String(localized: "Also switch the box's voice to \(entry.name) (takes a few minutes over the UART port)"), target: nil, action: nil)
+        let device = model.status?.device
+        // Only a box that has answered (build and voice reported) can take a voice; an unknown voice isn't guessed at.
+        if let device, device.connected, device.firmwareBuild != nil, let voice = device.voice,
+           let entry = VoiceCatalogEntry.switchSuggestion(boxVoice: voice, to: target, bundled: Resources.bundledVoices) {
+            let title = device.bridge
+                ? String(localized: "Also switch the box's voice to \(entry.name) (a few minutes over the UART bridge; keep it plugged in)")
+                : String(localized: "Also switch the box's voice to \(entry.name)")
+            let checkbox = NSButton(checkboxWithTitle: title, target: nil, action: nil)
             checkbox.state = .on
             alert.accessoryView = checkbox
             voiceSwitch = (entry, checkbox)
+        } else if !(device?.connected ?? false) {
+            alert.informativeText += "\n" + String(localized: "The box isn't connected, so its voice stays as it is. You can change it later on the Sound tab.")
         }
         alert.addButton(withTitle: String(localized: "Restart now"))
         alert.addButton(withTitle: String(localized: "Later"))
         let restart = alert.runModal() == .alertFirstButtonReturn
         let voice = voiceSwitch.flatMap { $0.checkbox.state == .on ? $0.entry.id : nil }
         if restart {
-            // A write in progress would be cut off by the restart; the restarted app writes it once it sees the box.
-            if let voice { UserDefaults.standard.set(voice, forKey: AppLanguage.pendingVoiceKey) }
-            AppRelaunch.relaunch()
+            model.restart(writingVoice: voice)
         } else if let voice {
             model.writeVoice(voice)
         }
