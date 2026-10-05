@@ -44,7 +44,7 @@ Vibe Buddy 是给 AI 编程 Agent 配的桌面宠物。它住在键盘旁一个�
 
 ## 需要准备
 
-- **盒子：** 正点原子 ATK-DNESP32S3-BOX V1.1（ESP32-S3，16 MB Flash，8 MB PSRAM），带 LCD、扬声器和三个按键。一根 USB-C 线同时供电、烧录和传事件。硬件记录见 [`docs/hardware.md`](docs/hardware.md)。也可以直接[预订成品](https://vibekeys.dev/vibe-buddy.html?utm_source=github&utm_medium=readme&utm_campaign=vibe-buddy-launch)，组装和刷机都已完成。
+- **盒子：** 一台 Vibe Buddy（ESP32-S3，16 MB Flash，8 MB PSRAM），带 LCD、扬声器和三个按键。一根 USB-C 线同时供电、烧录和传事件。可以直接[预订成品](https://vibekeys.dev/vibe-buddy.html?utm_source=github&utm_medium=readme&utm_campaign=vibe-buddy-launch)，组装和刷机都已完成；想自己做，硬件说明见 [`docs/hardware.md`](docs/hardware.md)。
 - **一台 Mac：** Apple 芯片，macOS 14 或更新；也可以是一台 Linux 机器（实验性，见下文）。
 - **至少一个 Agent：** Codex 或 Claude Code。GitHub Actions 用的是你已经登录好的 `gh` 命令行。
 
