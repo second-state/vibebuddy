@@ -1,7 +1,7 @@
 # Maintainer: MAINTAINER_TBD
 # Built from the Linux tarball each GitHub release ships; packaging/aur/README.md says how to update it.
 pkgname=vibebuddy-bin
-pkgver=0.3.1
+pkgver=0.3.2
 pkgrel=1
 pkgdesc="A desk pet that shows and announces what your AI coding agents are doing (daemon, agent hooks, tray app)"
 arch=('x86_64')
@@ -20,7 +20,7 @@ install=vibebuddy-bin.install
 # Prebuilt release binaries: there's nothing for a -debug package to hold.
 options=('!debug')
 source=("https://github.com/second-state/vibebuddy/releases/download/v${pkgver}/VibeBuddy-v${pkgver}-linux-x86_64.tar.gz")
-sha256sums=('9859b9fd7532ae7b636809feecb44967f133a6c3ed50815c00050059c11aae55')
+sha256sums=('ebcae5ba61105226ecd01d36be66c10a8766d49f51410ea0dc1bf5babd6aa79d')
 
 package() {
   cd "VibeBuddy-v${pkgver}-linux-x86_64"
