@@ -298,8 +298,11 @@ impl Firmware {
             && now.wrapping_sub(deadline) as i32 >= 0
         {
             self.ready_deadline = None;
-            if self.display.show_tasks(board, &scene!(self, now), State::Idle, None, &[]).is_err() {
-                Self::write_literal(board, "DISPLAY ERROR\n");
+            match self.display.settle_after_done(board, &scene!(self, now)) {
+                Ok(State::Working) => Self::write_literal(board, "DISPLAY STATE WORKING\n"),
+                Ok(State::InputRequired) => Self::write_literal(board, "DISPLAY STATE INPUT REQUIRED\n"),
+                Ok(_) => Self::write_literal(board, "DISPLAY STATE READY\n"),
+                Err(()) => Self::write_literal(board, "DISPLAY ERROR\n"),
             }
         }
         self.continue_voice_begin(board);
