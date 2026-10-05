@@ -266,6 +266,10 @@ impl Board for DeviceBoard {
         esp_hal::system::software_reset()
     }
 
+    fn has_other_app(&mut self) -> bool {
+        let Some(running) = storage::running_app_offset() else { return false };
+        matches!(vibebuddy_firmware_core::storage::other_app(&mut SharedFlash, running), Ok(Some(_)))
+    }
 }
 
 #[allow(clippy::large_stack_frames, reason = "main has to hold a lot of peripherals and buffers anyway")]
