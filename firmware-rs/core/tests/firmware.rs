@@ -207,6 +207,23 @@ fn a_done_event_is_shown_announced_and_returns_to_idle() {
     board.advance(20);
     firmware.poll(&mut board);
     assert!(board.presents > presents, "should redraw as idle after 5 seconds");
+    assert_eq!(board.take_lines(), ["DISPLAY STATE READY"]);
+}
+
+#[test]
+fn after_done_the_device_returns_to_the_tasks_still_running() {
+    // A subagent finished while the main session keeps working. The main session may then generate
+    // for minutes without a single hook, so nothing would refresh the screen back to working.
+    let (mut firmware, mut board, _) = booted(blank_flash());
+    send(
+        &mut firmware,
+        &mut board,
+        r#"{"version":1,"event":"task.done","title":"CC:SUB","tasks":[{"title":"CC:MAIN","status":"working","elapsed_s":60}],"announcement":"done"}"#,
+    );
+
+    board.advance(5000);
+    firmware.poll(&mut board);
+    assert_eq!(board.take_lines(), ["DISPLAY STATE WORKING"]);
 }
 
 #[test]

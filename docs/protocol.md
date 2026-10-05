@@ -37,7 +37,7 @@ What the current firmware recognizes:
 
 - `task.start`: working; no voice.
 - `agent.input_required`: needs user input; plays the needs-input line ("Hey, I need you for a sec." in the built-in voice) once.
-- `task.done`: done; plays the done line ("All done!") once and returns to idle after 5 seconds.
+- `task.done`: done; plays the done line ("All done!") once; after 5 seconds it goes back to the cards in `tasks` that are still open, or to idle when none are.
 - `task.error` / `agent.blocked`: failed; plays the failed line ("Uh-oh, something went wrong.") once.
 - `agent.idle`: back to idle; no voice.
 - `device.heartbeat`: proves the link is alive; not displayed, no diagnostic line echoed, no voice.

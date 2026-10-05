@@ -1035,6 +1035,30 @@ impl Display {
         self.render(screen, scene)
     }
 
+    /// The done announcement is over: go back to the cards that came with it and are still open, or to idle when
+    /// none are. The Mac sends nothing while the visible state is unchanged, and a task can run for minutes
+    /// without an event, so dropping the cards here would show READY over work still in progress.
+    /// Returns the state shown.
+    pub fn settle_after_done(&mut self, screen: &mut dyn Screen, scene: &Scene) -> Result<State, ()> {
+        if !self.ready {
+            return Err(());
+        }
+        self.tasks
+            .retain(|task| matches!(task.state, State::Working | State::InputRequired));
+        self.state = if self.tasks.iter().any(|task| task.state == State::InputRequired) {
+            State::InputRequired
+        } else if self.tasks.is_empty() {
+            State::Idle
+        } else {
+            State::Working
+        };
+        self.title = self.tasks.first().map(|task| task.title.clone()).unwrap_or_default();
+        self.animation_frame = 0;
+        self.next_animation_at = scene.now_ms.wrapping_add(self.animation_period());
+        self.render(screen, scene)?;
+        Ok(self.state)
+    }
+
     /// Screenshot: run-length encodes the current framebuffer and hands it to `write_line`
     /// line by line (without newlines). The first line is `SHOT BEGIN 320x240 BACKLIGHT ON|OFF`,
     /// each middle line holds several `rgb565:length` runs, and the last is `SHOT END`.
