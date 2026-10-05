@@ -149,7 +149,14 @@ jobs:
             --apple-id "${APPLE_ID}" --team-id "${APPLE_TEAM_ID}" --password "${APPLE_APP_PASSWORD}"
           # notarytool doesn't always exit non-zero when notarization fails, but staple fails without a ticket, so it is the gate;
           # then confirm once more with Gatekeeper's own assessment, and don't publish if it fails.
-          xcrun stapler staple "${dmg}"
+          # Right after "Accepted" the ticket may not be served yet (v0.3.1's first run: "Could not find base64 encoded
+          # ticket"), so give it a few tries before treating a missing ticket as a failed notarization.
+          for attempt in 1 2 3 4 5; do
+            xcrun stapler staple "${dmg}" && break
+            [[ "${attempt}" -lt 5 ]] || exit 1
+            echo "no ticket yet, retrying in 30 s"
+            sleep 30
+          done
           spctl --assess --type open --context context:primary-signature --verbose "${dmg}"
       # The publish job releases this, and it stays for a week either way for self-testing.
       - uses: actions/upload-artifact@v4
