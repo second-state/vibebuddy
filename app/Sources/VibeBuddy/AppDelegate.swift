@@ -14,6 +14,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var terminationSignal: DispatchSourceSignal?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        // A second copy of the app (another path, a dev build) would start a second daemon that fights over
+        // the port and the serial port. Hand off to the running one and quit before starting anything.
+        if SingleInstance.handOffToRunningCopy() { exit(0) }
+        DistributedNotificationCenter.default().addObserver(forName: SingleInstance.showSettings, object: nil, queue: .main) { [weak self] _ in
+            MainActor.assumeIsolated { self?.showMainWindow() }
+        }
+        NSApp.mainMenu = mainMenu()
+
         // A SIGTERM from `kill`/`pkill` ends the process outright by default, orphaning the daemon;
         // catch it and quit normally so applicationWillTerminate gets a chance to stop the daemon.
         signal(SIGTERM, SIG_IGN)
@@ -39,11 +47,75 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         if !UserDefaults.standard.bool(forKey: "onboardingDone") {
             showOnboarding()
+        } else if CommandLine.arguments.contains(AppRelaunch.showSettingsArgument) {
+            showSettings()
         }
     }
 
     func applicationWillTerminate(_ notification: Notification) {
         model.shutdown()
+    }
+
+    /// Double-clicking the app while it runs lands here: open its window rather than doing nothing.
+    func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
+        showMainWindow()
+        return false
+    }
+
+    /// Onboarding if it's still open, Settings otherwise.
+    private func showMainWindow() {
+        if onboardingWindow.map(isOpen) == true { showOnboarding() } else { showSettings() }
+    }
+
+    /// Minimized still counts: the Dock icon is how you get the window back.
+    private func isOpen(_ window: NSWindow) -> Bool { window.isVisible || window.isMiniaturized }
+
+    /// Shows a window with a Dock icon, so it can be found again; the icon goes when the last window closes.
+    private func present(_ window: NSWindow) {
+        NSApp.setActivationPolicy(.regular)
+        NSApp.activate(ignoringOtherApps: true)
+        window.makeKeyAndOrderFront(nil)
+    }
+
+    private func watchClose(_ window: NSWindow) {
+        NotificationCenter.default.addObserver(forName: NSWindow.willCloseNotification, object: window, queue: .main) { [weak self] _ in
+            // willClose fires while the window is still visible; check once it's gone.
+            DispatchQueue.main.async {
+                guard let self else { return }
+                if ![self.settingsWindow, self.onboardingWindow].compactMap({ $0 }).contains(where: self.isOpen) {
+                    NSApp.setActivationPolicy(.accessory)
+                }
+            }
+        }
+    }
+
+    /// The menu bar while a window is open: without it ⌘Q, ⌘W and copy/paste do nothing.
+    private func mainMenu() -> NSMenu {
+        let main = NSMenu()
+        let app = NSMenu()
+        let settings = NSMenuItem(title: String(localized: "Settings…"), action: #selector(showSettings), keyEquivalent: ",")
+        settings.target = self
+        app.addItem(settings)
+        app.addItem(.separator())
+        app.addItem(NSMenuItem(title: String(localized: "Hide Vibe Buddy"), action: #selector(NSApplication.hide(_:)), keyEquivalent: "h"))
+        app.addItem(.separator())
+        let quit = NSMenuItem(title: String(localized: "Quit Vibe Buddy (the box goes offline)"), action: #selector(quit), keyEquivalent: "q")
+        quit.target = self
+        app.addItem(quit)
+        let edit = NSMenu(title: String(localized: "Edit"))
+        edit.addItem(NSMenuItem(title: String(localized: "Cut"), action: #selector(NSText.cut(_:)), keyEquivalent: "x"))
+        edit.addItem(NSMenuItem(title: String(localized: "Copy"), action: #selector(NSText.copy(_:)), keyEquivalent: "c"))
+        edit.addItem(NSMenuItem(title: String(localized: "Paste"), action: #selector(NSText.paste(_:)), keyEquivalent: "v"))
+        edit.addItem(NSMenuItem(title: String(localized: "Select All"), action: #selector(NSText.selectAll(_:)), keyEquivalent: "a"))
+        let window = NSMenu(title: String(localized: "Window"))
+        window.addItem(NSMenuItem(title: String(localized: "Close"), action: #selector(NSWindow.performClose(_:)), keyEquivalent: "w"))
+        window.addItem(NSMenuItem(title: String(localized: "Minimize"), action: #selector(NSWindow.performMiniaturize(_:)), keyEquivalent: "m"))
+        for submenu in [app, edit, window] {
+            let item = NSMenuItem()
+            item.submenu = submenu
+            main.addItem(item)
+        }
+        return main
     }
 
     private func render(_ state: MenuState) {
@@ -81,10 +153,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             window.contentView = NSHostingView(rootView: SettingsView(model: model))
             window.center()
             window.isReleasedWhenClosed = false
+            watchClose(window)
             settingsWindow = window
         }
-        NSApp.activate(ignoringOtherApps: true)
-        settingsWindow?.makeKeyAndOrderFront(nil)
+        settingsWindow.map(present)
     }
 
     func showOnboarding() {
@@ -97,13 +169,30 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             }))
             window.center()
             window.isReleasedWhenClosed = false
+            watchClose(window)
             onboardingWindow = window
         }
-        NSApp.activate(ignoringOtherApps: true)
-        onboardingWindow?.makeKeyAndOrderFront(nil)
+        onboardingWindow.map(present)
     }
 
     @objc private func quit() { NSApp.terminate(nil) }
+}
+
+enum SingleInstance {
+    static let showSettings = Notification.Name("com.vibebuddy.app.showSettings")
+
+    /// If another copy is already running, ask it to open Settings and return true: this one should quit.
+    @MainActor
+    static func handOffToRunningCopy() -> Bool {
+        guard let bundleID = Bundle.main.bundleIdentifier,
+              let other = NSRunningApplication.runningApplications(withBundleIdentifier: bundleID)
+                .first(where: { $0.processIdentifier != getpid() }) else { return false }
+        DistributedNotificationCenter.default().postNotificationName(showSettings, object: nil, userInfo: nil, deliverImmediately: true)
+        // We were just launched by the user, so we may pass activation on to the running copy.
+        NSApp.yieldActivation(to: other)
+        other.activate()
+        return true
+    }
 }
 
 /// Leftover from the LaunchAgent era: if found, offer to remove it and take over, since two daemons can't share the serial port.

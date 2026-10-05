@@ -13,6 +13,15 @@
 "%lld h %lld min" = "%1$lld 小时 %2$lld 分";
 "%lld min" = "%lld 分";
 "Settings…" = "设置…";
+"Hide Vibe Buddy" = "隐藏 Vibe Buddy";
+"Edit" = "编辑";
+"Cut" = "剪切";
+"Copy" = "拷贝";
+"Paste" = "粘贴";
+"Select All" = "全选";
+"Window" = "窗口";
+"Close" = "关闭";
+"Minimize" = "最小化";
 "Quit Vibe Buddy (the box goes offline)" = "退出 Vibe Buddy（盒子将离线）";
 "Quit" = "退出";
 
@@ -161,6 +170,8 @@
 "Found it: %@" = "找到了：%@";
 "Make it blink" = "让它眨一下眼";
 "If the backlight flashes, that's the one." = "盒子背光闪了就是它。";
+"Not showing up? Use a cable that carries data, not just power, and click Allow if macOS asks whether to let the accessory connect." = "没出现？换一根能传数据的线（有的线只能充电），macOS 问是否允许配件连接时点「允许」。";
+"Still nothing? Hold K0 on the box while you plug in the cable, then click Allow. The box starts in download mode with a dark screen, ready to be flashed with Vibe Buddy firmware." = "还是不行？按住盒子的 K0 再插线，然后点「允许」。盒子会以下载模式启动，屏幕不亮，接着刷入 Vibe Buddy 固件即可。";
 "No box yet — this updates once you plug it in." = "还没找到盒子，插上后这里会变。";
 "Starting the daemon…" = "daemon 正在启动…";
 "Connect your agents so their progress shows up on the box." = "接入 Agent：让它们的进展传到盒子上。";
@@ -171,4 +182,14 @@
 "Start Vibe Buddy automatically when you log in?" = "登录时自动启动 Vibe Buddy？";
 "macOS may say a background item was added — that's expected." = "系统可能会提示「已添加后台项目」，那是 macOS 的正常提示。";
 "All set." = "好了。";
-"Vibe Buddy lives in the menu bar: the icon is the buddy's face, with its eyes open while the box is online. To change anything, choose Settings… from its menu." = "Vibe Buddy 住在菜单栏里：图标是氛围小助手的脸，盒子在线时睁着眼。想改什么，菜单里的「设置…」。";
+"Vibe Buddy lives in the menu bar: the icon is the buddy's face, with its eyes open while the box is online. To change anything, choose Settings… from its menu, or open Vibe Buddy again." = "Vibe Buddy 住在菜单栏里：图标是氛围小助手的脸，盒子在线时睁着眼。想改什么，点菜单里的「设置…」，或者再打开一次 Vibe Buddy。";
+
+/* Language */
+"Language" = "语言";
+"System" = "跟随系统";
+"Restart Vibe Buddy to change the language?" = "重启 Vibe Buddy 以切换语言？";
+"The box goes offline for a few seconds while the app restarts." = "重启期间盒子会离线几秒。";
+"Also switch the box's voice to %@ (a few minutes over the UART bridge; keep it plugged in)" = "同时把盒子的播报音色换成 %@（走 UART 桥要几分钟，期间别拔线）";
+"Also switch the box's voice to %@" = "同时把盒子的播报音色换成 %@";
+"The box isn't connected, so its voice stays as it is. You can change it later on the Sound tab." = "盒子没连上，这次音色不变，之后可以在「声音」页更换。";
+"Restart now" = "立即重启";

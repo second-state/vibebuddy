@@ -123,6 +123,8 @@ def source_keys() -> dict[str, str]:
                 found.append((match.start(), read_literal(code, match.end() - 1)[0]))
             for call in VIEW_CALLS:
                 for match in re.finditer(r"(?<![\w.])" + re.escape(call), code):
+                    if code.startswith("verbatim:", match.end()):
+                        continue  # Text(verbatim:) is shown as written, never looked up
                     for text in first_argument_literals(code, match.end()):
                         found.append((match.start(), text))
             for match in re.finditer(r"\[LocalizedStringKey\]\s*=\s*\[", code):

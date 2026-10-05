@@ -54,7 +54,7 @@ Pomodoro runs entirely on the box: its timer and today's tally keep going withou
    - picking an announcement voice and writing it to the box;
    - launching at login.
 
-After that Vibe Buddy lives in the menu bar. Its icon tells you whether the box is online, which mode it's in and how much got done today. Settings has five tabs: General, Sound, Agents, Device (firmware updates, screenshots) and Advanced. If the box's firmware differs from the one bundled with the app, Settings → Device offers to update it.
+After that Vibe Buddy lives in the menu bar; open the app again any time to bring up Settings. Its icon tells you whether the box is online, which mode it's in and how much got done today. Settings has five tabs: General (including the interface language), Sound, Agents, Device (firmware updates, screenshots) and Advanced. If the box's firmware differs from the one bundled with the app, Settings → Device offers to update it.
 
 If a release isn't signed yet, macOS blocks the first launch; allow it under System Settings → Privacy & Security.
 

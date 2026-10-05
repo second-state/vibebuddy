@@ -28,6 +28,10 @@ final class AppModel: ObservableObject {
     private var connectedSince: Date?
     private var linkLostSince: Date?
     private var linkNotified = false
+    /// A voice the user asked for while changing the UI language, to write once the restarted app sees the box.
+    /// Taken out of the defaults at start, so it is tried in this run only and never surprises the user days later.
+    private var pendingVoice: String?
+    private static let pendingVoiceKey = "pendingVoice"
 
     init() {
         preview.onFinish = { [weak self] in self?.previewingVoice = nil }
@@ -48,6 +52,8 @@ final class AppModel: ObservableObject {
     }
 
     func start() {
+        pendingVoice = UserDefaults.standard.string(forKey: Self.pendingVoiceKey)
+        UserDefaults.standard.removeObject(forKey: Self.pendingVoiceKey)
         Resources.migrateLegacyDirectories()
         try? HookInstaller.deployBinary()
         if HookInstaller.migrateLegacyCommands().contains(.codex) {
@@ -98,6 +104,11 @@ final class AppModel: ObservableObject {
         daemonAlive = true
         refreshMenu()
         refreshForeignFirmware()
+        // Wait for the build ID: the box has answered, not just had its port opened (which resets it).
+        if let voice = pendingVoice, status.device.connected, status.device.firmwareBuild != nil, !operationRunning {
+            pendingVoice = nil
+            writeVoice(voice)
+        }
     }
 
     private func refreshForeignFirmware() {
@@ -156,6 +167,13 @@ final class AppModel: ObservableObject {
 
     var operation: DeviceOperation? { status?.operation }
     var operationRunning: Bool { operation?.state == .running }
+
+    /// Restarts the app for a new UI language; the restarted app writes `voice` once it sees the box, since a write
+    /// in progress would be cut off by the restart.
+    func restart(writingVoice voice: String?) {
+        if let voice { UserDefaults.standard.set(voice, forKey: Self.pendingVoiceKey) }
+        AppRelaunch.relaunch()
+    }
 
     func writeVoice(_ id: String) {
         guard let pack = Resources.voicePack(id) else { lastError = String(localized: "This app has no voice pack for \(id)"); return }
