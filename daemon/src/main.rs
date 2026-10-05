@@ -46,6 +46,8 @@ use tracing_subscriber::EnvFilter;
 const SWEEP_INTERVAL: Duration = Duration::from_secs(60);
 /// Heartbeat interval. The device uses this cadence to judge whether the link is alive; the firmware timeout is three times it.
 const HEARTBEAT_INTERVAL: Duration = Duration::from_secs(5);
+/// Our firmware reports `DISPLAY READY` about two seconds after a reset.
+const FIRMWARE_BOOT_TIMEOUT: Duration = Duration::from_secs(15);
 /// Build-time git description, written by `build.rs`.
 const BUILD_REVISION: &str = env!("VIBEBUDDY_BUILD");
 
@@ -580,20 +582,57 @@ async fn post_firmware(
         })
         .await
         .unwrap_or_else(|error| Err(format!("flash task crashed: {error}")));
+        if result.is_ok() {
+            // Forget the old build before the worker reconnects, so only the new firmware's own report counts as booted.
+            task_state.device.lock().await.firmware_build = None;
+        }
         serial.set_suspended(false);
-        let operation = match result {
+        match result {
             Ok(()) => {
                 info!("firmware flashed, waiting for the device to restart");
-                Operation { kind: OperationKind::Firmware, state: OperationState::Done, progress: 1.0, message: "flash complete, device restarting".to_owned() }
+                await_first_boot(&task_state, FIRMWARE_BOOT_TIMEOUT).await;
             }
             Err(error) => {
                 warn!(%error, "firmware flash failed");
-                Operation { kind: OperationKind::Firmware, state: OperationState::Failed, progress: 0.0, message: error }
+                let operation = Operation { kind: OperationKind::Firmware, state: OperationState::Failed, progress: 0.0, message: error };
+                task_state.set_operation(Some(operation)).await;
             }
-        };
-        task_state.set_operation(Some(operation)).await;
+        }
     });
     (StatusCode::ACCEPTED, Json(ApiResponse { accepted: true, message: "started flashing".to_owned() }))
+}
+
+/// The reset after flashing doesn't always start the new firmware: a box put into download mode by hand (K0 held while
+/// plugging in) stays there until it loses power, with a dark screen. Only the firmware's own `DISPLAY READY` proves it
+/// booted; until then the flash isn't done, and if it never comes the user has to replug the box. The replug wait has no
+/// deadline: a stale `replug` would keep the app's onboarding from ever showing the box as found, however late it boots.
+async fn await_first_boot(state: &AppState, boot_timeout: Duration) {
+    let firmware = |state, message: &str| Some(Operation { kind: OperationKind::Firmware, state, progress: 1.0, message: message.to_owned() });
+    state.set_operation(firmware(OperationState::Running, "waiting for the box to restart")).await;
+    if wait_for_firmware_build(state, boot_timeout).await {
+        state.set_operation(firmware(OperationState::Done, "flash complete, box restarted")).await;
+        return;
+    }
+    warn!("the box did not start the new firmware, asking for a replug");
+    state.set_operation(firmware(OperationState::Replug, "firmware flashed but not started, replug the box")).await;
+    firmware_build_reported(state).await;
+    let mut operation = state.operation.lock().await;
+    // Another operation may have started in the meantime; only finish our own.
+    if operation.as_ref().is_some_and(|operation| operation.kind == OperationKind::Firmware && operation.state == OperationState::Replug) {
+        *operation = firmware(OperationState::Done, "flash complete, box restarted");
+        drop(operation);
+        state.notify_status();
+    }
+}
+
+async fn wait_for_firmware_build(state: &AppState, timeout: Duration) -> bool {
+    tokio::time::timeout(timeout, firmware_build_reported(state)).await.is_ok()
+}
+
+async fn firmware_build_reported(state: &AppState) {
+    while state.device.lock().await.firmware_build.is_none() {
+        tokio::time::sleep(Duration::from_millis(250)).await;
+    }
 }
 
 /// The app supervises the daemon: exiting means restarting. Send the response first, then exit.
@@ -836,6 +875,41 @@ mod tests {
             SessionTitles::disabled(),
             None,
         )
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_flash_is_done_only_once_the_new_firmware_reports_ready() {
+        let state = test_state(Arc::new(RecordingTransport::default()));
+        let waiting = tokio::spawn({
+            let state = state.clone();
+            async move { await_first_boot(&state, Duration::from_secs(15)).await }
+        });
+
+        tokio::time::sleep(Duration::from_secs(2)).await;
+        assert_eq!(state.operation.lock().await.as_ref().map(|operation| operation.state), Some(OperationState::Running));
+
+        publish_device_message(&state, DeviceMessage::Line("DISPLAY READY BUILD v9 2026-10-01".to_owned())).await;
+        waiting.await.unwrap();
+        assert_eq!(state.operation.lock().await.as_ref().map(|operation| operation.state), Some(OperationState::Done));
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_box_that_stays_dark_asks_for_a_replug_then_finishes_after_it() {
+        let state = test_state(Arc::new(RecordingTransport::default()));
+        let waiting = tokio::spawn({
+            let state = state.clone();
+            async move { await_first_boot(&state, Duration::from_secs(15)).await }
+        });
+
+        tokio::time::sleep(Duration::from_secs(20)).await;
+        assert_eq!(state.operation.lock().await.as_ref().map(|operation| operation.state), Some(OperationState::Replug));
+        // No deadline on the replug: an hour later it is still waiting, not stuck in a state nothing watches.
+        tokio::time::sleep(Duration::from_secs(3600)).await;
+        assert_eq!(state.operation.lock().await.as_ref().map(|operation| operation.state), Some(OperationState::Replug));
+
+        publish_device_message(&state, DeviceMessage::Line("DISPLAY READY BUILD v9 2026-10-01".to_owned())).await;
+        waiting.await.unwrap();
+        assert_eq!(state.operation.lock().await.as_ref().map(|operation| operation.state), Some(OperationState::Done));
     }
 
     fn device_event(json: &str) -> DeviceMessage {
