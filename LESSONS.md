@@ -225,3 +225,19 @@ On the way there, three theories looked right and were wrong: firmware dropping 
 v0.3.0's first tag failed in CI: bumping the version left `firmware-rs/device/Cargo.lock` recording the shared crates at 0.2.2, and the license step runs `cargo about --locked`. Three rehearsal runs on the release branch had all passed, because none of them changed the version; the one step that only happens at release time was the one that broke. `just release` updated the root lockfile and never knew the firmware had its own.
 
 When rehearsing a release, rehearse the release commit too: on a scratch branch, make the same version bump `just release` makes, then dispatch the workflow. A rehearsal that skips the step the real thing starts with proves less than it looks.
+
+## A receiver that leaves the sent state on its own breaks send-on-change
+
+On 2026-10-05 a user's box showed READY while Claude Code was still working. The daemon only sends when the visible state changes, so it took for granted that the box still showed the last thing it sent. The firmware broke that: five seconds after any `task.done` it went to READY and dropped every card, even though the event listed other tasks still working. A parent agent then generated a large file for four minutes without a hook, and nothing ever told the box to go back.
+
+Two things kept it hidden. The firmware made that transition silently, so the daemon log, the only record we had, looked correct throughout. And it needs two tasks at once plus a long hook-free stretch; with one task, READY after DONE is right. That is the same pattern as "No change in the visible state is not no activity" above: concurrency is what shows it.
+
+When the sender only sends on change, the receiver may move off the sent state on its own only to a state derived from what it was sent (here, the cards that came with `task.done`). And every transition the receiver makes on its own must be reported on the link, or the sender's log can't show it.
+
+## A turn is not the user's task
+
+This is the third time we modeled the agent lifecycle too literally (see the two Codex lessons above). Each `Stop` and `SubagentStop` was announced as "All done". But with background agents, one request spans many turns: the parent ends a turn to wait, each injected message or completion notification wakes it for a short turn, and each subagent stops on its own. One request said "All done" five times, and a user guessed that "two tasks finished".
+
+The announcement has to follow the user's unit of work. A subagent reports to its parent, not to the user, so its end isn't announced. And a session isn't done while any of its subagents still runs. The real question is never "which hook fired" but "is there something for the user to come back for".
+
+What found it quickly was matching each `task.done` in the daemon log against the session transcripts by timestamp. That named the hook behind every announcement, and showed whether the turn was started by a person or by a notification. The same check cleared a burst that looked like the bug but was a person sending messages a minute apart. Before changing announcement rules, check what actually started each turn.
