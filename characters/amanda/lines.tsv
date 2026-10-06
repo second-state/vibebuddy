@@ -1,0 +1,49 @@
+input_required	Hey, it's waiting on you.
+input_required	Hey, it needs your input.
+input_required	Hey, it's stuck until you answer.
+input_required	Hey, it needs a decision.
+input_required	Hey, quick one for you.
+input_required	Hey, it needs your okay.
+input_required	Hey, it's paused for you.
+input_required	Hey, got a sec? It needs you.
+done	Nice, that's done.
+done	Ooh, that one's finished.
+done	Nice! That went through.
+done	Another win, right there.
+done	That's a wrap, good job.
+done	Done and dusted.
+done	Look at you go. All done!
+done	Wrapped up. Nice work.
+failed	Oops, that one got stuck.
+failed	Hmm, that didn't work out.
+failed	Oh no, it hit a snag.
+failed	Ah, it failed. No big deal.
+focus_done	Nice work. Time for a break!
+focus_done	Break time. Stretch it out.
+focus_done	Eyes off the screen for a bit.
+focus_done	Go grab some water.
+break_done	Break's over. Back to it!
+break_done	Welcome back, fresh eyes.
+break_done	Ready when you are.
+break_done	Okay, let's get back to it.
+first_done	Woohoo, first one done!
+first_done	And we're off. First one!
+first_done	First one down. Let's go!
+milestone	Look at you, on a roll!
+milestone	Wow, you're unstoppable today.
+milestone	Another big one. So good!
+late_night_done	Done. It's really late, though.
+late_night_done	Finished. Please go to bed soon.
+late_night_done	That's done. Sleep, okay?
+late_night_input	Hey, it's late, but it needs you.
+late_night_input	Hey, one more thing before bed.
+late_night_input	Hey, still up? It needs you.
+greeting_morning	Good morning, sunshine!
+greeting_morning	Morning! Ready when you are.
+greeting_morning	Morning! Hope you slept well.
+greeting_afternoon	Hey, good afternoon!
+greeting_afternoon	Oh hey, hope lunch was good.
+greeting_afternoon	Afternoon! Let's keep it going.
+greeting_evening	Hey, good evening.
+greeting_evening	Oh hey, long day, huh?
+greeting_evening	Evening! Don't stay up too late.

@@ -141,6 +141,29 @@ if let parsed = VoicePack(data: pack) {
 }
 check(VoicePack(data: Data("garbage".utf8)) == nil, "garbage is not a voice pack")
 
+// A Character pack: a 1024-byte header; needs input has one line of 4 samples, done one of 3.
+var character = Data(count: 1024)
+character.replaceSubrange(0..<4, with: Data("VBCP".utf8))
+character.replaceSubrange(16..<22, with: Data("sample".utf8))
+character[52] = 1
+character[53] = 12
+character[54] = 2
+character[58] = 1 // needs input: first line 0, one line
+character[60] = 1; character[62] = 1 // done: first line 1, one line
+for (line, (offset, samples)) in [(1024, 4), (1026, 3)].enumerated() {
+    for (i, byte) in withUnsafeBytes(of: UInt32(offset).littleEndian, Array.init).enumerated() { character[128 + line * 8 + i] = byte }
+    for (i, byte) in withUnsafeBytes(of: UInt32(samples).littleEndian, Array.init).enumerated() { character[132 + line * 8 + i] = byte }
+}
+character.append(Data([0x77, 0x77, 0x07, 0x00]))
+if let parsed = VoicePack(data: character) {
+    check(parsed.voiceID == "sample" && parsed.isCharacter, "character id")
+    check(parsed.previewLines.count == 2, "a preview line per ordinary occasion with a pool")
+    // 4 and 3 samples at 16 kHz become 6 and 5 stereo frames at 24 kHz, with a 300 ms gap between.
+    check(parsed.previewPCM().count == (6 + 5) * 4 + 28_800, "character preview length \(parsed.previewPCM().count)")
+} else {
+    check(false, "character pack parses")
+}
+
 // 4. Voice catalog: every entry has a language, and the picker puts the UI language first.
 let catalog = VoiceCatalogEntry.all
 check(Set(catalog.map(\.id)).count == catalog.count, "voice ids are unique")
@@ -153,11 +176,11 @@ check(VoiceCatalogEntry.sorted(catalog, preferring: .zh).first?.id == "wanwanxia
 check(VoiceCatalogEntry.language(ofVoice: "builtin") == .en, "the built-in voice is English")
 check(VoiceCatalogEntry.language(ofVoice: "hsiaoyu") == nil, "an unknown voice has no language")
 check(VoiceCatalogEntry.switchSuggestion(boxVoice: "builtin", to: .zh, bundled: catalog)?.id == "wanwanxiaohe", "English box, Chinese UI: suggest the first Chinese voice")
-check(VoiceCatalogEntry.switchSuggestion(boxVoice: "xiaohe2", to: .en, bundled: catalog)?.id == "jessica", "Chinese box, English UI: suggest Jessica")
-check(VoiceCatalogEntry.switchSuggestion(boxVoice: "chris", to: .en, bundled: catalog) == nil, "the box already speaks the UI language")
+check(VoiceCatalogEntry.switchSuggestion(boxVoice: "wanwanxiaohe", to: .en, bundled: catalog)?.id == "amanda", "Chinese box, English UI: suggest Amanda")
+check(VoiceCatalogEntry.switchSuggestion(boxVoice: "jackson", to: .en, bundled: catalog) == nil, "the box already speaks the UI language")
 check(VoiceCatalogEntry.switchSuggestion(boxVoice: "hsiaoyu", to: .zh, bundled: catalog) == nil, "unknown box voice: don't guess")
 check(VoiceCatalogEntry.switchSuggestion(boxVoice: "builtin", to: .zh, bundled: catalog.filter { $0.language == .en }) == nil, "no Chinese pack bundled: nothing to offer")
-check(VoiceCatalogEntry.switchSuggestion(boxVoice: "builtin", to: .zh, bundled: catalog.filter { $0.id == "xiaohe2" })?.id == "xiaohe2", "skip voices this build doesn't ship")
+check(VoiceCatalogEntry.switchSuggestion(boxVoice: "wanwanxiaohe", to: .en, bundled: catalog.filter { $0.id == "jackson" })?.id == "jackson", "skip Characters this build doesn't ship")
 
 if failures > 0 {
     print("\(failures) failure(s)")

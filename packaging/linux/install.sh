@@ -47,7 +47,7 @@ systemctl --user enable --now vibebuddyd.service
 
 "${bin}/vibebuddy-hook" install
 
-# What the Mac app carries in its bundle lives here instead: voice packs and firmware for the Sound and Device tabs.
+# What the Mac app carries in its bundle lives here instead: Character packs and firmware for the Sound and Device tabs.
 assets="${data}/vibebuddy"
 mkdir -p "${assets}/voices"
 if [[ ${release} -eq 1 ]]; then
@@ -56,10 +56,8 @@ if [[ ${release} -eq 1 ]]; then
     cp -r "${share}/firmware" "${assets}/firmware"
     echo "Firmware for the Device tab: $(cat "${assets}/firmware/build.txt")"
 else
-    for dir in "${repo}"/voices/*/; do
-        if [[ -f "${dir}/done.pcm" ]]; then
-            python3 "${repo}/tools/make_voice_pack.py" "${dir}" "$(basename "${dir}")" "${assets}/voices/$(basename "${dir}").bin" >/dev/null
-        fi
+    for pack in "${repo}"/characters/*/pack.bin; do
+        cp "${pack}" "${assets}/voices/$(basename "$(dirname "${pack}")").bin"
     done
 
     # Firmware isn't built here (that takes the Xtensa toolchain): it comes from the GitHub release of this version,

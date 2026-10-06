@@ -35,6 +35,7 @@ Run the tests for what you touched:
 | `firmware-rs/` | `just test-firmware` (firmware-core tests, and a pixel-by-pixel comparison of the Rust and C firmware screens) |
 | `firmware/` (C) | `just test-firmware-c` |
 | UI text in the app | `tools/check-localization.py` |
+| `tools/character_pack.py` or the Character pack format | `cargo test -p vibebuddy-firmware-core` (it parses a pack the tool built) |
 | `tools/make_voice_pack.py` or the voice pack format | `python3 tools/test_make_voice_pack.py` and `tools/test-voice-pack.sh` |
 
 If your change affects what the box does, test it on a real box when you can, and say in the pull request what you checked on the device. Some behavior, like flashing, audio and the serial link, can only be verified there.

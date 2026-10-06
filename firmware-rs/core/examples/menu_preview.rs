@@ -7,13 +7,12 @@ use std::cell::Cell;
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use vibebuddy_firmware_core::audio::Prompt;
+use vibebuddy_firmware_core::audio::Sound;
 use vibebuddy_firmware_core::buttons::Levels;
 use vibebuddy_firmware_core::canvas::{FRAME_BYTES, HEIGHT, WIDTH};
 use vibebuddy_firmware_core::display::Screen;
 use vibebuddy_firmware_core::firmware::{AudioStatus, Board, Firmware, FrameAction, VolumeError};
 use vibebuddy_firmware_core::storage::{Flash, FlashError};
-use vibebuddy_firmware_core::voices::ClipTable;
 
 /// No partitions: settings and voice packs aren't what these pictures are about.
 struct NoFlash;
@@ -70,7 +69,7 @@ impl Board for PreviewBoard {
     fn read_buttons(&mut self) -> (bool, Option<(bool, bool)>) {
         (self.keys.0, Some((self.keys.1, self.keys.2)))
     }
-    fn play(&mut self, _prompt: Prompt, _clips: ClipTable) -> Result<(), ()> {
+    fn play(&mut self, _sound: Sound) -> Result<(), ()> {
         Ok(())
     }
     fn stop_audio(&mut self) {}

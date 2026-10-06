@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Assembles Vibe Buddy.app: the two Rust helpers, the Swift app, the three firmware images, and the voice packs.
+# Assembles Vibe Buddy.app: the two Rust helpers, the Swift app, the three firmware images, and the Character packs.
 #
 # Usage: app/scripts/build-app.sh [--debug] [--install]
 #   --debug    Allow a build without firmware (the Device tab hides "Update"); Swift uses the debug configuration.
@@ -94,13 +94,12 @@ else
     exit 1
 fi
 
-echo "== Voice packs"
-for dir in "${repo_root}"/voices/*/; do
-    id="$(basename "${dir}")"
-    if [[ -f "${dir}/done.pcm" ]]; then
-        "${repo_root}/tools/make_voice_pack.py" "${dir}" "${id}" "${contents}/Resources/voices/${id}.bin" >/dev/null
-        echo "  ${id}"
-    fi
+# Each Character's pack is built by tools/make-character.sh and committed as characters/<id>/pack.bin.
+echo "== Character packs"
+for pack in "${repo_root}"/characters/*/pack.bin; do
+    id="$(basename "$(dirname "${pack}")")"
+    cp "${pack}" "${contents}/Resources/voices/${id}.bin"
+    echo "  ${id}"
 done
 
 # Both the App and its separately downloadable firmware carry these notices.

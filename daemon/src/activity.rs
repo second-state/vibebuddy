@@ -7,7 +7,10 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
+use chrono::{NaiveDate, NaiveDateTime};
 use vibebuddy_protocol::{Event, VERSION};
+
+use crate::occasions;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 
@@ -150,6 +153,10 @@ struct DailyStats {
     busy_seconds: u64,
     /// Start of the current stretch with at least one activity; `None` when there is none.
     busy_since: Option<Instant>,
+    /// The night whose late-night line has been said; once a night, shared by done and needs input.
+    late_night: Option<NaiveDate>,
+    /// The day the daily greeting was said.
+    greeted: Option<NaiveDate>,
 }
 
 #[derive(Debug, Default, Deserialize, Serialize)]
@@ -160,6 +167,10 @@ struct StoredStats {
     busy_seconds: u64,
     #[serde(default)]
     last_source: Option<ActivitySource>,
+    #[serde(default)]
+    late_night: Option<NaiveDate>,
+    #[serde(default)]
+    greeted: Option<NaiveDate>,
 }
 
 #[derive(Default)]
@@ -197,6 +208,8 @@ impl ActivityTracker {
                 asks: stored.asks,
                 busy_seconds: stored.busy_seconds,
                 busy_since: None,
+                late_night: stored.late_night,
+                greeted: stored.greeted,
             },
             last_source: stored.last_source,
             stats_file: Some(path),
@@ -301,8 +314,13 @@ impl ActivityTracker {
         }
         self.set_activity(id, title, ActivityStatus::InputRequired);
         self.record(|stats| stats.asks += 1);
-        let visible = self.activity_snapshot()?;
+        let mut visible = self.activity_snapshot()?;
         self.last_visible = Some(visible.clone());
+        let now = chrono::Local::now().naive_local();
+        if let Some(occasion) = occasions::input_occasion(now, self.stats.late_night) {
+            self.spend_late_night(now);
+            visible.extra.insert("occasion".to_owned(), json!(occasion));
+        }
         Some(visible)
     }
 
@@ -320,7 +338,37 @@ impl ActivityTracker {
         self.remember_announced(finished);
         self.sync_busy();
         self.record(|stats| stats.done += 1);
-        self.announce_end("task.done", id, title, "done")
+        let mut announced = self.announce_end("task.done", id, title, "done")?;
+        let now = chrono::Local::now().naive_local();
+        if let Some(occasion) = occasions::done_occasion(now, self.stats.done, self.stats.late_night) {
+            if occasion == "late_night_done" {
+                self.spend_late_night(now);
+            }
+            announced.extra.insert("occasion".to_owned(), json!(occasion));
+        }
+        Some(announced)
+    }
+
+    fn spend_late_night(&mut self, now: NaiveDateTime) {
+        self.stats.late_night = occasions::night_of(now);
+        self.save_stats();
+    }
+
+    /// The daily greeting, the first time the link comes up on a local calendar day; None once
+    /// it has been said today.
+    pub fn daily_greeting(&mut self) -> Option<Event> {
+        self.daily_greeting_at(chrono::Local::now().naive_local())
+    }
+
+    fn daily_greeting_at(&mut self, now: NaiveDateTime) -> Option<Event> {
+        if self.stats.greeted == Some(now.date()) {
+            return None;
+        }
+        self.stats.greeted = Some(now.date());
+        self.save_stats();
+        let mut greeting = Event::named("buddy.say");
+        greeting.extra.insert("occasion".to_owned(), json!(occasions::greeting(now)));
+        Some(greeting)
     }
 
     /// The activity ended in failure: announce the failure once.
@@ -654,6 +702,8 @@ impl ActivityTracker {
             asks: self.stats.asks,
             busy_seconds: self.stats.busy_seconds,
             last_source: self.last_source.clone(),
+            late_night: self.stats.late_night,
+            greeted: self.stats.greeted,
         };
         let Ok(text) = serde_json::to_string(&stored) else {
             return;
@@ -1173,6 +1223,36 @@ mod tests {
             Some("failed"),
             "the screen should still show other tasks, but the failure must not be swallowed"
         );
+    }
+
+    #[test]
+    fn the_first_done_of_the_day_is_a_special_occasion() {
+        let mut tracker = ActivityTracker::default();
+        let mut occasions = Vec::new();
+        for turn in 0..5 {
+            let turn = id("s", &format!("s:{turn}"));
+            tracker.observe(&turn, "ALPHA", ActivityStatus::Working);
+            let done = tracker.finish(&turn, "ALPHA").expect("a done is announced");
+            occasions.push(done.extra.get("occasion").and_then(|value| value.as_str()).map(str::to_owned));
+        }
+        // Late at night the first done is the late-night one instead; either way the 5th is a milestone.
+        let first = occasions[0].as_deref();
+        assert!(matches!(first, Some("first_done" | "late_night_done")), "{first:?}");
+        assert_eq!(occasions[1..4], [None, None, None]);
+        assert_eq!(occasions[4].as_deref(), Some("milestone"));
+    }
+
+    #[test]
+    fn the_greeting_is_said_once_a_day() {
+        let mut tracker = ActivityTracker::default();
+        let morning = NaiveDate::from_ymd_opt(2026, 10, 6).unwrap().and_hms_opt(9, 0, 0).unwrap();
+        let greeting = tracker.daily_greeting_at(morning).expect("the first link of the day");
+        assert_eq!(greeting.event, "buddy.say");
+        assert_eq!(greeting.extra.get("occasion"), Some(&json!("greeting_morning")));
+        assert!(tracker.daily_greeting_at(morning + Duration::from_secs(3600)).is_none(), "the box restarted");
+        let next_evening = NaiveDate::from_ymd_opt(2026, 10, 7).unwrap().and_hms_opt(20, 0, 0).unwrap();
+        let greeting = tracker.daily_greeting_at(next_evening).expect("a new day");
+        assert_eq!(greeting.extra.get("occasion"), Some(&json!("greeting_evening")));
     }
 
     #[test]

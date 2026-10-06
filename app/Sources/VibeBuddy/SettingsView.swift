@@ -123,8 +123,8 @@ struct VoicesView: View {
         VStack(alignment: .leading, spacing: 12) {
             VolumeRow(model: model)
             Divider()
-            Text("Announcement voice").font(.headline)
-            Text("The box is using “\(currentVoiceName)”. Preview a voice, then click Use to write it to the box — no firmware flash needed. Over the UART port this takes a few minutes; when it's done the box says a line in the new voice.")
+            Text("Character").font(.headline)
+            Text("The box is speaking as “\(currentVoiceName)”. Each character has its own voice and lines. Preview one, then click Use to write it to the box — no firmware flash needed. Over the UART port this takes a few minutes; when it's done the box says a line as the new character.")
                 .font(.callout).foregroundStyle(.secondary)
             ScrollView {
                 VStack(spacing: 8) {

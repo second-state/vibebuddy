@@ -83,9 +83,9 @@ A voice pack is a small custom format with no file system: magic number, version
 
 Writing goes over the existing serial protocol: the Mac sends base64 in chunks, and the firmware writes the partition itself, verifies it and reports back, without resetting or grabbing the serial port; both connection types behave the same. Over the bridge at 115200 baud, 1.5 MB takes about three minutes; the native USB port takes a few seconds. The esptool path is reserved for firmware updates.
 
-The four voice packs (two Chinese, two English) aren't checked in; a script builds them from `voices/*/` at build time and they ship with the app, about 4.5 MB.
+The packs the app ships are the Character packs committed as `characters/*/pack.bin` (see [`characters.md`](characters.md)), about 2.5 MB for four.
 
-The voice catalog `VoiceCatalogEntry.all` tags each voice with the language of its lines (`VoiceLanguage.zh` / `.en`). The voice picker lists only the voices this build actually ships a pack for (computed once at startup from whether the file exists), and puts voices matching the interface language first. The catalog has two English voices, `jessica` and `chris` (ElevenLabs), which show up only once their PCM is in `voices/`; see `voices/README.md` for how to generate it. The firmware's built-in voice is Jessica, in English, so onboarding in the Chinese interface suggests picking a Chinese voice.
+The voice catalog `VoiceCatalogEntry.all` tags each voice with the language of its lines (`VoiceLanguage.zh` / `.en`). The voice picker lists only the voices this build actually ships a pack for (computed once at startup from whether the file exists), and puts voices matching the interface language first. The catalog has two English Characters, `amanda` and `jackson`, and two Chinese, `wanwanxiaohe` and `ahu`. The firmware's built-in voice is Jessica, in English, so onboarding in the Chinese interface suggests picking a Chinese voice.
 
 New events the device protocol needs (a draft, to be written into `protocol.md` at implementation time): `device.identify` (blink), `voice.begin` / `voice.chunk` / `voice.end`, and the device reporting `voice.written` with the verification result.
 

@@ -20,6 +20,127 @@ impl Prompt {
     pub const ALL: [Prompt; 5] = [Prompt::InputRequired, Prompt::Done, Prompt::Failed, Prompt::FocusDone, Prompt::BreakDone];
 }
 
+/// The situation an announcement is made in, which picks the pool its line is drawn from. The
+/// numbering is the order of the Character pack's occasion table (docs/characters.md).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Occasion {
+    InputRequired = 0,
+    Done = 1,
+    Failed = 2,
+    FocusDone = 3,
+    BreakDone = 4,
+    FirstDone = 5,
+    Milestone = 6,
+    LateNightDone = 7,
+    LateNightInput = 8,
+    GreetingMorning = 9,
+    GreetingAfternoon = 10,
+    GreetingEvening = 11,
+}
+
+pub const OCCASIONS: usize = 12;
+
+impl Occasion {
+    pub const ALL: [Occasion; OCCASIONS] = [
+        Occasion::InputRequired,
+        Occasion::Done,
+        Occasion::Failed,
+        Occasion::FocusDone,
+        Occasion::BreakDone,
+        Occasion::FirstDone,
+        Occasion::Milestone,
+        Occasion::LateNightDone,
+        Occasion::LateNightInput,
+        Occasion::GreetingMorning,
+        Occasion::GreetingAfternoon,
+        Occasion::GreetingEvening,
+    ];
+
+    /// The protocol's name, as in the `occasion` field.
+    pub fn name(self) -> &'static str {
+        match self {
+            Occasion::InputRequired => "input_required",
+            Occasion::Done => "done",
+            Occasion::Failed => "failed",
+            Occasion::FocusDone => "focus_done",
+            Occasion::BreakDone => "break_done",
+            Occasion::FirstDone => "first_done",
+            Occasion::Milestone => "milestone",
+            Occasion::LateNightDone => "late_night_done",
+            Occasion::LateNightInput => "late_night_input",
+            Occasion::GreetingMorning => "greeting_morning",
+            Occasion::GreetingAfternoon => "greeting_afternoon",
+            Occasion::GreetingEvening => "greeting_evening",
+        }
+    }
+
+    pub fn from_name(name: &str) -> Option<Occasion> {
+        Occasion::ALL.into_iter().find(|occasion| occasion.name() == name)
+    }
+
+    /// Where to look when this occasion has no lines: a special occasion falls back to the ordinary
+    /// one it is a rarer reading of; ordinary occasions and greetings have nowhere further to go.
+    pub fn fallback(self) -> Option<Occasion> {
+        match self {
+            Occasion::FirstDone | Occasion::Milestone | Occasion::LateNightDone => Some(Occasion::Done),
+            Occasion::LateNightInput => Some(Occasion::InputRequired),
+            _ => None,
+        }
+    }
+
+    /// The built-in line that speaks for this occasion when no pack has one; greetings have none.
+    pub fn builtin(self) -> Option<Prompt> {
+        match self {
+            Occasion::InputRequired | Occasion::LateNightInput => Some(Prompt::InputRequired),
+            Occasion::Done | Occasion::FirstDone | Occasion::Milestone | Occasion::LateNightDone => Some(Prompt::Done),
+            Occasion::Failed => Some(Prompt::Failed),
+            Occasion::FocusDone => Some(Prompt::FocusDone),
+            Occasion::BreakDone => Some(Prompt::BreakDone),
+            Occasion::GreetingMorning | Occasion::GreetingAfternoon | Occasion::GreetingEvening => None,
+        }
+    }
+
+    /// The Pomodoro chime that goes before a Character's line; built-in lines carry their own.
+    pub fn chime(self) -> Option<Chime> {
+        match self {
+            Occasion::FocusDone => Some(Chime::Focus),
+            Occasion::BreakDone => Some(Chime::Break),
+            _ => None,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Chime {
+    Focus,
+    Break,
+}
+
+/// How a line's audio is stored in flash.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Codec {
+    /// The old voice pack's format: 24 kHz, 16 bit, stereo, little endian.
+    Pcm24kStereo,
+    /// The Character pack's format: 16 kHz mono IMA ADPCM, `samples` long.
+    Adpcm16kMono { samples: u32 },
+}
+
+/// One line's audio: an absolute flash location and how to decode it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Line {
+    pub offset: u32,
+    pub length: u32,
+    pub codec: Codec,
+}
+
+/// One thing for the speaker to play.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Sound {
+    Builtin(Prompt),
+    Chime(Chime),
+    Line(Line),
+}
+
 /// Audio sample rate: both built-in and voice pack PCM are 24 kHz, 16 bit, stereo, little endian.
 pub const SAMPLE_RATE: u32 = 24000;
 

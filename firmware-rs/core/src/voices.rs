@@ -1,16 +1,18 @@
-//! Reading and writing voice packs: the device's `voices` partition holds the current
-//! announcement voice's five finished lines. If the partition is empty or fails its check, the
-//! compiled-in set is used. Changing voice writes only this partition, never the firmware
-//! (ADR-0003).
+//! Reading and writing the pack in the device's `voices` partition: a Character pack (ADR-0008),
+//! or an older voice pack with five fixed lines, which still plays until the Mac replaces it. If the
+//! partition is empty or fails its check, the compiled-in lines are used. Changing Character writes
+//! only this partition, never the firmware (ADR-0003).
 //!
 //! The C firmware maps the partition into the address space and feeds I2S from it directly, so
 //! the writer has to agree with the playback task on a "playing" flag first. There is no mapping
 //! here: the playback task reads flash chunk by chunk, and the layer above stops playback before a
 //! write session begins (see voice.begin in `Firmware`), so the two never touch this flash at once.
 
-use crate::audio::Prompt;
+use crate::audio::{Chime, Codec, Line, Occasion};
+use crate::character_pack::{self, CharacterPack};
+use crate::lines::LinePicker;
 use crate::storage::{Flash, FlashError, Region, SECTOR_BYTES};
-use crate::voice_pack::{self, CLIPS, HEADER_BYTES, VoicePack};
+use crate::voice_pack::{self, VoicePack};
 
 /// Maximum raw bytes per chunk; the Mac splits by this so a base64 line stays under the protocol limit.
 pub const CHUNK_BYTES: usize = 672;
@@ -52,20 +54,57 @@ impl From<FlashError> for VoiceError {
     }
 }
 
-/// Absolute location of one line in flash.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct ClipLocation {
-    pub offset: u32,
-    pub length: u32,
+/// The largest header of the two formats; the header is kept in memory and written last.
+const MAX_HEADER_BYTES: usize = character_pack::HEADER_BYTES;
+
+#[allow(clippy::large_enum_variant, reason = "there is only ever one, inside Voices; boxing it would just move it to the heap")]
+enum Pack {
+    Voice(VoicePack),
+    Character(CharacterPack),
 }
 
-/// Locations of the five lines; None means the built-in voice.
-pub type ClipTable = Option<[ClipLocation; CLIPS]>;
+impl Pack {
+    fn header_bytes(&self) -> u32 {
+        match self {
+            Pack::Voice(_) => voice_pack::HEADER_BYTES as u32,
+            Pack::Character(_) => character_pack::HEADER_BYTES as u32,
+        }
+    }
+
+    fn payload(&self) -> (u32, u32) {
+        match self {
+            Pack::Voice(pack) => (pack.payload_length, pack.payload_crc32),
+            Pack::Character(pack) => (pack.payload_length, pack.payload_crc32),
+        }
+    }
+}
+
+/// How long a header is, by the magic it starts with.
+fn header_bytes_for(magic: &[u8]) -> usize {
+    if magic == character_pack::MAGIC { character_pack::HEADER_BYTES } else { voice_pack::HEADER_BYTES }
+}
+
+fn parse(header: &[u8], capacity: usize) -> Option<Pack> {
+    if header[..4] == *character_pack::MAGIC {
+        character_pack::parse(header, capacity).map(Pack::Character)
+    } else {
+        voice_pack::parse(header, capacity).map(Pack::Voice)
+    }
+}
+
+/// The line an announcement plays, with the chime to play before it, if any.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Pick {
+    pub line: Line,
+    pub chime: Option<Chime>,
+}
 
 struct Session {
     expected_total: u32,
     received: u32,
     next_seq: u32,
+    /// How much of the start is header, kept in memory; known from the first chunk's magic.
+    header_bytes: usize,
     /// Leftover bytes short of 4 that cannot be written yet. Flash writes must be 4-byte aligned.
     tail: [u8; 4],
     tail_length: usize,
@@ -73,10 +112,10 @@ struct Session {
 
 pub struct Voices {
     partition: Option<Region>,
-    pack: Option<VoicePack>,
+    pack: Option<Pack>,
     session: Option<Session>,
-    /// The 256 header bytes stay in memory and are written to flash only after the final check passes.
-    header: [u8; HEADER_BYTES],
+    /// The header stays in memory and is written to flash only after the final check passes.
+    header: [u8; MAX_HEADER_BYTES],
     buffer: [u8; BUFFER_BYTES + 4],
 }
 
@@ -88,7 +127,7 @@ impl Default for Voices {
 
 impl Voices {
     pub const fn new() -> Self {
-        Self { partition: None, pack: None, session: None, header: [0; HEADER_BYTES], buffer: [0; BUFFER_BYTES + 4] }
+        Self { partition: None, pack: None, session: None, header: [0; MAX_HEADER_BYTES], buffer: [0; BUFFER_BYTES + 4] }
     }
 
     /// Records the partition and verifies the pack in it. Returns NotFound without one; the built-in
@@ -102,30 +141,53 @@ impl Voices {
         Ok(())
     }
 
-    /// Current voice id; "builtin" for the built-in one.
+    /// Current Character (or voice) id; "builtin" for the built-in one.
     pub fn current_id(&self) -> &str {
         match &self.pack {
-            Some(pack) => pack.voice_id(),
+            Some(Pack::Voice(pack)) => pack.voice_id(),
+            Some(Pack::Character(pack)) => pack.id(),
             None => "builtin",
         }
     }
 
-    /// Location table for playback. While a write session is running, always built-in: the partition
-    /// is being rewritten.
-    pub fn clips(&self) -> ClipTable {
+    /// The line to play for an occasion, following the occasion's fallbacks; None means the
+    /// built-in line, or silence for an occasion that has none. While a write session is running it
+    /// is always None: the partition is being rewritten.
+    pub fn pick(&self, occasion: Occasion, picker: &mut LinePicker) -> Option<Pick> {
         let pack = self.pack.as_ref()?;
         if self.session.is_some() {
             return None;
         }
         let partition = self.partition?;
-        let mut table = [ClipLocation { offset: 0, length: 0 }; CLIPS];
-        for (index, clip) in table.iter_mut().enumerate() {
-            *clip = ClipLocation {
-                offset: partition.offset + pack.clip_offset[index],
-                length: pack.clip_length[index],
-            };
+        match pack {
+            // The old voice pack: one line per ordinary occasion, chime included.
+            Pack::Voice(pack) => {
+                let index = occasion.builtin()? as usize;
+                let line = Line {
+                    offset: partition.offset + pack.clip_offset[index],
+                    length: pack.clip_length[index],
+                    codec: Codec::Pcm24kStereo,
+                };
+                Some(Pick { line, chime: None })
+            }
+            Pack::Character(pack) => {
+                let mut wanted = Some(occasion);
+                while let Some(candidate) = wanted {
+                    let pool = pack.pool(candidate);
+                    if !pool.is_empty() {
+                        let entry = pool[picker.pick(candidate as usize, pool.len())];
+                        let line = Line {
+                            offset: partition.offset + entry.offset,
+                            length: entry.bytes(),
+                            codec: Codec::Adpcm16kMono { samples: entry.samples },
+                        };
+                        return Some(Pick { line, chime: candidate.chime() });
+                    }
+                    wanted = candidate.fallback();
+                }
+                None
+            }
         }
-        Some(table)
     }
 
     /// Reads the header and verifies header and payload. A failed check treats the partition as empty.
@@ -134,15 +196,16 @@ impl Voices {
         let Some(partition) = self.partition else {
             return false;
         };
-        let mut header = [0u8; HEADER_BYTES];
+        let mut header = [0u8; MAX_HEADER_BYTES];
         if flash.read(partition.offset, &mut header).is_err() {
             return false;
         }
-        let Some(parsed) = voice_pack::parse(&header, partition.size as usize) else {
+        let Some(parsed) = parse(&header, partition.size as usize) else {
             return false;
         };
-        match self.payload_crc(flash, partition, parsed.payload_length) {
-            Ok(crc) if crc == parsed.payload_crc32 => {
+        let (length, expected) = parsed.payload();
+        match self.payload_crc(flash, partition, parsed.header_bytes(), length) {
+            Ok(crc) if crc == expected => {
                 self.pack = Some(parsed);
                 true
             }
@@ -150,7 +213,7 @@ impl Voices {
         }
     }
 
-    fn payload_crc(&mut self, flash: &mut dyn Flash, partition: Region, length: u32) -> Result<u32, FlashError> {
+    fn payload_crc(&mut self, flash: &mut dyn Flash, partition: Region, header_bytes: u32, length: u32) -> Result<u32, FlashError> {
         let mut crc = 0;
         let mut offset = 0;
         while offset < length {
@@ -158,7 +221,7 @@ impl Voices {
             // Flash reads are 4-byte aligned too; the extra tail bytes are left out of the CRC.
             let aligned = block.div_ceil(4) * 4;
             let buffer = &mut self.buffer[..aligned as usize];
-            flash.read(partition.offset + HEADER_BYTES as u32 + offset, buffer)?;
+            flash.read(partition.offset + header_bytes + offset, buffer)?;
             crc = voice_pack::crc32(crc, &buffer[..block as usize]);
             offset += block;
         }
@@ -172,7 +235,7 @@ impl Voices {
     /// Checks before begin: is there a partition, and does the total size fit.
     pub fn check_begin(&self, total_bytes: u32) -> Result<Region, VoiceError> {
         let partition = self.partition.ok_or(VoiceError::NotFound)?;
-        if total_bytes as usize <= HEADER_BYTES || total_bytes > partition.size {
+        if total_bytes as usize <= voice_pack::HEADER_BYTES || total_bytes > partition.size {
             return Err(VoiceError::InvalidSize);
         }
         Ok(partition)
@@ -184,7 +247,7 @@ impl Voices {
         self.session = None;
         let erase_bytes = total_bytes.div_ceil(SECTOR_BYTES) * SECTOR_BYTES;
         flash.erase(partition.offset, partition.offset + erase_bytes)?;
-        self.session = Some(Session { expected_total: total_bytes, received: 0, next_seq: 0, tail: [0; 4], tail_length: 0 });
+        self.session = Some(Session { expected_total: total_bytes, received: 0, next_seq: 0, header_bytes: 0, tail: [0; 4], tail_length: 0 });
         Ok(())
     }
 
@@ -209,16 +272,22 @@ impl Voices {
             return Err(VoiceError::InvalidCrc);
         }
 
+        if session.received == 0 {
+            if decoded < 4 {
+                return Err(VoiceError::InvalidArg);
+            }
+            session.header_bytes = header_bytes_for(&self.buffer[4..8]);
+        }
         let mut consumed = 0;
         // The header part stays in memory for now.
-        if (session.received as usize) < HEADER_BYTES {
-            let take = (HEADER_BYTES - session.received as usize).min(decoded);
+        if (session.received as usize) < session.header_bytes {
+            let take = (session.header_bytes - session.received as usize).min(decoded);
             let at = session.received as usize;
             self.header[at..at + take].copy_from_slice(&self.buffer[4..4 + take]);
             consumed = take;
         }
         if consumed < decoded {
-            // The payload starts at 256 and stays 4-byte aligned: the write position is the bytes
+            // The payload starts at 256 or 1024 and stays 4-byte aligned: the write position is the bytes
             // received so far minus the tail still being held.
             let payload_start = 4 + consumed;
             let tail_length = session.tail_length;
@@ -251,17 +320,19 @@ impl Voices {
             let offset = session.received - session.tail_length as u32;
             flash.write(partition.offset + offset, &padded)?;
         }
-        let parsed = voice_pack::parse(&self.header, partition.size as usize).ok_or(VoiceError::InvalidResponse)?;
-        if HEADER_BYTES as u32 + parsed.payload_length != session.expected_total {
+        let header_bytes = session.header_bytes;
+        let parsed = parse(&self.header[..header_bytes], partition.size as usize).ok_or(VoiceError::InvalidResponse)?;
+        let (length, expected) = parsed.payload();
+        if parsed.header_bytes() + length != session.expected_total {
             return Err(VoiceError::InvalidSize);
         }
         // Read-back verification: what is in flash counts, not what is in memory.
-        let crc = self.payload_crc(flash, partition, parsed.payload_length)?;
-        if crc != parsed.payload_crc32 {
+        let crc = self.payload_crc(flash, partition, parsed.header_bytes(), length)?;
+        if crc != expected {
             return Err(VoiceError::InvalidCrc);
         }
         let header = self.header;
-        flash.write(partition.offset, &header)?;
+        flash.write(partition.offset, &header[..header_bytes])?;
         if self.validate(flash) { Ok(()) } else { Err(VoiceError::Fail) }
     }
 
@@ -275,15 +346,11 @@ impl Voices {
     }
 }
 
-/// The five lines are in the same order as in the voice pack.
-pub fn clip_index(prompt: Prompt) -> usize {
-    prompt as usize
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::storage::tests::MemoryFlash;
+    use crate::character_pack::tests::build_pack;
     use crate::voice_pack::tests::build_header;
     use std::string::String;
     use std::vec::Vec;
@@ -332,20 +399,57 @@ mod tests {
         let mut voices = Voices::new();
         voices.init(&mut flash, Some(PARTITION)).unwrap();
         assert_eq!(voices.current_id(), "builtin");
-        assert_eq!(voices.clips(), None);
+        assert_eq!(voices.pick(Occasion::Done, &mut LinePicker::new(1)), None);
 
         let pack = pack();
         write(&mut voices, &mut flash, &pack).unwrap();
         assert_eq!(voices.current_id(), "wanwanxiaohe");
         let start = PARTITION.offset as usize;
         assert_eq!(&flash.bytes[start..start + pack.len()], &pack[..]);
-        let clips = voices.clips().unwrap();
-        assert_eq!(clips[0], ClipLocation { offset: PARTITION.offset + 256, length: 1001 });
+        let pick = voices.pick(Occasion::InputRequired, &mut LinePicker::new(1)).unwrap();
+        assert_eq!(pick, Pick { line: Line { offset: PARTITION.offset + 256, length: 1001, codec: Codec::Pcm24kStereo }, chime: None });
+        // An old voice pack speaks a special occasion with its ordinary line, and has no greeting.
+        let pick = voices.pick(Occasion::FirstDone, &mut LinePicker::new(1)).unwrap();
+        assert_eq!(pick.line.offset, PARTITION.offset + 256 + 1001);
+        assert_eq!(voices.pick(Occasion::GreetingMorning, &mut LinePicker::new(1)), None);
 
         // Still recognized after a reboot.
         let mut again = Voices::new();
         again.init(&mut flash, Some(PARTITION)).unwrap();
         assert_eq!(again.current_id(), "wanwanxiaohe");
+    }
+
+    #[test]
+    fn a_written_character_pack_draws_from_its_pools() {
+        let mut flash = MemoryFlash::new(0x610000);
+        let mut voices = Voices::new();
+        voices.init(&mut flash, Some(PARTITION)).unwrap();
+        // Pools: input required (2 lines), done (1), failed (none), focus done (1), break done (none),
+        // first done (none), milestone (1).
+        let pack = build_pack("jessica", &[&[1001, 1003], &[2001], &[], &[4001], &[], &[], &[777]]);
+        write(&mut voices, &mut flash, &pack).unwrap();
+        assert_eq!(voices.current_id(), "jessica");
+        let mut picker = LinePicker::new(5);
+
+        let done = voices.pick(Occasion::Done, &mut picker).unwrap();
+        assert_eq!(done.line, Line { offset: PARTITION.offset + 1024 + 501 + 502, length: 1001, codec: Codec::Adpcm16kMono { samples: 2001 } });
+        assert_eq!(done.chime, None);
+
+        let milestone = voices.pick(Occasion::Milestone, &mut picker).unwrap();
+        assert_eq!(milestone.line.codec, Codec::Adpcm16kMono { samples: 777 });
+        assert_eq!(voices.pick(Occasion::FirstDone, &mut picker).unwrap().line, done.line, "first done falls back to done");
+        assert_eq!(voices.pick(Occasion::Failed, &mut picker), None, "no failed pool: the built-in line plays");
+        assert_eq!(voices.pick(Occasion::GreetingMorning, &mut picker), None);
+        assert_eq!(voices.pick(Occasion::FocusDone, &mut picker).unwrap().chime, Some(Chime::Focus));
+
+        let first = voices.pick(Occasion::InputRequired, &mut picker).unwrap().line;
+        let second = voices.pick(Occasion::InputRequired, &mut picker).unwrap().line;
+        assert_ne!(first, second, "a pool of two alternates");
+
+        // Still recognized after a reboot.
+        let mut again = Voices::new();
+        again.init(&mut flash, Some(PARTITION)).unwrap();
+        assert_eq!(again.current_id(), "jessica");
     }
 
     #[test]

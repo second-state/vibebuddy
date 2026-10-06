@@ -4,6 +4,7 @@ mod claude_hooks;
 mod codex_hooks;
 mod config;
 mod link_alert;
+mod occasions;
 mod rom_flasher;
 mod screenshot;
 mod serial_transport;
@@ -210,8 +211,19 @@ async fn handle_device_events(
 /// Every device message goes through here: update device state, broadcast to operations waiting for acks, and K2 opens the source.
 /// Tests inject device messages here too, so it must not depend on the serial port.
 async fn publish_device_message(state: &AppState, message: DeviceMessage) {
-    if state.device.lock().await.apply(&message) {
+    let (changed, booted) = {
+        let mut device = state.device.lock().await;
+        let had_build = device.firmware_build.is_some();
+        let changed = device.apply(&message);
+        (changed, !had_build && device.firmware_build.is_some())
+    };
+    if changed {
         state.notify_status();
+    }
+    // The daily greeting waits for the firmware to report its build: the box restarts when the port
+    // opens, and a line sent before it is listening would be lost.
+    if booted && let Some(greeting) = state.activities.lock().await.daily_greeting() {
+        send_event(state, greeting);
     }
     let _ = state.device_bus.send(message.clone());
     // Ask right after connecting; the device reports its mode, firmware build and voice again.

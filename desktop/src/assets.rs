@@ -1,4 +1,4 @@
-//! What was installed next to the app: voice packs built from `voices/`, and the firmware of the release this app
+//! What was installed next to the app: the Character packs from `characters/`, and the firmware of the release this app
 //! belongs to. On the Mac both ride inside the app bundle. Here `install.sh` puts them in `~/.local/share/vibebuddy`
 //! and a distribution package in `/usr/share/vibebuddy`; the user's copy wins, as XDG data lookups go.
 
@@ -50,9 +50,9 @@ fn catalog() -> Vec<Voice> {
             tr("Chinese · Taiwanese accent · Doubao · same voice as Xiaozhi", &[]),
             Language::Chinese,
         ),
-        voice("xiaohe2", tr("Xiaohe 2.0", &[]), tr("Chinese · Mandarin · Doubao", &[]), Language::Chinese),
-        voice("jessica", "Jessica".to_owned(), tr("English · US · ElevenLabs", &[]), Language::English),
-        voice("chris", "Chris".to_owned(), tr("English · US · ElevenLabs", &[]), Language::English),
+        voice("ahu", tr("Ahu", &[]), tr("Chinese · Mandarin · Doubao", &[]), Language::Chinese),
+        voice("amanda", "Amanda".to_owned(), tr("English · Doubao", &[]), Language::English),
+        voice("jackson", "Jackson".to_owned(), tr("English · Doubao", &[]), Language::English),
     ]
 }
 
@@ -162,10 +162,10 @@ mod tests {
             switch_among(catalog(), voice, language, installed).map(|voice| voice.id)
         };
         assert_eq!(switch("builtin", Language::Chinese, &all), Some("wanwanxiaohe"));
-        assert_eq!(switch("xiaohe2", Language::English, &all), Some("jessica"));
-        assert_eq!(switch("jessica", Language::English, &all), None);
+        assert_eq!(switch("wanwanxiaohe", Language::English, &all), Some("amanda"));
+        assert_eq!(switch("jackson", Language::English, &all), None);
         assert_eq!(switch("someone-else", Language::English, &all), None);
-        assert_eq!(switch("builtin", Language::Chinese, &|id: &str| id == "xiaohe2"), Some("xiaohe2"));
+        assert_eq!(switch("builtin", Language::Chinese, &|id: &str| id == "ahu"), Some("ahu"));
         assert_eq!(switch("builtin", Language::Chinese, &|_: &str| false), None);
     }
 

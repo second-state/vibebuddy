@@ -11,7 +11,7 @@ use alloc::vec::Vec;
 use serde_json::{Map, Value};
 use vibebuddy_protocol::{Event, ProtocolError, VERSION};
 
-use crate::audio::{Prompt, clamp_volume, VOLUME_DEFAULT};
+use crate::audio::{Occasion, Sound, clamp_volume, VOLUME_DEFAULT};
 use crate::buttons::{ButtonEvent, Buttons, Levels};
 use crate::display::{Display, MAX_STATS, MAX_TASKS, Mode, Panel, PanelKind, Scene, Screen, State, TaskInput, Tone};
 use crate::leisure::{Leisure, Tier};
@@ -20,7 +20,8 @@ use crate::pomodoro::{Phase, Pomodoro, Run, Transition};
 use crate::storage::{Flash, Settings, SettingsStore, find_partition};
 use crate::text;
 use crate::voice_pack::crc32;
-use crate::voices::{ClipTable, Voices, VoiceError};
+use crate::lines::LinePicker;
+use crate::voices::{Pick, Voices, VoiceError};
 
 pub const MAX_LINE_BYTES: usize = 1024;
 const LINE_BUFFER_BYTES: usize = MAX_LINE_BYTES + 2;
@@ -68,8 +69,8 @@ pub trait Board: Screen {
     /// K0's level and the levels of K1 and K2 on the expander (true means pressed); None if the expander read fails.
     fn read_buttons(&mut self) -> (bool, Option<(bool, bool)>);
 
-    /// Queues an announcement. With `clips` None, plays the built-in voice. Returns Err when the queue is full.
-    fn play(&mut self, prompt: Prompt, clips: ClipTable) -> Result<(), ()>;
+    /// Queues a sound to play after whatever is already queued. Returns Err when the queue is full.
+    fn play(&mut self, sound: Sound) -> Result<(), ()>;
     /// Stops what is playing and clears the queue.
     fn stop_audio(&mut self);
     /// Still making sound: something is queued, playing, or not yet flushed to silence in DMA.
@@ -82,6 +83,7 @@ pub struct Firmware {
     leisure: Leisure,
     display: Display,
     voices: Voices,
+    picker: LinePicker,
     buttons: Option<Buttons>,
     settings: Option<SettingsStore>,
     volume: u32,
@@ -155,6 +157,24 @@ fn string<'a>(fields: &'a impl Fields, key: &str) -> Option<&'a str> {
     fields.field(key).and_then(Value::as_str)
 }
 
+/// The diagnostic name of an occasion in `AUDIO QUEUED` lines.
+fn occasion_label(occasion: Occasion) -> &'static str {
+    match occasion {
+        Occasion::InputRequired => "INPUT_REQUIRED",
+        Occasion::Done => "DONE",
+        Occasion::Failed => "FAILED",
+        Occasion::FocusDone => "FOCUS_DONE",
+        Occasion::BreakDone => "BREAK_DONE",
+        Occasion::FirstDone => "FIRST_DONE",
+        Occasion::Milestone => "MILESTONE",
+        Occasion::LateNightDone => "LATE_NIGHT_DONE",
+        Occasion::LateNightInput => "LATE_NIGHT_INPUT",
+        Occasion::GreetingMorning => "GREETING_MORNING",
+        Occasion::GreetingAfternoon => "GREETING_AFTERNOON",
+        Occasion::GreetingEvening => "GREETING_EVENING",
+    }
+}
+
 impl Firmware {
     pub fn new(seed: u32, now_ms: u32, build: &[u8]) -> Self {
         Self {
@@ -162,6 +182,7 @@ impl Firmware {
             leisure: Leisure::new(seed, now_ms),
             display: Display::new(),
             voices: Voices::new(),
+            picker: LinePicker::new(seed ^ 0x9E37_79B9),
             buttons: None,
             settings: None,
             volume: VOLUME_DEFAULT,
@@ -345,20 +366,32 @@ impl Firmware {
         Self::write_value_line(board, "POMODORO ", what.as_bytes());
     }
 
-    fn clips(&self) -> ClipTable {
-        if self.pending_voice_begin.is_some() { None } else { self.voices.clips() }
-    }
-
-    /// Every voice line goes out through here; when muted it only logs a line.
-    fn play_prompt<B: Board>(&mut self, board: &mut B, prompt: Prompt, label: &str) {
+    /// Every announcement goes out through here: draw a line from the current Character's pool for
+    /// the occasion, or fall back to the built-in line. When muted it only logs a line.
+    fn announce<B: Board>(&mut self, board: &mut B, occasion: Occasion) {
+        let label = occasion_label(occasion);
         if self.muted {
             Self::write_value_line(board, "AUDIO MUTED ", label.as_bytes());
             return;
         }
-        if !self.audio_ready || board.play(prompt, self.clips()).is_err() {
-            Self::write_literal(board, "AUDIO ERROR\n");
-        } else {
+        // While a write is about to start, the partition is no longer trusted.
+        let pick = if self.pending_voice_begin.is_some() { None } else { self.voices.pick(occasion, &mut self.picker) };
+        let (first, then) = match pick {
+            Some(Pick { line, chime: Some(chime) }) => (Sound::Chime(chime), Some(Sound::Line(line))),
+            Some(Pick { line, chime: None }) => (Sound::Line(line), None),
+            None => match occasion.builtin() {
+                Some(prompt) => (Sound::Builtin(prompt), None),
+                None => {
+                    Self::write_value_line(board, "AUDIO SILENT ", label.as_bytes());
+                    return;
+                }
+            },
+        };
+        let queued = self.audio_ready && board.play(first).is_ok() && then.is_none_or(|sound| board.play(sound).is_ok());
+        if queued {
             Self::write_value_line(board, "AUDIO QUEUED ", label.as_bytes());
+        } else {
+            Self::write_literal(board, "AUDIO ERROR\n");
         }
     }
 
@@ -516,10 +549,10 @@ impl Firmware {
                 self.show_menu(board);
                 self.stop_phase(board);
             }
-            // The preview goes through play_prompt, so it is silent when muted, like the app's.
+            // The preview goes through announce, so it is silent when muted, like the app's.
             MenuAction::StepVolume => {
                 self.set_volume_level(board, menu::next_volume(self.volume));
-                self.play_prompt(board, Prompt::Done, "DONE");
+                self.announce(board, Occasion::Done);
             }
             MenuAction::ToggleMute => self.toggle_mute(board),
         }
@@ -619,9 +652,9 @@ impl Firmware {
             self.save_tally(board);
         }
         if focus_ended {
-            self.play_prompt(board, Prompt::FocusDone, "FOCUS_DONE");
+            self.announce(board, Occasion::FocusDone);
         } else {
-            self.play_prompt(board, Prompt::BreakDone, "BREAK_DONE");
+            self.announce(board, Occasion::BreakDone);
         }
         let now = board.now_ms();
         self.display.pomodoro_ended(&scene!(self, now));
@@ -707,23 +740,31 @@ impl Firmware {
         }
 
         let now = board.now_ms();
-        let (state, state_label, mut prompt) = match event {
+        let (state, state_label, mut occasion) = match event {
             "task.start" => (State::Working, "WORKING", None),
             "agent.idle" => (State::Idle, "READY", None),
-            "agent.input_required" => (State::InputRequired, "INPUT REQUIRED", Some((Prompt::InputRequired, "INPUT_REQUIRED"))),
-            "task.done" => (State::Done, "DONE", Some((Prompt::Done, "DONE"))),
-            "task.error" | "agent.blocked" => (State::Failed, "FAILED", Some((Prompt::Failed, "FAILED"))),
+            "agent.input_required" => (State::InputRequired, "INPUT REQUIRED", Some(Occasion::InputRequired)),
+            "task.done" => (State::Done, "DONE", Some(Occasion::Done)),
+            "task.error" | "agent.blocked" => (State::Failed, "FAILED", Some(Occasion::Failed)),
             _ => return,
         };
         self.ready_deadline = if event == "task.done" { Some(now.wrapping_add(DONE_TO_IDLE_MS)) } else { None };
 
         if fields.get("suppress_audio") == Some(&Value::Bool(true)) {
-            prompt = None;
+            occasion = None;
         }
         match string(fields, "announcement") {
-            Some("done") => prompt = Some((Prompt::Done, "DONE")),
-            Some("failed") => prompt = Some((Prompt::Failed, "FAILED")),
+            Some("done") => occasion = Some(Occasion::Done),
+            Some("failed") => occasion = Some(Occasion::Failed),
             _ => {}
+        }
+        // A special occasion only changes which pool the line comes from, and only for the ordinary
+        // occasion it is a rarer reading of: a "first_done" on a needs-input event is ignored.
+        if let Some(special) = string(fields, "occasion").and_then(Occasion::from_name)
+            && special.fallback().is_some()
+            && special.fallback() == occasion
+        {
+            occasion = Some(special);
         }
 
         if matches!(state, State::InputRequired | State::Failed) {
@@ -735,8 +776,8 @@ impl Firmware {
         } else {
             Self::write_value_line(board, "DISPLAY STATE ", state_label.as_bytes());
         }
-        if let Some((prompt, label)) = prompt {
-            self.play_prompt(board, prompt, label);
+        if let Some(occasion) = occasion {
+            self.announce(board, occasion);
         }
     }
 
@@ -814,13 +855,23 @@ impl Firmware {
             // at boot or on change, and the daemon restarts more often than the device, so without
             // asking it would never know.
             "device.hello" => self.announce_state(board),
+            // The daily greeting: a line and nothing else. It isn't agent activity, so it neither
+            // changes the screen nor wakes leisure, and only greetings may be said this way.
+            "buddy.say" => {
+                let greeting = string(fields, "occasion")
+                    .and_then(Occasion::from_name)
+                    .filter(|occasion| occasion.builtin().is_none());
+                if let Some(occasion) = greeting {
+                    self.announce(board, occasion);
+                }
+            }
             // Blink-to-identify and voice pack writes are the app operating the device itself, so they aren't agent activity either.
             "device.identify" => {
                 self.display.identify(now);
                 Self::write_literal(board, "IDENTIFY\n");
             }
             // Volume: the app's slider lands here, goes to the codec and is saved; without a
-            // level it is just a query. The preview goes through play_prompt, so it is silent when
+            // level it is just a query. The preview goes through announce, so it is silent when
             // muted, same rule as every other announcement.
             "device.volume" => {
                 match number(fields, "level") {
@@ -830,7 +881,7 @@ impl Firmware {
                 // The app's slider can move while the menu shows the volume.
                 self.show_menu(board);
                 if fields.get("preview") == Some(&Value::Bool(true)) {
-                    self.play_prompt(board, Prompt::Done, "DONE");
+                    self.announce(board, Occasion::Done);
                 }
             }
             _ if event.starts_with("voice.") => self.handle_voice_event(board, fields, event),
@@ -929,7 +980,7 @@ impl Firmware {
                 // and the user may not be watching the app for the preview button; the box speaking up
                 // is the most direct "done" (on 2026-09-22 a colleague finished a write and thought
                 // there was no sound).
-                self.play_prompt(board, Prompt::Done, "DONE");
+                self.announce(board, Occasion::Done);
             }
             _ => Self::voice_reply(board, "voice.error", -1, "unknown voice event"),
         }

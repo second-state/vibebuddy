@@ -56,6 +56,14 @@ Each item contains `title`, `status` and `elapsed_s`, with optional `project`; t
 
 When a background task finishes but the screen still needs to show other active tasks, `vibebuddyd` attaches `"announcement":"done"` to the current state event. This is a one-shot voice notification that doesn't change the screen state; `announcement_id` identifies the corresponding turn. When the device receives it, it queues the done line to play once. Failures take the same path with `"announcement":"failed"`, playing the failed line once.
 
+A done or needs-input announcement may carry `"occasion"`, naming a special occasion that changes only which pool of the Character's lines the box draws from: `first_done`, `milestone` or `late_night_done` on a done, `late_night_input` on a needs input (see [`characters.md`](characters.md)). The device ignores an occasion that doesn't belong to the announcement, and older firmware ignores the field and plays the ordinary line.
+
+The first time the link comes up on a local calendar day, once the firmware has reported its build, `vibebuddyd` sends the daily greeting. It changes nothing on screen and isn't agent activity; only the three greetings may be said this way:
+
+```json
+{"version":1,"event":"buddy.say","occasion":"greeting_morning"}
+```
+
 When a change in aggregated tasks only requires redrawing an existing waiting-for-input state, `vibebuddyd` attaches `"suppress_audio":true`. The device keeps showing `agent.input_required` but doesn't replay the alert it already played. A one-shot `announcement` takes precedence over this field.
 
 `vibebuddyd` sends a heartbeat every 5 seconds, carrying its own build identifier, the local hour and the local date:
@@ -94,7 +102,7 @@ These messages are the app operating on the device itself. They don't count as a
 
 `device.volume` sets the speaker volume: `level` is the codec's 20 to 100, out-of-range values are clamped, and the value is stored in the device's NVS so it survives restarts; without `level` it's just a query. After applying it the device replies with a line `VOLUME <n>`, the same line it prints unprompted when the volume is changed from the device menu (a board without a codec replies `VOLUME ERROR` and then reports the current value); with `preview: true` it also plays the done line at the current volume, which stays silent while muted just like any other announcement. The floor is above zero: muting happens only by long-pressing K2 on the device, and is deliberately not persisted.
 
-Voice packs (format in `firmware/main/agent_voice_pack.h`) are written into the `voices` partition over the same serial link, without resetting and without esptool; both connection types behave the same. Stop-and-wait flow control: after each chunk the Mac waits for the device's acknowledgment, and sends nothing further without one.
+Character packs (format in `firmware-rs/core/src/character_pack.rs`), and the older voice packs (`firmware-rs/core/src/voice_pack.rs`), are written into the `voices` partition over the same serial link, without resetting and without esptool; both connection types behave the same. Stop-and-wait flow control: after each chunk the Mac waits for the device's acknowledgment, and sends nothing further without one.
 
 ```json
 {"version":1,"event":"voice.begin","size":1523456}
@@ -111,7 +119,7 @@ The device's acknowledgments:
 {"version":1,"event":"voice.error","seq":12,"message":"ESP_ERR_INVALID_CRC"}
 ```
 
-`begin` first waits for any line currently playing to finish, then erases the needed range; `size` is the whole pack's byte count, including the 256-byte header. Chunks must arrive consecutively by `seq` starting from 0, each with at most 672 bytes of raw data, so the whole line after base64 still fits within the 1024-byte limit. `crc` is the CRC32 of the chunk's raw bytes (the same as zlib's); the device checks it right after decoding and, on a mismatch, replies `voice.error` and aborts rather than waiting until the end. The 256-byte header stays in device memory; on `end` the device reads the flash back to verify the payload CRC, writes the header only if that passes, then remaps and switches to the new voice. If any step fails it replies `voice.error` and abandons the session; the firmware then sees the partition as empty and announcements fall back to the built-in voice. Announcements during a write use the built-in voice.
+`begin` first waits for any line currently playing to finish, then erases the needed range; `size` is the whole pack's byte count, including the header: 1024 bytes for a Character pack, 256 for a voice pack, told apart by the magic in the first chunk. Chunks must arrive consecutively by `seq` starting from 0, each with at most 672 bytes of raw data, so the whole line after base64 still fits within the 1024-byte limit. `crc` is the CRC32 of the chunk's raw bytes (the same as zlib's); the device checks it right after decoding and, on a mismatch, replies `voice.error` and aborts rather than waiting until the end. The header stays in device memory; on `end` the device reads the flash back to verify the payload CRC, writes the header only if that passes, then switches to the new Character. If any step fails it replies `voice.error` and abandons the session; the firmware then sees the partition as empty and announcements fall back to the built-in voice. Announcements during a write use the built-in voice.
 
 ## Stage 1 error output
 

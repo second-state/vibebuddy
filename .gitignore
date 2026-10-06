@@ -17,3 +17,4 @@ app/build/
 /VibeBuddy-*.tar.gz
 /VibeBuddy-*.dmg
 /VibeBuddy-*.zip
+/characters/*/audio/

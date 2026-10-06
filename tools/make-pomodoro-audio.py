@@ -7,6 +7,11 @@ The chime is additive synthesis (a fundamental plus two faster-decaying overtone
 Usage:
     tools/make-pomodoro-audio.py focus <voice.pcm> <output.pcm>
     tools/make-pomodoro-audio.py break <voice.pcm> <output.pcm>
+    tools/make-pomodoro-audio.py focus <output.pcm>
+    tools/make-pomodoro-audio.py break <output.pcm>
+
+Without a voice it writes the chime and the gap alone: the firmware plays that before a
+Character's Pomodoro line (docs/characters.md).
 
 The voice PCM comes from tools/make-voices.sh (neural TTS, then converted by ffmpeg to
 the same format and normalized); see firmware/main/assets/README.md.
@@ -57,16 +62,19 @@ def render_chime(notes: tuple[tuple[float, float], ...], length: float) -> bytes
 
 
 def main(argv: list[str]) -> int:
-    if len(argv) != 4 or argv[1] not in ("focus", "break"):
+    if len(argv) not in (3, 4) or argv[1] not in ("focus", "break"):
         print(__doc__, file=sys.stderr)
         return 2
-    kind, voice_path, output_path = argv[1:]
+    kind, output_path = argv[1], argv[-1]
+    voice_path = argv[2] if len(argv) == 4 else None
     if kind == "focus":
         chime = render_chime(FOCUS_CHIME, FOCUS_LENGTH)
     else:
         chime = render_chime(BREAK_CHIME, BREAK_LENGTH)
-    with open(voice_path, "rb") as voice_file:
-        voice = voice_file.read()
+    voice = b""
+    if voice_path is not None:
+        with open(voice_path, "rb") as voice_file:
+            voice = voice_file.read()
     gap = bytes(int(GAP_SECONDS * RATE) * 4)
     with open(output_path, "wb") as output_file:
         output_file.write(chime + gap + voice)
