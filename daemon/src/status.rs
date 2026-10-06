@@ -33,10 +33,14 @@ impl DeviceState {
                 self.connected = true;
                 self.port = Some(port.clone());
                 self.bridge = *bridge;
-                // A newly connected port starts with unknown identity: our firmware re-reports its build as soon as it gets hello;
-                // one that never does runs other firmware (a factory unit), and the app offers to flash it. A build id left by
-                // the previous box mustn't pass for this one.
+                // A newly connected port starts with unknown identity: our firmware re-reports its build, mode, voice and volume
+                // as soon as it gets hello; one that never does runs other firmware (a factory unit, or another ESP32-S3 product
+                // entirely), and the app offers to flash it. Nothing left by the previous device may pass for this one: on
+                // 2026-10-06 a leftover voice made another product look like the box, and it nearly got flashed.
                 self.firmware_build = None;
+                self.mode = None;
+                self.voice = None;
+                self.volume = None;
             }
             DeviceMessage::Disconnected => {
                 self.connected = false;
@@ -180,6 +184,18 @@ mod tests {
         state.apply(&DeviceMessage::Disconnected);
         assert!(state.apply(&DeviceMessage::Connected { port: "/dev/cu.y".to_owned(), bridge: false }));
         assert_eq!(state.firmware_build, None);
+    }
+
+    #[test]
+    fn a_new_connection_forgets_everything_the_previous_device_said() {
+        let mut state = DeviceState::default();
+        state.apply(&DeviceMessage::Connected { port: "/dev/cu.x".to_owned(), bridge: false });
+        for said in ["MODE DUTY", "VOICES ahu", "VOLUME 50"] {
+            state.apply(&line(said));
+        }
+        state.apply(&DeviceMessage::Disconnected);
+        state.apply(&DeviceMessage::Connected { port: "/dev/cu.y".to_owned(), bridge: false });
+        assert_eq!((state.mode.as_deref(), state.voice.as_deref(), state.volume), (None, None, None));
     }
 
     #[test]
