@@ -115,6 +115,35 @@ pub trait Screen {
     fn set_backlight(&mut self, on: bool) -> Result<(), ()>;
 }
 
+/// How a panel line's value is colored.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Tone {
+    Plain,
+    Dim,
+    Accent,
+    Warn,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PanelKind {
+    /// Rows: a label on the left, its value on the right, one row selected.
+    List,
+    /// Facts: a small label, a large value.
+    Facts,
+}
+
+/// A panel over the whole screen (the device menu): what it says is the caller's, drawing it is the display's.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Panel {
+    pub kind: PanelKind,
+    pub title: Vec<u8>,
+    /// Label, value and the value's tone.
+    pub lines: Vec<(Vec<u8>, Vec<u8>, Tone)>,
+    pub selected: Option<usize>,
+    /// Key name and what it does now, along the bottom.
+    pub hints: Vec<(&'static [u8], &'static [u8])>,
+}
+
 /// External state needed to draw a frame: the pomodoro and the leisure director belong to the main program.
 pub struct Scene<'a> {
     pub now_ms: u32,
@@ -147,6 +176,8 @@ pub struct Display {
     ring_alarm_phase: Phase,
     /// Shake frames left; after shaking, switch to pulsing.
     ring_alarm_shake_frames: u32,
+    /// Drawn over everything while set.
+    panel: Option<Panel>,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -646,6 +677,7 @@ impl Display {
             ring_alarm: false,
             ring_alarm_phase: Phase::Focus,
             ring_alarm_shake_frames: 0,
+            panel: None,
         }
     }
 
@@ -987,6 +1019,9 @@ impl Display {
         if dim {
             canvas.dim();
         }
+        if let Some(panel) = &self.panel {
+            draw_panel(&mut canvas, panel);
+        }
         screen.present()
     }
 
@@ -1033,6 +1068,30 @@ impl Display {
             .collect();
         self.next_animation_at = scene.now_ms.wrapping_add(self.animation_period());
         self.render(screen, scene)
+    }
+
+    /// The done announcement is over: go back to the cards that came with it and are still open, or to idle when
+    /// none are. The Mac sends nothing while the visible state is unchanged, and a task can run for minutes
+    /// without an event, so dropping the cards here would show READY over work still in progress.
+    /// Returns the state shown.
+    pub fn settle_after_done(&mut self, screen: &mut dyn Screen, scene: &Scene) -> Result<State, ()> {
+        if !self.ready {
+            return Err(());
+        }
+        self.tasks
+            .retain(|task| matches!(task.state, State::Working | State::InputRequired));
+        self.state = if self.tasks.iter().any(|task| task.state == State::InputRequired) {
+            State::InputRequired
+        } else if self.tasks.is_empty() {
+            State::Idle
+        } else {
+            State::Working
+        };
+        self.title = self.tasks.first().map(|task| task.title.clone()).unwrap_or_default();
+        self.animation_frame = 0;
+        self.next_animation_at = scene.now_ms.wrapping_add(self.animation_period());
+        self.render(screen, scene)?;
+        Ok(self.state)
     }
 
     /// Screenshot: run-length encodes the current framebuffer and hands it to `write_line`
@@ -1150,6 +1209,17 @@ impl Display {
         }
     }
 
+    /// Shows a panel over the screen, or takes it away; redraws only on a change.
+    pub fn set_panel(&mut self, screen: &mut dyn Screen, scene: &Scene, panel: Option<Panel>) {
+        if self.panel == panel {
+            return;
+        }
+        self.panel = panel;
+        if self.ready {
+            let _ = self.render(screen, scene);
+        }
+    }
+
     /// While muted, a MUTE badge stays in the top left: mute is easy to forget, so it must stay visible.
     pub fn set_muted(&mut self, screen: &mut dyn Screen, scene: &Scene, muted: bool) {
         if self.muted == muted {
@@ -1215,6 +1285,64 @@ impl Display {
         if let Some(alarm) = alarm {
             self.ring_alarm = alarm;
         }
+    }
+}
+
+const PANEL_BORDER: u16 = COLOR_PET;
+const PANEL_SELECTED: u16 = 0x2148;
+const PANEL_LEFT: i32 = 44;
+const PANEL_RIGHT: i32 = 276;
+
+fn text_width(text: &[u8], scale: i32) -> i32 {
+    if text.is_empty() { 0 } else { (text.len() as i32 * 6 - 1) * scale }
+}
+
+fn tone_color(tone: Tone) -> u16 {
+    match tone {
+        Tone::Plain => COLOR_TEXT,
+        Tone::Dim => COLOR_MUTED,
+        Tone::Accent => COLOR_PET_HIGHLIGHT,
+        Tone::Warn => COLOR_WORKING,
+    }
+}
+
+/// The menu panel: the screen underneath dimmed twice, a bordered box, the title, the lines, and
+/// key hints along the bottom.
+fn draw_panel(canvas: &mut Canvas, panel: &Panel) {
+    canvas.dim();
+    canvas.dim();
+    canvas.fill_rect(30, 14, 260, 212, PANEL_BORDER);
+    canvas.fill_rect(32, 16, 256, 208, COLOR_SCREEN);
+    canvas.draw_text(PANEL_LEFT, 26, &panel.title, 2, COLOR_PET_HIGHLIGHT, 19);
+    canvas.fill_rect(PANEL_LEFT, 46, PANEL_RIGHT - PANEL_LEFT, 1, COLOR_MUTED);
+    for (index, (label, value, tone)) in panel.lines.iter().enumerate() {
+        let index = index as i32;
+        match panel.kind {
+            PanelKind::List => {
+                let y = 54 + index * 23;
+                if panel.selected == Some(index as usize) {
+                    canvas.fill_rect(38, y - 3, 244, 21, PANEL_SELECTED);
+                    canvas.draw_text(42, y, b">", 2, COLOR_PET_HIGHLIGHT, 1);
+                }
+                canvas.draw_text(58, y, label, 2, COLOR_TEXT, 12);
+                let value = &value[..value.len().min(8)];
+                canvas.draw_text(PANEL_RIGHT - text_width(value, 2), y, value, 2, tone_color(*tone), 8);
+            }
+            PanelKind::Facts => {
+                let y = 58 + index * 22;
+                canvas.draw_text(PANEL_LEFT, y, label, 1, COLOR_MUTED, 12);
+                canvas.draw_text(120, y - 3, value, 2, tone_color(*tone), 13);
+            }
+        }
+    }
+    canvas.fill_rect(PANEL_LEFT, 196, PANEL_RIGHT - PANEL_LEFT, 1, COLOR_MUTED);
+    let mut x = PANEL_LEFT;
+    for (key, action) in &panel.hints {
+        canvas.fill_rect(x, 204, text_width(key, 1) + 6, 11, COLOR_MUTED);
+        canvas.draw_text(x + 3, 206, key, 1, COLOR_SCREEN, 4);
+        x += text_width(key, 1) + 10;
+        canvas.draw_text(x, 206, action, 1, COLOR_TEXT, 12);
+        x += text_width(action, 1) + 14;
     }
 }
 

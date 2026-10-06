@@ -225,3 +225,37 @@ On the way there, three theories looked right and were wrong: firmware dropping 
 v0.3.0's first tag failed in CI: bumping the version left `firmware-rs/device/Cargo.lock` recording the shared crates at 0.2.2, and the license step runs `cargo about --locked`. Three rehearsal runs on the release branch had all passed, because none of them changed the version; the one step that only happens at release time was the one that broke. `just release` updated the root lockfile and never knew the firmware had its own.
 
 When rehearsing a release, rehearse the release commit too: on a scratch branch, make the same version bump `just release` makes, then dispatch the workflow. A rehearsal that skips the step the real thing starts with proves less than it looks.
+
+## A receiver that leaves the sent state on its own breaks send-on-change
+
+On 2026-10-05 a user's box showed READY while Claude Code was still working. The daemon only sends when the visible state changes, so it took for granted that the box still showed the last thing it sent. The firmware broke that: five seconds after any `task.done` it went to READY and dropped every card, even though the event listed other tasks still working. A parent agent then generated a large file for four minutes without a hook, and nothing ever told the box to go back.
+
+Two things kept it hidden. The firmware made that transition silently, so the daemon log, the only record we had, looked correct throughout. And it needs two tasks at once plus a long hook-free stretch; with one task, READY after DONE is right. That is the same pattern as "No change in the visible state is not no activity" above: concurrency is what shows it.
+
+When the sender only sends on change, the receiver may move off the sent state on its own only to a state derived from what it was sent (here, the cards that came with `task.done`). And every transition the receiver makes on its own must be reported on the link, or the sender's log can't show it.
+
+## A turn is not the user's task
+
+This is the third time we modeled the agent lifecycle too literally (see the two Codex lessons above). Each `Stop` and `SubagentStop` was announced as "All done". But with background agents, one request spans many turns: the parent ends a turn to wait, each injected message or completion notification wakes it for a short turn, and each subagent stops on its own. One request said "All done" five times, and a user guessed that "two tasks finished".
+
+The announcement has to follow the user's unit of work. A subagent reports to its parent, not to the user, so its end isn't announced. And a session isn't done while any of its subagents still runs. The real question is never "which hook fired" but "is there something for the user to come back for".
+
+What found it quickly was matching each `task.done` in the daemon log against the session transcripts by timestamp. That named the hook behind every announcement, and showed whether the turn was started by a person or by a notification. The same check cleared a burst that looked like the bug but was a person sending messages a minute apart. Before changing announcement rules, check what actually started each turn.
+
+## At login, the desktop you talk to may not be up yet
+
+On 2026-10-06 the Linux app had no tray icon on Omarchy, while it worked whenever it was started by hand. The journal said why: `no tray available (failed to register to the StatusNotifierWatcher)`, logged in the same second the shell (quickshell, which hosts the tray) started. The login autostart had run the app a moment before the shell owned `org.kde.StatusNotifierWatcher`, the registration failed once, and the app gave up on the tray for the rest of the session. The shell also restarts on its own (it did that morning), which drops every registered icon.
+
+Anything started at login can't treat a missing desktop service as final: wait for it to appear on the bus, register again when its owner changes, and only fall back after a timeout. ksni does the waiting with `assume_sni_available(true)`. To reproduce, stop the shell, start the app, then start the shell; checking `RegisteredStatusNotifierItems` on the watcher is quicker than looking at the bar. Also look at the bar itself: Omarchy keeps every tray icon in a drawer until the user pins it, so a registered icon can still look missing.
+
+## One flashing session per job, and never kill one halfway
+
+Putting the box into the layout it shares with Muse took three unplugs. Chained espflash calls with `--after no-reset` left the chip in its loader, and the next connection hung at "Connecting..." for minutes; killing that hung process, then trying esptool with `--before usb-reset`, didn't recover it either. RST didn't help; only pulling the USB cable did. `tools/flash.sh` chains calls the same way and has worked, so the hang depends on what the previous call left behind, which makes it worse than a steady failure.
+
+A flashing job is one esptool `write-flash` with every address in it (and an area to clear written as 0xFF in the same call): one connection, one reset at the end. If a flashing process hangs, ask for an unplug straight away instead of stacking more connection attempts on a wedged chip.
+
+## On a shared port, one program's output is the other's input
+
+With the box switched to Muse and vibebuddyd connected, Muse's menu scrolled by itself, it recorded empty voice notes, its mic gain dropped to 0 dB and in the end its pairing was reset. Muse's bench console reads single characters from the USB port as keys, and the daemon's heartbeat JSON is full of them: `a`, `s`, `d`, `u`, `z`, `w`. The risk had been written down ("the daemon may disturb Muse") and then tested only with the daemon stopped, which is exactly the case where it can't happen.
+
+When two firmwares share a box, everything that talks to the port has to be tried against each of them, with the Mac side running as it normally does. A firmware that might sit behind someone else's serial writer reads no keys from the port by default, and the writer stops writing once it sees the firmware isn't its own.

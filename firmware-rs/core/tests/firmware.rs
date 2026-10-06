@@ -67,6 +67,8 @@ struct FakeBoard {
     busy: bool,
     stops: usize,
     k0: bool,
+    k1: bool,
+    k2: bool,
 }
 
 impl FakeBoard {
@@ -83,6 +85,8 @@ impl FakeBoard {
             busy: false,
             stops: 0,
             k0: false,
+            k1: false,
+            k2: false,
         }
     }
 
@@ -136,7 +140,7 @@ impl Board for FakeBoard {
         Some(Levels::default())
     }
     fn read_buttons(&mut self) -> (bool, Option<(bool, bool)>) {
-        (self.k0, Some((false, false)))
+        (self.k0, Some((self.k1, self.k2)))
     }
     fn play(&mut self, sound: Sound) -> Result<(), ()> {
         self.played.push(sound);
@@ -206,6 +210,23 @@ fn a_done_event_is_shown_announced_and_returns_to_idle() {
     board.advance(20);
     firmware.poll(&mut board);
     assert!(board.presents > presents, "should redraw as idle after 5 seconds");
+    assert_eq!(board.take_lines(), ["DISPLAY STATE READY"]);
+}
+
+#[test]
+fn after_done_the_device_returns_to_the_tasks_still_running() {
+    // A subagent finished while the main session keeps working. The main session may then generate
+    // for minutes without a single hook, so nothing would refresh the screen back to working.
+    let (mut firmware, mut board, _) = booted(blank_flash());
+    send(
+        &mut firmware,
+        &mut board,
+        r#"{"version":1,"event":"task.done","title":"CC:SUB","tasks":[{"title":"CC:MAIN","status":"working","elapsed_s":60}],"announcement":"done"}"#,
+    );
+
+    board.advance(5000);
+    firmware.poll(&mut board);
+    assert_eq!(board.take_lines(), ["DISPLAY STATE WORKING"]);
 }
 
 #[test]
@@ -507,4 +528,96 @@ fn the_daily_greeting_is_only_a_line() {
     let lines = send(&mut firmware, &mut board, r#"{"version":1,"event":"buddy.say","occasion":"done"}"#);
     assert!(lines.is_empty());
     assert_eq!(board.played.len(), played + 1);
+}
+
+#[derive(Clone, Copy)]
+enum Key {
+    K0,
+    K1,
+    K2,
+}
+
+/// Presses a key for `hold_ms` and lets go, polling along the way; returns what was printed.
+fn press(firmware: &mut Firmware, board: &mut FakeBoard, key: Key, hold_ms: u32) -> Vec<String> {
+    let set = |board: &mut FakeBoard, down: bool| match key {
+        Key::K0 => board.k0 = down,
+        Key::K1 => board.k1 = down,
+        Key::K2 => board.k2 = down,
+    };
+    board.advance(100);
+    set(board, true);
+    firmware.poll(board);
+    let mut held = 0;
+    while held < hold_ms {
+        board.advance(50);
+        held += 50;
+        firmware.poll(board);
+    }
+    set(board, false);
+    firmware.poll(board);
+    board.take_lines()
+}
+
+#[test]
+fn k1_long_opens_the_menu_where_k0_steps_the_volume() {
+    let (mut firmware, mut board, _) = booted(blank_flash());
+    let lines = press(&mut firmware, &mut board, Key::K1, 1100);
+    assert_eq!(lines, ["MENU OPEN"], "a long K1 no longer starts leisure");
+    // The first row is VOLUME: K0 moves 65 to the next step and plays the preview.
+    assert_eq!(press(&mut firmware, &mut board, Key::K0, 50), ["VOLUME 80", "AUDIO QUEUED DONE"]);
+    assert_eq!(board.codec_volume, Some(80));
+    // K1 moves to MUTE, K0 toggles it.
+    assert!(press(&mut firmware, &mut board, Key::K1, 50).is_empty());
+    assert_eq!(press(&mut firmware, &mut board, Key::K0, 50), ["MUTE ON"]);
+    // K2 closes rather than asking the Mac to open a source.
+    assert_eq!(press(&mut firmware, &mut board, Key::K2, 50), ["MENU CLOSED"]);
+    // Closed, the keys are back to their own jobs.
+    assert_eq!(press(&mut firmware, &mut board, Key::K2, 50), [r#"{"version":1,"event":"button","button":"K2","action":"press"}"#]);
+    assert_eq!(press(&mut firmware, &mut board, Key::K1, 50), ["MODE POMODORO"]);
+
+    let flash = board.flash;
+    let (_, board, lines) = booted(flash);
+    assert!(lines.contains(&"VOLUME 80".to_owned()), "the menu's volume is saved: {lines:?}");
+    assert_eq!(board.codec_volume, Some(80));
+}
+
+#[test]
+fn stop_focus_is_offered_only_while_a_phase_runs() {
+    let (mut firmware, mut board, _) = booted(blank_flash());
+    assert_eq!(press(&mut firmware, &mut board, Key::K0, 50), ["POMODORO FOCUS START", "MODE POMODORO"]);
+    press(&mut firmware, &mut board, Key::K1, 1100);
+    assert_eq!(press(&mut firmware, &mut board, Key::K0, 50), ["MENU CLOSED", "POMODORO STOPPED"]);
+    // With nothing running the first row is VOLUME again.
+    press(&mut firmware, &mut board, Key::K1, 1100);
+    assert_eq!(press(&mut firmware, &mut board, Key::K0, 50), ["VOLUME 80", "AUDIO QUEUED DONE"]);
+}
+
+#[test]
+fn an_agent_needing_the_user_closes_the_menu_and_quiet_closes_it_too() {
+    let (mut firmware, mut board, _) = booted(blank_flash());
+    press(&mut firmware, &mut board, Key::K1, 1100);
+    let lines = send(&mut firmware, &mut board, r#"{"version":1,"event":"task.start","title":"CC:A"}"#);
+    assert!(!lines.contains(&"MENU CLOSED".to_owned()), "work in progress waits: {lines:?}");
+    let lines = send(&mut firmware, &mut board, r#"{"version":1,"event":"agent.input_required","title":"CC:A"}"#);
+    assert!(lines.contains(&"MENU CLOSED".to_owned()), "{lines:?}");
+    assert!(lines.contains(&"AUDIO QUEUED INPUT_REQUIRED".to_owned()), "{lines:?}");
+
+    press(&mut firmware, &mut board, Key::K1, 1100);
+    board.advance(29_000);
+    firmware.poll(&mut board);
+    assert!(!board.take_lines().contains(&"MENU CLOSED".to_owned()));
+    board.advance(1_000);
+    firmware.poll(&mut board);
+    assert!(board.take_lines().contains(&"MENU CLOSED".to_owned()));
+}
+
+#[test]
+fn k1_wraps_around_the_rows() {
+    let (mut firmware, mut board, _) = booted(blank_flash());
+    // VOLUME, MUTE, STATUS, and back to VOLUME.
+    press(&mut firmware, &mut board, Key::K1, 1100);
+    for _ in 0..3 {
+        press(&mut firmware, &mut board, Key::K1, 50);
+    }
+    assert_eq!(press(&mut firmware, &mut board, Key::K0, 50), ["VOLUME 80", "AUDIO QUEUED DONE"]);
 }

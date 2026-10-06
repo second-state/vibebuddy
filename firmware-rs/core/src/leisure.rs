@@ -235,11 +235,6 @@ impl Leisure {
         self.idle_since_ms = now_ms;
     }
 
-    /// K1 long press: go play right now.
-    pub fn force_bored(&mut self, now_ms: u32) {
-        self.idle_since_ms = now_ms.wrapping_sub(BORED_AFTER_MS);
-    }
-
     /// Local hour from the Mac's heartbeat; -1 means unknown.
     pub fn set_hour(&mut self, hour: i32) {
         self.hour = hour;
@@ -459,18 +454,6 @@ mod tests {
         let mut clock = 0;
         advance_to(&mut leisure, &mut clock, minutes(200));
         assert!(!leisure.view(clock).lights_out);
-    }
-
-    #[test]
-    fn force_bored_starts_playing_now() {
-        let mut leisure = Leisure::new(13, 0);
-        let mut clock = 1000;
-        leisure.force_bored(clock);
-        leisure.tick(clock);
-        assert_eq!(leisure.view(clock).tier, Tier::Bored);
-        let target = clock + 4000;
-            advance_to(&mut leisure, &mut clock, target);
-        assert_ne!(leisure.view(clock).skit, Skit::None);
     }
 
     #[test]

@@ -9,23 +9,44 @@ mod assets;
 mod client;
 mod face;
 mod i18n;
+#[cfg(target_os = "linux")]
+mod instance;
 mod status;
 mod theme;
 #[cfg(target_os = "linux")]
 mod tray;
 
-use std::time::{Duration, SystemTime};
+use std::time::{Duration, Instant, SystemTime};
 
-use iced::widget::{button, column, container, image, row, scrollable, slider, space, text, toggler};
+use iced::widget::{button, checkbox, column, container, image, pick_list, row, scrollable, slider, space, text, toggler};
 use iced::{Element, Font, Length, Subscription, Task, Theme, window};
 
-use i18n::tr;
+use i18n::{UiLanguage, tr};
 use status::{Config, MenuState, Status};
 
 /// Omarchy's monospace font, used when Omarchy's theme is: the window should look like the rest of the desktop.
 const OMARCHY_FONT: &str = "JetBrainsMono Nerd Font";
 
+/// Passed to the copy a language change starts: it waits for this one to quit and opens Settings where the user was.
+const RESTARTED: &str = "--restarted";
+/// Followed by a voice id: written once the restarted copy sees the box answer, then forgotten.
+const WRITE_VOICE: &str = "--write-voice";
+
+/// Without the box's build this long after its port opened, it isn't running Vibe Buddy firmware (the Mac's
+/// `Firmware.silenceGrace`): ours reports within a second.
+const FOREIGN_GRACE: Duration = Duration::from_secs(5);
+
+/// The running copy's socket, handed to the subscription that listens on it.
+#[cfg(target_os = "linux")]
+static INSTANCE: std::sync::Mutex<Option<std::os::unix::net::UnixListener>> = std::sync::Mutex::new(None);
+
 fn main() -> iced::Result {
+    #[cfg(target_os = "linux")]
+    match instance::claim(std::env::args().any(|arg| arg == RESTARTED)) {
+        instance::Claim::First(listener) => *INSTANCE.lock().unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(listener),
+        instance::Claim::HandedOff => return Ok(()),
+        instance::Claim::Unavailable => {}
+    }
     let mut app = iced::daemon(App::boot, App::update, App::view)
         .title(App::title)
         .theme(App::theme)
@@ -58,11 +79,18 @@ enum Message {
     TrayReady(TrayHandle),
     /// No tray host on this desktop: the window is the only way in, so it opens.
     TrayUnavailable,
+    /// The shell's tray host went away or came back; if it stays away, the window opens instead.
+    TrayHost(bool),
+    TrayHostCheck,
     ThemeTick,
     OpenSettings,
     WindowClosed(window::Id),
     Tab(Tab),
     NotifyLink(bool),
+    PickLanguage(UiLanguage),
+    SwitchVoice(bool),
+    /// Restart now (true) or later (false) to apply the picked language.
+    RestartForLanguage(bool),
     ConfigSaved(Result<Config, String>),
     VolumeDragged(u8),
     VolumeReleased,
@@ -115,8 +143,23 @@ struct App {
     confirm_firmware: bool,
     /// The outcome of the last action, shown at the bottom of the window.
     notice: Option<Result<String, String>>,
+    /// The language picked in Settings, and, while it differs from the UI's, the offer to restart.
+    language: UiLanguage,
+    restart_offer: Option<RestartOffer>,
+    /// A voice to write once the box answers, asked for when the language changed.
+    pending_voice: Option<&'static str>,
+    /// When the box's port was last seen open, to tell a box that never reports a build.
+    connected_since: Option<Instant>,
+    /// Whether the shell has a tray host for the icon right now.
+    tray_host: bool,
     #[cfg(target_os = "linux")]
     tray: Option<TrayHandle>,
+}
+
+struct RestartOffer {
+    /// A voice in the new language for the box, when it speaks the other one; ticked by default.
+    voice: Option<assets::Voice>,
+    switch_voice: bool,
 }
 
 impl App {
@@ -134,12 +177,19 @@ impl App {
             firmware: assets::firmware(),
             confirm_firmware: false,
             notice: None,
+            language: UiLanguage::saved(),
+            restart_offer: None,
+            pending_voice: launch_voice(),
+            connected_since: None,
+            tray_host: true,
             #[cfg(target_os = "linux")]
             tray: None,
         };
-        // The first launch shows the window, so it's clear where the app went; later ones stay in the tray. Without a
-        // tray (macOS builds, for development) the window is the only way in.
-        let open = first_launch() || !cfg!(target_os = "linux");
+        // The first launch shows the window, so it's clear where the app went; later ones stay in the tray, unless a
+        // language change restarted the app from its window. Without a tray (macOS builds, for development) the
+        // window is the only way in.
+        let restarted = std::env::args().any(|arg| arg == RESTARTED);
+        let open = first_launch() || restarted || !cfg!(target_os = "linux");
         let task = if open { Task::done(Message::OpenSettings) } else { Task::none() };
         (app, task)
     }
@@ -154,33 +204,57 @@ impl App {
 
     fn subscription(&self) -> Subscription<Message> {
         #[cfg(target_os = "linux")]
-        let tray = Subscription::run(run_tray);
+        let (tray, instance) = (Subscription::run(run_tray), Subscription::run(run_instance));
         #[cfg(not(target_os = "linux"))]
-        let tray = Subscription::none();
+        let (tray, instance) = (Subscription::none(), Subscription::none());
         Subscription::batch([
             Subscription::run(client::status_updates).map(Message::Daemon),
             iced::time::every(Duration::from_secs(2)).map(|_| Message::ThemeTick),
             window::close_events().map(Message::WindowClosed),
             tray,
+            instance,
         ])
     }
 
     fn update(&mut self, message: Message) -> Task<Message> {
         match message {
             Message::Daemon(client::Update::Status(status)) => {
+                let device = &status.device;
+                self.connected_since = device.connected.then(|| self.connected_since.unwrap_or_else(Instant::now));
+                let busy = status.operation.as_ref().is_some_and(status::Operation::running);
+                // Wait for the build: the box has answered, not just had its port opened (which resets it).
+                let voice = (device.connected && device.firmware_build.is_some() && !busy)
+                    .then(|| self.pending_voice.take())
+                    .flatten();
                 self.status = Some(*status);
-                return self.refresh_tray();
+                return Task::batch([self.refresh_tray(), voice.map_or_else(Task::none, |id| Task::done(Message::UseVoice(id)))]);
             }
             Message::Daemon(client::Update::Down) => {
                 self.status = None;
+                self.connected_since = None;
                 return self.refresh_tray();
             }
             #[cfg(target_os = "linux")]
             Message::TrayReady(handle) => {
                 self.tray = Some(handle);
-                return self.refresh_tray();
+                let pin = state_dir().map_or_else(Task::none, |dir| {
+                    Task::future(tray::pin_in_omarchy_bar(dir.join("tray-pinned"))).discard()
+                });
+                return Task::batch([self.refresh_tray(), pin]);
             }
             Message::TrayUnavailable => return Task::done(Message::OpenSettings),
+            Message::TrayHost(up) => {
+                self.tray_host = up;
+                // A shell restarting is back within a second or two; one that isn't up after this, isn't coming.
+                if !up {
+                    return Task::perform(tokio::time::sleep(Duration::from_secs(10)), |()| Message::TrayHostCheck);
+                }
+            }
+            Message::TrayHostCheck => {
+                if !self.tray_host {
+                    return Task::done(Message::OpenSettings);
+                }
+            }
             Message::ThemeTick => {
                 let stamp = theme::stamp();
                 if stamp != self.theme_stamp {
@@ -216,6 +290,43 @@ impl App {
                 let mut config = self.status.as_ref().map(|status| status.config.clone()).unwrap_or_default();
                 config.notify_link = enabled;
                 return Task::perform(client::put_config(config), Message::ConfigSaved);
+            }
+            Message::PickLanguage(choice) => {
+                if choice == self.language {
+                    return Task::none();
+                }
+                if let Err(error) = choice.save() {
+                    self.notice = Some(Err(error));
+                    return Task::none();
+                }
+                self.language = choice;
+                self.restart_offer = (choice.chinese() != i18n::is_chinese()).then(|| {
+                    let target = if choice.chinese() { assets::Language::Chinese } else { assets::Language::English };
+                    let device = self.status.as_ref().map(|status| &status.device);
+                    // Only a box that has answered (build and voice reported) can take a voice; an unknown one isn't guessed at.
+                    let voice = device
+                        .filter(|device| device.connected && device.firmware_build.is_some())
+                        .and_then(|device| device.voice.as_deref())
+                        .and_then(|voice| assets::voice_switch(voice, target));
+                    RestartOffer { voice, switch_voice: true }
+                });
+            }
+            Message::SwitchVoice(on) => {
+                if let Some(offer) = &mut self.restart_offer {
+                    offer.switch_voice = on;
+                }
+            }
+            Message::RestartForLanguage(now) => {
+                let Some(offer) = self.restart_offer.take() else { return Task::none() };
+                let voice = offer.voice.filter(|_| offer.switch_voice).map(|voice| voice.id);
+                if now {
+                    match restart(voice) {
+                        Ok(()) => return iced::exit(),
+                        Err(error) => self.notice = Some(Err(error)),
+                    }
+                } else if let Some(id) = voice {
+                    return Task::done(Message::UseVoice(id));
+                }
             }
             Message::ConfigSaved(result) => {
                 match result {
@@ -357,9 +468,45 @@ impl App {
             toggler(notify)
                 .label(tr("Notify me when the box disconnects or the daemon fails", &[]))
                 .on_toggle_maybe(self.status.is_some().then_some(Message::NotifyLink)),
+            space().height(8),
+            row![text(tr("Language", &[])), pick_list(UiLanguage::ALL, Some(self.language), Message::PickLanguage)]
+                .spacing(12)
+                .align_y(iced::Alignment::Center),
         ]
+        .push(self.restart_offer.as_ref().map(|offer| self.restart_prompt(offer)))
         .spacing(8)
         .into()
+    }
+
+    fn restart_prompt(&self, offer: &RestartOffer) -> Element<'_, Message> {
+        let device = self.status.as_ref().map(|status| &status.device);
+        let voice: Option<Element<'_, Message>> = match &offer.voice {
+            Some(voice) => {
+                let label = if device.is_some_and(|device| device.bridge) {
+                    tr("Also switch the box's voice to %@ (a few minutes over the UART bridge; keep it plugged in)", &[&voice.name])
+                } else {
+                    tr("Also switch the box's voice to %@", &[&voice.name])
+                };
+                Some(checkbox(offer.switch_voice).label(label).on_toggle(Message::SwitchVoice).into())
+            }
+            None if !device.is_some_and(|device| device.connected) => Some(
+                text(tr("The box isn't connected, so its voice stays as it is. You can change it later on the Sound tab.", &[]))
+                    .size(13)
+                    .into(),
+            ),
+            None => None,
+        };
+        column![text(tr("Restart Vibe Buddy to change the language?", &[]))]
+            .push(voice)
+            .push(
+                row![
+                    button(text(tr("Restart now", &[]))).on_press(Message::RestartForLanguage(true)),
+                    button(text(tr("Later", &[]))).style(button::secondary).on_press(Message::RestartForLanguage(false)),
+                ]
+                .spacing(8),
+            )
+            .spacing(8)
+            .into()
     }
 
     fn sound(&self) -> Element<'_, Message> {
@@ -469,34 +616,90 @@ impl App {
             device.and_then(|device| device.firmware_build.as_deref()),
             self.firmware.as_ref().map(|firmware| firmware.build.as_str()),
         );
-        let update: Option<Element<'_, Message>> = (outdated && online).then(|| {
-            if self.confirm_firmware {
+        // A box whose port is open but that never reports a build: a factory box, or one held in download mode with K0.
+        let foreign = online
+            && device.is_some_and(|device| device.firmware_build.is_none())
+            && self.connected_since.is_some_and(|since| since.elapsed() >= FOREIGN_GRACE)
+            && self.firmware.is_some();
+        // Either offer asks once more before flashing, since the box restarts.
+        let confirm = |title: String, detail: String, action: String| -> Element<'_, Message> {
+            column![
+                text(title),
+                text(detail).size(13),
+                row![
+                    button(text(action)).on_press_maybe((!busy).then_some(Message::FlashFirmware)),
+                    button(text(tr("Cancel", &[])))
+                        .style(button::secondary)
+                        .on_press(Message::AskFirmwareUpdate(false)),
+                ]
+                .spacing(8),
+            ]
+            .spacing(8)
+            .into()
+        };
+        let update: Option<Element<'_, Message>> = match (foreign, outdated && online, self.confirm_firmware) {
+            (true, _, true) => Some(confirm(
+                tr("Flash the box with Vibe Buddy?", &[]),
+                tr(
+                    "The box's current firmware and data will be erased and can't be recovered. It restarts on its own when done; over the UART port this takes a few minutes.",
+                    &[],
+                ),
+                tr("Flash", &[]),
+            )),
+            (true, _, false) => Some(
                 column![
-                    text(tr("Update the box firmware?", &[])),
-                    text(tr(
-                        "The box restarts once; its voice pack and today's stats are kept. Over the UART bridge this takes a few minutes.",
-                        &[]
-                    ))
-                    .size(13),
-                    row![
-                        button(text(tr("Update", &[]))).on_press_maybe((!busy).then_some(Message::FlashFirmware)),
-                        button(text(tr("Cancel", &[])))
-                            .style(button::secondary)
-                            .on_press(Message::AskFirmwareUpdate(false)),
-                    ]
-                    .spacing(8),
+                    text(tr("The box isn't running Vibe Buddy firmware.", &[])).style(text::warning),
+                    button(text(tr("Flash Vibe Buddy firmware", &[])))
+                        .on_press_maybe((!busy).then_some(Message::AskFirmwareUpdate(true))),
                 ]
                 .spacing(8)
-                .into()
-            } else {
+                .into(),
+            ),
+            (false, true, true) => Some(confirm(
+                tr("Update the box firmware?", &[]),
+                tr(
+                    "The box restarts once; its voice pack and today's stats are kept. Over the UART bridge this takes a few minutes.",
+                    &[],
+                ),
+                tr("Update", &[]),
+            )),
+            (false, true, false) => Some(
                 button(text(tr("Update to bundled version", &[])))
                     .on_press_maybe((!busy).then_some(Message::AskFirmwareUpdate(true)))
-                    .into()
-            }
+                    .into(),
+            ),
+            (false, false, _) => None,
+        };
+        let flashing = operation.filter(|operation| operation.kind == status::OperationKind::Firmware).map(|operation| {
+            let failed = (operation.state == status::OperationState::Failed).then(|| {
+                column![
+                    text(tr("Before retrying, hold K0 on the box and replug the cable to put it in download mode.", &[]))
+                        .size(13),
+                    button(text(tr("Retry", &[])))
+                        .on_press_maybe((online && self.firmware.is_some()).then_some(Message::FlashFirmware)),
+                ]
+                .spacing(8)
+            });
+            column![text(operation.summary()).size(13)].push(failed).spacing(8)
         });
-        let flashing = operation
-            .filter(|operation| operation.kind == status::OperationKind::Firmware)
-            .map(|operation| text(operation.summary()).size(13));
+        // Not while a flash waits for a replug: that row says not to hold K0 this time.
+        let replug = operation.is_some_and(|operation| operation.state == status::OperationState::Replug);
+        let not_found = (self.status.is_some() && !online && !busy && !replug).then(|| {
+            column![
+                text(tr("Not showing up? Use a cable that carries data, not just power.", &[])).size(13),
+                text(tr(
+                    "If the daemon log on the Advanced tab says “Permission denied”, your account can't open the box's port yet: restart the computer once, then replug the box.",
+                    &[]
+                ))
+                .size(13),
+                text(tr(
+                    "Still nothing? Hold K0 on the box while you plug in the cable. The box starts in download mode with a dark screen, ready to be flashed with Vibe Buddy firmware.",
+                    &[]
+                ))
+                .size(13),
+            ]
+            .spacing(4)
+        });
         // The frame is dark whatever the theme, so its text is light: in a light theme the theme's own text color
         // vanished there, and a grab in progress looked like a button that did nothing.
         let on_frame = |label: String| text(label).size(13).color(iced::Color::from_rgb8(0xd0, 0xd0, 0xd0));
@@ -509,35 +712,34 @@ impl App {
                 .into(),
             (None, false) => on_frame(tr("Click Refresh to see what the box is showing", &[])).into(),
         };
-        column![
-            row![text(tr("Link", &[])).width(140), text(link)].spacing(12),
-            row![text(tr("Box firmware", &[])).width(140), text(firmware)].spacing(12),
-            row![text(tr("Bundled with app", &[])).width(140), text(bundled)].spacing(12),
-        ]
-        .push(update)
-        .push(flashing)
-        .push(column![
-            button(text(tr("Make the box blink", &[]))).on_press_maybe(online.then_some(Message::Identify)),
-            row![
-                text(tr("Box screen", &[])),
-                space::horizontal(),
-                button(text(tr("Refresh", &[])))
-                    .on_press_maybe((online && !self.screenshot_busy).then_some(Message::TakeScreenshot)),
-                button(text(tr("Save image", &[])))
-                    .style(button::secondary)
-                    .on_press_maybe(self.screenshot.is_some().then_some(Message::SaveScreenshot)),
+        column![row![text(tr("Link", &[])).width(140), text(link)].spacing(12)]
+            .push(not_found)
+            .push(row![text(tr("Box firmware", &[])).width(140), text(firmware)].spacing(12))
+            .push(row![text(tr("Bundled with app", &[])).width(140), text(bundled)].spacing(12))
+            .push(update)
+            .push(flashing)
+            .push(column![
+                button(text(tr("Make the box blink", &[]))).on_press_maybe(online.then_some(Message::Identify)),
+                row![
+                    text(tr("Box screen", &[])),
+                    space::horizontal(),
+                    button(text(tr("Refresh", &[])))
+                        .on_press_maybe((online && !self.screenshot_busy).then_some(Message::TakeScreenshot)),
+                    button(text(tr("Save image", &[])))
+                        .style(button::secondary)
+                        .on_press_maybe(self.screenshot.is_some().then_some(Message::SaveScreenshot)),
+                ]
+                .spacing(8),
+                container(screen)
+                    .padding(4)
+                    .width(Length::Fill)
+                    .height(Length::Fill)
+                    .center(Length::Fill)
+                    .style(|_| container::background(iced::Color::from_rgb8(0x16, 0x16, 0x16))),
             ]
-            .spacing(8),
-            container(screen)
-                .padding(4)
-                .width(Length::Fill)
-                .height(Length::Fill)
-                .center(Length::Fill)
-                .style(|_| container::background(iced::Color::from_rgb8(0x16, 0x16, 0x16))),
-        ]
-        .spacing(12))
-        .spacing(12)
-        .into()
+            .spacing(12))
+            .spacing(12)
+            .into()
     }
 
     fn advanced(&self) -> Element<'_, Message> {
@@ -645,6 +847,36 @@ fn user_dir(kind: &str, fallback: &str) -> Result<std::path::PathBuf, String> {
         .ok_or_else(|| "HOME is not set".to_owned())
 }
 
+/// The voice a language change asked the restarted app to write (`--write-voice <id>`), if it is one we know.
+fn launch_voice() -> Option<&'static str> {
+    let args: Vec<String> = std::env::args().collect();
+    let index = args.iter().position(|arg| arg == WRITE_VOICE)?;
+    assets::voice_id(args.get(index + 1)?)
+}
+
+/// Starts a new copy that waits for this one to quit, then opens Settings. It goes through systemd-run: started by the
+/// login autostart, this copy is a systemd service, and anything it left behind would be stopped along with it.
+fn restart(voice: Option<&str>) -> Result<(), String> {
+    let exe = std::env::current_exe().map_err(|error| error.to_string())?;
+    let mut args = vec![exe.into_os_string(), RESTARTED.into()];
+    if let Some(id) = voice {
+        args.extend([WRITE_VOICE.into(), id.into()]);
+    }
+    let started = std::process::Command::new("systemd-run")
+        .args(["--user", "--collect", "--quiet"])
+        .args(&args)
+        .status()
+        .is_ok_and(|status| status.success());
+    if started {
+        return Ok(());
+    }
+    std::process::Command::new(&args[0])
+        .args(&args[1..])
+        .spawn()
+        .map(drop)
+        .map_err(|error| format!("cannot restart: {error}"))
+}
+
 /// True only the first time the app starts for this user; a marker in the state directory remembers it.
 fn first_launch() -> bool {
     let Some(state) = state_dir() else { return false };
@@ -703,7 +935,9 @@ fn run_tray() -> impl futures::Stream<Item = Message> {
     iced::stream::channel(16, async |mut output| {
         let (events, mut clicks) = futures::channel::mpsc::unbounded();
         let tray = tray::Tray { menu: MenuState::derive(None), color: [255, 255, 255], events };
-        match tray.spawn().await {
+        // At login the app can start before the shell's tray host is up; ksni then registers once it appears, and
+        // again after the shell restarts. The app opens the window if it doesn't (`Message::TrayHost`).
+        match tray.assume_sni_available(true).spawn().await {
             Ok(handle) => {
                 let _ = output.send(Message::TrayReady(TrayHandle(handle))).await;
             }
@@ -717,8 +951,30 @@ fn run_tray() -> impl futures::Stream<Item = Message> {
             let message = match event {
                 tray::TrayEvent::OpenSettings => Message::OpenSettings,
                 tray::TrayEvent::Quit => Message::Quit,
+                tray::TrayEvent::HostGone => Message::TrayHost(false),
+                tray::TrayEvent::HostBack => Message::TrayHost(true),
             };
             let _ = output.send(message).await;
+        }
+    })
+}
+
+/// Another copy started (the launcher, while this one runs) connects here: show Settings, as the Mac app does on reopen.
+#[cfg(target_os = "linux")]
+fn run_instance() -> impl futures::Stream<Item = Message> {
+    use futures::SinkExt;
+
+    iced::stream::channel(4, async |mut output| {
+        let Some(listener) = INSTANCE.lock().ok().and_then(|mut listener| listener.take()) else { return };
+        let listener = match listener.set_nonblocking(true).and_then(|()| tokio::net::UnixListener::from_std(listener)) {
+            Ok(listener) => listener,
+            Err(error) => {
+                eprintln!("vibebuddy-desktop: cannot listen for other copies ({error})");
+                return;
+            }
+        };
+        while listener.accept().await.is_ok() {
+            let _ = output.send(Message::OpenSettings).await;
         }
     })
 }

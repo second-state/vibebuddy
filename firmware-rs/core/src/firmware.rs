@@ -13,8 +13,9 @@ use vibebuddy_protocol::{Event, ProtocolError, VERSION};
 
 use crate::audio::{Occasion, Sound, clamp_volume, VOLUME_DEFAULT};
 use crate::buttons::{ButtonEvent, Buttons, Levels};
-use crate::display::{Display, MAX_STATS, MAX_TASKS, Mode, Scene, Screen, State, TaskInput};
+use crate::display::{Display, MAX_STATS, MAX_TASKS, Mode, Panel, PanelKind, Scene, Screen, State, TaskInput, Tone};
 use crate::leisure::{Leisure, Tier};
+use crate::menu::{self, Action as MenuAction, Context as MenuContext, Menu, Row, View};
 use crate::pomodoro::{Phase, Pomodoro, Run, Transition};
 use crate::storage::{Flash, Settings, SettingsStore, find_partition};
 use crate::text;
@@ -98,6 +99,7 @@ pub struct Firmware {
     /// device would stay silent for days; coming back with sound after a restart is safer than
     /// remembering, and the MUTE badge on screen is the reminder.
     muted: bool,
+    menu: Menu,
     /// voice.begin arrived and we are waiting for playback to stop before erasing the partition: total bytes and when the wait began.
     pending_voice_begin: Option<(u32, u32)>,
 
@@ -192,6 +194,7 @@ impl Firmware {
             link_lost: false,
             ready_deadline: None,
             muted: false,
+            menu: Menu::new(),
             pending_voice_begin: None,
             reported_tier: Tier::Alert,
             reported_lights_out: false,
@@ -319,11 +322,18 @@ impl Firmware {
             && now.wrapping_sub(deadline) as i32 >= 0
         {
             self.ready_deadline = None;
-            if self.display.show_tasks(board, &scene!(self, now), State::Idle, None, &[]).is_err() {
-                Self::write_literal(board, "DISPLAY ERROR\n");
+            match self.display.settle_after_done(board, &scene!(self, now)) {
+                Ok(State::Working) => Self::write_literal(board, "DISPLAY STATE WORKING\n"),
+                Ok(State::InputRequired) => Self::write_literal(board, "DISPLAY STATE INPUT REQUIRED\n"),
+                Ok(_) => Self::write_literal(board, "DISPLAY STATE READY\n"),
+                Err(()) => Self::write_literal(board, "DISPLAY ERROR\n"),
             }
         }
         self.continue_voice_begin(board);
+        if self.menu.expire(now) {
+            Self::write_literal(board, "MENU CLOSED\n");
+            self.show_menu(board);
+        }
         self.tick_buttons(board);
         let transition = self.pomodoro.tick(board.now_ms());
         self.handle_pomodoro_transition(board, transition);
@@ -430,11 +440,17 @@ impl Firmware {
     }
 
     /// Each of the three keys does one thing regardless of mode: K0 is the pomodoro key, K1
-    /// switches between duty and pomodoro (long press goes to leisure), and K2 asks the Mac to
-    /// open the source. In leisure mode any key first calls the buddy back to duty and then does
+    /// switches between duty and pomodoro (long press opens the menu), and K2 asks the Mac to
+    /// open the source. While the menu is open the keys are its own (menu.rs). In leisure mode any key first calls the buddy back to duty and then does
     /// its own job: leisure hides nothing that needs a look first.
     fn on_button<B: Board>(&mut self, board: &mut B, event: ButtonEvent) {
         let now = board.now_ms();
+        if self.menu.is_open() {
+            self.leisure.note_activity(now);
+            let action = self.menu.key(event, self.menu_context(now), now);
+            self.on_menu_action(board, action);
+            return;
+        }
         let mode_before = self.display.mode();
         self.leisure.note_activity(now);
         if mode_before == Mode::Leisure {
@@ -448,10 +464,7 @@ impl Firmware {
                 return;
             }
             ButtonEvent::K2Long => {
-                self.muted = !self.muted;
-                let muted = self.muted;
-                self.display.set_muted(board, &scene!(self, now), muted);
-                Self::write_literal(board, if muted { "MUTE ON\n" } else { "MUTE OFF\n" });
+                self.toggle_mute(board);
                 return;
             }
             ButtonEvent::K1Short => {
@@ -459,25 +472,20 @@ impl Firmware {
                 return;
             }
             ButtonEvent::K1Long => {
-                self.leisure.force_bored(now);
-                self.leisure.tick(now);
-                self.set_mode(board, Mode::Leisure);
+                self.menu.open(self.menu_context(now), now);
+                Self::write_literal(board, "MENU OPEN\n");
+                self.show_menu(board);
                 return;
             }
             ButtonEvent::K0Short | ButtonEvent::K0Long => {}
         }
 
-        let before = self.pomodoro.view(now);
-        let break_phase = before.phase == Phase::Break;
         if event == ButtonEvent::K0Long {
-            if before.is_idle() {
-                return;
-            }
-            self.pomodoro.stop();
-            Self::report_pomodoro(board, if break_phase && before.run == Run::Pending { "BREAK SKIPPED" } else { "STOPPED" });
-            self.refresh(board);
+            self.stop_phase(board);
             return;
         }
+        let before = self.pomodoro.view(now);
+        let break_phase = before.phase == Phase::Break;
         self.pomodoro.toggle(now);
         if before.run == Run::Pending {
             Self::report_pomodoro(board, if break_phase { "BREAK START" } else { "FOCUS START" });
@@ -490,6 +498,144 @@ impl Firmware {
         self.refresh(board);
     }
 
+    /// Gives up the current Pomodoro phase: K0 long, or STOP FOCUS in the menu.
+    fn stop_phase<B: Board>(&mut self, board: &mut B) {
+        let before = self.pomodoro.view(board.now_ms());
+        if before.is_idle() {
+            return;
+        }
+        self.pomodoro.stop();
+        let skipped = before.phase == Phase::Break && before.run == Run::Pending;
+        Self::report_pomodoro(board, if skipped { "BREAK SKIPPED" } else { "STOPPED" });
+        self.refresh(board);
+    }
+
+    /// K2 long, or MUTE in the menu.
+    fn toggle_mute<B: Board>(&mut self, board: &mut B) {
+        self.muted = !self.muted;
+        let now = board.now_ms();
+        let muted = self.muted;
+        self.display.set_muted(board, &scene!(self, now), muted);
+        Self::write_literal(board, if muted { "MUTE ON\n" } else { "MUTE OFF\n" });
+    }
+
+    /// Sets, saves and reports the volume: the app's slider and the menu both land here.
+    fn set_volume_level<B: Board>(&mut self, board: &mut B, level: u32) {
+        let level = clamp_volume(level);
+        let saved = match board.set_volume(level) {
+            Ok(()) => {
+                self.volume = level;
+                self.save_settings(board)
+            }
+            Err(_) => false,
+        };
+        if !saved {
+            Self::write_literal(board, "VOLUME ERROR\n");
+        }
+        self.announce_volume(board);
+    }
+
+    fn menu_context(&self, now: u32) -> MenuContext {
+        MenuContext { phase_active: !self.pomodoro.view(now).is_idle() }
+    }
+
+    fn on_menu_action<B: Board>(&mut self, board: &mut B, action: MenuAction) {
+        match action {
+            MenuAction::None => return,
+            MenuAction::Redraw => {}
+            MenuAction::Close => Self::write_literal(board, "MENU CLOSED\n"),
+            MenuAction::StopPhase => {
+                Self::write_literal(board, "MENU CLOSED\n");
+                self.show_menu(board);
+                self.stop_phase(board);
+            }
+            // The preview goes through announce, so it is silent when muted, like the app's.
+            MenuAction::StepVolume => {
+                self.set_volume_level(board, menu::next_volume(self.volume));
+                self.announce(board, Occasion::Done);
+            }
+            MenuAction::ToggleMute => self.toggle_mute(board),
+        }
+        self.show_menu(board);
+    }
+
+    /// Something that needs the user takes the screen back from the menu.
+    fn close_menu<B: Board>(&mut self, board: &mut B) {
+        if self.menu.is_open() {
+            self.menu.close();
+            Self::write_literal(board, "MENU CLOSED\n");
+            self.show_menu(board);
+        }
+    }
+
+    /// Hands the display the panel for what the menu shows now, or none when it's closed.
+    fn show_menu<B: Board>(&mut self, board: &mut B) {
+        let now = board.now_ms();
+        let panel = self.menu.view().map(|view| self.menu_panel(view, now));
+        self.display.set_panel(board, &scene!(self, now), panel);
+    }
+
+    fn menu_panel(&self, view: View, now: u32) -> Panel {
+        let line = |label: &[u8], value: &[u8], tone| (label.to_vec(), value.to_vec(), tone);
+        match view {
+            View::List => {
+                let context = self.menu_context(now);
+                let rows = Menu::rows(context);
+                let selected = self.menu.selected(context);
+                let volume = text!(4, "{}", self.volume % 1000);
+                let lines = rows
+                    .iter()
+                    .map(|row| match row {
+                        Row::StopPhase if self.pomodoro.view(now).phase == Phase::Break => line(b"END BREAK", b"", Tone::Plain),
+                        Row::StopPhase => line(b"STOP FOCUS", b"", Tone::Plain),
+                        Row::Volume => line(b"VOLUME", volume.as_bytes(), Tone::Accent),
+                        Row::Mute => line(b"MUTE", if self.muted { b"ON" } else { b"OFF" }, Tone::Accent),
+                        Row::Status => line(b"STATUS", b"OPEN", Tone::Dim),
+                    })
+                    .collect();
+                let verb: &'static [u8] = match rows[selected] {
+                    Row::StopPhase => b"STOP",
+                    Row::Volume => b"CHANGE",
+                    Row::Mute => b"TOGGLE",
+                    Row::Status => b"OPEN",
+                };
+                Panel {
+                    kind: PanelKind::List,
+                    title: b"MENU".to_vec(),
+                    lines,
+                    selected: Some(selected),
+                    hints: alloc::vec![(b"K1", b"NEXT"), (b"K0", verb), (b"K2", b"CLOSE")],
+                }
+            }
+            View::Status => {
+                let build = self.build.split(|&byte| byte == b' ').next().unwrap_or(&[]);
+                let voice = self.voices.current_id().to_ascii_uppercase();
+                let volume = text!(4, "{}", self.volume % 1000);
+                let tally = self.pomodoro.tally();
+                let minutes = tally.focus_s / 60;
+                let today = if minutes >= 60 {
+                    text!(24, "{} FOCUS {}H{:02}", tally.completed % 1000, minutes / 60 % 100, minutes % 60)
+                } else {
+                    text!(24, "{} FOCUS {}M", tally.completed % 1000, minutes)
+                };
+                Panel {
+                    kind: PanelKind::Facts,
+                    title: b"STATUS".to_vec(),
+                    lines: alloc::vec![
+                        line(b"FIRMWARE", &build[..build.len().min(13)], Tone::Plain),
+                        line(b"MAC", if self.link_lost { b"NO LINK" } else { b"LINKED" }, Tone::Plain),
+                        line(b"VOICE", voice.as_bytes(), Tone::Plain),
+                        line(b"VOLUME", volume.as_bytes(), Tone::Plain),
+                        line(b"MUTE", if self.muted { b"ON" } else { b"OFF" }, Tone::Plain),
+                        line(b"TODAY", today.as_bytes(), Tone::Plain),
+                    ],
+                    selected: None,
+                    hints: alloc::vec![(b"K0", b"BACK"), (b"K2", b"CLOSE")],
+                }
+            }
+        }
+    }
+
     /// A phase end is an edge consumed once: play the voice once and bring the pomodoro to the
     /// front, since this is exactly when the user should glance at it. The next phase waits to
     /// start until the user presses K0.
@@ -500,6 +646,8 @@ impl Firmware {
             Transition::BreakEnded => false,
         };
         Self::report_pomodoro(board, if focus_ended { "FOCUS END" } else { "BREAK END" });
+        // The alarm waits for K0, which the menu would take.
+        self.close_menu(board);
         if focus_ended {
             self.save_tally(board);
         }
@@ -522,7 +670,7 @@ impl Firmware {
     fn tend_leisure<B: Board>(&mut self, board: &mut B) {
         let now = board.now_ms();
         let pomodoro = self.pomodoro.view(now);
-        if !self.display.agent_idle() || pomodoro.run == Run::Running || self.link_lost {
+        if !self.display.agent_idle() || pomodoro.run == Run::Running || self.link_lost || self.menu.is_open() {
             self.leisure.note_activity(now);
         }
 
@@ -619,6 +767,9 @@ impl Firmware {
             occasion = Some(special);
         }
 
+        if matches!(state, State::InputRequired | State::Failed) {
+            self.close_menu(board);
+        }
         let shown = self.display.show_tasks(board, &scene!(self, now), state, title.map(str::as_bytes), &tasks);
         if shown.is_err() {
             Self::write_literal(board, "DISPLAY ERROR\n");
@@ -723,21 +874,12 @@ impl Firmware {
             // level it is just a query. The preview goes through announce, so it is silent when
             // muted, same rule as every other announcement.
             "device.volume" => {
-                if let Some(level) = number(fields, "level") {
-                    let wanted = if level < 0.0 { 0 } else { level as u32 };
-                    let level = clamp_volume(wanted);
-                    let saved = match board.set_volume(level) {
-                        Ok(()) => {
-                            self.volume = level;
-                            self.save_settings(board)
-                        }
-                        Err(_) => false,
-                    };
-                    if !saved {
-                        Self::write_literal(board, "VOLUME ERROR\n");
-                    }
+                match number(fields, "level") {
+                    Some(level) => self.set_volume_level(board, if level < 0.0 { 0 } else { level as u32 }),
+                    None => self.announce_volume(board),
                 }
-                self.announce_volume(board);
+                // The app's slider can move while the menu shows the volume.
+                self.show_menu(board);
                 if fields.get("preview") == Some(&Value::Bool(true)) {
                     self.announce(board, Occasion::Done);
                 }

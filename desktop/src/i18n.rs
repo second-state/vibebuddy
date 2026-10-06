@@ -1,6 +1,7 @@
 //! UI strings are keyed in English, written exactly as in the Mac app's table (`%@`, `%lld`), so both apps share
 //! `app/Localization/zh-Hans.lproj/Localizable.strings` and `tools/check-localization.py` checks this app too.
-//! Chinese is shown when the locale asks for it; everything else gets the English key.
+//! Chinese is shown when the language picked in Settings, or else the locale, asks for it; everything else gets the
+//! English key.
 
 use std::collections::HashMap;
 use std::fmt::Display;
@@ -29,8 +30,72 @@ pub fn is_chinese() -> bool {
     chinese().is_some()
 }
 
-/// The first of the POSIX locale variables that is set decides, as it does for every other program.
 fn wants_chinese() -> bool {
+    UiLanguage::saved().chinese()
+}
+
+/// The UI language picked in Settings. It is read once at start, so a change applies after a restart, as on the Mac.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum UiLanguage {
+    System,
+    English,
+    Chinese,
+}
+
+impl UiLanguage {
+    pub const ALL: [Self; 3] = [Self::System, Self::English, Self::Chinese];
+
+    fn file() -> Option<std::path::PathBuf> {
+        crate::config_dir().map(|dir| dir.join("language"))
+    }
+
+    pub fn saved() -> Self {
+        match Self::file().and_then(|file| std::fs::read_to_string(file).ok()).as_deref().map(str::trim) {
+            Some("en") => Self::English,
+            Some("zh-Hans") => Self::Chinese,
+            _ => Self::System,
+        }
+    }
+
+    /// "System" removes the file, so the locale decides again.
+    pub fn save(self) -> Result<(), String> {
+        let file = Self::file().ok_or("HOME is not set")?;
+        let result = match self {
+            Self::System => std::fs::remove_file(&file).or_else(|error| match error.kind() {
+                std::io::ErrorKind::NotFound => Ok(()),
+                _ => Err(error),
+            }),
+            Self::English | Self::Chinese => {
+                let code = if self == Self::Chinese { "zh-Hans" } else { "en" };
+                file.parent().map_or(Ok(()), std::fs::create_dir_all).and_then(|()| std::fs::write(&file, code))
+            }
+        };
+        result.map_err(|error| format!("{}: {error}", file.display()))
+    }
+
+    /// Whether the UI is shown in Chinese once this choice applies.
+    pub fn chinese(self) -> bool {
+        match self {
+            Self::System => locale_wants_chinese(),
+            Self::English => false,
+            Self::Chinese => true,
+        }
+    }
+}
+
+impl Display for UiLanguage {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        // The languages are named in themselves, so they can be found whichever one the UI is in.
+        match self {
+            Self::System => f.write_str(&tr("System", &[])),
+            Self::English => f.write_str("English"),
+            Self::Chinese => f.write_str("简体中文"),
+        }
+    }
+}
+
+/// The first of the POSIX locale variables that is set decides, as it does for every other program.
+fn locale_wants_chinese() -> bool {
     ["LC_ALL", "LC_MESSAGES", "LANG"]
         .iter()
         .find_map(|name| std::env::var(name).ok().filter(|value| !value.is_empty()))

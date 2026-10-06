@@ -2,6 +2,8 @@
 //! buddy's face and the menu repeats the Mac app's menu bar menu; picking an item only sends an event to
 //! the app, which does the work.
 
+use std::path::PathBuf;
+
 use futures::channel::mpsc::UnboundedSender;
 use ksni::menu::StandardItem;
 use ksni::{Icon, MenuItem, ToolTip};
@@ -14,6 +16,9 @@ use crate::status::{Icon as FaceIcon, MenuState};
 pub enum TrayEvent {
     OpenSettings,
     Quit,
+    /// The shell's tray host is gone (not up yet at login, or restarting) or back; ksni registers again by itself.
+    HostGone,
+    HostBack,
 }
 
 pub struct Tray {
@@ -57,6 +62,15 @@ impl ksni::Tray for Tray {
         }
     }
 
+    fn watcher_online(&self) {
+        let _ = self.events.unbounded_send(TrayEvent::HostBack);
+    }
+
+    fn watcher_offline(&self, _reason: ksni::OfflineReason) -> bool {
+        let _ = self.events.unbounded_send(TrayEvent::HostGone);
+        true
+    }
+
     fn activate(&mut self, _x: i32, _y: i32) {
         let _ = self.events.unbounded_send(TrayEvent::OpenSettings);
     }
@@ -84,5 +98,34 @@ impl ksni::Tray for Tray {
             // systemd keeps the daemon running, so unlike on the Mac, quitting leaves the box online.
             action(tr("Quit", &[]), TrayEvent::Quit),
         ]
+    }
+}
+
+/// Omarchy keeps tray icons in a drawer behind a chevron until they're pinned, while the Mac's icon always shows in the
+/// menu bar; so pin ours, once. The edit goes through Omarchy's own `omarchy-shell-config`, which writes `shell.json`
+/// atomically and reloads the bar. Once means the marker: unpinning or hiding it later is the user's call, and an icon
+/// they already hid stays hidden.
+pub async fn pin_in_omarchy_bar(marker: PathBuf) {
+    if marker.exists() {
+        return;
+    }
+    // Exit 3: not Omarchy, so nothing to pin and nothing to remember.
+    const SCRIPT: &str = r#"
+source omarchy-shell-config 2>/dev/null || exit 3
+commit "$NORMALIZE"' | .bar.layout[] |= map(
+    (if . == "omarchy.tray" then {id: .} else . end)
+    | if type == "object" and .id == "omarchy.tray"
+        and ((.pinned // []) | any(. == "vibebuddy") | not)
+        and ((.hidden // []) | any(. == "vibebuddy") | not)
+      then .pinned = ((.pinned // []) + ["vibebuddy"]) else . end)'
+"#;
+    match tokio::process::Command::new("bash").args(["-c", SCRIPT]).status().await {
+        Ok(status) if status.success() => {
+            let _ = marker.parent().map(std::fs::create_dir_all);
+            let _ = std::fs::write(&marker, "");
+        }
+        Ok(status) if status.code() == Some(3) => {}
+        Ok(status) => eprintln!("vibebuddy-desktop: pinning the tray icon in Omarchy's bar failed ({status})"),
+        Err(error) => eprintln!("vibebuddy-desktop: cannot run bash to pin the tray icon ({error})"),
     }
 }

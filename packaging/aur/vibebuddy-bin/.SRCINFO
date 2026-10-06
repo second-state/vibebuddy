@@ -1,6 +1,6 @@
 pkgbase = vibebuddy-bin
 	pkgdesc = A desk pet that shows and announces what your AI coding agents are doing (daemon, agent hooks, tray app)
-	pkgver = 0.3.1
+	pkgver = 0.3.2
 	pkgrel = 1
 	url = https://github.com/second-state/vibebuddy
 	install = vibebuddy-bin.install
@@ -17,7 +17,7 @@ pkgbase = vibebuddy-bin
 	provides = vibebuddy
 	conflicts = vibebuddy
 	options = !debug
-	source = https://github.com/second-state/vibebuddy/releases/download/v0.3.1/VibeBuddy-v0.3.1-linux-x86_64.tar.gz
-	sha256sums = 9859b9fd7532ae7b636809feecb44967f133a6c3ed50815c00050059c11aae55
+	source = https://github.com/second-state/vibebuddy/releases/download/v0.3.2/VibeBuddy-v0.3.2-linux-x86_64.tar.gz
+	sha256sums = ebcae5ba61105226ecd01d36be66c10a8766d49f51410ea0dc1bf5babd6aa79d
 
 pkgname = vibebuddy-bin

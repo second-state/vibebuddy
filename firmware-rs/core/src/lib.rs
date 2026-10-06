@@ -22,6 +22,7 @@ pub mod firmware;
 pub mod lcd;
 pub mod leisure;
 pub mod lines;
+pub mod menu;
 pub mod pomodoro;
 pub mod storage;
 pub mod voice_pack;

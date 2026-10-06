@@ -45,9 +45,9 @@ The heartbeat carries the Mac side's local hour (the device has no clock, and sh
 
 The done count in today's stats shapes its mood: if nothing got done today, kick the ball gets double weight, as it idly kicks pebbles; with five or more done, it's tired and dreams a lot, and in the Sleepy tier it no longer startles itself awake. What the sleep-talk bubbles recite is the stats themselves.
 
-## Long press K1
+## Starting it on demand
 
-Hold K1 for one second and the buddy goes into Leisure immediately. This is for demos and acceptance testing: no need to wait five minutes.
+A long press on K1 used to send the buddy into Leisure at once; in the Rust firmware it now opens the device menu ([`device-menu.md`](device-menu.md)), and Leisure only starts on its own. For demos and acceptance, the time-compressed build below gets there in seconds. The C fallback firmware still starts Leisure on a long K1.
 
 ## Implementation
 

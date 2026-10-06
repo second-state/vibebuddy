@@ -8,6 +8,10 @@ Vibe Buddy 是给 AI 编程 Agent 配的桌面宠物。它住在键盘旁一个�
 
 （项目原名 VibeBuddy，仓库、`vibebuddyd` 守护进程与 Vibe Buddy Protocol 沿用旧名。）
 
+[![观看 2 分钟产品介绍](docs/images/intro-poster.zh-CN.jpg)](https://www.youtube.com/watch?v=lLEFGSrcwDA)
+
+**不想自己动手？** 组装好、刷好固件并测试过的 Vibe Buddy 成品已在 [vibekeys.dev](https://vibekeys.dev/vibe-buddy.html?utm_source=github&utm_medium=readme&utm_campaign=vibe-buddy-launch) 开放预订，运行的就是本仓库里的开源代码。
+
 ## 盒子上的画面
 
 以下截图来自运行 Rust 固件的实机。状态场景使用示例任务名称和每日统计，番茄钟场景展示实际运行中的计时器。
@@ -31,7 +35,7 @@ Vibe Buddy 是给 AI 编程 Agent 配的桌面宠物。它住在键盘旁一个�
 它有三个模式：
 
 - **值班**（默认）：盯着 Agent，有事叫你。
-- **番茄钟**：给你计时，专注 25 分钟、休息 5 分钟。K0 开始、暂停、继续，长按放弃；K1 在值班与番茄钟之间切换；K2 照旧带你回到 Agent 所在的窗口，长按静音。阶段结束响铃并播报，下一阶段等你按 K0 再开始。今天完成了几次、专注了多久记在盒子上，按日清零，重启不丢。
+- **番茄钟**：给你计时，专注 25 分钟、休息 5 分钟。K0 开始、暂停、继续，长按放弃；K1 在值班与番茄钟之间切换，长按打开盒子上的菜单（音量、静音、状态）；K2 照旧带你回到 Agent 所在的窗口，长按静音。阶段结束响铃并播报，下一阶段等你按 K0 再开始。今天完成了几次、专注了多久记在盒子上，按日清零，重启不丢。
 - **休闲**：值班空闲够久之后它自己去玩。五分钟后开始演小剧目（巡逻、踢球、看书、数星星、躲猫猫、被自己吓醒、梦话），半小时后困了转暗睡觉，夜里睡够 90 分钟关背光。Agent 一有动静或按任何键，立刻回来值班。
 
 番茄钟完全在盒子上运行，计时和当日次数不依赖 Mac 端。休闲的状态同样在固件里，但它需要与 daemon 的链路在线：盒子 15 秒收不到 Mac 的消息就判定链路断开，休闲随即回到值班，链路恢复前不会再进入。设计见 [`docs/pomodoro.md`](docs/pomodoro.md) 与 [`docs/leisure.md`](docs/leisure.md)。
@@ -40,7 +44,7 @@ Vibe Buddy 是给 AI 编程 Agent 配的桌面宠物。它住在键盘旁一个�
 
 ## 需要准备
 
-- **盒子：** 正点原子 ATK-DNESP32S3-BOX V1.1（ESP32-S3，16 MB Flash，8 MB PSRAM），带 LCD、扬声器和三个按键。一根 USB-C 线同时供电、烧录和传事件。硬件记录见 [`docs/hardware.md`](docs/hardware.md)。
+- **盒子：** 一台 Vibe Buddy（ESP32-S3，16 MB Flash，8 MB PSRAM），带 LCD、扬声器和三个按键。一根 USB-C 线同时供电、烧录和传事件。可以直接[预订成品](https://vibekeys.dev/vibe-buddy.html?utm_source=github&utm_medium=readme&utm_campaign=vibe-buddy-launch)，组装和刷机都已完成；想自己做，硬件说明见 [`docs/hardware.md`](docs/hardware.md)。
 - **一台 Mac：** Apple 芯片，macOS 14 或更新；也可以是一台 Linux 机器（实验性，见下文）。
 - **至少一个 Agent：** Codex 或 Claude Code。GitHub Actions 用的是你已经登录好的 `gh` 命令行。
 
@@ -77,7 +81,7 @@ systemctl --user enable --now vibebuddyd && vibebuddy-hook install
 
 等 AUR 重新开放注册后，它会以 `vibebuddy-bin` 上架。想从源码编译的话，在装好 Rust 工具链和 python3 的仓库里运行 `packaging/linux/install.sh`，它会编译所有程序，并从 GitHub 下载这个版本的固件。两种方式都一样：脚本把程序装进 `~/.local/bin`，把 `vibebuddyd` 注册成 systemd 用户服务，把 Vibe Buddy App 放进启动器并设为登录时启动，再给本机有的 Claude Code 和 Codex 加上 Hook（Codex 之后需要你在 `/hooks` 里信任它们）。升级时重新运行即可。daemon 要在 `/dev/ttyACM*` 所属的组里（Arch 是 `uucp`，Debian 和 Ubuntu 是 `dialout`），不在的话脚本会提示。配置放在 `~/.config/vibebuddy`，统计放在 `~/.local/state/vibebuddy`；盒子断开 30 秒后会通过 `notify-send` 弹一条桌面通知。
 
-在 Hyprland 上，K2 会切回会话所在的终端窗口，不管它在哪个工作区；跑在 tmux 里或通过 SSH 的会话没有窗口可回。App 是一个托盘图标（氛围小助手的脸，点一下打开设置）加一个设置窗口，标签页和 Mac 版一样。它从 Omarchy 主题取配色和字体，切换主题时会跟着变。它只是个客户端：退出它，daemon 和盒子照常在线。设备页点「刷新」能看到盒子当前的屏幕，「保存图片」会存进你的图片文件夹。声音页列出脚本生成的音色包，选中的会写进盒子；盒子上的固件和这个版本不同时，设备页会提供更新，固件由脚本下载并按 GitHub 记录的 sha256 校验。首次启动会打开设置窗口；没有单独的首次引导，那些事脚本已经做了。想让设置窗口在 Omarchy 上浮动显示，在 `~/.config/hypr/hyprland.lua` 里加两行 `o.window("^vibebuddy$", { tag = "+floating-window" })` 和 `o.window("^vibebuddy$", { tag = "-default-opacity" })`（每条规则只能写一个标签：Hyprland 会把空格当成标签名的一部分）；和所有 Hyprland 窗口一样，按住 Super 拖动就能移动它。卸载时先运行 `vibebuddy-hook uninstall`，再运行 `systemctl --user disable --now vibebuddyd`，然后删掉脚本装的文件。
+在 Hyprland 上，K2 会切回会话所在的终端窗口，不管它在哪个工作区；跑在 tmux 里或通过 SSH 的会话没有窗口可回。App 是一个托盘图标（氛围小助手的脸，点一下打开设置）加一个设置窗口，标签页和 Mac 版一样。它从 Omarchy 主题取配色和字体，切换主题时会跟着变。它只是个客户端：退出它，daemon 和盒子照常在线。设备页点「刷新」能看到盒子当前的屏幕，「保存图片」会存进你的图片文件夹。声音页列出脚本生成的音色包，选中的会写进盒子；盒子上的固件和这个版本不同时，设备页会提供更新，固件由脚本下载并按 GitHub 记录的 sha256 校验。首次启动会打开设置窗口，App 运行时再次启动它也会打开；没有单独的首次引导，那些事脚本已经做了。Omarchy 把托盘图标收在状态栏箭头后面的抽屉里，所以 App 第一次运行时会把它的脸固定（Pin）到状态栏上；之后你在那里（右键那个箭头）取消固定或隐藏它，App 不会再改回来。和 Mac 版一样，可以在「通用 → 语言」里改用和系统不同的语言。想让设置窗口在 Omarchy 上浮动显示，在 `~/.config/hypr/hyprland.lua` 里加两行 `o.window("^vibebuddy$", { tag = "+floating-window" })` 和 `o.window("^vibebuddy$", { tag = "-default-opacity" })`（每条规则只能写一个标签：Hyprland 会把空格当成标签名的一部分）；和所有 Hyprland 窗口一样，按住 Super 拖动就能移动它。卸载时先运行 `vibebuddy-hook uninstall`，再运行 `systemctl --user disable --now vibebuddyd`，然后删掉脚本装的文件。
 
 ## 工作原理
 

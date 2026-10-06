@@ -21,6 +21,8 @@ const MAX_TITLE_CHARS: usize = 26;
 const WORKING_TTL: Duration = Duration::from_secs(30 * 60);
 /// Waiting for the user can last a long time; the expiry must be long enough for them to leave and come back.
 const INPUT_REQUIRED_TTL: Duration = Duration::from_secs(4 * 60 * 60);
+/// A child activity holds back its parent's done announcement, so a lost end event costs more there: shorter.
+const CHILD_TTL: Duration = Duration::from_secs(10 * 60);
 /// How long to remember project roots an agent worked in. If nobody has worked there for this long,
 /// its CI is no longer worth watching.
 const WORKSPACE_TTL: Duration = Duration::from_secs(60 * 60);
@@ -129,6 +131,9 @@ struct Activity {
     /// seconds, but the card answers "how long has this turn been running" and "how long has it waited".
     status_since: Instant,
     source: Option<ActivitySource>,
+    /// Work an agent delegated inside its own session (a Claude Code subagent). It gets a card but is not the
+    /// user's task: its end is never announced, and while it runs the session's work isn't done.
+    child: bool,
 }
 
 /// Snapshot of today's stats: done count, times input was needed, busy seconds.
@@ -289,6 +294,15 @@ impl ActivityTracker {
         self.visible_activity()
     }
 
+    /// Like `observe`, for a child activity.
+    pub fn observe_child(&mut self, id: &ActivityId, title: &str) -> Option<Event> {
+        self.set_activity(id, title, ActivityStatus::Working);
+        if let Some(activity) = self.activities.get_mut(&id.key) {
+            activity.child = true;
+        }
+        self.visible_activity()
+    }
+
     /// Mark the activity as waiting for the user. Marking it again doesn't trigger the voice again.
     pub fn require_input(&mut self, id: &ActivityId, title: &str) -> Option<Event> {
         if self
@@ -315,6 +329,12 @@ impl ActivityTracker {
         let Some(finished) = self.activities.remove(&id.key) else {
             return self.visible_activity();
         };
+        // The agent ended its turn to wait for work it delegated: the user's task is not done yet. The child's cards
+        // keep the screen busy, and the turn that wraps up after the last child is the one announced.
+        if !finished.child && self.has_children(&id.session_id) {
+            self.sync_busy();
+            return self.visible_activity();
+        }
         self.remember_announced(finished);
         self.sync_busy();
         self.record(|stats| stats.done += 1);
@@ -384,6 +404,19 @@ impl ActivityTracker {
         self.sync_busy();
     }
 
+    /// A new turn replaces the session's previous one; children it started earlier keep running and keep their cards.
+    pub fn clear_turns(&mut self, session_id: &str) {
+        self.activities
+            .retain(|_, activity| activity.session_id != session_id || activity.child);
+        self.sync_busy();
+    }
+
+    fn has_children(&self, session_id: &str) -> bool {
+        self.activities
+            .values()
+            .any(|activity| activity.child && activity.session_id == session_id)
+    }
+
     /// Clear abandoned activities. An agent that is force-killed sends no wrap-up event;
     /// without expiry those activities would hold task cards forever and leave the pet stuck on needs-input.
     pub fn sweep_expired(&mut self) -> Option<Event> {
@@ -394,8 +427,9 @@ impl ActivityTracker {
         let mut expired_session = None;
         self.activities.retain(|_, activity| {
             let ttl = match activity.status {
-                ActivityStatus::Working => WORKING_TTL,
                 ActivityStatus::InputRequired => INPUT_REQUIRED_TTL,
+                ActivityStatus::Working if activity.child => CHILD_TTL,
+                ActivityStatus::Working => WORKING_TTL,
             };
             let alive = now.duration_since(activity.updated_at) < ttl;
             if !alive {
@@ -438,10 +472,9 @@ impl ActivityTracker {
             .get(&id.key)
             .filter(|existing| existing.status == status)
             .map_or(now, |existing| existing.status_since);
-        let source = self
-            .activities
-            .get(&id.key)
-            .and_then(|existing| existing.source.clone());
+        let existing = self.activities.get(&id.key);
+        let source = existing.and_then(|existing| existing.source.clone());
+        let child = existing.is_some_and(|existing| existing.child);
         self.activities.insert(
             id.key.clone(),
             Activity {
@@ -452,6 +485,7 @@ impl ActivityTracker {
                 updated_at: now,
                 status_since,
                 source,
+                child,
             },
         );
         self.sync_busy();
@@ -1024,6 +1058,19 @@ mod tests {
             Some(source),
             "a daemon restart should not make K2 forget the latest session"
         );
+    }
+
+    #[test]
+    fn a_silent_child_expires_sooner_so_it_cannot_mute_its_parent_for_long() {
+        let mut tracker = ActivityTracker::default();
+        let parent = id("session", "session:turn");
+        tracker.observe(&parent, "CC:MAIN", ActivityStatus::Working);
+        tracker.observe_child(&id("session", "session:turn:agent"), "CC:MAIN");
+        tracker.activities.get_mut(&parent.key).expect("parent should be tracked").updated_at += CHILD_TTL;
+
+        tracker.sweep_expired_at(Instant::now() + CHILD_TTL + Duration::from_secs(1));
+        let done = tracker.finish(&parent, "CC:MAIN").expect("finishing should be visible");
+        assert_eq!(done.extra.get("announcement").and_then(|v| v.as_str()), Some("done"));
     }
 
     #[test]
