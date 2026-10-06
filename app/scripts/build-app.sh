@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Assembles Vibe Buddy.app: the two Rust helpers, the Swift app, the three firmware images, and the voice packs.
+# Assembles Vibe Buddy.app: the two Rust helpers, the Swift app, the three firmware images, and the Character packs.
 #
 # Usage: app/scripts/build-app.sh [--debug] [--install]
 #   --debug    Allow a build without firmware (the Device tab hides "Update"); Swift uses the debug configuration.
@@ -94,12 +94,21 @@ else
     exit 1
 fi
 
-echo "== Voice packs"
+# A Character's pack (characters/<id>/pack.bin, from tools/make-character.sh) replaces the old voice
+# pack of the same id; voices that have no Character yet still ship their five fixed lines.
+echo "== Character packs"
+for dir in "${repo_root}"/characters/*/; do
+    id="$(basename "${dir}")"
+    if [[ -f "${dir}/pack.bin" ]]; then
+        cp "${dir}/pack.bin" "${contents}/Resources/voices/${id}.bin"
+        echo "  ${id} (character)"
+    fi
+done
 for dir in "${repo_root}"/voices/*/; do
     id="$(basename "${dir}")"
-    if [[ -f "${dir}/done.pcm" ]]; then
+    if [[ -f "${dir}/done.pcm" && ! -f "${contents}/Resources/voices/${id}.bin" ]]; then
         "${repo_root}/tools/make_voice_pack.py" "${dir}" "${id}" "${contents}/Resources/voices/${id}.bin" >/dev/null
-        echo "  ${id}"
+        echo "  ${id} (voice pack)"
     fi
 done
 
