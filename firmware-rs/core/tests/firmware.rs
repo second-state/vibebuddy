@@ -4,14 +4,13 @@
 
 use std::cell::Cell;
 
-use vibebuddy_firmware_core::audio::Prompt;
+use vibebuddy_firmware_core::audio::{Codec, Prompt, Sound};
 use vibebuddy_firmware_core::buttons::Levels;
 use vibebuddy_firmware_core::canvas::FRAME_BYTES;
 use vibebuddy_firmware_core::display::Screen;
 use vibebuddy_firmware_core::firmware::{AudioStatus, Board, Firmware, FrameAction, VolumeError};
 use vibebuddy_firmware_core::storage::{Flash, FlashError};
 use vibebuddy_firmware_core::voice_pack;
-use vibebuddy_firmware_core::voices::ClipTable;
 
 struct MemoryFlash {
     bytes: Vec<u8>,
@@ -64,7 +63,7 @@ struct FakeBoard {
     presents: usize,
     backlight: bool,
     codec_volume: Option<u32>,
-    played: Vec<(Prompt, bool)>,
+    played: Vec<Sound>,
     busy: bool,
     stops: usize,
     k0: bool,
@@ -139,8 +138,8 @@ impl Board for FakeBoard {
     fn read_buttons(&mut self) -> (bool, Option<(bool, bool)>) {
         (self.k0, Some((false, false)))
     }
-    fn play(&mut self, prompt: Prompt, clips: ClipTable) -> Result<(), ()> {
-        self.played.push((prompt, clips.is_some()));
+    fn play(&mut self, sound: Sound) -> Result<(), ()> {
+        self.played.push(sound);
         Ok(())
     }
     fn stop_audio(&mut self) {
@@ -199,7 +198,7 @@ fn a_done_event_is_shown_announced_and_returns_to_idle() {
         r#"{"version":1,"event":"task.done","title":"CC:VIBE","tasks":[{"title":"CC:VIBE","status":"done","elapsed_s":3}],"stats":["7 DONE"]}"#,
     );
     assert_eq!(lines, ["EVENT task.done", "TITLE CC:VIBE", "DISPLAY STATE DONE", "AUDIO QUEUED DONE"]);
-    assert_eq!(board.played, [(Prompt::Done, false)]);
+    assert_eq!(board.played, [Sound::Builtin(Prompt::Done)]);
 
     let presents = board.presents;
     board.advance(4990);
@@ -329,7 +328,10 @@ fn a_voice_pack_is_written_over_the_serial_line() {
     }
     let lines = send(&mut firmware, &mut board, r#"{"version":1,"event":"voice.end"}"#);
     assert_eq!(lines, [r#"{"version":1,"event":"voice.written","voice":"xiaohe"}"#, "VOICES xiaohe", "AUDIO QUEUED DONE"]);
-    assert_eq!(board.played.last(), Some(&(Prompt::Done, true)), "says a line in the new voice when done");
+    assert!(
+        matches!(board.played.last(), Some(Sound::Line(line)) if line.codec == Codec::Pcm24kStereo),
+        "says a line in the new voice when done"
+    );
 
     // It is still used after a restart.
     let flash = board.flash;
@@ -419,4 +421,90 @@ fn a_voice_pack_that_cannot_fit_is_refused_without_interrupting_playback() {
     let lines = send(&mut firmware, &mut board, r#"{"version":1,"event":"voice.begin","size":99999999}"#);
     assert_eq!(lines, [r#"{"version":1,"event":"voice.error","seq":-1,"message":"ESP_ERR_INVALID_SIZE"}"#]);
     assert_eq!(board.stops, 0);
+}
+
+/// Writes a pack over the serial line the way the Mac does, with the box already quiet.
+fn write_pack(firmware: &mut Firmware, board: &mut FakeBoard, pack: &[u8]) -> Vec<String> {
+    let begin = format!(r#"{{"version":1,"event":"voice.begin","size":{}}}"#, pack.len());
+    send(firmware, board, &begin);
+    firmware.poll(board);
+    board.take_lines();
+    for (seq, piece) in pack.chunks(672).enumerate() {
+        let chunk = format!(
+            r#"{{"version":1,"event":"voice.chunk","seq":{seq},"data":"{}","crc":{}}}"#,
+            encode_base64(piece),
+            voice_pack::crc32(0, piece)
+        );
+        send(firmware, board, &chunk);
+    }
+    send(firmware, board, r#"{"version":1,"event":"voice.end"}"#)
+}
+
+/// Built by tools/character_pack.py: input required has two lines, done one, the evening greeting
+/// one, and every other occasion none.
+const SAMPLE_PACK: &[u8] = include_bytes!("../src/fixtures/sample_character_pack.bin");
+
+fn adpcm_samples(sound: Option<&Sound>) -> Option<u32> {
+    match sound {
+        Some(Sound::Line(line)) => match line.codec {
+            Codec::Adpcm16kMono { samples } => Some(samples),
+            Codec::Pcm24kStereo => None,
+        },
+        _ => None,
+    }
+}
+
+#[test]
+fn a_character_pack_speaks_its_own_lines() {
+    let (mut firmware, mut board, _) = booted(blank_flash());
+    let lines = write_pack(&mut firmware, &mut board, SAMPLE_PACK);
+    assert_eq!(lines, [r#"{"version":1,"event":"voice.written","voice":"sample"}"#, "VOICES sample", "AUDIO QUEUED DONE"]);
+    assert_eq!(adpcm_samples(board.played.last()), Some(3), "the done line of the new Character");
+
+    // Its two needs-input lines take turns.
+    let ask = r#"{"version":1,"event":"agent.input_required","title":"A"}"#;
+    send(&mut firmware, &mut board, ask);
+    let first = adpcm_samples(board.played.last());
+    send(&mut firmware, &mut board, ask);
+    let second = adpcm_samples(board.played.last());
+    assert!(first.is_some() && second.is_some() && first != second, "{first:?} then {second:?}");
+
+    // No failed pool: the built-in line.
+    send(&mut firmware, &mut board, r#"{"version":1,"event":"task.error","title":"A"}"#);
+    assert_eq!(board.played.last(), Some(&Sound::Builtin(Prompt::Failed)));
+}
+
+#[test]
+fn a_special_occasion_picks_its_pool_or_falls_back() {
+    let (mut firmware, mut board, _) = booted(blank_flash());
+    write_pack(&mut firmware, &mut board, SAMPLE_PACK);
+
+    // The sample has no first-done pool, so the done line speaks for it.
+    let lines = send(&mut firmware, &mut board, r#"{"version":1,"event":"task.done","title":"A","occasion":"first_done"}"#);
+    assert_eq!(lines.last().map(String::as_str), Some("AUDIO QUEUED FIRST_DONE"));
+    assert_eq!(adpcm_samples(board.played.last()), Some(3));
+
+    // A special occasion that doesn't belong to the event is ignored.
+    let lines = send(&mut firmware, &mut board, r#"{"version":1,"event":"agent.input_required","title":"A","occasion":"first_done"}"#);
+    assert_eq!(lines.last().map(String::as_str), Some("AUDIO QUEUED INPUT_REQUIRED"));
+}
+
+#[test]
+fn the_daily_greeting_is_only_a_line() {
+    let (mut firmware, mut board, _) = booted(blank_flash());
+    write_pack(&mut firmware, &mut board, SAMPLE_PACK);
+    let played = board.played.len();
+
+    let lines = send(&mut firmware, &mut board, r#"{"version":1,"event":"buddy.say","occasion":"greeting_evening"}"#);
+    assert_eq!(lines, ["AUDIO QUEUED GREETING_EVENING"]);
+    assert_eq!(adpcm_samples(board.played.last()), Some(4));
+
+    // No morning pool, and greetings have no built-in line: silence.
+    let lines = send(&mut firmware, &mut board, r#"{"version":1,"event":"buddy.say","occasion":"greeting_morning"}"#);
+    assert_eq!(lines, ["AUDIO SILENT GREETING_MORNING"]);
+
+    // Only greetings may be said this way.
+    let lines = send(&mut firmware, &mut board, r#"{"version":1,"event":"buddy.say","occasion":"done"}"#);
+    assert!(lines.is_empty());
+    assert_eq!(board.played.len(), played + 1);
 }

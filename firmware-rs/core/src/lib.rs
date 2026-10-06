@@ -12,13 +12,16 @@ extern crate std;
 
 pub mod text;
 
+pub mod adpcm;
 pub mod audio;
 pub mod buttons;
 pub mod canvas;
+pub mod character_pack;
 pub mod display;
 pub mod firmware;
 pub mod lcd;
 pub mod leisure;
+pub mod lines;
 pub mod pomodoro;
 pub mod storage;
 pub mod voice_pack;

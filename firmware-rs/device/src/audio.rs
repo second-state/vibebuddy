@@ -16,8 +16,8 @@ use embassy_time::Timer;
 use esp_hal::Async;
 use esp_hal::dma::DmaTxStreamBuf;
 use esp_hal::i2s::master::I2sTx;
-use vibebuddy_firmware_core::audio::Prompt;
-use vibebuddy_firmware_core::voices::{ClipTable, clip_index};
+use vibebuddy_firmware_core::adpcm::LineStream;
+use vibebuddy_firmware_core::audio::{Chime, Codec, Prompt, Sound};
 
 use crate::storage;
 
@@ -26,8 +26,7 @@ pub const STREAM_BYTES: usize = 16000;
 pub const STREAM_CHUNK: usize = 1000;
 
 pub struct PlayCommand {
-    pub prompt: Prompt,
-    pub clips: ClipTable,
+    pub sound: Sound,
 }
 
 /// As in the C firmware, at most 8 lines are queued.
@@ -42,6 +41,8 @@ static DONE: &[u8] = include_bytes!("../../../firmware/main/assets/done.pcm");
 static FAILED: &[u8] = include_bytes!("../../../firmware/main/assets/failed.pcm");
 static FOCUS_DONE: &[u8] = include_bytes!("../../../firmware/main/assets/focus_done.pcm");
 static BREAK_DONE: &[u8] = include_bytes!("../../../firmware/main/assets/break_done.pcm");
+static FOCUS_CHIME: &[u8] = include_bytes!("../../../firmware/main/assets/focus_chime.pcm");
+static BREAK_CHIME: &[u8] = include_bytes!("../../../firmware/main/assets/break_chime.pcm");
 
 fn builtin(prompt: Prompt) -> &'static [u8] {
     match prompt {
@@ -53,9 +54,39 @@ fn builtin(prompt: Prompt) -> &'static [u8] {
     }
 }
 
+/// Compressed bytes read from flash ahead of the decoder.
+struct Pending {
+    offset: u32,
+    left: u32,
+    buffer: [u8; 128],
+    length: usize,
+    position: usize,
+    failed: bool,
+}
+
+impl Pending {
+    fn next_byte(&mut self) -> u8 {
+        if self.position == self.length {
+            let count = (self.left as usize).min(self.buffer.len());
+            if count == 0 || storage::read_unaligned(self.offset, &mut self.buffer[..count]).is_err() {
+                self.failed = true;
+                return 0;
+            }
+            self.offset += count as u32;
+            self.left -= count as u32;
+            self.length = count;
+            self.position = 0;
+        }
+        self.position += 1;
+        self.buffer[self.position - 1]
+    }
+}
+
 enum Source {
     Builtin(&'static [u8]),
     Flash { offset: u32, length: u32 },
+    /// A Character's line: decoded and upsampled on the way out.
+    Adpcm { stream: LineStream, pending: Pending },
 }
 
 struct Cursor {
@@ -65,20 +96,26 @@ struct Cursor {
 
 impl Cursor {
     fn new(command: &PlayCommand) -> Self {
-        let source = match command.clips {
-            Some(table) => {
-                let clip = table[clip_index(command.prompt)];
-                Source::Flash { offset: clip.offset, length: clip.length }
-            }
-            None => Source::Builtin(builtin(command.prompt)),
+        let source = match command.sound {
+            Sound::Builtin(prompt) => Source::Builtin(builtin(prompt)),
+            Sound::Chime(Chime::Focus) => Source::Builtin(FOCUS_CHIME),
+            Sound::Chime(Chime::Break) => Source::Builtin(BREAK_CHIME),
+            Sound::Line(line) => match line.codec {
+                Codec::Pcm24kStereo => Source::Flash { offset: line.offset, length: line.length },
+                Codec::Adpcm16kMono { samples } => Source::Adpcm {
+                    stream: LineStream::new(samples),
+                    pending: Pending { offset: line.offset, left: line.length, buffer: [0; 128], length: 0, position: 0, failed: false },
+                },
+            },
         };
         Self { source, position: 0 }
     }
 
     fn remaining(&self) -> usize {
-        let total = match self.source {
+        let total = match &self.source {
             Source::Builtin(data) => data.len(),
-            Source::Flash { length, .. } => length as usize,
+            Source::Flash { length, .. } => *length as usize,
+            Source::Adpcm { stream, .. } => return stream.remaining_bytes(),
         };
         total - self.position
     }
@@ -87,12 +124,20 @@ impl Cursor {
     /// line.
     fn fill(&mut self, out: &mut [u8]) -> usize {
         let count = out.len().min(self.remaining());
-        let ok = match self.source {
+        let ok = match &mut self.source {
             Source::Builtin(data) => {
                 out[..count].copy_from_slice(&data[self.position..self.position + count]);
                 true
             }
-            Source::Flash { offset, .. } => storage::read_unaligned(offset + self.position as u32, &mut out[..count]).is_ok(),
+            Source::Flash { offset, .. } => storage::read_unaligned(*offset + self.position as u32, &mut out[..count]).is_ok(),
+            Source::Adpcm { stream, pending } => {
+                let written = stream.fill(&mut out[..count / 4 * 4], || pending.next_byte());
+                if pending.failed {
+                    *stream = LineStream::new(0);
+                    return 0;
+                }
+                return written;
+            }
         };
         if !ok {
             self.position += self.remaining();

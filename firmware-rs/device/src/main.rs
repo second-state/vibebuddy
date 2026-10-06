@@ -40,13 +40,12 @@ use esp_hal::uart::{Config as UartConfig, Uart};
 use esp_hal::usb::usb_serial_jtag::UsbSerialJtag;
 use esp_hal::{Blocking, dma_tx_buffer, dma_tx_stream_buffer};
 use esp_storage::FlashStorage;
-use vibebuddy_firmware_core::audio::{self as codec, ES8311_ADDRESS, Prompt, Registers, SAMPLE_RATE};
+use vibebuddy_firmware_core::audio::{self as codec, ES8311_ADDRESS, Registers, SAMPLE_RATE, Sound};
 use vibebuddy_firmware_core::buttons::Levels;
 use vibebuddy_firmware_core::canvas::FRAME_BYTES;
 use vibebuddy_firmware_core::display::Screen;
 use vibebuddy_firmware_core::firmware::{AudioStatus, Board, Firmware, FrameAction, VolumeError};
 use vibebuddy_firmware_core::storage::Flash;
-use vibebuddy_firmware_core::voices::ClipTable;
 
 use crate::audio::{PLAYING, PlayCommand, QUEUE, STOP, STREAM_BYTES, STREAM_CHUNK};
 use crate::lcd::Lcd;
@@ -223,8 +222,8 @@ impl Board for DeviceBoard {
         (k0, expander)
     }
 
-    fn play(&mut self, prompt: Prompt, clips: ClipTable) -> Result<(), ()> {
-        QUEUE.try_send(PlayCommand { prompt, clips }).map_err(|_| ())
+    fn play(&mut self, sound: Sound) -> Result<(), ()> {
+        QUEUE.try_send(PlayCommand { sound }).map_err(|_| ())
     }
 
     fn stop_audio(&mut self) {

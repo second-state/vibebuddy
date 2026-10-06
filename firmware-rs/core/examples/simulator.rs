@@ -8,13 +8,12 @@ use std::io::{Read, Write};
 use std::sync::mpsc;
 use std::time::{Duration, Instant};
 
-use vibebuddy_firmware_core::audio::Prompt;
+use vibebuddy_firmware_core::audio::Sound;
 use vibebuddy_firmware_core::buttons::Levels;
 use vibebuddy_firmware_core::canvas::FRAME_BYTES;
 use vibebuddy_firmware_core::display::Screen;
 use vibebuddy_firmware_core::firmware::{AudioStatus, Board, Firmware, FrameAction, VolumeError};
 use vibebuddy_firmware_core::storage::{Flash, FlashError};
-use vibebuddy_firmware_core::voices::ClipTable;
 
 struct MemoryFlash(Vec<u8>);
 
@@ -87,7 +86,7 @@ impl Board for SimulatedBoard {
     fn read_buttons(&mut self) -> (bool, Option<(bool, bool)>) {
         (false, Some((false, false)))
     }
-    fn play(&mut self, _prompt: Prompt, _clips: ClipTable) -> Result<(), ()> {
+    fn play(&mut self, _sound: Sound) -> Result<(), ()> {
         Ok(())
     }
     fn stop_audio(&mut self) {}
