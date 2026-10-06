@@ -176,11 +176,11 @@ check(VoiceCatalogEntry.sorted(catalog, preferring: .zh).first?.id == "wanwanxia
 check(VoiceCatalogEntry.language(ofVoice: "builtin") == .en, "the built-in voice is English")
 check(VoiceCatalogEntry.language(ofVoice: "hsiaoyu") == nil, "an unknown voice has no language")
 check(VoiceCatalogEntry.switchSuggestion(boxVoice: "builtin", to: .zh, bundled: catalog)?.id == "wanwanxiaohe", "English box, Chinese UI: suggest the first Chinese voice")
-check(VoiceCatalogEntry.switchSuggestion(boxVoice: "xiaohe2", to: .en, bundled: catalog)?.id == "jessica", "Chinese box, English UI: suggest Jessica")
-check(VoiceCatalogEntry.switchSuggestion(boxVoice: "chris", to: .en, bundled: catalog) == nil, "the box already speaks the UI language")
+check(VoiceCatalogEntry.switchSuggestion(boxVoice: "wanwanxiaohe", to: .en, bundled: catalog)?.id == "amanda", "Chinese box, English UI: suggest Amanda")
+check(VoiceCatalogEntry.switchSuggestion(boxVoice: "jackson", to: .en, bundled: catalog) == nil, "the box already speaks the UI language")
 check(VoiceCatalogEntry.switchSuggestion(boxVoice: "hsiaoyu", to: .zh, bundled: catalog) == nil, "unknown box voice: don't guess")
 check(VoiceCatalogEntry.switchSuggestion(boxVoice: "builtin", to: .zh, bundled: catalog.filter { $0.language == .en }) == nil, "no Chinese pack bundled: nothing to offer")
-check(VoiceCatalogEntry.switchSuggestion(boxVoice: "builtin", to: .zh, bundled: catalog.filter { $0.id == "xiaohe2" })?.id == "xiaohe2", "skip voices this build doesn't ship")
+check(VoiceCatalogEntry.switchSuggestion(boxVoice: "wanwanxiaohe", to: .en, bundled: catalog.filter { $0.id == "jackson" })?.id == "jackson", "skip Characters this build doesn't ship")
 
 if failures > 0 {
     print("\(failures) failure(s)")

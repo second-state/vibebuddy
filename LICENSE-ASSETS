@@ -14,8 +14,10 @@ the same license.
 
 Covered:
 
-- voices/jessica/ and voices/chris/: announcement voices synthesized with
-  ElevenLabs premade voices on a paid plan.
+- voices/jessica/: the built-in announcement voice, synthesized with an
+  ElevenLabs premade voice on a paid plan.
+- characters/*/persona.md and characters/*/lines.tsv: the Characters'
+  personas and lines.
 - firmware/main/assets/*.pcm: a copy of the built-in voice, licensed like
   the voice it was copied from.
 - Any artwork added to the repository later (images, sprite sheets,
@@ -24,7 +26,8 @@ Covered:
 Not covered, because the rights to the generated audio depend on the
 terms of the service that produced it:
 
-- voices/wanwanxiaohe/ and voices/xiaohe2/ (Volcano Engine Doubao TTS)
+- characters/*/pack.bin, the Characters' synthesized lines (Volcano Engine
+  Doubao TTS)
 
 Neither license grants rights to the name "Vibe Buddy" or to the buddy
 character as a trademark.

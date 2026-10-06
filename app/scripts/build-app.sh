@@ -94,22 +94,12 @@ else
     exit 1
 fi
 
-# A Character's pack (characters/<id>/pack.bin, from tools/make-character.sh) replaces the old voice
-# pack of the same id; voices that have no Character yet still ship their five fixed lines.
+# Each Character's pack is built by tools/make-character.sh and committed as characters/<id>/pack.bin.
 echo "== Character packs"
-for dir in "${repo_root}"/characters/*/; do
-    id="$(basename "${dir}")"
-    if [[ -f "${dir}/pack.bin" ]]; then
-        cp "${dir}/pack.bin" "${contents}/Resources/voices/${id}.bin"
-        echo "  ${id} (character)"
-    fi
-done
-for dir in "${repo_root}"/voices/*/; do
-    id="$(basename "${dir}")"
-    if [[ -f "${dir}/done.pcm" && ! -f "${contents}/Resources/voices/${id}.bin" ]]; then
-        "${repo_root}/tools/make_voice_pack.py" "${dir}" "${id}" "${contents}/Resources/voices/${id}.bin" >/dev/null
-        echo "  ${id} (voice pack)"
-    fi
+for pack in "${repo_root}"/characters/*/pack.bin; do
+    id="$(basename "$(dirname "${pack}")")"
+    cp "${pack}" "${contents}/Resources/voices/${id}.bin"
+    echo "  ${id}"
 done
 
 # Both the App and its separately downloadable firmware carry these notices.

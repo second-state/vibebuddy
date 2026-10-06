@@ -398,9 +398,9 @@ impl App {
             button(text(tr("Play a line on the box", &[]))).on_press_maybe(online.then_some(Message::PlayLine)),
             text(tr("Saved on the box and kept across restarts. To mute, long-press K2 on the box.", &[])).size(13),
             space().height(8),
-            text(tr("Announcement voice", &[])).size(18),
+            text(tr("Character", &[])).size(18),
             text(tr(
-                "The box is using “%@”. Click Use to write another voice to it — no firmware flash needed. Over the UART port this takes a few minutes; when it's done the box says a line in the new voice.",
+                "The box is speaking as “%@”. Each character has its own voice and lines. Click Use to write another one to it — no firmware flash needed. Over the UART port this takes a few minutes; when it's done the box says a line as the new character.",
                 &[&using]
             ))
             .size(13),

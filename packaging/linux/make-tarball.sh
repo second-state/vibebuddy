@@ -27,10 +27,8 @@ done
 for file in vibebuddyd.service vibebuddy.desktop vibebuddy.svg 70-vibebuddy.rules; do
     install -m644 "${repo}/packaging/linux/${file}" "${stage}/share/${file}"
 done
-for dir in "${repo}"/voices/*/; do
-    if [[ -f "${dir}/done.pcm" ]]; then
-        python3 "${repo}/tools/make_voice_pack.py" "${dir}" "$(basename "${dir}")" "${stage}/share/voices/$(basename "${dir}").bin" >/dev/null
-    fi
+for pack in "${repo}"/characters/*/pack.bin; do
+    cp "${pack}" "${stage}/share/voices/$(basename "$(dirname "${pack}")").bin"
 done
 for file in bootloader.bin partition-table.bin vibebuddy-fw.bin build.txt; do
     install -m644 "${firmware}/${file}" "${stage}/share/firmware/${file}"

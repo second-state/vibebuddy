@@ -54,14 +54,15 @@ Whatever the persona, every line:
 
 ### Characters at launch
 
-The four existing voices become four Characters that share the robot look, each with its own persona and pool. A Character speaks one language; the App suggests Characters in the UI language first, as it did for voices.
+Three Characters share the robot look, each with its own persona and pool, all spoken by Volcano Engine Doubao voices. A Character speaks one language; the App suggests Characters in the UI language first, as it did for voices.
 
 | Character id | Language | Voice |
 | --- | --- | --- |
-| `jessica` | en | ElevenLabs Jessica |
-| `chris` | en | ElevenLabs Chris |
+| `amanda` | en | Doubao `en_female_amanda_mars_bigtts` |
+| `jackson` | en | Doubao `en_male_jackson_mars_bigtts` |
 | `wanwanxiaohe` | zh | Doubao Wanwan Xiaohe |
-| `xiaohe2` | zh | Doubao Xiaohe 2.0 |
+
+They replace the four voices the App used to offer: Jessica and Chris (ElevenLabs) gave way to Amanda and Jackson, since the built-in voice is still ElevenLabs Jessica and two different voices both called Jessica would only confuse; Xiaohe 2.0 was dropped to keep one Chinese Character.
 
 With no Character pack on the box, the built-in default Character speaks Jessica's original five fixed lines.
 
@@ -75,7 +76,7 @@ characters/<id>/
   lines.tsv    occasion<TAB>line, one line per row
 ```
 
-A local LLM drafts `lines.tsv` from `persona.md` and the rules above; a person listens to the synthesized result and deletes what doesn't work. Nothing in the App or the daemon calls a language model. `tools/make-character.sh` synthesizes each line with the Character's TTS voice, normalizes it and builds the Character pack, which the App bundles.
+A language model drafts `lines.tsv` from `persona.md` and the rules above (`tools/draft-lines.py` asks a local one); a person listens to the synthesized result and deletes what doesn't work. Nothing in the App or the daemon calls a language model. `tools/make-character.sh` synthesizes each line with the Character's TTS voice, normalizes it and builds the Character pack, which the App bundles.
 
 ### Character pack format
 

@@ -1,4 +1,4 @@
-//! What was installed next to the app: voice packs built from `voices/`, and the firmware of the release this app
+//! What was installed next to the app: the Character packs from `characters/`, and the firmware of the release this app
 //! belongs to. On the Mac both ride inside the app bundle. Here `install.sh` puts them in `~/.local/share/vibebuddy`
 //! and a distribution package in `/usr/share/vibebuddy`; the user's copy wins, as XDG data lookups go.
 
@@ -50,9 +50,8 @@ fn catalog() -> Vec<Voice> {
             tr("Chinese · Taiwanese accent · Doubao · same voice as Xiaozhi", &[]),
             Language::Chinese,
         ),
-        voice("xiaohe2", tr("Xiaohe 2.0", &[]), tr("Chinese · Mandarin · Doubao", &[]), Language::Chinese),
-        voice("jessica", "Jessica".to_owned(), tr("English · US · ElevenLabs", &[]), Language::English),
-        voice("chris", "Chris".to_owned(), tr("English · US · ElevenLabs", &[]), Language::English),
+        voice("amanda", "Amanda".to_owned(), tr("English · Doubao", &[]), Language::English),
+        voice("jackson", "Jackson".to_owned(), tr("English · Doubao", &[]), Language::English),
     ]
 }
 

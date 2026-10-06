@@ -119,7 +119,7 @@ enum ADPCM {
     }
 }
 
-/// Display info for the candidate voices, matching voices/README.md.
+/// Display info for the Characters the app ships, matching characters/ (docs/characters.md).
 /// `language` is the language the five lines are spoken in, so the picker can put
 /// voices matching the UI language first. An entry only shows up once its pack is
 /// bundled (build-app.sh packs every voices/<id>/ that has PCM in it).
@@ -140,9 +140,8 @@ public struct VoiceCatalogEntry: Equatable, Identifiable, Sendable {
     /// Built once: names and tags are localized for the language the process started in.
     public static let all: [VoiceCatalogEntry] = [
         VoiceCatalogEntry(id: "wanwanxiaohe", name: String(localized: "Wanwan Xiaohe"), tag: String(localized: "Chinese · Taiwanese accent · Doubao · same voice as Xiaozhi"), language: .zh),
-        VoiceCatalogEntry(id: "xiaohe2", name: String(localized: "Xiaohe 2.0"), tag: String(localized: "Chinese · Mandarin · Doubao"), language: .zh),
-        VoiceCatalogEntry(id: "jessica", name: "Jessica", tag: String(localized: "English · US · ElevenLabs"), language: .en),
-        VoiceCatalogEntry(id: "chris", name: "Chris", tag: String(localized: "English · US · ElevenLabs"), language: .en),
+        VoiceCatalogEntry(id: "amanda", name: "Amanda", tag: String(localized: "English · Doubao"), language: .en),
+        VoiceCatalogEntry(id: "jackson", name: "Jackson", tag: String(localized: "English · Doubao"), language: .en),
     ]
 
     /// The language a box voice speaks, from the voice id the box reports; "builtin" is Jessica (English).
