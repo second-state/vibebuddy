@@ -164,6 +164,41 @@ if let parsed = VoicePack(data: character) {
     check(false, "character pack parses")
 }
 
+// A look from a drawing: a white background with an orange figure (a 20 × 60 block) and white eyes inside.
+var drawing = [UInt8](repeating: 255, count: 100 * 100 * 4)
+for y in 20..<80 {
+    for x in 40..<60 {
+        let at = (y * 100 + x) * 4
+        let eye = y == 30 && (x == 45 || x == 54)
+        drawing[at] = eye ? 255 : 250; drawing[at + 1] = eye ? 255 : 120; drawing[at + 2] = eye ? 255 : 20
+    }
+}
+if let look = try? LookBuilder.build([RGBAImage(width: 100, height: 100, pixels: drawing)]) {
+    check(look.count == 8 + 32 + 4 * 1536 && look.prefix(4) == Data("LOOK".utf8), "look size and magic")
+    // The figure is 60 tall, the cell 64: rows 4 to 63, bottom-aligned; the top rows stay transparent.
+    check(look[40] == 0 && look[40 + 4 * 24 + 12] != 0, "a transparent top, the figure from row 4")
+    // White eyes inside the figure survive the background removal: some index other than the orange.
+    let frame = look[40..<(40 + 1536)]
+    check(Set(frame.flatMap { [$0 & 15, $0 >> 4] }).count >= 3, "transparent, orange and white")
+    if let base = VoicePack(data: character), let worn = base.withLook(look, id: "mine"), let parsed = VoicePack(data: worn) {
+        check(parsed.voiceID == "mine" && worn[4] == 2, "a version 2 pack under the new id")
+        let offset = VoicePack.u32(worn, 1008), length = VoicePack.u32(worn, 1012)
+        check(offset % 4 == 0 && worn.subdata(in: offset..<(offset + length)) == look, "the look sits word-aligned after the lines")
+        check(VoicePack.u32(worn, 1020) == Int(CRC32.of(worn.prefix(1020))), "header CRC")
+        check(VoicePack.u32(worn, 12) == Int(CRC32.of(worn.suffix(from: 1024))), "payload CRC")
+        check(parsed.previewLines.count == base.previewLines.count, "the lines are borrowed as they were")
+        check(parsed.look == look, "the pack hands its look back")
+        let frames = LookBuilder.frames(of: look)
+        check(frames?.count == 4 && frames?[0].pixel(0, 0).3 == 0 && frames?[0].pixel(24, 40).3 == 255, "a look decodes to four frames")
+        check(base.withLook(look, id: String(repeating: "x", count: 32)) == nil, "an id too long for the header")
+    } else {
+        check(false, "a Character pack takes a look")
+    }
+} else {
+    check(false, "a look builds from one drawing")
+}
+check(CRC32.of(Data("123456789".utf8)) == 0xCBF4_3926, "CRC32 as in zlib")
+
 // 4. Voice catalog: every entry has a language, and the picker puts the UI language first.
 let catalog = VoiceCatalogEntry.all
 check(Set(catalog.map(\.id)).count == catalog.count, "voice ids are unique")

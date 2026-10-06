@@ -131,6 +131,7 @@ struct VoicesView: View {
                     ForEach(Resources.bundledVoices) { entry in
                         VoiceCard(model: model, entry: entry)
                     }
+                    CustomCharacterCard(model: model)
                 }
             }
             if let operation = model.operation, operation.kind == .voicePack {
@@ -145,6 +146,7 @@ struct VoicesView: View {
     private var currentVoiceName: String {
         let id = model.status?.device.voice ?? "builtin"
         if id == "builtin" { return String(localized: "Built-in voice (Jessica)") }
+        if id == CustomCharacterCard.id { return String(localized: "Your own character") }
         return VoiceCatalogEntry.all.first { $0.id == id }?.name ?? id
     }
 }
@@ -161,6 +163,9 @@ struct VoiceCard: View {
                 Image(systemName: model.previewingVoice == entry.id ? "stop.fill" : "play.fill")
             }
             .disabled(model.operationRunning)
+            if let frame = Resources.voicePack(entry.id)?.look.flatMap(LookBuilder.frames(of:))?.first {
+                Image(nsImage: LookImages.image(frame, scale: 1))
+            }
             VStack(alignment: .leading) {
                 Text(entry.name).font(.body.weight(.semibold))
                 Text(entry.tag).font(.caption).foregroundStyle(.secondary)
@@ -506,5 +511,84 @@ struct AdvancedView: View {
         """
         try? summary.write(to: target.appendingPathComponent("summary.txt"), atomically: true, encoding: .utf8)
         NSWorkspace.shared.activateFileViewerSelecting([target])
+    }
+}
+
+/// A Character of the user's own: their drawings as the look, a preset Character's voice and lines.
+/// The app doesn't draw (ADR-0009): the user brings one to four images (normal, eyes closed, happy,
+/// sad), made with whatever tool they like.
+struct CustomCharacterCard: View {
+    static let id = "custom"
+    @ObservedObject var model: AppModel
+    @State private var frames: [RGBAImage] = []
+    @State private var look: Data?
+    @State private var lender = Resources.bundledVoices.first?.id ?? ""
+    @State private var problem: String?
+
+    static let prompt = "Pixel art game sprite of [describe your character], chibi proportions, standing, front view, full body, centered, arms down, flat colors, thick dark outline, limited 16-color palette, plain solid white background. Then the same character in exactly the same pose with the eyes closed; with a big happy smile; with a sad face."
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Your own character").font(.body.weight(.semibold))
+            Text("Draw a figure with any image tool, on a plain white background: one image, or four in the order normal, eyes closed, happy, sad. The box shows it in place of the robot, with the voice and lines of the character you pick.")
+                .font(.caption).foregroundStyle(.secondary)
+            HStack {
+                Button("Choose images…") { choose() }
+                Button("Copy a prompt") {
+                    NSPasteboard.general.clearContents()
+                    NSPasteboard.general.setString(Self.prompt, forType: .string)
+                }
+            }
+            if let problem {
+                Text(problem).font(.caption).foregroundStyle(.red)
+            }
+            if !frames.isEmpty {
+                HStack(spacing: 6) {
+                    ForEach(frames.indices, id: \.self) { index in
+                        Image(nsImage: LookImages.image(frames[index], scale: 2))
+                            .background(Color.black)
+                    }
+                }
+                Picker(String(localized: "Voice and lines from"), selection: $lender) {
+                    ForEach(Resources.bundledVoices) { entry in Text(entry.name).tag(entry.id) }
+                }
+                .frame(maxWidth: 320)
+                Button("Use") { use() }
+                    .disabled(model.operationRunning || !(model.status?.device.connected ?? false))
+            }
+        }
+        .padding(10)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(RoundedRectangle(cornerRadius: 8).fill(Color(nsColor: .controlBackgroundColor)))
+    }
+
+    private func choose() {
+        let panel = NSOpenPanel()
+        panel.allowsMultipleSelection = true
+        panel.allowedContentTypes = [.png, .jpeg]
+        guard panel.runModal() == .OK else { return }
+        // In name order, so normal.png, closed.png, ... or 1.png, 2.png, ... come in as meant.
+        let urls = panel.urls.sorted { $0.lastPathComponent.localizedStandardCompare($1.lastPathComponent) == .orderedAscending }
+        let images = urls.compactMap(LookImages.load)
+        guard images.count == urls.count, (1...4).contains(images.count) else {
+            problem = String(localized: "Pick one to four PNG or JPEG images.")
+            return
+        }
+        do {
+            let built = try LookBuilder.build(images)
+            look = built
+            frames = LookBuilder.frames(of: built) ?? []
+            problem = nil
+        } catch {
+            problem = String(localized: "No figure found: use a plain white or transparent background.")
+        }
+    }
+
+    private func use() {
+        guard let look, let base = Resources.voicePack(lender), let pack = base.withLook(look, id: Self.id) else {
+            problem = String(localized: "That character can't lend its voice; pick another.")
+            return
+        }
+        model.writePack(pack)
     }
 }

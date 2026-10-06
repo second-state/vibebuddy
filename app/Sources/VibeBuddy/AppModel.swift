@@ -180,6 +180,11 @@ final class AppModel: ObservableObject {
         run { try await self.client.writeVoicePack(pack.data) }
     }
 
+    /// Writes a pack the app put together itself, such as a custom Character.
+    func writePack(_ data: Data) {
+        run { try await self.client.writeVoicePack(data) }
+    }
+
     func togglePreview(_ id: String) {
         guard let pack = Resources.voicePack(id) else { lastError = String(localized: "This app has no voice pack for \(id)"); return }
         preview.toggle(pack: pack)

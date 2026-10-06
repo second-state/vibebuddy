@@ -397,7 +397,7 @@ fn draw_look_on_duty(canvas: &mut Canvas, look: &Look, state: State, frame: u32,
         State::Working => LookPose { dx: if frame.is_multiple_of(2) { -1 } else { 1 }, mark: Mark::Dots(frame % 3 + 1), ..LookPose::default() },
         State::InputRequired => LookPose { dy: if frame.is_multiple_of(2) { -2 } else { 0 }, mark: Mark::Ask, ..LookPose::default() },
         State::Done => LookPose { frame: look::Frame::Happy, dy: if frame.is_multiple_of(2) { -10 } else { 0 }, ..LookPose::default() },
-        State::Failed => LookPose { frame: look::Frame::Sad, dy: 6, ..LookPose::default() },
+        State::Failed => LookPose { frame: look::Frame::Sad, dy: 4, ..LookPose::default() },
         State::Offline => LookPose { frame: look::Frame::EyesClosed, ..LookPose::default() },
     };
     draw_look_pose(canvas, look, &pose, center_x, state == State::Offline, color);

@@ -153,7 +153,7 @@ A sprite is never recolored by state. The status bar and the task cards carry th
 ### Where looks come from
 
 - **Preset looks.** A local image model (Qwen-Image) draws the base figure and edits it into the other three expressions; a script reduces the colors, removes the background and aligns the frames; a person approves the result. As with lines, the tool drafts and a person decides.
-- **Custom looks.** We publish a template (four 48 × 64 cells side by side, on a transparent or solid magenta background) and a prompt; the user makes the image with any tool and drops it into the App, which validates, reduces colors and converts it. The App never calls an image model (ADR-0009).
+- **Custom looks.** The App's Character tab takes one to four images (normal, eyes closed, happy, sad, in file name order; one image stands in for all four) on a plain white or transparent background, made with any tool; "Copy a prompt" gives a starting prompt for an image model. The App removes the background, scales and aligns the figures and reduces the colors exactly as `tools/draft-look.py` does, and writes the result as the Character `custom`. It never calls an image model (ADR-0009). The Linux app doesn't offer this yet.
 - **A custom Character is a custom look.** The user picks a preset Character to lend its voice, persona and lines.
 
 ### Storage
