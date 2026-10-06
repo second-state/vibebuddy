@@ -64,11 +64,35 @@ pub fn voices() -> Vec<Voice> {
     voices
 }
 
+/// `id` as the catalog's own string, if the catalog has it.
+pub fn voice_id(id: &str) -> Option<&'static str> {
+    catalog().into_iter().find(|voice| voice.id == id).map(|voice| voice.id)
+}
+
 pub fn voice_name(id: &str) -> String {
     if id == "builtin" {
         return tr("Built-in voice (Jessica)", &[]);
     }
     catalog().into_iter().find(|voice| voice.id == id).map(|voice| voice.name).unwrap_or_else(|| id.to_owned())
+}
+
+/// The voice to offer when the UI switches language, as the Mac's `switchSuggestion`: none when the box already
+/// speaks `language` or its voice is unknown ("builtin" is Jessica, English); otherwise the first installed voice in
+/// `language`, in catalog order.
+pub fn voice_switch(box_voice: &str, language: Language) -> Option<Voice> {
+    switch_among(catalog(), box_voice, language, |id| find_voice_pack(id).is_some())
+}
+
+fn switch_among(catalog: Vec<Voice>, box_voice: &str, language: Language, installed: impl Fn(&str) -> bool) -> Option<Voice> {
+    let current = if box_voice == "builtin" {
+        Language::English
+    } else {
+        catalog.iter().find(|voice| voice.id == box_voice)?.language
+    };
+    if current == language {
+        return None;
+    }
+    catalog.into_iter().find(|voice| voice.language == language && installed(voice.id))
 }
 
 fn voice_pack(dir: &Path, id: &str) -> PathBuf {
@@ -129,6 +153,20 @@ mod tests {
         let expected = ["/xdg/vibebuddy", "/usr/local/share/vibebuddy", "/usr/share/vibebuddy"].map(PathBuf::from);
         assert_eq!(search_dirs(Some("/xdg".into()), None, None), expected);
         assert_eq!(search_dirs(Some("/xdg".into()), None, Some("".into())), expected);
+    }
+
+    #[test]
+    fn a_voice_switch_is_offered_only_across_languages() {
+        let all = |_: &str| true;
+        let switch = |voice, language, installed: &dyn Fn(&str) -> bool| {
+            switch_among(catalog(), voice, language, installed).map(|voice| voice.id)
+        };
+        assert_eq!(switch("builtin", Language::Chinese, &all), Some("wanwanxiaohe"));
+        assert_eq!(switch("xiaohe2", Language::English, &all), Some("jessica"));
+        assert_eq!(switch("jessica", Language::English, &all), None);
+        assert_eq!(switch("someone-else", Language::English, &all), None);
+        assert_eq!(switch("builtin", Language::Chinese, &|id: &str| id == "xiaohe2"), Some("xiaohe2"));
+        assert_eq!(switch("builtin", Language::Chinese, &|_: &str| false), None);
     }
 
     #[test]

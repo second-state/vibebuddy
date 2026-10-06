@@ -172,6 +172,9 @@
 "If the backlight flashes, that's the one." = "盒子背光闪了就是它。";
 "Not showing up? Use a cable that carries data, not just power, and click Allow if macOS asks whether to let the accessory connect." = "没出现？换一根能传数据的线（有的线只能充电），macOS 问是否允许配件连接时点「允许」。";
 "Still nothing? Hold K0 on the box while you plug in the cable, then click Allow. The box starts in download mode with a dark screen, ready to be flashed with Vibe Buddy firmware." = "还是不行？按住盒子的 K0 再插线，然后点「允许」。盒子会以下载模式启动，屏幕不亮，接着刷入 Vibe Buddy 固件即可。";
+"Not showing up? Use a cable that carries data, not just power." = "没出现？换一根能传数据的线（有的线只能充电）。";
+"If the daemon log on the Advanced tab says “Permission denied”, your account can't open the box's port yet: restart the computer once, then replug the box." = "如果「高级」页的 daemon 日志里有 “Permission denied”，说明你的账户还打不开盒子的串口：重启一次电脑，再重新插上盒子。";
+"Still nothing? Hold K0 on the box while you plug in the cable. The box starts in download mode with a dark screen, ready to be flashed with Vibe Buddy firmware." = "还是不行？按住盒子的 K0 再插线。盒子会以下载模式启动，屏幕不亮，接着刷入 Vibe Buddy 固件即可。";
 "No box yet — this updates once you plug it in." = "还没找到盒子，插上后这里会变。";
 "Starting the daemon…" = "daemon 正在启动…";
 "Connect your agents so their progress shows up on the box." = "接入 Agent：让它们的进展传到盒子上。";

@@ -14,6 +14,9 @@ use crate::status::{Icon as FaceIcon, MenuState};
 pub enum TrayEvent {
     OpenSettings,
     Quit,
+    /// The shell's tray host is gone (not up yet at login, or restarting) or back; ksni registers again by itself.
+    HostGone,
+    HostBack,
 }
 
 pub struct Tray {
@@ -55,6 +58,15 @@ impl ksni::Tray for Tray {
             description: self.menu.device_line.clone(),
             ..Default::default()
         }
+    }
+
+    fn watcher_online(&self) {
+        let _ = self.events.unbounded_send(TrayEvent::HostBack);
+    }
+
+    fn watcher_offline(&self, _reason: ksni::OfflineReason) -> bool {
+        let _ = self.events.unbounded_send(TrayEvent::HostGone);
+        true
     }
 
     fn activate(&mut self, _x: i32, _y: i32) {
