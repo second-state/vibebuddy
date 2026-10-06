@@ -59,7 +59,6 @@ fn main() {
         };
     }
     display.start(&mut screen, &scene!()).unwrap();
-    display.set_firmware_build(&mut screen, &scene!(), b"look preview");
     display.set_stats(&[b"7 DONE", b"4 ASKS", b"1H23 BUSY"]);
     display.set_look(&mut screen, &scene!(), Some(look));
 
