@@ -36,6 +36,8 @@ OCCASIONS = [
     "greeting_morning",
     "greeting_afternoon",
     "greeting_evening",
+    "long_session",
+    "welcome_back",
 ]
 
 STEPS = [

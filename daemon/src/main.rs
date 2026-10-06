@@ -724,6 +724,9 @@ async fn poll_ci(state: AppState) {
             }
             events
         };
+        if let Some(say) = state.activities.lock().await.take_say() {
+            send_event(&state, say);
+        }
         for event in events {
             info!(event = %event.event, "CI status changed");
             send_event(&state, event);
@@ -839,6 +842,10 @@ async fn post_claude_hook(
 }
 
 async fn forward(state: AppState, event: Option<Event>) -> (StatusCode, Json<ApiResponse>) {
+    // A greeting or welcome back this activity earned goes first: it speaks before the activity does.
+    if let Some(say) = state.activities.lock().await.take_say() {
+        send_event(&state, say);
+    }
     let Some(event) = event else {
         return (
             StatusCode::ACCEPTED,

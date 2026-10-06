@@ -157,6 +157,10 @@ struct DailyStats {
     late_night: Option<NaiveDate>,
     /// The day the daily greeting was said.
     greeted: Option<NaiveDate>,
+    /// Today's busy hours a long-session line has been said for.
+    long_session_hours: u64,
+    /// When an Agent last did something, for telling a welcome back.
+    last_activity: Option<NaiveDateTime>,
 }
 
 #[derive(Debug, Default, Deserialize, Serialize)]
@@ -171,6 +175,10 @@ struct StoredStats {
     late_night: Option<NaiveDate>,
     #[serde(default)]
     greeted: Option<NaiveDate>,
+    #[serde(default)]
+    long_session_hours: u64,
+    #[serde(default)]
+    last_activity: Option<NaiveDateTime>,
 }
 
 #[derive(Default)]
@@ -191,6 +199,8 @@ pub struct ActivityTracker {
     workspaces: HashMap<PathBuf, Instant>,
     /// Project name for each activity. The title's first line goes to the session name; the project name moves to the second line.
     projects: HashMap<String, String>,
+    /// The greeting or welcome back the last activity earned, not yet sent.
+    pending_say: Option<Event>,
 }
 
 impl ActivityTracker {
@@ -210,6 +220,8 @@ impl ActivityTracker {
                 busy_since: None,
                 late_night: stored.late_night,
                 greeted: stored.greeted,
+                long_session_hours: stored.long_session_hours,
+                last_activity: stored.last_activity,
             },
             last_source: stored.last_source,
             stats_file: Some(path),
@@ -340,9 +352,15 @@ impl ActivityTracker {
         self.record(|stats| stats.done += 1);
         let mut announced = self.announce_end("task.done", id, title, "done")?;
         let now = chrono::Local::now().naive_local();
-        if let Some(occasion) = occasions::done_occasion(now, self.stats.done, self.stats.late_night) {
+        let busy_hours = occasions::long_session_hours(self.today().busy_seconds);
+        let long_session_due = busy_hours > self.stats.long_session_hours;
+        if let Some(occasion) = occasions::done_occasion(now, self.stats.done, self.stats.late_night, long_session_due) {
             if occasion == "late_night_done" {
                 self.spend_late_night(now);
+            }
+            if occasion == "long_session" {
+                self.stats.long_session_hours = busy_hours;
+                self.save_stats();
             }
             announced.extra.insert("occasion".to_owned(), json!(occasion));
         }
@@ -354,8 +372,32 @@ impl ActivityTracker {
         self.save_stats();
     }
 
-    /// The daily greeting, the first time the link comes up on a local calendar day; None once
-    /// it has been said today.
+    /// An Agent did something: the first activity of the day is the daily greeting's other chance,
+    /// and the first after hours of quiet is a welcome back. The line waits in `take_say`.
+    fn note_activity(&mut self, now: NaiveDateTime) {
+        let quiet = self.stats.last_activity.map(|last| now - last);
+        self.stats.last_activity = Some(now);
+        if self.pending_say.is_some() {
+            return;
+        }
+        if let Some(greeting) = self.daily_greeting_at(now) {
+            self.pending_say = Some(greeting);
+        } else if quiet.is_some_and(|quiet| quiet >= occasions::WELCOME_BACK_QUIET) {
+            let mut welcome = Event::named("buddy.say");
+            welcome.extra.insert("occasion".to_owned(), json!("welcome_back"));
+            self.pending_say = Some(welcome);
+            self.save_stats();
+        }
+    }
+
+    /// A line the last activity earned (the daily greeting or a welcome back), to send before the
+    /// activity's own event.
+    pub fn take_say(&mut self) -> Option<Event> {
+        self.pending_say.take()
+    }
+
+    /// The daily greeting, the first time the link comes up or an Agent does something on a local
+    /// calendar day; None once it has been said today.
     pub fn daily_greeting(&mut self) -> Option<Event> {
         self.daily_greeting_at(chrono::Local::now().naive_local())
     }
@@ -365,6 +407,8 @@ impl ActivityTracker {
             return None;
         }
         self.stats.greeted = Some(now.date());
+        // A greeting counts as the buddy and the user meeting: no welcome back right after it.
+        self.stats.last_activity = Some(now);
         self.save_stats();
         let mut greeting = Event::named("buddy.say");
         greeting.extra.insert("occasion".to_owned(), json!(occasions::greeting(now)));
@@ -464,6 +508,7 @@ impl ActivityTracker {
     }
 
     fn set_activity(&mut self, id: &ActivityId, title: &str, status: ActivityStatus) {
+        self.note_activity(chrono::Local::now().naive_local());
         self.sequence = self.sequence.wrapping_add(1);
         let now = Instant::now();
         // Keep the start time if the state hasn't changed, otherwise every PostToolUse would reset the timer.
@@ -673,6 +718,7 @@ impl ActivityTracker {
         self.stats.done = 0;
         self.stats.asks = 0;
         self.stats.busy_seconds = 0;
+        self.stats.long_session_hours = 0;
         if self.stats.busy_since.is_some() {
             // Activities still running across midnight restart their timer at midnight; yesterday doesn't count toward today.
             self.stats.busy_since = Some(Instant::now());
@@ -704,6 +750,8 @@ impl ActivityTracker {
             last_source: self.last_source.clone(),
             late_night: self.stats.late_night,
             greeted: self.stats.greeted,
+            long_session_hours: self.stats.long_session_hours,
+            last_activity: self.stats.last_activity,
         };
         let Ok(text) = serde_json::to_string(&stored) else {
             return;
@@ -1253,6 +1301,28 @@ mod tests {
         let next_evening = NaiveDate::from_ymd_opt(2026, 10, 7).unwrap().and_hms_opt(20, 0, 0).unwrap();
         let greeting = tracker.daily_greeting_at(next_evening).expect("a new day");
         assert_eq!(greeting.extra.get("occasion"), Some(&json!("greeting_evening")));
+    }
+
+    #[test]
+    fn the_first_activity_of_the_day_greets_and_hours_of_quiet_welcome_back() {
+        let mut tracker = ActivityTracker::default();
+        let day = NaiveDate::from_ymd_opt(2026, 10, 6).unwrap();
+        let say = |tracker: &mut ActivityTracker, hour, minute| {
+            tracker.note_activity(day.and_hms_opt(hour, minute, 0).unwrap());
+            tracker.take_say().and_then(|say| say.extra.get("occasion").and_then(|o| o.as_str()).map(str::to_owned))
+        };
+        assert_eq!(say(&mut tracker, 9, 0).as_deref(), Some("greeting_morning"), "the box was plugged in all night");
+        assert_eq!(say(&mut tracker, 9, 5), None);
+        assert_eq!(say(&mut tracker, 11, 59), None, "under three hours");
+        assert_eq!(say(&mut tracker, 15, 30).as_deref(), Some("welcome_back"));
+        assert_eq!(say(&mut tracker, 15, 31), None);
+
+        // Greeted when the link came up in the morning: the first activity soon after is no welcome back,
+        // however long the night was.
+        let mut tracker = ActivityTracker::default();
+        tracker.stats.last_activity = Some(day.and_hms_opt(1, 0, 0).unwrap());
+        assert!(tracker.daily_greeting_at(day.and_hms_opt(8, 50, 0).unwrap()).is_some());
+        assert_eq!(say(&mut tracker, 9, 0), None);
     }
 
     #[test]

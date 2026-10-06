@@ -174,6 +174,8 @@ fn occasion_label(occasion: Occasion) -> &'static str {
         Occasion::GreetingMorning => "GREETING_MORNING",
         Occasion::GreetingAfternoon => "GREETING_AFTERNOON",
         Occasion::GreetingEvening => "GREETING_EVENING",
+        Occasion::LongSession => "LONG_SESSION",
+        Occasion::WelcomeBack => "WELCOME_BACK",
     }
 }
 
@@ -859,8 +861,8 @@ impl Firmware {
             // at boot or on change, and the daemon restarts more often than the device, so without
             // asking it would never know.
             "device.hello" => self.announce_state(board),
-            // The daily greeting: a line and nothing else. It isn't agent activity, so it neither
-            // changes the screen nor wakes leisure, and only greetings may be said this way.
+            // The daily greeting or a welcome back: a line and nothing else. It isn't agent activity,
+            // so it neither changes the screen nor wakes leisure, and only those may be said this way.
             "buddy.say" => {
                 let greeting = string(fields, "occasion")
                     .and_then(Occasion::from_name)

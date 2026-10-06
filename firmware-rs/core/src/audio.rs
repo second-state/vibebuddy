@@ -36,9 +36,11 @@ pub enum Occasion {
     GreetingMorning = 9,
     GreetingAfternoon = 10,
     GreetingEvening = 11,
+    LongSession = 12,
+    WelcomeBack = 13,
 }
 
-pub const OCCASIONS: usize = 12;
+pub const OCCASIONS: usize = 14;
 
 impl Occasion {
     pub const ALL: [Occasion; OCCASIONS] = [
@@ -54,6 +56,8 @@ impl Occasion {
         Occasion::GreetingMorning,
         Occasion::GreetingAfternoon,
         Occasion::GreetingEvening,
+        Occasion::LongSession,
+        Occasion::WelcomeBack,
     ];
 
     /// The protocol's name, as in the `occasion` field.
@@ -71,6 +75,8 @@ impl Occasion {
             Occasion::GreetingMorning => "greeting_morning",
             Occasion::GreetingAfternoon => "greeting_afternoon",
             Occasion::GreetingEvening => "greeting_evening",
+            Occasion::LongSession => "long_session",
+            Occasion::WelcomeBack => "welcome_back",
         }
     }
 
@@ -82,7 +88,7 @@ impl Occasion {
     /// one it is a rarer reading of; ordinary occasions and greetings have nowhere further to go.
     pub fn fallback(self) -> Option<Occasion> {
         match self {
-            Occasion::FirstDone | Occasion::Milestone | Occasion::LateNightDone => Some(Occasion::Done),
+            Occasion::FirstDone | Occasion::Milestone | Occasion::LateNightDone | Occasion::LongSession => Some(Occasion::Done),
             Occasion::LateNightInput => Some(Occasion::InputRequired),
             _ => None,
         }
@@ -92,11 +98,11 @@ impl Occasion {
     pub fn builtin(self) -> Option<Prompt> {
         match self {
             Occasion::InputRequired | Occasion::LateNightInput => Some(Prompt::InputRequired),
-            Occasion::Done | Occasion::FirstDone | Occasion::Milestone | Occasion::LateNightDone => Some(Prompt::Done),
+            Occasion::Done | Occasion::FirstDone | Occasion::Milestone | Occasion::LateNightDone | Occasion::LongSession => Some(Prompt::Done),
             Occasion::Failed => Some(Prompt::Failed),
             Occasion::FocusDone => Some(Prompt::FocusDone),
             Occasion::BreakDone => Some(Prompt::BreakDone),
-            Occasion::GreetingMorning | Occasion::GreetingAfternoon | Occasion::GreetingEvening => None,
+            Occasion::GreetingMorning | Occasion::GreetingAfternoon | Occasion::GreetingEvening | Occasion::WelcomeBack => None,
         }
     }
 
