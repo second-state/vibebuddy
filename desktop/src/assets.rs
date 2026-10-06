@@ -50,6 +50,7 @@ fn catalog() -> Vec<Voice> {
             tr("Chinese · Taiwanese accent · Doubao · same voice as Xiaozhi", &[]),
             Language::Chinese,
         ),
+        voice("ahu", tr("Ahu", &[]), tr("Chinese · Mandarin · Doubao", &[]), Language::Chinese),
         voice("amanda", "Amanda".to_owned(), tr("English · Doubao", &[]), Language::English),
         voice("jackson", "Jackson".to_owned(), tr("English · Doubao", &[]), Language::English),
     ]

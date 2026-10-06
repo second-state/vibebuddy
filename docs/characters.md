@@ -54,15 +54,16 @@ Whatever the persona, every line:
 
 ### Characters at launch
 
-Three Characters share the robot look, each with its own persona and pool, all spoken by Volcano Engine Doubao voices. A Character speaks one language; the App suggests Characters in the UI language first, as it did for voices.
+Four Characters, a woman and a man in each language, share the robot look, each with its own persona and pool, all spoken by Volcano Engine Doubao voices. A Character speaks one language; the App suggests Characters in the UI language first, as it did for voices.
 
 | Character id | Language | Voice |
 | --- | --- | --- |
 | `amanda` | en | Doubao `en_female_amanda_mars_bigtts` |
 | `jackson` | en | Doubao `en_male_jackson_mars_bigtts` |
 | `wanwanxiaohe` | zh | Doubao Wanwan Xiaohe |
+| `ahu` | zh | Doubao `zh_male_wennuanahu_moon_bigtts` |
 
-They replace the four voices the App used to offer: Jessica and Chris (ElevenLabs) gave way to Amanda and Jackson, since the built-in voice is still ElevenLabs Jessica and two different voices both called Jessica would only confuse; Xiaohe 2.0 was dropped to keep one Chinese Character.
+They replace the four voices the App used to offer: Jessica and Chris (ElevenLabs) gave way to Amanda and Jackson, since the built-in voice is still ElevenLabs Jessica and two different voices both called Jessica would only confuse; Xiaohe 2.0 was dropped, and Ahu, a steady senior colleague, joined so Chinese has a man's voice too.
 
 With no Character pack on the box, the built-in default Character speaks Jessica's original five fixed lines.
 
