@@ -126,6 +126,7 @@ struct VoicesView: View {
             Text("Character").font(.headline)
             Text("The box is speaking as “\(currentVoiceName)”. Each character has its own voice and lines. Preview one, then click Use to write it to the box — no firmware flash needed. Over the UART port this takes a few minutes; when it's done the box says a line as the new character.")
                 .font(.callout).foregroundStyle(.secondary)
+            AddressRow(model: model)
             ScrollView {
                 VStack(spacing: 8) {
                     ForEach(Resources.bundledVoices) { entry in
@@ -585,10 +586,35 @@ struct CustomCharacterCard: View {
     }
 
     private func use() {
-        guard let look, let base = Resources.voicePack(lender), let pack = base.withLook(look, id: Self.id) else {
+        guard let look, let base = Resources.voicePack(lender), let pack = model.addressed(base, id: lender).withLook(look, id: Self.id) else {
             problem = String(localized: "That character can't lend its voice; pick another.")
             return
         }
         model.writePack(pack)
+    }
+}
+
+/// What the buddy calls the user, one pick per language: every Character of that language says it.
+struct AddressRow: View {
+    @ObservedObject var model: AppModel
+
+    var body: some View {
+        HStack(spacing: 16) {
+            Text("What the buddy calls you")
+            ForEach([VoiceLanguage.zh, .en], id: \.self) { language in
+                Picker(selection: Binding(get: { model.formOfAddress(language) ?? "" },
+                                          set: { model.setFormOfAddress($0.isEmpty ? nil : $0, for: language) })) {
+                    Text("Nothing").tag("")
+                    ForEach(FormOfAddress.all.filter { $0.language == language }) { form in
+                        Text(verbatim: form.words).tag(form.id)
+                    }
+                } label: {
+                    Text(language == .zh ? "Chinese" : "English")
+                }
+                .frame(maxWidth: 180)
+                .disabled(model.operationRunning)
+            }
+        }
+        .font(.callout)
     }
 }

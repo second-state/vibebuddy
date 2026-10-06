@@ -247,3 +247,75 @@ public enum CRC32 {
         ~data.reduce(~UInt32(0)) { c, byte in table[Int((c ^ UInt32(byte)) & 0xFF)] ^ (c >> 8) }
     }
 }
+
+/// Putting Character packs together in the app: the lines of a pack, and a pack made of lines.
+extension VoicePack {
+    /// Each occasion's pool, in table order: each line's ADPCM bytes and sample count. Nil for an
+    /// old voice pack.
+    public var pools: [[(audio: Data, samples: Int)]]? {
+        guard isCharacter else { return nil }
+        let occasions = Int(data[53])
+        return (0..<occasions).map { occasion in
+            let first = Int(data[56 + occasion * 4]) | Int(data[57 + occasion * 4]) << 8
+            let count = Int(data[58 + occasion * 4]) | Int(data[59 + occasion * 4]) << 8
+            return (first..<(first + count)).map { line in
+                let offset = Self.u32(data, 128 + line * 8), samples = Self.u32(data, 132 + line * 8)
+                return (data.subdata(in: offset..<(offset + (samples + 1) / 2)), samples)
+            }
+        }
+    }
+
+    /// This Character with a form of address: `variant` (characters/<id>/address/<form>.bin) holds the
+    /// lines said with it, which take the place of the first lines of each pool, where the same lines
+    /// sit said without one. The look and the id stay. Nil if either isn't a Character pack.
+    public func withAddress(_ variant: VoicePack) -> Data? {
+        guard var pools, let replacements = variant.pools else { return nil }
+        for (occasion, lines) in replacements.enumerated() where occasion < pools.count && lines.count <= pools[occasion].count {
+            pools[occasion].replaceSubrange(0..<lines.count, with: lines)
+        }
+        return Self.build(id: voiceID, pools: pools, look: look)
+    }
+
+    /// Lays a Character pack out exactly as tools/character_pack.py does.
+    public static func build(id: String, pools: [[(audio: Data, samples: Int)]], look: Data?) -> Data? {
+        guard let idBytes = id.data(using: .ascii), (1...31).contains(idBytes.count) else { return nil }
+        let header = characterHeaderBytes
+        let lineCount = pools.reduce(0) { $0 + $1.count }
+        guard lineCount <= (look == nil ? (1020 - 128) / 8 : (1008 - 128) / 8), pools.count <= (128 - 56) / 4 else { return nil }
+        var head = Data(count: header)
+        var payload = Data()
+        var line = 0
+        for (occasion, lines) in pools.enumerated() {
+            put16(&head, 56 + occasion * 4, lines.isEmpty ? 0 : line)
+            put16(&head, 58 + occasion * 4, lines.count)
+            for (audio, samples) in lines {
+                put(&head, 128 + line * 8, UInt32(header + payload.count))
+                put(&head, 132 + line * 8, UInt32(samples))
+                payload += audio
+                line += 1
+            }
+        }
+        if let look {
+            payload += Data(count: (4 - payload.count % 4) % 4)
+            put(&head, 1008, UInt32(header + payload.count))
+            put(&head, 1012, UInt32(look.count))
+            payload += look
+        }
+        head.replaceSubrange(0..<4, with: Data("VBCP".utf8))
+        put(&head, 4, look == nil ? 1 : 2)
+        put(&head, 8, UInt32(payload.count))
+        put(&head, 12, CRC32.of(payload))
+        head.replaceSubrange(16..<(16 + idBytes.count), with: idBytes)
+        put(&head, 48, 16000)
+        head[52] = 1
+        head[53] = UInt8(pools.count)
+        put16(&head, 54, lineCount)
+        put(&head, 1020, CRC32.of(head.prefix(1020)))
+        return head + payload
+    }
+
+    static func put16(_ data: inout Data, _ at: Int, _ value: Int) {
+        data[at] = UInt8(value & 0xFF)
+        data[at + 1] = UInt8(value >> 8)
+    }
+}

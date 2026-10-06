@@ -49,6 +49,12 @@ enum Resources {
         resourcesDirectory.appendingPathComponent("voices").appendingPathComponent("\(id).bin")
     }
 
+    /// The lines of Character `id` said with a form of address (characters/<id>/address/<form>.bin).
+    static func addressPack(_ id: String, form: String) -> VoicePack? {
+        let url = resourcesDirectory.appendingPathComponent("voices").appendingPathComponent("\(id).\(form).bin")
+        return (try? Data(contentsOf: url)).flatMap(VoicePack.init(data:))
+    }
+
     static func voicePack(_ id: String) -> VoicePack? {
         guard let data = try? Data(contentsOf: voicePackURL(id)) else { return nil }
         return VoicePack(data: data)

@@ -1,7 +1,7 @@
-input_required	Hey. It's waiting on you.
+input_required	Hey {address}. It's waiting on you.
 input_required	Hey. It needs an answer.
 input_required	Hey. It's paused.
-input_required	Hey. Your move.
+input_required	Hey {address}. Your move.
 input_required	Hey. It's stuck on you.
 input_required	Hey. It needs a nod.
 input_required	Hey. Waiting for input.
@@ -10,8 +10,8 @@ done	Done.
 done	That's finished.
 done	It ran clean.
 done	Finished.
-done	Solid.
-done	That's good.
+done	Solid, {address}.
+done	That's good, {address}.
 done	It passed.
 done	Looks right.
 failed	Something broke.
@@ -28,22 +28,28 @@ break_done	Ready when you are.
 break_done	Back on deck.
 first_done	First one down.
 first_done	Off the mark.
-first_done	Nice start.
+first_done	Nice start, {address}.
 milestone	Steady.
-milestone	On a roll.
+milestone	On a roll, {address}.
 milestone	Not bad at all.
 late_night_done	Done. Still working?
-late_night_done	Done. Get some sleep.
+late_night_done	Done. Get some sleep, {address}.
 late_night_done	Late win.
 late_night_input	Hey. Still here?
 late_night_input	Hey. It needs you.
 late_night_input	Hey. Decision needed.
-greeting_morning	Morning.
+greeting_morning	Morning, {address}.
 greeting_morning	Coffee first.
 greeting_morning	Start slow.
-greeting_afternoon	Afternoon.
+greeting_afternoon	Afternoon, {address}.
 greeting_afternoon	Still standing?
 greeting_afternoon	Hope it's going okay.
-greeting_evening	Evening.
+greeting_evening	Evening, {address}.
 greeting_evening	Still here?
 greeting_evening	Long day?
+long_session	Long stretch. Take five, {address}.
+long_session	Been a while. Stand up.
+long_session	Break. Seriously.
+welcome_back	Back again.
+welcome_back	Welcome back, {address}.
+welcome_back	Hey. Missed you.

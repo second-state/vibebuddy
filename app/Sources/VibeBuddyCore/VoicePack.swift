@@ -137,6 +137,26 @@ public enum VoiceLanguage: String, Equatable, Sendable {
     case zh, en
 }
 
+/// The forms of address the buddy can call the user by, matching characters/addresses.tsv. Each is
+/// synthesized in advance for every Character of its language, so the list is fixed.
+public struct FormOfAddress: Equatable, Identifiable, Sendable {
+    public var id: String
+    /// The words spoken, shown as they are: they are the same in every UI language.
+    public var words: String
+    public var language: VoiceLanguage
+
+    public static let all: [FormOfAddress] = [
+        FormOfAddress(id: "laoban", words: "老板", language: .zh),
+        FormOfAddress(id: "dalao", words: "大佬", language: .zh),
+        FormOfAddress(id: "ge", words: "哥", language: .zh),
+        FormOfAddress(id: "jie", words: "姐", language: .zh),
+        FormOfAddress(id: "qin", words: "亲", language: .zh),
+        FormOfAddress(id: "boss", words: "boss", language: .en),
+        FormOfAddress(id: "captain", words: "captain", language: .en),
+        FormOfAddress(id: "buddy", words: "buddy", language: .en),
+    ]
+}
+
 public struct VoiceCatalogEntry: Equatable, Identifiable, Sendable {
     public var id: String
     public var name: String

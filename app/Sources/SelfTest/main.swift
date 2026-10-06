@@ -199,6 +199,31 @@ if let look = try? LookBuilder.build([RGBAImage(width: 100, height: 100, pixels:
 }
 check(CRC32.of(Data("123456789".utf8)) == 0xCBF4_3926, "CRC32 as in zlib")
 
+// The app lays a pack out byte for byte as tools/character_pack.py does: rebuilding a shipped pack
+// from its own pools gives it back unchanged.
+for id in ["amanda", "ahu"] {
+    if let data = try? Data(contentsOf: URL(fileURLWithPath: "characters/\(id)/pack.bin")), let pack = VoicePack(data: data), let pools = pack.pools {
+        check(VoicePack.build(id: pack.voiceID, pools: pools, look: pack.look) == data, "\(id): rebuilt byte for byte")
+    }
+}
+
+// A form of address: the variant's lines replace the first lines of each pool, the rest stay.
+if let base = VoicePack(data: character), let pools = base.pools {
+    check(pools.count == 12 && pools[0].count == 1 && pools[1].count == 1 && pools[1][0].samples == 3, "pools read back")
+    let variantPools: [[(audio: Data, samples: Int)]] = [[(Data([0x11, 0x22, 0x33]), 6)], [], []]
+    if let variantData = VoicePack.build(id: "sample", pools: variantPools, look: nil), let variant = VoicePack(data: variantData),
+       let addressed = base.withAddress(variant).flatMap(VoicePack.init(data:)), let after = addressed.pools {
+        check(after[0][0].audio == Data([0x11, 0x22, 0x33]) && after[0][0].samples == 6, "the needs-input line is the variant's")
+        check(after[1][0].audio == pools[1][0].audio, "the done line is untouched")
+        check(addressed.voiceID == "sample" && addressed.look == base.look, "same id, same look")
+        check(VoicePack.u32(addressed.data, 12) == Int(CRC32.of(addressed.data.suffix(from: 1024))), "payload CRC after recomposing")
+    } else {
+        check(false, "a pack takes a form of address")
+    }
+} else {
+    check(false, "pools of a Character pack")
+}
+
 // 4. Voice catalog: every entry has a language, and the picker puts the UI language first.
 let catalog = VoiceCatalogEntry.all
 check(Set(catalog.map(\.id)).count == catalog.count, "voice ids are unique")

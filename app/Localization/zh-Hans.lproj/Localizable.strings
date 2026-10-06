@@ -206,3 +206,9 @@
 "Pick one to four PNG or JPEG images." = "请选一到四张 PNG 或 JPEG 图片。";
 "No figure found: use a plain white or transparent background." = "没找到人物：请用纯白或透明背景。";
 "That character can't lend its voice; pick another." = "这个角色没法借出声音，换一个吧。";
+
+/* Form of address */
+"What the buddy calls you" = "小助手怎么称呼你";
+"Nothing" = "不称呼";
+"Chinese" = "中文";
+"English" = "英文";

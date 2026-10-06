@@ -99,6 +99,10 @@ echo "== Character packs"
 for pack in "${repo_root}"/characters/*/pack.bin; do
     id="$(basename "$(dirname "${pack}")")"
     cp "${pack}" "${contents}/Resources/voices/${id}.bin"
+    # The same Character's lines said with each form of address; the app swaps in the one picked.
+    for variant in "$(dirname "${pack}")"/address/*.bin; do
+        [[ -f "${variant}" ]] && cp "${variant}" "${contents}/Resources/voices/${id}.$(basename "${variant}")"
+    done
     echo "  ${id}"
 done
 

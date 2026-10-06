@@ -5,9 +5,10 @@ Each directory is one Character (see [`docs/characters.md`](../docs/characters.m
 | File | What it is |
 | --- | --- |
 | `persona.md` | Who they are and how they talk; the only thing a line writer gets about them |
-| `voice.env` | The TTS engine and voice that speak their lines |
+| `voice.env` | The TTS engine and voice that speak their lines, and their `LANGUAGE` |
 | `lines.tsv` | Their lines: `occasion<TAB>text`, one per row |
 | `pack.bin` | The built Character pack the App ships, from `tools/make-character.sh <id>` |
+| `address/<form>.bin` | The lines with `{address}`, said with each form of address in `addresses.tsv` |
 
 `audio/` is the synthesis cache and is not committed.
 
@@ -26,7 +27,7 @@ You are writing the spoken lines of a small desk companion that watches the user
 5. sounds like the persona talking, not like a notification;
 6. is something a real person would say out loud, and makes sense on its own: no riddles, no poetry, no metaphors that need explaining.
 
-The agent is "it" (or simply left out); the user is "you". A `milestone` line is said on the 5th, the 10th and the 20th done alike, so it never says a number. A late-night line never suggests drinking.
+The agent is "it" (or simply left out); the user is "you". About one line in five per occasion may call the user something: write `{address}` where a form such as "boss" or "老板" goes, so that the line still reads well when it is dropped along with its comma. A `milestone` line is said on the 5th, the 10th and the 20th done alike, so it never says a number. A late-night line never suggests drinking.
 
 Occasions, and how many lines each needs:
 
@@ -44,5 +45,7 @@ Occasions, and how many lines each needs:
 | `greeting_morning` | The user's first time at the computer today, before noon | 3 |
 | `greeting_afternoon` | The same, in the afternoon | 3 |
 | `greeting_evening` | The same, in the evening or at night | 3 |
+| `long_session` | The user has been busy for another whole hour today: tell them to take a break | 3 |
+| `welcome_back` | The user is back after hours away | 3 |
 
 Output one line per row as `occasion<TAB>text`, nothing else.

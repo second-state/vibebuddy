@@ -20,3 +20,4 @@ app/build/
 /characters/*/audio/
 /characters/*/look-raw/
 /.preview/
+/characters/*/audio-address/

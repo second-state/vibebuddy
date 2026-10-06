@@ -27,13 +27,15 @@ An announcement speaks one line, drawn from the pool for its occasion. There are
 | `greeting_morning` | First link of the day, 05:00 to 12:00 | silence |
 | `greeting_afternoon` | First link of the day, 12:00 to 18:00 | silence |
 | `greeting_evening` | First link of the day, 18:00 to 05:00 | silence |
+| `long_session` | The first done after today's busy time passes another whole hour (up to three) | `done` |
+| `welcome_back` | The first activity after three quiet hours, on a day already greeted | silence |
 
 Rules:
 
 - **One edge, one line.** A special occasion replaces the ordinary line rather than adding a second one.
-- **The rarest wins.** When several special occasions fit the same done, late night beats first done, which beats a milestone.
+- **The rarest wins.** When several special occasions fit the same done, late night beats first done, which beats a long session, which beats a milestone.
 - **Late night is once a night**, shared between done and needs input. A night runs from 23:00 to 05:00 the next morning.
-- **The greeting follows the link, not the power.** The box restarts every time the daemon opens the serial port, so "booted" happens many times a day. The greeting fires the first time the link comes up on a local calendar day.
+- **The greeting follows the link and the work, not the power.** The box restarts every time the daemon opens the serial port, so "booted" happens many times a day; and a box left plugged in overnight never sees the link come up in the morning. The greeting fires once a local calendar day, the first time the link comes up or an Agent does something, whichever comes first. A welcome back is the same kind of line for coming back to work later in a day: an Agent doing something after three quiet hours, never right after a greeting.
 - **The buddy still never speaks up on its own.** Each special occasion rides an edge that would have made a sound anyway; the daily greeting is the one exception, and it happens once a day at the moment the user plugs in or starts working.
 - **Mute wins.** A muted box swallows every line, special or not. The daemon still counts the occasion as used.
 
@@ -51,6 +53,12 @@ Whatever the persona, every line:
 2. never mentions a session, a project or any code. The persona never sees them;
 3. never mocks the user when something fails;
 4. for `input_required` and `late_night_input`, is unmistakably a call for attention. All of a Character's needs-input lines start with the same call-out, such as "Hey".
+
+### Forms of address
+
+Some lines call the user something: 老板, 大佬, 哥, 姐 or 亲 in Chinese, boss, captain or buddy in English, or nothing. The user picks one per language in the App; every Character of that language then says it. The forms are a fixed list because every line is synthesized in advance (ADR-0007): a name the user typed would need speech synthesis at the moment they type it.
+
+A line in `lines.tsv` that can carry a form of address has `{address}` where it goes. `tools/make-character.sh` synthesizes it once without a form (the `{address}` and the comma that joins it dropped) into `pack.bin`, and once with each form of the Character's language into `address/<form>.bin`, which holds only those lines, first in their pools in row order. When it writes a Character, the App swaps the lines of the picked form in for the plain ones, so the box only ever holds one form.
 
 ### Characters at launch
 
