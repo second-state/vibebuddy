@@ -241,3 +241,9 @@ This is the third time we modeled the agent lifecycle too literally (see the two
 The announcement has to follow the user's unit of work. A subagent reports to its parent, not to the user, so its end isn't announced. And a session isn't done while any of its subagents still runs. The real question is never "which hook fired" but "is there something for the user to come back for".
 
 What found it quickly was matching each `task.done` in the daemon log against the session transcripts by timestamp. That named the hook behind every announcement, and showed whether the turn was started by a person or by a notification. The same check cleared a burst that looked like the bug but was a person sending messages a minute apart. Before changing announcement rules, check what actually started each turn.
+
+## At login, the desktop you talk to may not be up yet
+
+On 2026-10-06 the Linux app had no tray icon on Omarchy, while it worked whenever it was started by hand. The journal said why: `no tray available (failed to register to the StatusNotifierWatcher)`, logged in the same second the shell (quickshell, which hosts the tray) started. The login autostart had run the app a moment before the shell owned `org.kde.StatusNotifierWatcher`, the registration failed once, and the app gave up on the tray for the rest of the session. The shell also restarts on its own (it did that morning), which drops every registered icon.
+
+Anything started at login can't treat a missing desktop service as final: wait for it to appear on the bus, register again when its owner changes, and only fall back after a timeout. ksni does the waiting with `assume_sni_available(true)`. To reproduce, stop the shell, start the app, then start the shell; checking `RegisteredStatusNotifierItems` on the watcher is quicker than looking at the bar. Also look at the bar itself: Omarchy keeps every tray icon in a drawer until the user pins it, so a registered icon can still look missing.
