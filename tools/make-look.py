@@ -41,7 +41,8 @@ def build(sheet: Image.Image) -> bytes:
     quantized = strip.quantize(colors=COLORS - 1, method=Image.Quantize.MEDIANCUT)
     palette = quantized.getpalette()[: (COLORS - 1) * 3]
     indices = [[0] * (WIDTH * FRAMES) for _ in range(HEIGHT)]
-    for (x, y), index in zip(opaque, quantized.getdata()):
+    flattened = quantized.get_flattened_data() if hasattr(quantized, "get_flattened_data") else quantized.getdata()
+    for (x, y), index in zip(opaque, flattened):
         indices[y][x] = index + 1
 
     out = bytearray(b"LOOK" + bytes([WIDTH, HEIGHT, FRAMES, 0]))
