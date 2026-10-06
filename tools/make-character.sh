@@ -9,8 +9,9 @@
 #
 # Each line is synthesized once and cached in characters/<id>/audio/<occasion>/, named by a hash of
 # its text, so editing a few rows only re-synthesizes those; audio for rows that are gone is deleted.
-# Lines are converted to 16 kHz mono and normalized to a -1 dBFS peak one by one. A line longer than
-# 3 seconds is reported: every line has to be short enough to catch from across the desk.
+# Lines are converted to 16 kHz mono, trimmed of leading and trailing silence and normalized to a
+# -1 dBFS peak one by one. A line longer than 3 seconds is reported: every line has to be short
+# enough to catch from across the desk.
 #
 # Usage: VOLC_API_KEY=... tools/make-character.sh wanwanxiaohe
 #        ELEVENLABS_API_KEY=... tools/make-character.sh jessica
@@ -50,7 +51,10 @@ synth() {
             volc) "${repo_root}/tools/volc-tts.py" "${VOICE}" "${text}" "${source}" ;;
             elevenlabs) "${repo_root}/tools/elevenlabs-tts.py" "${VOICE}" "${text}" "${source}" ;;
         esac
-        ffmpeg -loglevel error -y -i "${source}" -ar 16000 -ac 1 -f s16le -acodec pcm_s16le "${work}/${name}.raw"
+        # TTS pads both ends with silence; trimmed, the box speaks as soon as it is asked to.
+        ffmpeg -loglevel error -y -i "${source}" -ar 16000 -ac 1 \
+            -af "silenceremove=start_periods=1:start_threshold=-50dB,areverse,silenceremove=start_periods=1:start_threshold=-50dB,areverse" \
+            -f s16le -acodec pcm_s16le "${work}/${name}.raw"
         local peak gain
         peak="$(ffmpeg -f s16le -ar 16000 -ac 1 -i "${work}/${name}.raw" -af volumedetect -f null - 2>&1 \
             | sed -n 's/.*max_volume: \(-*[0-9.]*\) dB.*/\1/p')"

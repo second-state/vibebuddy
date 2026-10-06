@@ -1,10 +1,10 @@
-input_required	喂，它停下了，正等着你点头呢。
+input_required	喂，它等你点头呢。
 input_required	喂，给个准话，它走不动道了。
 input_required	喂，它犹豫了，需要你拿个主意。
 input_required	喂，它卡在那儿了，你回它一句？
 input_required	喂，它等你指令，别晾着它。
 input_required	喂，缺个确认，你来看一眼。
-input_required	喂，它不敢动，你给个方向。
+input_required	喂，给个方向吧。
 input_required	喂，喊你嘞，它在那儿发呆呢。
 done	这个搞定啦，稳了。
 done	漂亮，这活儿干完了。
@@ -15,7 +15,7 @@ done	顺溜了，翻篇儿。
 done	看，结果出来了。
 done	搞定，继续保持这节奏。
 failed	哎，它这块儿不对劲，回头查查看。
-failed	注意，它跑偏了，咱们看看怎么回事。
+failed	它跑偏了，看看怎么回事。
 failed	有个坑，它迈不过去，拉它一把。
 failed	它卡住了，看一眼是哪儿堵得慌。
 focus_done	二十五分钟，喝口水吧。
@@ -36,7 +36,7 @@ late_night_done	这么晚还在干，做完就睡吧。
 late_night_done	搞定了，早点歇，别熬坏了。
 late_night_done	完事了，赶紧睡觉去。
 late_night_input	喂，这么晚了，它还等你呢。
-late_night_input	喂，它卡壳了，给个提示再睡。
+late_night_input	喂，它卡住了，看一眼再睡。
 late_night_input	喂，处理完这个就去睡吧。
 greeting_morning	早啊，今天心情不错？
 greeting_morning	新的一天，搞定它。
