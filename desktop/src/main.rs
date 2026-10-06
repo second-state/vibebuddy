@@ -237,7 +237,10 @@ impl App {
             #[cfg(target_os = "linux")]
             Message::TrayReady(handle) => {
                 self.tray = Some(handle);
-                return self.refresh_tray();
+                let pin = state_dir().map_or_else(Task::none, |dir| {
+                    Task::future(tray::pin_in_omarchy_bar(dir.join("tray-pinned"))).discard()
+                });
+                return Task::batch([self.refresh_tray(), pin]);
             }
             Message::TrayUnavailable => return Task::done(Message::OpenSettings),
             Message::TrayHost(up) => {
