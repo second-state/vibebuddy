@@ -16,9 +16,10 @@ const HEADER_BYTES: usize = 256;
 /// Upper bound for waiting on a device receipt. Erasing the 2 MB partition takes two or three seconds, and the final read-back check takes a while too.
 const STEP_TIMEOUT: Duration = Duration::from_secs(20);
 
-/// Reads the voice id from the header; None if it isn't a voice pack.
+/// Reads the Character (or old voice) id from the header; None if it is neither kind of pack. Both
+/// keep the id at the same place.
 pub fn voice_id_of(pack: &[u8]) -> Option<String> {
-    if pack.len() <= HEADER_BYTES || &pack[0..4] != b"VBVP" {
+    if pack.len() <= HEADER_BYTES || !matches!(&pack[0..4], b"VBVP" | b"VBCP") {
         return None;
     }
     let raw = &pack[16..48];
@@ -141,6 +142,8 @@ mod tests {
         pack[0..4].copy_from_slice(b"VBVP");
         pack[16..28].copy_from_slice(b"wanwanxiaohe");
         assert_eq!(voice_id_of(&pack).as_deref(), Some("wanwanxiaohe"));
+        pack[0..4].copy_from_slice(b"VBCP");
+        assert_eq!(voice_id_of(&pack).as_deref(), Some("wanwanxiaohe"), "a Character pack");
         pack[0] = b'X';
         assert_eq!(voice_id_of(&pack), None);
         assert_eq!(voice_id_of(&[]), None);
