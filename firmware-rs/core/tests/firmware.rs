@@ -621,3 +621,25 @@ fn k1_wraps_around_the_rows() {
     }
     assert_eq!(press(&mut firmware, &mut board, Key::K0, 50), ["VOLUME 80", "AUDIO QUEUED DONE"]);
 }
+
+/// Built by tools/character_pack.py with a look from tools/make-look.py: four solid blocks in four colors.
+const LOOK_PACK: &[u8] = include_bytes!("../src/fixtures/sample_look_pack.bin");
+
+#[test]
+fn a_pack_with_a_look_is_worn_and_survives_a_restart() {
+    let (mut firmware, mut board, _) = booted(blank_flash());
+    let lines = write_pack(&mut firmware, &mut board, LOOK_PACK);
+    assert!(lines.contains(&"LOOK looked".to_owned()), "{lines:?}");
+
+    // The buddy is drawn from the look now: the robot's blue is gone from the screen.
+    let robot_blue = [0x3c, 0x9f];
+    assert!(!board.frame.chunks(2).any(|pixel| pixel == robot_blue), "no robot pixels left");
+
+    let (mut firmware, mut board, lines) = booted(board.flash);
+    assert!(lines.contains(&"LOOK looked".to_owned()), "after a restart: {lines:?}");
+
+    // A pack without a look brings the robot back; the robot stands in from the moment the write
+    // begins, which is when LOOK ROBOT is reported.
+    write_pack(&mut firmware, &mut board, SAMPLE_PACK);
+    assert!(board.frame.chunks(2).any(|pixel| pixel == robot_blue), "the robot is back");
+}

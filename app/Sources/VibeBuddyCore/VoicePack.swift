@@ -13,6 +13,8 @@ public struct VoicePack: Equatable, Sendable {
     /// A Character pack's preview: the first line of each ordinary occasion that has one, with its
     /// sample count. Empty for a voice pack.
     public var previewLines: [(bytes: Range<Int>, samples: Int)]
+    /// A Character pack's look (format version 2), if it carries one.
+    public var look: Data?
     public var data: Data
 
     public var isCharacter: Bool { !previewLines.isEmpty }
@@ -29,6 +31,7 @@ public struct VoicePack: Equatable, Sendable {
         guard let id = String(bytes: idBytes, encoding: .ascii), !id.isEmpty else { return nil }
         var clips: [Range<Int>] = []
         var previewLines: [(bytes: Range<Int>, samples: Int)] = []
+        var look: Data?
         switch data.prefix(4) {
         case Data("VBVP".utf8):
             for index in 0..<5 {
@@ -52,12 +55,18 @@ public struct VoicePack: Equatable, Sendable {
                 previewLines.append((offset..<(offset + length), samples))
             }
             guard !previewLines.isEmpty else { return nil }
+            if u32(4) == 2, u32(1012) > 0 {
+                let offset = u32(1008), length = u32(1012)
+                guard offset >= VoicePack.characterHeaderBytes, offset + length <= data.count else { return nil }
+                look = data.subdata(in: offset..<(offset + length))
+            }
         default:
             return nil
         }
         self.voiceID = id
         self.clips = clips
         self.previewLines = previewLines
+        self.look = look
         self.data = data
     }
 

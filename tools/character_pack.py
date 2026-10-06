@@ -2,11 +2,12 @@
 """Build a Character pack from a directory of synthesized lines.
 
 Usage:
-    tools/character_pack.py <character id> <audio dir> <output.bin>
+    tools/character_pack.py <character id> <audio dir> <output.bin> [look.bin]
 
 The audio directory holds one subdirectory per occasion (input_required, done, first_done, ...),
 each with that pool's lines as 16 kHz, 16-bit, mono, little-endian PCM files, taken in name order.
-Occasions without a directory have no pool. Byte layout: see firmware-rs/core/src/character_pack.rs
+Occasions without a directory have no pool. With a look (from tools/make-look.py) the pack is format
+version 2 and carries it after the lines; without one it is version 1 and the box draws the robot. Byte layout: see firmware-rs/core/src/character_pack.rs
 and docs/characters.md; the ADPCM encoder matches the decoder in firmware-rs/core/src/adpcm.rs.
 """
 
@@ -21,6 +22,7 @@ HEADER_BYTES = 1024
 SAMPLE_RATE = 16000
 CODEC_IMA_ADPCM = 1
 MAX_LINES = (1020 - 128) // 8
+MAX_LINES_WITH_LOOK = (1008 - 128) // 8
 OCCASIONS = [
     "input_required",
     "done",
@@ -81,7 +83,7 @@ def encode_adpcm(samples: list[int]) -> bytes:
     return bytes(out)
 
 
-def build(character_id: str, pools: dict[str, list[list[int]]]) -> bytes:
+def build(character_id: str, pools: dict[str, list[list[int]]], look: bytes | None = None) -> bytes:
     encoded_id = character_id.encode("ascii")
     if not encoded_id or len(encoded_id) > 31:
         raise ValueError("character id must be 1 to 31 ASCII characters")
@@ -97,13 +99,19 @@ def build(character_id: str, pools: dict[str, list[list[int]]]) -> bytes:
         for samples in lines:
             if not samples:
                 raise ValueError(f"an empty line in {occasion}")
-            if line == MAX_LINES:
-                raise ValueError(f"more than {MAX_LINES} lines")
+            limit = MAX_LINES_WITH_LOOK if look else MAX_LINES
+            if line == limit:
+                raise ValueError(f"more than {limit} lines")
             struct.pack_into("<II", header, 128 + line * 8, HEADER_BYTES + len(payload), len(samples))
             payload += encode_adpcm(samples)
             line += 1
+    if look:
+        # The look starts on a word boundary, so the firmware reads it straight from flash.
+        payload += bytes(-len(payload) % 4)
+        struct.pack_into("<II", header, 1008, HEADER_BYTES + len(payload), len(look))
+        payload += look
     header[0:4] = b"VBCP"
-    struct.pack_into("<III", header, 4, 1, len(payload), zlib.crc32(payload))
+    struct.pack_into("<III", header, 4, 2 if look else 1, len(payload), zlib.crc32(payload))
     header[16 : 16 + len(encoded_id)] = encoded_id
     struct.pack_into("<IBBH", header, 48, SAMPLE_RATE, CODEC_IMA_ADPCM, len(OCCASIONS), line)
     struct.pack_into("<I", header, 1020, zlib.crc32(bytes(header[:1020])))
@@ -116,18 +124,19 @@ def read_pcm(path: Path) -> list[int]:
 
 
 def main(argv: list[str]) -> None:
-    if len(argv) != 4:
+    if len(argv) not in (4, 5):
         sys.exit(__doc__)
     character_id, audio_dir, output = argv[1], Path(argv[2]), Path(argv[3])
+    look = Path(argv[4]).read_bytes() if len(argv) == 5 else None
     pools = {
         occasion: [read_pcm(path) for path in sorted((audio_dir / occasion).glob("*.pcm"))]
         for occasion in OCCASIONS
         if (audio_dir / occasion).is_dir()
     }
-    pack = build(character_id, {occasion: lines for occasion, lines in pools.items() if lines})
+    pack = build(character_id, {occasion: lines for occasion, lines in pools.items() if lines}, look)
     output.write_bytes(pack)
     count = sum(len(lines) for lines in pools.values())
-    print(f"{output}: {len(pack)} bytes, {count} lines, character {character_id}")
+    print(f"{output}: {len(pack)} bytes, {count} lines{', a look' if look else ''}, character {character_id}")
 
 
 if __name__ == "__main__":

@@ -196,3 +196,13 @@
 "Also switch the box's voice to %@" = "同时把盒子的播报音色换成 %@";
 "The box isn't connected, so its voice stays as it is. You can change it later on the Sound tab." = "盒子没连上，这次音色不变，之后可以在「声音」页更换。";
 "Restart now" = "立即重启";
+
+/* Your own character */
+"Your own character" = "你自己的角色";
+"Draw a figure with any image tool, on a plain white background: one image, or four in the order normal, eyes closed, happy, sad. The box shows it in place of the robot, with the voice and lines of the character you pick." = "用任意画图工具画一个人物，纯白背景：一张，或者按「正常、闭眼、开心、难过」的顺序画四张。盒子会用它代替机器人，声音和台词借用你选的角色。";
+"Choose images…" = "选择图片…";
+"Copy a prompt" = "复制提示词";
+"Voice and lines from" = "声音和台词来自";
+"Pick one to four PNG or JPEG images." = "请选一到四张 PNG 或 JPEG 图片。";
+"No figure found: use a plain white or transparent background." = "没找到人物：请用纯白或透明背景。";
+"That character can't lend its voice; pick another." = "这个角色没法借出声音，换一个吧。";

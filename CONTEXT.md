@@ -57,7 +57,7 @@ One finished spoken sentence in a Character's voice. Each Character has many lin
 _Avoid_: prompt (the firmware's old name for a clip), clip (the audio of a line), phrase, script
 
 **Look (外观)**:
-How a Character appears on screen: its animations for each state and its leisure moves. The default Character's look is built into the firmware; every other look is a sprite sheet carried in the Character pack.
+How a Character appears on screen. The default Character's look is the robot, drawn by the firmware; every other look is four still key frames (normal, eyes closed, happy, sad) carried in the Character pack, which the firmware moves and marks for each state.
 _Avoid_: skin, avatar, sprite (that is the image format)
 
 **Character pack (角色包)**:
