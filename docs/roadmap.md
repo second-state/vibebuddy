@@ -58,6 +58,10 @@ Hardware findings: the firmware gained a 2 MB `voices` partition; voice packs ar
 
 Along the way it turned out that the CH343 UART bridge can't swallow more than about two hundred bytes of continuous data (see `LESSONS.md`), so the daemon was changed to send in segments at line rate, which also fixed the old problem of long event lines occasionally producing `invalid_json`.
 
+### Stage 8 — Characters
+
+The buddy becomes a role that wears one Character at a time: a look, a voice, a persona and a pool of lines. Phase 1 gives the four existing voices personas and line pools for twelve occasions on the robot look, in a new Character pack format; phase 2 adds sprite-sheet looks and importing custom ones. Design in [`characters.md`](characters.md).
+
 ## Later
 
 Optional task titles, microphone, voice interaction, long-term task history, Wi-Fi, WebSocket transport, progress, multiple devices. Real-time three-task cards for multiple agents have already moved forward into Stage 4.

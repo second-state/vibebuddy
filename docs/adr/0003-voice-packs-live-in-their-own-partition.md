@@ -1,5 +1,5 @@
 ---
-status: accepted
+status: accepted; the pack format is superseded by ADR-0008
 ---
 
 # Voice packs live in their own partition and are written over the serial protocol

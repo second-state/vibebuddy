@@ -11,8 +11,12 @@ The product name, in use since 2026-09-15; it was previously called AgentBeacon.
 _Avoid_: AgentBeacon, beacond, beacon-hook (old names, only when talking about history), 氛围助手 ("vibe assistant"; that is a description, not a name)
 
 **The buddy (氛围小助手)**:
-Vibe Buddy's original pixel character and the only anthropomorphic presence on the device; in English it is also called Vibe Buddy. Before 2026-09-15 it was called 小灯灵 ("little lamp sprite"); in code it is `buddy`.
-_Avoid_: 小灯灵 (old name), pet (fine as a generic word, not when referring to this character), Pet, Codex pet, assistant (on its own it means an Agent, see below)
+The only anthropomorphic presence on the device: the one who watches the Agents and speaks up for you. It is a role, not a look; at any moment it wears exactly one Character. Before 2026-09-15 it was called 小灯灵 ("little lamp sprite"); in code it is `buddy`.
+_Avoid_: 小灯灵 (old name), pet (fine as a generic word, not when referring to this role), Pet, Codex pet, assistant (on its own it means an Agent, see below)
+
+**Character (角色)**:
+The identity the buddy currently wears: its look, its voice, its persona and its lines, which always travel together. Only one Character is active at a time. The default Character is the original pixel robot, also named Vibe Buddy.
+_Avoid_: skin, theme, avatar (the look alone), pet
 
 **Agent**:
 A local AI assistant observed by Vibe Buddy, such as Codex or Claude Code. An Agent is the thing being observed, not part of Vibe Buddy.
@@ -23,7 +27,7 @@ The layer that translates one Agent's events into Vibe Buddy domain concepts, co
 _Avoid_: integration, plugin, connector
 
 **App**:
-Vibe Buddy's graphical interface on the Mac: a menu bar icon plus a settings window. It handles onboarding, settings, voices and firmware, and supervises the daemon. It is not a second reminder channel; everything about Agents is said by the buddy.
+Vibe Buddy's graphical interface on the Mac: a menu bar icon plus a settings window. It handles onboarding, settings, characters and firmware, and supervises the daemon. It is not a second reminder channel; everything about Agents is said by the buddy.
 _Avoid_: client, panel, console, companion app
 
 **Link (链路)**:
@@ -41,12 +45,24 @@ _Avoid_: environment, entry point, entrypoint, surface, terminal (a terminal is 
 ### Sound
 
 **Announcement voice (播报音色)**:
-The single voice the buddy speaks with, shared by all five lines; only one is active at a time. Each candidate voice is archived as its own set; the user picks one in the App and writes it to the device.
+The single voice the buddy speaks with, shared by all its lines. It belongs to the Character and is never picked on its own: changing voice means changing Character.
 _Avoid_: sound, speech (speech means the lines themselves), TTS
 
-**Voice pack (语音包)**:
-The five finished lines of one announcement voice bundled into a single pack, written to a location on the device separate from the program. When the device has no voice pack, it uses the built-in set it shipped with. Changing voices means changing the voice pack, not the firmware.
-_Avoid_: 音色包 ("timbre pack"), asset pack, voice assets (those are the source files in the repo)
+**Persona (人设)**:
+A Character's personality and way of talking, written down so that its lines can be written in it. A persona never sees what the Agents are working on.
+_Avoid_: system prompt (that is one way to use a persona), personality setting, style
+
+**Line (台词)**:
+One finished spoken sentence in a Character's voice. Each Character has many lines, written in advance; when an announcement fires, the device picks one of them. Lines are never written at the moment they are spoken.
+_Avoid_: prompt (the firmware's old name for a clip), clip (the audio of a line), phrase, script
+
+**Look (外观)**:
+How a Character appears on screen: its animations for each state and its leisure moves. The default Character's look is built into the firmware; every other look is a sprite sheet carried in the Character pack.
+_Avoid_: skin, avatar, sprite (that is the image format)
+
+**Character pack (角色包)**:
+One Character bundled into a single pack: its look (unless it uses the built-in one), the audio of its lines and its name, written to a location on the device separate from the program. Changing Character means changing the Character pack, never the firmware, and the whole pack is written at once so look and voice never disagree. When the device has no Character pack, it uses the built-in default Character.
+_Avoid_: voice pack (the older pack that held only five lines), 语音包, 音色包, asset pack, skin pack
 
 **Mute (静音)**:
 The master switch for the device speaker, toggled only by long-pressing K2 on the device. When it is on, neither announcements nor the Pomodoro chime make a sound; the screen behaves as usual. It belongs to the device alone: the Mac side doesn't record it, show it or toggle it on the device's behalf.
@@ -96,9 +112,10 @@ Fixed wording for the App's English UI and English logs. Use these words when wr
 | 氛围小助手 | the buddy | The character; the product name is still Vibe Buddy |
 | 链路 | link | The "Link" section of the settings window; when it drops, say disconnected |
 | 接入 / 修复 / 移除 | Connect / Repair / Remove | The three hook actions; the settings tab is called Agents, and an agent that isn't connected shows Not set up |
-| 播报音色 | announcement voice | Where you pick the voice; on its own, just say voice |
-| 内置音色 | built-in voice | Jessica (English), which ships with the firmware |
-| 语音包 | voice pack | |
+| 角色 | character | Where you pick who the buddy is |
+| 播报音色 | announcement voice | Part of a character, never picked on its own; on its own, just say voice |
+| 内置音色 | built-in voice | Jessica (English), which ships with the firmware and speaks for the built-in default character |
+| 角色包 | character pack | |
 | 音量 / 静音 | volume / mute | |
 | 模式 | mode | |
 | 值班 / 番茄钟 / 休闲 | On duty / Pomodoro / Leisure | Capitalized in the UI; duty / pomodoro / leisure in code and comments |
@@ -136,6 +153,22 @@ _Avoid_: current state, global state, snapshot
 **Announcement (播报)**:
 An edge notification that must be consumed exactly once, corresponding to one short voice line. An announcement doesn't change the visible state and isn't deduplicated; the same Turn must never trigger a second announcement.
 _Avoid_: notification, reminder, voice event
+
+**Occasion (时机)**:
+The situation an announcement is made in, which decides which lines it draws from. Ordinary occasions follow the edge itself: needs input, done, failed, focus done, break done. Special occasions are rarer readings of the same edge: first done of the day, a milestone, late night, and the daily greeting. One edge speaks at most one line; when several occasions fit, the rarest one wins.
+_Avoid_: trigger, event (that is the protocol message), case
+
+**Milestone (里程碑)**:
+A done that brings today's completion count to a round number: the 5th, 10th or 20th.
+_Avoid_: streak, combo (they imply "without a failure in between", which is not counted)
+
+**Late night (深夜)**:
+The special occasion of the first done or needs input between 23:00 and 05:00, at most once a night. The buddy never speaks up at night on its own; it only changes what it says when something happens anyway.
+_Avoid_: overtime, night mode
+
+**Daily greeting (每日问候)**:
+The line said the first time the link comes up on a local calendar day, worded for the time of day. It is tied to the link, not to the box powering on, because the box restarts many times a day.
+_Avoid_: boot greeting, startup sound, hello (that is the device.hello event)
 
 **Today's stats (当日战绩)**:
 The count of completions, the number of needs-input requests and the busy time, accumulated per local calendar day. It describes what happened during the day, not the current state, so it is only shown when idle and isn't deduplicated.
