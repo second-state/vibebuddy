@@ -90,6 +90,9 @@ pub struct Firmware {
     volume: u32,
     audio_ready: bool,
     build: Vec<u8>,
+    /// The Mac side's build stamp, from the heartbeat. Kept when the link drops: which version was
+    /// connected last is exactly what's worth knowing then.
+    daemon_build: Vec<u8>,
 
     line: Vec<u8>,
     discarding: bool,
@@ -192,6 +195,7 @@ impl Firmware {
             volume: VOLUME_DEFAULT,
             audio_ready: false,
             build: build.to_vec(),
+            daemon_build: Vec::new(),
             line: Vec::with_capacity(LINE_BUFFER_BYTES),
             discarding: false,
             last_message_ms: now_ms,
@@ -248,8 +252,6 @@ impl Firmware {
 
         let display_ok = board.init_display() && self.display.start(board, &scene!(self, now)).is_ok();
         if display_ok {
-            let build = self.build.clone();
-            self.display.set_firmware_build(board, &scene!(self, now), &build);
             Self::write_value_line(board, "DISPLAY READY BUILD ", &self.build);
         } else {
             Self::write_literal(board, "DISPLAY ERROR\n");
@@ -614,9 +616,16 @@ impl Firmware {
                 }
             }
             View::Status => {
-                let build = self.build.split(|&byte| byte == b' ').next().unwrap_or(&[]);
+                let build_line = |label: &[u8], build: &[u8], tone| {
+                    let (version, time) = menu::short_build(build);
+                    let mut label = label.to_vec();
+                    if !time.is_empty() {
+                        label.push(b'\n');
+                        label.extend_from_slice(time.as_bytes());
+                    }
+                    line(&label, version.as_bytes(), tone)
+                };
                 let voice = self.voices.current_id().to_ascii_uppercase();
-                let volume = text!(4, "{}", self.volume % 1000);
                 let tally = self.pomodoro.tally();
                 let minutes = tally.focus_s / 60;
                 let today = if minutes >= 60 {
@@ -628,11 +637,10 @@ impl Firmware {
                     kind: PanelKind::Facts,
                     title: b"STATUS".to_vec(),
                     lines: alloc::vec![
-                        line(b"FIRMWARE", &build[..build.len().min(13)], Tone::Plain),
+                        build_line(b"FIRMWARE", &self.build, Tone::Plain),
+                        build_line(b"APP", &self.daemon_build, if self.link_lost { Tone::Dim } else { Tone::Plain }),
                         line(b"MAC", if self.link_lost { b"NO LINK" } else { b"LINKED" }, Tone::Plain),
                         line(b"VOICE", voice.as_bytes(), Tone::Plain),
-                        line(b"VOLUME", volume.as_bytes(), Tone::Plain),
-                        line(b"MUTE", if self.muted { b"ON" } else { b"OFF" }, Tone::Plain),
                         line(b"TODAY", today.as_bytes(), Tone::Plain),
                     ],
                     selected: None,
@@ -827,7 +835,7 @@ impl Firmware {
             // device may restart at any time, and a one-off handshake would be lost.
             "device.heartbeat" => {
                 if let Some(build) = string(fields, "build") {
-                    self.display.set_daemon_build(board, &scene!(self, now), build.as_bytes());
+                    self.daemon_build = crate::text::truncated(build.as_bytes(), 47);
                 }
                 // The local hour also comes with the heartbeat: the device has no clock, so day and night are whatever the Mac says.
                 if let Some(hour) = number(fields, "hour").map(|hour| hour as i32)

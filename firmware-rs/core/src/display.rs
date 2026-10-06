@@ -33,7 +33,6 @@ const COLOR_FOCUS: u16 = 0xfa8a;
 const COLOR_BREAK: u16 = 0x4ecc;
 
 const TITLE_BYTES: usize = 63;
-const BUILD_BYTES: usize = 47;
 
 /// Idle small moves: one in the last 8 frames of every 40.
 const IDLE_MOOD_PERIOD: u32 = 40;
@@ -139,7 +138,7 @@ pub enum PanelKind {
 pub struct Panel {
     pub kind: PanelKind,
     pub title: Vec<u8>,
-    /// Label, value and the value's tone.
+    /// Label, value and the value's tone. A Facts label may carry a second, smaller line after a `\n`.
     pub lines: Vec<(Vec<u8>, Vec<u8>, Tone)>,
     pub selected: Option<usize>,
     /// Key name and what it does now, along the bottom.
@@ -161,8 +160,6 @@ pub struct Display {
     title: Vec<u8>,
     tasks: Vec<Task>,
     stats: Vec<Vec<u8>>,
-    firmware_build: Vec<u8>,
-    daemon_build: Vec<u8>,
     animation_frame: u32,
     next_animation_at: u32,
     /// Whether the backlight is on. Leisure mode turns it off after sleeping long at night; anything at all
@@ -782,8 +779,6 @@ impl Display {
             title: Vec::new(),
             tasks: Vec::new(),
             stats: Vec::new(),
-            firmware_build: Vec::new(),
-            daemon_build: Vec::new(),
             animation_frame: 0,
             next_animation_at: 0,
             backlight_on: false,
@@ -875,27 +870,6 @@ impl Display {
             let elapsed_color = if task.state == State::InputRequired { color } else { COLOR_MUTED };
             canvas.draw_text(x + width - 8 - elapsed_width, y + 17, elapsed.as_bytes(), 1, elapsed_color, 8);
         }
-    }
-
-    /// The footer shows the build stamps of both sides: this firmware, and the Mac side carried by the heartbeat.
-    ///
-    /// Display only, no judgement. Flashing firmware means plugging in USB and stopping the daemon, while the
-    /// daemon restarts after a one-line change, so most of the time the two sides aren't on the same commit;
-    /// treating a mismatch as a warning would get it ignored within days. What actually breaks is a protocol
-    /// capability mismatch, which a commit can't answer.
-    ///
-    /// Both lines are left-aligned to the same column: verbatim comparison relies on alignment, not color.
-    fn draw_build_footer(&self, canvas: &mut Canvas) {
-        let mut firmware_line = Text::<55>::new();
-        firmware_line.push_bytes(b"FW     ");
-        firmware_line.push_bytes(if self.firmware_build.is_empty() { b"?" } else { &self.firmware_build });
-        let mut daemon_line = Text::<55>::new();
-        daemon_line.push_bytes(b"APP    ");
-        daemon_line.push_bytes(if self.daemon_build.is_empty() { b"?" } else { &self.daemon_build });
-        let longest = firmware_line.len().max(daemon_line.len()) as i32;
-        let x = ((WIDTH - (longest * 6 - 1)) / 2).max(2);
-        canvas.draw_text(x, 216, firmware_line.as_bytes(), 1, COLOR_MUTED, 56);
-        canvas.draw_text(x, 228, daemon_line.as_bytes(), 1, COLOR_MUTED, 56);
     }
 
     /// While idle, rotate between the title and stats. The idle screen shows up most often, so a single fixed
@@ -1179,7 +1153,6 @@ impl Display {
             Mode::Leisure => self.draw_leisure_scene(&mut canvas, scene, &leisure),
             Mode::Duty => self.draw_pet_scene(&mut canvas, scene, label, status_color),
         }
-        self.draw_build_footer(&mut canvas);
         if dim {
             canvas.dim();
         }
@@ -1294,30 +1267,6 @@ impl Display {
     /// Records today's stats, which the idle screen rotates through. Takes effect on the next draw.
     pub fn set_stats(&mut self, lines: &[&[u8]]) {
         self.stats = lines.iter().take(MAX_STATS).map(|line| truncated(line, TITLE_BYTES)).collect();
-    }
-
-    /// The heartbeat comes every 5 seconds; don't redraw if the stamp hasn't changed.
-    fn set_build(&mut self, screen: &mut dyn Screen, scene: &Scene, firmware: bool, build: &[u8]) {
-        let value = truncated(build, BUILD_BYTES);
-        let slot = if firmware { &mut self.firmware_build } else { &mut self.daemon_build };
-        if *slot == value {
-            return;
-        }
-        *slot = value;
-        if self.ready {
-            let _ = self.render(screen, scene);
-        }
-    }
-
-    /// Sets the build stamps of this firmware and of the Mac side. The device compares them
-    /// for the user: asking people to read two hashes and compare them isn't reliable, and a
-    /// mismatch is exactly the signal they need to see.
-    pub fn set_firmware_build(&mut self, screen: &mut dyn Screen, scene: &Scene, build: &[u8]) {
-        self.set_build(screen, scene, true, build);
-    }
-
-    pub fn set_daemon_build(&mut self, screen: &mut dyn Screen, scene: &Scene, build: &[u8]) {
-        self.set_build(screen, scene, false, build);
     }
 
     /// Blink to identify: the backlight flashes for about a second, visible in any mode. Onboarding uses it to
@@ -1504,8 +1453,12 @@ fn draw_panel(canvas: &mut Canvas, panel: &Panel) {
                 canvas.draw_text(PANEL_RIGHT - text_width(value, 2), y, value, 2, tone_color(*tone), 8);
             }
             PanelKind::Facts => {
-                let y = 58 + index * 22;
-                canvas.draw_text(PANEL_LEFT, y, label, 1, COLOR_MUTED, 12);
+                let y = 58 + index * 26;
+                let mut label = label.splitn(2, |&byte| byte == b'\n');
+                canvas.draw_text(PANEL_LEFT, y, label.next().unwrap_or_default(), 1, COLOR_MUTED, 12);
+                if let Some(note) = label.next() {
+                    canvas.draw_text(PANEL_LEFT, y + 9, note, 1, COLOR_MUTED, 12);
+                }
                 canvas.draw_text(120, y - 3, value, 2, tone_color(*tone), 13);
             }
         }

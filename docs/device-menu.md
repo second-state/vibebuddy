@@ -50,7 +50,7 @@ Volume steps are coarse on purpose: six presses cover the range, and the app's s
 
 ![The status view](images/menu-status.png)
 
-What the box knows about itself, with nothing to change: firmware build, whether the Mac is linked, the voice pack, volume, mute and today's focus tally. It's where "is it the box or the Mac?" gets answered without opening the app.
+What the box knows about itself, with nothing to change: the firmware and app builds (version over build time, see [`pet.md`](pet.md#build-identifiers)), whether the Mac is linked, the voice pack and today's focus tally. Volume and mute aren't repeated here: the menu's own rows already show them. It's where "is it the box or the Mac?" gets answered without opening the app.
 
 ## Behavior around the menu
 

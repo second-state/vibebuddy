@@ -79,8 +79,8 @@ cp "${repo_root}/target/release/vibebuddyd" "${contents}/MacOS/vibebuddyd"
 cp "${repo_root}/target/release/vibebuddy-hook" "${contents}/MacOS/vibebuddy-hook"
 
 echo "== Firmware"
-# The Rust firmware's three images and build ID, produced by tools/build-firmware.sh. build.txt matches the box
-# footer and its DISPLAY READY BUILD line character for character; the app compares against it to offer updates.
+# The Rust firmware's three images and build ID, produced by tools/build-firmware.sh. build.txt matches the box's
+# DISPLAY READY BUILD line character for character; the app compares against it to offer updates.
 fw="${repo_root}/firmware-rs/device/build"
 if [[ -f "${fw}/bootloader.bin" && -f "${fw}/partition-table.bin" && -f "${fw}/vibebuddy-fw.bin" && -f "${fw}/build.txt" ]]; then
     for file in bootloader.bin partition-table.bin vibebuddy-fw.bin build.txt; do

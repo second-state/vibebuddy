@@ -312,7 +312,7 @@ fn build_identity(app_version: Option<&str>) -> String {
     build_identity_from(app_version, BUILD_REVISION, &built)
 }
 
-/// When the app is present its version comes first: the device footer line is the app version plus the build.
+/// When the app is present its version comes first: the device's APP row shows the app version plus the build.
 fn build_identity_from(app_version: Option<&str>, revision: &str, built: &str) -> String {
     let mut parts = Vec::new();
     if let Some(version) = app_version {

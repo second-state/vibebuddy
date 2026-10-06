@@ -3,7 +3,7 @@
 #   bootloader.bin      → 0x0
 #   partition-table.bin → 0x8000
 #   vibebuddy-fw.bin    → 0x10000
-#   build.txt           matches the box footer and its DISPLAY READY BUILD line character for character
+#   build.txt           matches the box's DISPLAY READY BUILD line character for character
 # None of the three touches the settings area at 0x9000 or the voices partition at 0x410000.
 #
 # FAST_CLOCK=1 builds the time-compressed acceptance firmware (five minutes of leisure become five seconds).
