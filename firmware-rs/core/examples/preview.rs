@@ -112,8 +112,6 @@ fn main() {
         now: 0,
     };
     preview.display.start(&mut preview.screen, &scene!(preview)).unwrap();
-    preview.display.set_firmware_build(&mut preview.screen, &scene!(preview), b"9b642af 2026-09-14 17:41");
-    preview.display.set_daemon_build(&mut preview.screen, &scene!(preview), b"9b642af 2026-09-14 17:43");
     preview.display.set_stats(&[b"7 DONE", b"4 ASKS", b"1H23 BUSY"]);
     preview.pomodoro.restore_tally(Tally { day: 20260915, completed: 3, focus_s: 4500 });
     if arguments.get(2).map(String::as_str) == Some("leisure") {

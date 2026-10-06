@@ -516,32 +516,6 @@ static void draw_task_cards(void) {
   }
 }
 
-/// The footer shows the build stamps of both sides: this firmware, and the Mac side carried by the heartbeat.
-///
-/// Display only, no judgement. Flashing firmware means plugging in USB and stopping the daemon, while the daemon
-/// restarts after a one-line change, so most of the time the two sides aren't on the same commit; treating a mismatch as a
-/// warning would get it ignored within days. What actually breaks is a protocol capability mismatch, which a commit can't answer.
-///
-/// Both lines are left-aligned to the same column: verbatim comparison relies on alignment, not color.
-static void draw_build_footer(void) {
-  char firmware_line[BUILD_BYTES + 8];
-  char daemon_line[BUILD_BYTES + 8];
-  snprintf(firmware_line, sizeof(firmware_line), "FW     %s",
-           firmware_build[0] == '\0' ? "?" : firmware_build);
-  snprintf(daemon_line, sizeof(daemon_line), "APP    %s",
-           daemon_build[0] == '\0' ? "?" : daemon_build);
-
-  size_t firmware_length = strlen(firmware_line);
-  size_t daemon_length = strlen(daemon_line);
-  size_t longest = firmware_length > daemon_length ? firmware_length : daemon_length;
-  int x = (DISPLAY_WIDTH - (int)(longest * 6 - 1)) / 2;
-  if (x < 2) {
-    x = 2;
-  }
-  draw_text(x, 216, firmware_line, 1, COLOR_MUTED, sizeof(firmware_line));
-  draw_text(x, 228, daemon_line, 1, COLOR_MUTED, sizeof(daemon_line));
-}
-
 /// While idle, rotate between the title and stats. The idle screen shows up most often, so a single fixed sentence is a waste.
 /// The pomodoro's daily record is kept by the device itself and goes into the rotation too.
 static void draw_idle_line(void) {
@@ -784,8 +758,8 @@ static void draw_pomodoro_badge(void) {
             phase_color(&view), sizeof(badge));
 }
 
-/// Leisure mode: the buddy leaves its duty spot and plays skits in the middle of the screen. The status bar and
-/// footer stay as usual; a sleeping buddy simply means "nothing is waiting for you".
+/// Leisure mode: the buddy leaves its duty spot and plays skits in the middle of the screen. The status bar stays as
+/// usual; a sleeping buddy simply means "nothing is waiting for you".
 typedef enum {
   EYES_OPEN,
   EYES_CLOSED,
@@ -1198,7 +1172,6 @@ static esp_err_t render_current_state(void) {
   } else {
     draw_pet_scene(label, status_color);
   }
-  draw_build_footer();
   return present();
 }
 

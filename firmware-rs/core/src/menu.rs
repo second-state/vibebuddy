@@ -6,6 +6,7 @@
 use alloc::vec::Vec;
 
 use crate::buttons::ButtonEvent;
+use crate::text::Text;
 
 /// Left alone this long, the menu closes on its own.
 pub const IDLE_CLOSE_MS: u32 = 30_000;
@@ -149,9 +150,78 @@ pub fn next_volume(current: u32) -> u32 {
     VOLUME_STEPS.iter().copied().find(|&step| step > current).unwrap_or(VOLUME_STEPS[0])
 }
 
+/// A build stamp as the status view shows it: the version and the build time, short enough for
+/// one row. `v0.3.2-11-g0adc18b-dirty 2026-10-06 16:34` becomes `0.3.2-11!` and `10-06 16:34`:
+/// the hash and year go, the commits past the tag stay (without them a dev build reads as the
+/// release), and `!` marks uncommitted changes since the font has no `+` or `*`. The daemon's stamp
+/// leads with the app version (`0.3.1 v0.3.1-12-ga4a667c ...`); the git description after it wins.
+pub fn short_build(build: &[u8]) -> (Text<16>, Text<12>) {
+    let mut words: Vec<&[u8]> = build.split(|&byte| byte == b' ').filter(|word| !word.is_empty()).collect();
+    let mut time = Text::new();
+    if let [.., date, clock] = words[..]
+        && date.len() == 10
+        && date[4] == b'-'
+        && clock.len() == 5
+        && clock[2] == b':'
+    {
+        time.push_bytes(&date[5..]);
+        time.push_bytes(b" ");
+        time.push_bytes(clock);
+        words.truncate(words.len() - 2);
+    }
+    let mut version = Text::new();
+    let Some(&describe) = words.last() else {
+        version.push_bytes(b"?");
+        return (version, time);
+    };
+    let (describe, dirty) = match describe.strip_suffix(b"-dirty") {
+        Some(clean) => (clean, true),
+        None => (describe, false),
+    };
+    // tag-N-gHASH: keep the tag and N.
+    let mut parts = describe.rsplitn(3, |&byte| byte == b'-');
+    let describe = match (parts.next(), parts.next(), parts.next()) {
+        (Some(hash), Some(count), Some(tag))
+            if hash.first() == Some(&b'g') && !count.is_empty() && count.iter().all(u8::is_ascii_digit) =>
+        {
+            &describe[..tag.len() + 1 + count.len()]
+        }
+        _ => describe,
+    };
+    let describe = match describe {
+        [b'v' | b'V', digit, ..] if digit.is_ascii_digit() => &describe[1..],
+        _ => describe,
+    };
+    version.push_bytes(describe);
+    if dirty {
+        version.push_bytes(b"!");
+    }
+    (version, time)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    use std::string::{String, ToString};
+
+    fn short(build: &str) -> (String, String) {
+        let (version, time) = short_build(build.as_bytes());
+        (String::from_utf8(version.as_bytes().to_vec()).unwrap(), String::from_utf8(time.as_bytes().to_vec()).unwrap())
+    }
+
+    #[test]
+    fn short_build_keeps_the_version_and_the_time() {
+        let pair = |version: &str, time: &str| (version.to_string(), time.to_string());
+        assert_eq!(short("v0.3.2-11-g0adc18b 2026-10-06 16:34"), pair("0.3.2-11", "10-06 16:34"));
+        assert_eq!(short("0.3.1 v0.3.1-12-ga4a667c 2026-10-06 16:26"), pair("0.3.1-12", "10-06 16:26"));
+        assert_eq!(short("v0.3.2-11-g0adc18b-dirty 2026-10-06 16:34"), pair("0.3.2-11!", "10-06 16:34"));
+        assert_eq!(short("v0.3.2 2026-10-06 16:34"), pair("0.3.2", "10-06 16:34"));
+        assert_eq!(short("abc1234-dirty 2026-09-16 13:11"), pair("abc1234!", "09-16 13:11"));
+        assert_eq!(short("v0.2.0-rc1-3-gabc1234"), pair("0.2.0-rc1-3", ""));
+        assert_eq!(short("abc1234"), pair("abc1234", ""));
+        assert_eq!(short(""), pair("?", ""));
+    }
 
     const PLAIN: Context = Context { phase_active: false };
     const FULL: Context = Context { phase_active: true };
