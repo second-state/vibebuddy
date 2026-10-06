@@ -21,7 +21,7 @@ Leisure is not a switch; it is a tiny emotional model: the longer it's idle, the
 
 **Leisure is silent.** Voice on this device is for notifications; a device on your desk humming for no reason is harassment, not cute.
 
-**Leisure doesn't change the at-a-glance state semantics.** The top status bar keeps the On duty idle blue, the footer stays as it is, and a sleeping sprite simply means "nothing is waiting for you".
+**Leisure doesn't change the at-a-glance state semantics.** The top status bar keeps the On duty idle blue and a sleeping sprite simply means "nothing is waiting for you".
 
 ## Skits
 

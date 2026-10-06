@@ -63,7 +63,7 @@ jobs:
         with:
           name: firmware
           retention-days: 1
-          # build-app.sh needs the three images, plus the build ID that matches the box footer character for character.
+          # build-app.sh needs the three images, plus the build ID that matches the box's DISPLAY READY BUILD line character for character.
           path: |
             firmware-rs/device/build/bootloader.bin
             firmware-rs/device/build/partition-table.bin

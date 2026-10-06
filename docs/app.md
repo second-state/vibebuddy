@@ -103,9 +103,9 @@ The firmware is also distributed on its own: at release time CI packages the cop
 
 A factory-fresh box (running some other firmware) goes down the same flashing path, just from a different entry point. Every time the daemon opens the port it resets the build number and sends hello; if the port has been open for 5 seconds with no build number reported, it concludes the box isn't running our firmware, and both the onboarding "Find the box" page and the Device tab switch to offering "Flash Vibe Buddy firmware", with a confirmation dialog that says plainly the existing firmware and data will be erased. The ROM download protocol doesn't care what the box was running before; but the native USB port is only recognized if the other firmware kept USB Serial/JTAG (VID/PID `303A:1001`). If it isn't recognized, the user is told to switch to the UART port, which is a hardware bridge and independent of the firmware.
 
-## Device footer
+## Build identifier on the box
 
-The label on the footer's second line changes from `DAEMON` to `APP`, and its value is the app version plus build number. It isn't cleared when the link drops; it goes gray along with the rest of the screen, because when disconnected the most valuable information is precisely "which version was connected last".
+The box shows the Mac side's build on the `APP` row of the device menu's STATUS view (see [`pet.md`](pet.md#build-identifiers)); the heartbeat's `build` is the app version plus the build number. It isn't cleared when the link drops; it goes gray, because when disconnected the most valuable information is precisely "which version was connected last".
 
 ## Implementation notes (2026-09-16)
 

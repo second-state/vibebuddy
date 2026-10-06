@@ -6,7 +6,7 @@ public struct FirmwarePackage: Equatable {
     public let bootloader: URL
     public let partitionTable: URL
     public let app: URL
-    /// "hash date time", the same format the box footer reports; without build.txt, just the version string in the image.
+    /// "hash date time", the same format the box reports on its DISPLAY READY BUILD line; without build.txt, just the version string in the image.
     public let build: String
 
     public static let bootloaderName = "bootloader.bin"

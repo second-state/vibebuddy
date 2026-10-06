@@ -2,7 +2,7 @@ use std::process::Command;
 
 /// Linker script, Xtensa linker check, and compiling the build stamp into the firmware.
 ///
-/// The footer and the `DISPLAY READY BUILD` line both show "git description + build time", written
+/// The `DISPLAY READY BUILD` line and the menu's STATUS view both show "git description + build time", written
 /// the same way as the C firmware (esp_app_desc's version + a time regenerated on every build): the
 /// Mac compares the two sides' build stamps byte for byte.
 fn main() {

@@ -28,22 +28,24 @@ Idle is the screen that shows up most often, so it can't be just one fixed line.
 
 The little moves are not decoration. A device that is always lit and always on the same frame looks stuck rather than standing by; the buddy has to prove it's awake first for `NO LINK` to mean anything. Conversely, when disconnected it neither rotates stats nor makes little moves: a moving screen looks alive, which is exactly the opposite of what it needs to convey.
 
-## Footer: build identifiers
+## Build identifiers
 
-The footer always shows two lines: the box's own firmware, and the Mac side as reported in the heartbeat. The format is `git describe` plus the build time:
+The build identifiers of both sides live in the device menu's STATUS view (see [`device-menu.md`](device-menu.md)), not on the main screen: they matter when diagnosing, not at a glance, and two full `git describe` lines along the bottom of a 320×240 screen cost more than they gave. Until 2026-10-06 they were a two-line footer.
+
+The view shows the box's own firmware and the Mac side as reported in the heartbeat, each shortened to the version plus the build time:
 
 ```text
-FW     9b642af 2026-09-14 17:41
-APP    9b642af 2026-09-14 17:43
+FIRMWARE  0.3.2-11      (v0.3.2-11-g0adc18b 2026-10-06 16:34)
+APP       0.3.1-12      (0.3.1 v0.3.1-12-ga4a667c 2026-10-06 16:26)
 ```
 
-The second line's label used to be `DAEMON`; once the App bundled the daemon inside it, the two became the same build, and since 2026-09-16 the label has been `APP`. When the link drops, these two lines are not cleared; they go gray along with the rest of the screen: when disconnected, the most valuable piece of information is exactly "which version was I last connected to".
+The hash and the year go; the commits past the tag stay, since without them a dev build reads as the release, and a trailing `!` marks uncommitted changes (the font has no `+` or `*`). The build time sits under the label as `10-06 16:34`. The full stamps still travel unchanged on the serial port and in the daemon's status, where the app compares them to offer firmware updates.
 
-Build identifiers are used instead of semantic version numbers: both sides can say `0.1.0` and still be days apart, with nothing to show for it.
+The `APP` value isn't cleared when the link drops; it goes gray: when disconnected, the most valuable piece of information is exactly "which version was I last connected to". When the Mac side is too old to send this field at all, it shows `?`, which is itself the answer.
 
-**Display only, don't judge.** Flashing the firmware requires plugging in USB and stopping the daemon, while the daemon restarts on a one-line source change, so the two sides are on different commits most of the time anyway; treat "mismatch" as a warning and within days it will be ignored completely. What actually causes trouble is a protocol capability mismatch — the firmware gains a requirement whose other half the Mac side doesn't yet satisfy — and that is not a question a commit can answer.
+Build identifiers are used instead of semantic version numbers alone: both sides can say `0.1.0` and still be days apart.
 
-The information on its own is enough: see `NO LINK`, glance down, notice the `APP` line is three days old, and the diagnosis is over. The two lines are left-aligned to the same column, because character-by-character comparison relies on alignment, not color. When the Mac side is too old to send this field at all, it shows `?`, which is itself the answer.
+**Display only, don't judge.** Flashing the firmware requires plugging in USB and stopping the daemon, while the daemon restarts on a one-line source change, so the two sides are on different commits most of the time anyway; treat "mismatch" as a warning and within days it will be ignored completely. What actually causes trouble is a protocol capability mismatch, and that is not a question a commit can answer.
 
 ## Pomodoro badge
 

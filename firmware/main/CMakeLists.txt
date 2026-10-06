@@ -5,7 +5,7 @@ idf_component_register(
     EMBED_FILES "assets/input_required.pcm" "assets/done.pcm" "assets/failed.pcm" "assets/focus_done.pcm" "assets/break_done.pcm"
 )
 
-# The build time in the footer is regenerated here on every build. __TIME__ in
+# The build time in the build stamp is regenerated here on every build. __TIME__ in
 # esp_app_desc.c only updates when that file is recompiled, so after incremental
 # builds it sticks at the last full build. The second OUTPUT is never produced,
 # so Ninja always considers this command out of date.
