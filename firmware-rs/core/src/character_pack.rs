@@ -5,7 +5,7 @@
 //! 1024-byte header, little endian:
 //! ```text
 //!    0  magic "VBCP"
-//!    4  u32 format version, currently 1
+//!    4  u32 format version: 1, or 2 with a look
 //!    8  u32 payload length (bytes after the header)
 //!   12  u32 payload CRC32 (zlib)
 //!   16  char[32] character id, NUL-terminated
@@ -15,6 +15,9 @@
 //!   54  u16 line count
 //!   56  occasion table: per occasion, u16 first line, u16 line count (0 = no pool)
 //!  128  line table: per line, u32 offset from the start of the pack, u32 sample count
+//!       (at most 111 lines in version 1, 110 in version 2)
+//! 1008  version 2: u32 offset of the look from the start of the pack (a multiple of 4), u32 its
+//!       length; 0, 0 for none
 //! 1020  u32 CRC32 of bytes 0..1020
 //! ```
 
@@ -24,6 +27,8 @@ use crate::voice_pack::{ID_BYTES, crc32};
 pub const MAGIC: &[u8; 4] = b"VBCP";
 pub const HEADER_BYTES: usize = 1024;
 pub const MAX_LINES: usize = (1020 - 128) / 8;
+/// Version 2 gives up the last line slot for the look's location.
+const MAX_LINES_V2: usize = (1008 - 128) / 8;
 const SAMPLE_RATE: u32 = 16000;
 const CODEC_IMA_ADPCM: u8 = 1;
 /// Room the occasion table has before the line table starts.
@@ -50,6 +55,8 @@ pub struct CharacterPack {
     /// Per occasion: index of its first line and how many it has.
     pools: [(u16, u16); OCCASIONS],
     lines: [LineEntry; MAX_LINES],
+    /// Where the look is, from the start of the pack, and its length.
+    pub look: Option<(u32, u32)>,
 }
 
 impl CharacterPack {
@@ -78,7 +85,8 @@ fn read_u32(at: &[u8]) -> u32 {
 /// invalid. Occasions the pack doesn't know count as having no pool; occasions this firmware doesn't
 /// know are ignored, so the table can grow.
 pub fn parse(header: &[u8], capacity: usize) -> Option<CharacterPack> {
-    if header.len() < HEADER_BYTES || &header[0..4] != MAGIC || read_u32(&header[4..]) != 1 {
+    let version = read_u32(&header[4..]);
+    if header.len() < HEADER_BYTES || &header[0..4] != MAGIC || !(1..=2).contains(&version) {
         return None;
     }
     if read_u32(&header[1020..]) != crc32(0, &header[..1020]) {
@@ -89,7 +97,7 @@ pub fn parse(header: &[u8], capacity: usize) -> Option<CharacterPack> {
     }
     let occasion_count = header[53] as usize;
     let line_count = read_u16(&header[54..]) as usize;
-    if occasion_count > MAX_OCCASIONS || line_count > MAX_LINES {
+    if occasion_count > MAX_OCCASIONS || line_count > if version == 1 { MAX_LINES } else { MAX_LINES_V2 } {
         return None;
     }
     let mut pack = CharacterPack {
@@ -98,6 +106,7 @@ pub fn parse(header: &[u8], capacity: usize) -> Option<CharacterPack> {
         payload_crc32: read_u32(&header[12..]),
         pools: [(0, 0); OCCASIONS],
         lines: [LineEntry { offset: 0, samples: 0 }; MAX_LINES],
+        look: None,
     };
     pack.id[..ID_BYTES - 1].copy_from_slice(&header[16..16 + ID_BYTES - 1]);
     let end_of_payload = HEADER_BYTES as u64 + pack.payload_length as u64;
@@ -120,6 +129,16 @@ pub fn parse(header: &[u8], capacity: usize) -> Option<CharacterPack> {
             return None;
         }
         pack.lines[index] = line;
+    }
+    if version == 2 {
+        let (offset, length) = (read_u32(&header[1008..]), read_u32(&header[1012..]));
+        if length > 0 {
+            // Word-aligned, so the firmware can read it from flash in one go.
+            if !offset.is_multiple_of(4) || (offset as usize) < HEADER_BYTES || offset as u64 + length as u64 > end_of_payload {
+                return None;
+            }
+            pack.look = Some((offset, length));
+        }
     }
     Some(pack)
 }
@@ -202,6 +221,33 @@ pub(crate) mod tests {
         assert!(pack.pool(Occasion::Failed).is_empty());
         assert_eq!(pack.payload_length as usize, bytes.len() - HEADER_BYTES);
         assert_eq!(pack.payload_crc32, crc32(0, &bytes[HEADER_BYTES..]));
+    }
+
+    #[test]
+    fn a_version_2_pack_says_where_its_look_is() {
+        let mut bytes = build_pack("x", &[&[10]]);
+        put_u32(&mut bytes[4..], 2);
+        // A look of 6 bytes after the 5-byte line, padded to a word boundary.
+        bytes.extend_from_slice(b"\0\0\0LOOK!!");
+        let payload_length = (bytes.len() - HEADER_BYTES) as u32;
+        put_u32(&mut bytes[8..], payload_length);
+        put_u32(&mut bytes[1008..], 1032);
+        put_u32(&mut bytes[1012..], 6);
+        reseal(&mut bytes);
+        assert_eq!(parse(&bytes, 4096).expect("parses").look, Some((1032, 6)));
+
+        put_u32(&mut bytes[1008..], 1030);
+        reseal(&mut bytes);
+        assert!(parse(&bytes, 4096).is_none(), "a look off a word boundary");
+        put_u32(&mut bytes[1008..], 1032);
+
+        put_u32(&mut bytes[1012..], 7);
+        reseal(&mut bytes);
+        assert!(parse(&bytes, 4096).is_none(), "a look past the payload");
+
+        put_u32(&mut bytes[1012..], 0);
+        reseal(&mut bytes);
+        assert_eq!(parse(&bytes, 4096).expect("parses").look, None, "no look");
     }
 
     #[test]

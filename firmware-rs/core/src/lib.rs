@@ -22,6 +22,7 @@ pub mod firmware;
 pub mod lcd;
 pub mod leisure;
 pub mod lines;
+pub mod look;
 pub mod menu;
 pub mod pomodoro;
 pub mod storage;

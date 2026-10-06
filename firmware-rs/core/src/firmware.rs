@@ -21,6 +21,7 @@ use crate::storage::{Flash, Settings, SettingsStore, find_partition};
 use crate::text;
 use crate::voice_pack::crc32;
 use crate::lines::LinePicker;
+use crate::look::Look;
 use crate::voices::{Pick, Voices, VoiceError};
 
 pub const MAX_LINE_BYTES: usize = 1024;
@@ -107,6 +108,7 @@ pub struct Firmware {
     reported_tier: Tier,
     reported_lights_out: bool,
     reported_hour: i32,
+    reported_look: alloc::string::String,
 }
 
 /// Borrows the Firmware's pomodoro and leisure director to build the context for one frame.
@@ -199,6 +201,7 @@ impl Firmware {
             reported_tier: Tier::Alert,
             reported_lights_out: false,
             reported_hour: -1,
+            reported_look: alloc::string::String::from("ROBOT"),
         }
     }
 
@@ -255,6 +258,7 @@ impl Firmware {
             Ok(()) => Self::write_value_line(board, "VOICES ", self.voices.current_id().as_bytes()),
             Err(_) => Self::write_literal(board, "VOICES NO PARTITION\n"),
         }
+        self.load_look(board);
 
         match board.init_audio(self.volume) {
             Ok(codec) => {
@@ -975,6 +979,7 @@ impl Firmware {
                 }
                 let id = alloc::string::String::from(self.voices.current_id());
                 Self::voice_reply(board, "voice.written", -1, &id);
+                self.load_look(board);
                 Self::write_value_line(board, "VOICES ", id.as_bytes());
                 // Say a line in the new voice when done: over the bridge a write takes several minutes,
                 // and the user may not be watching the app for the preview button; the box speaking up
@@ -984,6 +989,25 @@ impl Firmware {
             }
             _ => Self::voice_reply(board, "voice.error", -1, "unknown voice event"),
         }
+    }
+
+    /// Reads the current Character's look into memory and hands it to the display; no look, or one
+    /// that doesn't parse, means the robot. A change is reported as `LOOK <id>` or `LOOK ROBOT`; the
+    /// robot at boot is the default and says nothing.
+    fn load_look<B: Board>(&mut self, board: &mut B) {
+        let look = self.voices.look().and_then(|(offset, length)| {
+            let mut bytes = alloc::vec![0u8; length as usize];
+            board.flash().read(offset, &mut bytes).ok()?;
+            Look::parse(&bytes)
+        });
+        let label = if look.is_some() { self.voices.current_id() } else { "ROBOT" };
+        if label != self.reported_look {
+            self.reported_look = alloc::string::String::from(label);
+            let line = self.reported_look.clone();
+            Self::write_value_line(board, "LOOK ", line.as_bytes());
+        }
+        let now = board.now_ms();
+        self.display.set_look(board, &scene!(self, now), look);
     }
 
     /// The second half of voice.begin: once playback has stopped (or we've waited long enough), erase the partition and reply voice.ready.
@@ -999,5 +1023,7 @@ impl Firmware {
             Ok(()) => Self::voice_reply(board, "voice.ready", -1, ""),
             Err(error) => Self::voice_reply(board, "voice.error", -1, error.name()),
         }
+        // The look lived in the partition just erased: the robot stands in until the new pack is in.
+        self.load_look(board);
     }
 }

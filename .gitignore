@@ -18,3 +18,5 @@ app/build/
 /VibeBuddy-*.dmg
 /VibeBuddy-*.zip
 /characters/*/audio/
+/characters/*/look-raw/
+/.preview/

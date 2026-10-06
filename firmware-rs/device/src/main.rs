@@ -249,6 +249,9 @@ async fn main(spawner: Spawner) -> ! {
     let peripherals = esp_hal::init(esp_hal::Config::default().with_cpu_clock(CpuClock::max()));
     // JSON parsing and the few lines of text in a frame live on the heap; 72 KB is enough.
     esp_alloc::heap_allocator!(#[esp_hal::ram(reclaimed)] size: 73744);
+    // A Character's look lives on the heap too (about 6 KB, plus as much again while it is read from
+    // flash); this region keeps it from eating into what JSON parsing needs.
+    esp_alloc::heap_allocator!(size: 16 * 1024);
 
     let timg0 = TimerGroup::new(peripherals.TIMG0);
     esp_rtos::start(timg0.timer0, peripherals.FROM_CPU_INTR0);

@@ -6,6 +6,7 @@
 #   2.0 voice VOLC_RESOURCE_ID=seed-tts-2.0. The API keys stay in your environment, never in the repo:
 #   VOLC_API_KEY or ELEVENLABS_API_KEY (a paid plan; the free one has no commercial license).
 # - lines.tsv has one line per row: occasion<TAB>text. Blank rows and rows starting with # are skipped.
+# - look.png, optional: the look sheet (see tools/make-look.py); without it the box draws the robot.
 #
 # Each line is synthesized once and cached in characters/<id>/audio/<occasion>/, named by a hash of
 # its text, so editing a few rows only re-synthesizes those; audio for rows that are gone is deleted.
@@ -84,7 +85,13 @@ find "${audio}" -name '*.pcm' | while read -r file; do
 done
 find "${audio}" -type d -empty -delete
 
-"${repo_root}/tools/character_pack.py" "${id}" "${audio}" "${dir}/pack.bin"
+# A look sheet, if the Character has one, goes into the pack too.
+look=()
+if [[ -f "${dir}/look.png" ]]; then
+    "${repo_root}/tools/make-look.py" "${dir}/look.png" "${work}/look.bin" >/dev/null
+    look=("${work}/look.bin")
+fi
+"${repo_root}/tools/character_pack.py" "${id}" "${audio}" "${dir}/pack.bin" ${look[@]+"${look[@]}"}
 if [[ "${too_long}" == 1 ]]; then
     echo "some lines are longer than 3 seconds; shorten them in lines.tsv" >&2
     exit 1
