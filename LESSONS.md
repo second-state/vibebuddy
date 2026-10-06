@@ -247,3 +247,15 @@ What found it quickly was matching each `task.done` in the daemon log against th
 On 2026-10-06 the Linux app had no tray icon on Omarchy, while it worked whenever it was started by hand. The journal said why: `no tray available (failed to register to the StatusNotifierWatcher)`, logged in the same second the shell (quickshell, which hosts the tray) started. The login autostart had run the app a moment before the shell owned `org.kde.StatusNotifierWatcher`, the registration failed once, and the app gave up on the tray for the rest of the session. The shell also restarts on its own (it did that morning), which drops every registered icon.
 
 Anything started at login can't treat a missing desktop service as final: wait for it to appear on the bus, register again when its owner changes, and only fall back after a timeout. ksni does the waiting with `assume_sni_available(true)`. To reproduce, stop the shell, start the app, then start the shell; checking `RegisteredStatusNotifierItems` on the watcher is quicker than looking at the bar. Also look at the bar itself: Omarchy keeps every tray icon in a drawer until the user pins it, so a registered icon can still look missing.
+
+## One flashing session per job, and never kill one halfway
+
+Putting the box into the layout it shares with Muse took three unplugs. Chained espflash calls with `--after no-reset` left the chip in its loader, and the next connection hung at "Connecting..." for minutes; killing that hung process, then trying esptool with `--before usb-reset`, didn't recover it either. RST didn't help; only pulling the USB cable did. `tools/flash.sh` chains calls the same way and has worked, so the hang depends on what the previous call left behind, which makes it worse than a steady failure.
+
+A flashing job is one esptool `write-flash` with every address in it (and an area to clear written as 0xFF in the same call): one connection, one reset at the end. If a flashing process hangs, ask for an unplug straight away instead of stacking more connection attempts on a wedged chip.
+
+## On a shared port, one program's output is the other's input
+
+With the box switched to Muse and vibebuddyd connected, Muse's menu scrolled by itself, it recorded empty voice notes, its mic gain dropped to 0 dB and in the end its pairing was reset. Muse's bench console reads single characters from the USB port as keys, and the daemon's heartbeat JSON is full of them: `a`, `s`, `d`, `u`, `z`, `w`. The risk had been written down ("the daemon may disturb Muse") and then tested only with the daemon stopped, which is exactly the case where it can't happen.
+
+When two firmwares share a box, everything that talks to the port has to be tried against each of them, with the Mac side running as it normally does. A firmware that might sit behind someone else's serial writer reads no keys from the port by default, and the writer stops writing once it sees the firmware isn't its own.

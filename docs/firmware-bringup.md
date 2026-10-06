@@ -85,7 +85,7 @@ The review fixes applied before bring-up (see the PR) were in place, so it can't
 
 5. **Buttons.**
    - K0: a short press starts a pomodoro; a long press abandons it.
-   - K1: a short press switches between duty and pomodoro; a long press starts leisure.
+   - K1: a short press switches between duty and pomodoro; a long press opens the menu, where K1 steps down, K0 changes the row and K2 closes.
    - K2: a long press toggles mute, and MUTE appears in the top left.
 6. **Open the app.** The Device tab should show the same firmware build. Run a task in Claude Code or Codex and watch the task card, the face and the announcement.
 7. **Change the voice once in the app.** When the write finishes, the box speaks in the new voice. Power-cycle it and check that the voice stays.

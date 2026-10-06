@@ -49,11 +49,11 @@ The five finished lines of one announcement voice bundled into a single pack, wr
 _Avoid_: 音色包 ("timbre pack"), asset pack, voice assets (those are the source files in the repo)
 
 **Mute (静音)**:
-The master switch for the device speaker, toggled only by long-pressing K2 on the device. When it is on, neither announcements nor the Pomodoro chime make a sound; the screen behaves as usual. It belongs to the device alone: the Mac side doesn't record it, show it or toggle it on the device's behalf.
+The master switch for the device speaker, toggled only on the device: by long-pressing K2, or from the device menu. When it is on, neither announcements nor the Pomodoro chime make a sound; the screen behaves as usual. It belongs to the device alone: the Mac side doesn't record it, show it or toggle it on the device's behalf.
 _Avoid_: do not disturb, DND, sound off
 
 **Volume (音量)**:
-The loudness level of the device speaker, from 20 to 100, stored on the device and kept across reboots; announcements and the Pomodoro chime share it. The App's slider is only a remote control, and it always shows the value the device reports back. The minimum is not zero: the only way to silence the speaker is mute.
+The loudness level of the device speaker, from 20 to 100, stored on the device and kept across reboots; announcements and the Pomodoro chime share it. The App's slider is only a remote control, and it always shows the value the device reports back; the device menu changes it too. The minimum is not zero: the only way to silence the speaker is mute.
 _Avoid_: loudness, volume settings (that is a place in the App's UI, not this concept)
 
 ### Modes
@@ -73,6 +73,10 @@ _Avoid_: timer, Timer, 番茄 ("tomato"), focus mode (it collides with the focus
 **Phase (阶段)**:
 The segment the Pomodoro is currently in: focus or break, each with three run states: not started, running and paused. The end of a phase is an edge consumed exactly once, the same kind of thing as an announcement.
 _Avoid_: session
+
+**Device menu (设备菜单)**:
+The box's own settings on its screen, opened by holding K1: volume, mute, giving up a Pomodoro phase, and a status view. It's stepped through with short presses and closes itself; it is an overlay, not a mode, and the mode underneath keeps running. It holds only what the box owns; everything else stays in the App.
+_Avoid_: settings (that's the App's window), menu on its own (that's the App's menu bar menu)
 
 **Leisure (休闲)**:
 The mode the buddy wanders off into on its own after being idle long enough in On duty. It is driven by boredom, not switched by the user; any Agent activity, a button press or a dropped link sends it straight back to On duty.
@@ -103,6 +107,7 @@ Fixed wording for the App's English UI and English logs. Use these words when wr
 | 模式 | mode | |
 | 值班 / 番茄钟 / 休闲 | On duty / Pomodoro / Leisure | Capitalized in the UI; duty / pomodoro / leisure in code and comments |
 | 剧目 | skit | The little performances in Leisure mode |
+| 设备菜单 | the box's menu | On the box's screen it's titled MENU; in the App, "the menu" means the menu bar menu |
 | 当日战绩 | today's stats | Written in the menu as Today: done · asks · busy |
 | 需要确认 | needs input | The voice line is Hey, I need you for a sec.; counted as asks in the stats |
 | 任务卡 | task card | |
