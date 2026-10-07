@@ -235,3 +235,4 @@
 "Releases" = "发布页";
 "Up to date" = "已是最新";
 "To upgrade, download the new release and run its install.sh again." = "升级方法：下载新版本，再运行一次它的 install.sh。";
+"Install %@…" = "安装 %@…";

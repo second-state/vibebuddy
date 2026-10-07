@@ -134,6 +134,16 @@ curl -H 'content-type: application/json' \
 
 See [`docs/protocol.md`](docs/protocol.md) for the events.
 
+### Updates
+
+The App and the box's firmware are released separately, and Vibe Buddy looks for new versions of both ([ADR-0010](docs/adr/0010-firmware-and-app-release-separately-behind-an-update-manifest.md)). This is the only time it contacts anything on the internet:
+
+- **When**: when it starts, once a day, and when you click Check now in Settings → General.
+- **What it sends**: your platform (`macos-arm64` or `linux-x86_64`), the App's version and the box's firmware version. Nothing else: no ID, no hook data, nothing about your agents or projects. On the Mac, Sparkle also fetches the App's update feed, sending the usual User-Agent with the App's name and version; its system profiling stays off.
+- **Where**: a signed list of releases on Vibe Buddy's update site on Cloudflare (its address isn't settled yet, and until it is, no build contacts anything). The downloads themselves come from GitHub Releases.
+- **What happens**: nothing is installed without you. A new App opens Sparkle's window on the Mac, where you can install, wait or skip; on Linux, General says how to upgrade. Newer firmware is downloaded and checked in the background, then Settings → Device offers it with a button.
+- **Turning it off**: Settings → General → Check for updates. Builds from source have it off by default; the builds on the Releases page have it on.
+
 ## Development
 
 Everyday tasks live in the [`justfile`](justfile); run `just` to list them. See [`CONTRIBUTING.md`](CONTRIBUTING.md) for how to set up, test and send changes. The docs to start with are [`docs/architecture.md`](docs/architecture.md) (boundaries and decisions), [`CONTEXT.md`](CONTEXT.md) (domain terms), [`docs/pet.md`](docs/pet.md) (the buddy's design), [`docs/protocol.md`](docs/protocol.md) (protocol decisions), [`docs/references.md`](docs/references.md) (what we borrow from other projects, and where we stop) and [`LESSONS.md`](LESSONS.md) (lessons learned).
@@ -240,7 +250,7 @@ CI builds releases. The App and the firmware release separately (ADR-0010). [`re
 
 With the five signing secrets set on the repository, releases are signed with a Developer ID and notarized, so they open straight after download. Without them the build falls back to ad-hoc signing, and the first launch has to be allowed under Privacy & Security. [`tools/setup-release-signing.sh`](tools/setup-release-signing.sh) sets the secrets up: it walks you through requesting the certificate, packing the p12 and creating an app-specific password, then checks each one before writing it to GitHub.
 
-After each release, [`update-manifest`](.github/workflows/update-manifest.yml) rebuilds the signed update manifest (ADR-0010) from every published release: the latest App per platform, every firmware with the oldest App it runs with, and `min_supported_app` from `Cargo.toml`. [`tools/setup-update-signing.sh`](tools/setup-update-signing.sh) creates the signing key once: the private half goes to the `MANIFEST_SIGNING_KEY` secret and `~/.vibebuddy-signing`, the public half to `manifest/manifest-key.pub`, which the daemon trusts.
+After each release, [`update-manifest`](.github/workflows/update-manifest.yml) rebuilds the signed update manifest (ADR-0010) from every published release: the latest App per platform, every firmware with the oldest App it runs with, and `min_supported_app` from `Cargo.toml`. It also writes Sparkle's appcast for the Mac App, with the published DMG (checked against the manifest's sha256) signed by a second key. [`tools/setup-update-signing.sh`](tools/setup-update-signing.sh) creates both keys once. The private halves go to the `MANIFEST_SIGNING_KEY` and `SPARKLE_SIGNING_KEY` secrets and `~/.vibebuddy-signing`; the public halves go to `manifest/manifest-key.pub`, which the daemon trusts, and `app/sparkle-key.pub`, which `build-app.sh` writes into the App's `SUPublicEDKey`.
 
 ## License
 

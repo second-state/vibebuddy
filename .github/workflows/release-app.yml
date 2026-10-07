@@ -69,7 +69,10 @@ jobs:
         run: |
           rustup update stable --no-self-update
           cargo test --workspace
-          swift run --package-path app SelfTest
+          # Built and run in two steps: since the package depends on Sparkle (a binary framework), the runner's
+          # `swift run` gets SelfTest killed with SIGKILL as it starts, while the same binary run directly passes.
+          swift build --package-path app --product SelfTest
+          "$(swift build --package-path app --show-bin-path)/SelfTest"
       - name: Import signing certificate
         if: env.SIGNED == 'true'
         env:

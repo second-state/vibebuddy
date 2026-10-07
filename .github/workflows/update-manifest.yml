@@ -1,6 +1,7 @@
-# Rebuilds and signs the update manifest (ADR-0010) from every published release and the notes in docs/releases.
+# Rebuilds and signs the update manifest (ADR-0010) from every published release and the notes in docs/releases,
+# and Sparkle's appcast for the macOS App, with its DMG signed by the separate Sparkle key.
 # Called after each release of the App or the firmware, so either keeps the other's entry; run it by hand to rebuild.
-# Until the update domain exists (#55), the manifest is only kept as an artifact.
+# Until the update domain exists (#55), both are only kept as an artifact.
 name: update-manifest
 
 on:
@@ -15,6 +16,7 @@ jobs:
     runs-on: ubuntu-latest
     env:
       SIGNED: ${{ secrets.MANIFEST_SIGNING_KEY != '' }}
+      SPARKLE: ${{ secrets.SPARKLE_SIGNING_KEY != '' }}
     steps:
       - name: Skip without a signing key
         if: env.SIGNED != 'true'
@@ -31,9 +33,23 @@ jobs:
           cargo run --locked --release -q -p vibebuddy-manifest -- build "${RUNNER_TEMP}/releases.json" manifest.json
           # The checked-in public key is what the daemon trusts; a manifest it can't verify must not go out.
           cargo run --locked --release -q -p vibebuddy-manifest -- verify manifest/manifest-key.pub manifest.json
+      - name: Sparkle appcast
+        if: env.SIGNED == 'true' && env.SPARKLE == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SPARKLE_SIGNING_KEY: ${{ secrets.SPARKLE_SIGNING_KEY }}
+        run: |
+          version="$(python3 -c 'import json; m = json.loads(json.load(open("manifest.json"))["manifest"]); print(m["app"].get("macos-arm64", {}).get("version", ""))')"
+          [[ -n "${version}" ]] || { echo "::notice::no macOS App in the manifest; no appcast"; exit 0; }
+          # The DMG as published (notarized and stapled), the file Sparkle will download; the tool checks it against
+          # the manifest's sha256 before signing it.
+          gh release download "v${version}" --repo "${GITHUB_REPOSITORY}" --pattern "VibeBuddy-v${version}-arm64.dmg" --dir "${RUNNER_TEMP}"
+          cargo run --locked --release -q -p vibebuddy-manifest -- appcast manifest.json "${RUNNER_TEMP}/VibeBuddy-v${version}-arm64.dmg" appcast.xml
       - uses: actions/upload-artifact@v4
         if: env.SIGNED == 'true'
         with:
           name: manifest
-          path: manifest.json
+          path: |
+            manifest.json
+            appcast.xml
           retention-days: 30

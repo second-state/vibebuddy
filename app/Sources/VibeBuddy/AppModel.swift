@@ -20,6 +20,7 @@ final class AppModel: ObservableObject {
     let client = DaemonClient()
     let supervisor = DaemonSupervisor()
     let preview = VoicePreview()
+    let updater = Updater()
     /// Whether the app manages the daemon itself; false when an old LaunchAgent was found and the user kept it.
     var managesDaemon = true
 
@@ -98,6 +99,7 @@ final class AppModel: ObservableObject {
         refreshMenu()
         refreshForeignFirmware()
         notifyNewFirmware(status)
+        updater.follow(checks: status.updates?.enabled ?? false)
         // Wait for the build ID: the box has answered, not just had its port opened (which resets it).
         if let voice = pendingVoice, status.device.connected, status.device.firmwareBuild != nil, !operationRunning {
             pendingVoice = nil
@@ -162,7 +164,20 @@ final class AppModel: ObservableObject {
         run { _ = try await self.client.putConfig(config) }
     }
 
-    func checkForUpdates() { run { try await self.client.checkForUpdates() } }
+    /// The daemon reads the manifest (firmware, and the App on Linux); on the Mac, Sparkle checks the App with its own window.
+    func checkForUpdates() {
+        run { try await self.client.checkForUpdates() }
+        updater.checkForUpdates()
+    }
+
+    /// Installs a newer App: Sparkle when this build has it, otherwise the download page.
+    func installApp(_ offer: AppOffer) {
+        if updater.available {
+            updater.checkForUpdates()
+        } else if let url = URL(string: offer.url) {
+            NSWorkspace.shared.open(url)
+        }
+    }
 
     func setLaunchAtLogin(_ enabled: Bool) {
         do {
