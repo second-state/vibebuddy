@@ -13,7 +13,7 @@ struct SettingsView: View {
             AdvancedView(model: model).tabItem { Label("Advanced", systemImage: "wrench.and.screwdriver") }
         }
         .padding(20)
-        .frame(width: 640, height: 480)
+        .frame(minWidth: 640, maxWidth: .infinity, minHeight: 480, maxHeight: .infinity)
     }
 }
 

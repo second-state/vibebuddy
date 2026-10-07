@@ -148,9 +148,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     @objc func showSettings() {
         if settingsWindow == nil {
-            let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 640, height: 480), styleMask: [.titled, .closable, .miniaturizable], backing: .buffered, defer: false)
+            // Roomy enough for the whole Character tab at first sight, and resizable down to the old size.
+            let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 760, height: 640), styleMask: [.titled, .closable, .miniaturizable, .resizable], backing: .buffered, defer: false)
             window.title = String(localized: "Vibe Buddy Settings")
-            window.contentView = NSHostingView(rootView: SettingsView(model: model))
+            let hosting = NSHostingView(rootView: SettingsView(model: model))
+            // Only the minimum comes from SwiftUI; otherwise the view's ideal size would pin the window.
+            hosting.sizingOptions = [.minSize]
+            window.contentView = hosting
+            window.contentMinSize = NSSize(width: 640, height: 480)
             window.center()
             window.isReleasedWhenClosed = false
             watchClose(window)
