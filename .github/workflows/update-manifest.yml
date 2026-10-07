@@ -14,6 +14,12 @@ permissions:
 
 jobs:
   manifest:
+    # One at a time across the App and firmware workflows: each lists the releases when it starts, so two running
+    # side by side could finish out of order and upload a manifest missing the other's release. Queued instead of
+    # cancelled; if a third arrives, GitHub drops the one still waiting, which is fine, since the newest lists everything.
+    concurrency:
+      group: update-manifest
+      cancel-in-progress: false
     runs-on: ubuntu-latest
     env:
       SIGNED: ${{ secrets.MANIFEST_SIGNING_KEY != '' }}
@@ -22,7 +28,7 @@ jobs:
     steps:
       - name: Skip without a signing key
         if: env.SIGNED != 'true'
-        run: echo "::notice::MANIFEST_SIGNING_KEY is not set; no manifest built. tools/setup-release-signing.sh sets it up."
+        run: echo "::notice::MANIFEST_SIGNING_KEY is not set; no manifest built. tools/setup-update-signing.sh sets it up."
       - uses: actions/checkout@v4
         if: env.SIGNED == 'true'
       - name: Build and sign
