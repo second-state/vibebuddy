@@ -7,7 +7,7 @@ struct SettingsView: View {
     var body: some View {
         TabView {
             GeneralView(model: model).tabItem { Label("General", systemImage: "gearshape") }
-            VoicesView(model: model).tabItem { Label("Sound", systemImage: "speaker.wave.2") }
+            VoicesView(model: model).tabItem { Label("Character", systemImage: "person.crop.square") }
             HooksView(model: model).tabItem { Label("Agents", systemImage: "link") }
             DeviceView(model: model).tabItem { Label("Device", systemImage: "cpu") }
             AdvancedView(model: model).tabItem { Label("Advanced", systemImage: "wrench.and.screwdriver") }
@@ -65,7 +65,7 @@ struct GeneralView: View {
             alert.accessoryView = checkbox
             voiceSwitch = (entry, checkbox)
         } else if !(device?.connected ?? false) {
-            alert.informativeText += "\n" + String(localized: "The box isn't connected, so its voice stays as it is. You can change it later on the Sound tab.")
+            alert.informativeText += "\n" + String(localized: "The box isn't connected, so its character stays as it is. You can change it later on the Character tab.")
         }
         alert.addButton(withTitle: String(localized: "Restart now"))
         alert.addButton(withTitle: String(localized: "Later"))
@@ -181,6 +181,7 @@ struct VoiceCard: View {
         }
         .padding(10)
         .background(RoundedRectangle(cornerRadius: 8).fill(Color(nsColor: .controlBackgroundColor)))
+        .overlay(RoundedRectangle(cornerRadius: 8).stroke(inUse ? Color.accentColor : .clear, lineWidth: 2))
     }
 }
 
@@ -526,11 +527,19 @@ struct CustomCharacterCard: View {
     @State private var lender = Resources.bundledVoices.first?.id ?? ""
     @State private var problem: String?
 
+    private var inUse: Bool { model.status?.device.voice == Self.id }
+
     static let prompt = "Pixel art game sprite of [describe your character], chibi proportions, standing, front view, full body, centered, arms down, flat colors, thick dark outline, limited 16-color palette, plain solid white background. Then the same character in exactly the same pose with the eyes closed; with a big happy smile; with a sad face."
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text("Your own character").font(.body.weight(.semibold))
+            HStack {
+                Text("Your own character").font(.body.weight(.semibold))
+                Spacer()
+                if inUse {
+                    Label("In use", systemImage: "checkmark.circle.fill").foregroundStyle(.green)
+                }
+            }
             Text("Draw a figure with any image tool, on a plain white background: one image, or four in the order normal, eyes closed, happy, sad. The box shows it in place of the robot, with the voice and lines of the character you pick.")
                 .font(.caption).foregroundStyle(.secondary)
             HStack {
@@ -561,6 +570,14 @@ struct CustomCharacterCard: View {
         .padding(10)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(RoundedRectangle(cornerRadius: 8).fill(Color(nsColor: .controlBackgroundColor)))
+        .overlay(RoundedRectangle(cornerRadius: 8).stroke(inUse ? Color.accentColor : .clear, lineWidth: 2))
+        .onAppear {
+            // The last one written, so the card shows what the box wears after the app restarts.
+            guard look == nil, let saved = model.savedCustomCharacter else { return }
+            look = saved.look
+            frames = LookBuilder.frames(of: saved.look) ?? []
+            lender = saved.lender
+        }
     }
 
     private func choose() {
@@ -586,11 +603,10 @@ struct CustomCharacterCard: View {
     }
 
     private func use() {
-        guard let look, let base = Resources.voicePack(lender), let pack = model.addressed(base, id: lender).withLook(look, id: Self.id) else {
+        guard let look, model.writeCustomCharacter(look: look, lender: lender) else {
             problem = String(localized: "That character can't lend its voice; pick another.")
             return
         }
-        model.writePack(pack)
     }
 }
 

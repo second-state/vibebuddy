@@ -429,7 +429,7 @@ impl App {
     fn view(&self, _window: window::Id) -> Element<'_, Message> {
         let tabs = [
             (Tab::General, tr("General", &[])),
-            (Tab::Sound, tr("Sound", &[])),
+            (Tab::Sound, tr("Character", &[])),
             (Tab::Agents, tr("Agents", &[])),
             (Tab::Device, tr("Device", &[])),
             (Tab::Advanced, tr("Advanced", &[])),
@@ -490,7 +490,7 @@ impl App {
                 Some(checkbox(offer.switch_voice).label(label).on_toggle(Message::SwitchVoice).into())
             }
             None if !device.is_some_and(|device| device.connected) => Some(
-                text(tr("The box isn't connected, so its voice stays as it is. You can change it later on the Sound tab.", &[]))
+                text(tr("The box isn't connected, so its character stays as it is. You can change it later on the Character tab.", &[]))
                     .size(13)
                     .into(),
             ),
