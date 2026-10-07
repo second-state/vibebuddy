@@ -46,7 +46,7 @@ systemctl --user enable --now vibebuddyd.service
 
 "${bin}/vibebuddy-hook" install
 
-# What the Mac app carries in its bundle lives here instead: the Character packs for the Sound tab. Firmware isn't
+# What the Mac app carries in its bundle lives here instead: the Character packs for the Character tab. Firmware isn't
 # installed; the daemon downloads it (ADR-0010).
 assets="${data}/vibebuddy"
 mkdir -p "${assets}/voices"
