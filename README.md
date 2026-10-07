@@ -140,7 +140,7 @@ The App and the box's firmware are released separately, and Vibe Buddy looks for
 
 - **When**: when it starts, once a day, and when you click Check now in Settings → General.
 - **What it sends**: your platform (`macos-arm64` or `linux-x86_64`), the App's version and the box's firmware version. Nothing else: no ID, no hook data, nothing about your agents or projects. On the Mac, Sparkle also fetches the App's update feed, sending the usual User-Agent with the App's name and version; its system profiling stays off.
-- **Where**: a signed list of releases on Vibe Buddy's update site on Cloudflare (its address isn't settled yet, and until it is, no build contacts anything). The downloads themselves come from GitHub Releases.
+- **Where**: a signed list of releases at `https://updates.korekore.ai/vibebuddy/manifest.json` (and Sparkle's `appcast.xml` next to it), served by Cloudflare. The downloads themselves come from GitHub Releases.
 - **What happens**: nothing is installed without you. A new App opens Sparkle's window on the Mac, where you can install, wait or skip; on Linux, General says how to upgrade. Newer firmware is downloaded and checked in the background, then Settings → Device offers it with a button.
 - **Turning it off**: Settings → General → Check for updates. Builds from source have it off by default; the builds on the Releases page have it on.
 

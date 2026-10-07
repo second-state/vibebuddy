@@ -1,7 +1,8 @@
 # Rebuilds and signs the update manifest (ADR-0010) from every published release and the notes in docs/releases,
 # and Sparkle's appcast for the macOS App, with its DMG signed by the separate Sparkle key.
 # Called after each release of the App or the firmware, so either keeps the other's entry; run it by hand to rebuild.
-# Until the update domain exists (#55), both are only kept as an artifact.
+# Both go to the korekore-updates R2 bucket, served at https://updates.korekore.ai/vibebuddy/, and are kept as an
+# artifact too.
 name: update-manifest
 
 on:
@@ -17,6 +18,7 @@ jobs:
     env:
       SIGNED: ${{ secrets.MANIFEST_SIGNING_KEY != '' }}
       SPARKLE: ${{ secrets.SPARKLE_SIGNING_KEY != '' }}
+      UPLOAD: ${{ secrets.R2_ACCESS_KEY_ID != '' }}
     steps:
       - name: Skip without a signing key
         if: env.SIGNED != 'true'
@@ -53,3 +55,24 @@ jobs:
             manifest.json
             appcast.xml
           retention-days: 30
+      # An R2 API token limited to this one bucket, through R2's S3 API (the account holds other projects' buckets).
+      # Five minutes of caching: a release reaches everyone within that, and the daily checks barely notice.
+      - name: Upload
+        if: env.SIGNED == 'true' && env.UPLOAD == 'true'
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          AWS_DEFAULT_REGION: auto
+          ENDPOINT: https://144772c196f3327fb8e8af4cfdf09cc6.r2.cloudflarestorage.com
+        run: |
+          # The manifest last: an appcast pointing at a release the manifest doesn't know yet does no harm.
+          if [[ -f appcast.xml ]]; then
+            aws s3 cp appcast.xml s3://korekore-updates/vibebuddy/appcast.xml --endpoint-url "${ENDPOINT}" \
+              --content-type application/xml --cache-control "public, max-age=300"
+          fi
+          aws s3 cp manifest.json s3://korekore-updates/vibebuddy/manifest.json --endpoint-url "${ENDPOINT}" \
+            --content-type application/json --cache-control "public, max-age=300"
+          # What clients now get is what was just signed.
+          curl -fsS "https://updates.korekore.ai/vibebuddy/manifest.json?check=${GITHUB_RUN_ID}" -o served.json
+          cargo run --locked --release -q -p vibebuddy-manifest -- verify manifest/manifest-key.pub served.json
+          cmp manifest.json served.json

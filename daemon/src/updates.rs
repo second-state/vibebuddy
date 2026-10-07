@@ -15,9 +15,9 @@ use vibebuddy_manifest::{Firmware, Manifest, Notes, Signed, VerifyingKey};
 
 use crate::status::DeviceState;
 
-/// Where the manifest lives. None until the update domain exists (#55): until then nothing is checked, unless
-/// `VIBEBUDDY_MANIFEST_URL` points somewhere for testing.
-const MANIFEST_URL: Option<&str> = None;
+/// Where the manifest lives: R2 behind our own domain, so it can move or gain a Worker without an App release.
+/// `VIBEBUDDY_MANIFEST_URL` points somewhere else for testing.
+const MANIFEST_URL: Option<&str> = Some("https://updates.korekore.ai/vibebuddy/manifest.json");
 
 /// The key CI signs the manifest with (`tools/setup-update-signing.sh`).
 const PUBLIC_KEY: &str = include_str!("../../manifest/manifest-key.pub");
