@@ -232,12 +232,14 @@ CI builds releases; see [`release-app`](.github/workflows/release-app.yml). It b
 
 - Commits on main that touch what goes into the packages (`app/`, `daemon/`, `desktop/`, `hook/`, `protocol/`, `firmware/`, `voices/`, `packaging/`) only produce test artifacts kept for 7 days.
 - A `vX.Y.Z` tag notarizes the app and publishes one GitHub Release with the DMG, the Linux tarball and the firmware zip. The tag must match `version` in `Cargo.toml`, or the build fails.
-- Before releasing, write `docs/releases/vX.Y.Z.md`: a few bullets on what the version does. It opens the release notes, and CI adds the downloads after it.
+- Before releasing, write `docs/releases/vX.Y.Z.md`: a few bullets on what the version does. It opens the release notes, and CI adds the downloads after it. A `vX.Y.Z.zh-Hans.md` next to it gives the Chinese notes the App shows; without one it shows the English.
 - Then releasing is one command on a clean main: `just release 0.3.0` checks that file, updates the versions in `Cargo.toml` and both lockfiles, commits, tags and pushes.
 - `VibeBuddy-firmware-vX.Y.Z.zip` holds the three firmware images plus `build.txt`. Anyone with it can flash a box from Settings → Device → Flash from file… on the Mac.
 - Builds are arm64 for the Mac and x86_64 for Linux. After a release, `packaging/aur/README.md` says how to update the AUR package.
 
 With the five signing secrets set on the repository, releases are signed with a Developer ID and notarized, so they open straight after download. Without them the build falls back to ad-hoc signing, and the first launch has to be allowed under Privacy & Security. [`tools/setup-release-signing.sh`](tools/setup-release-signing.sh) sets the secrets up: it walks you through requesting the certificate, packing the p12 and creating an app-specific password, then checks each one before writing it to GitHub.
+
+After each release, [`update-manifest`](.github/workflows/update-manifest.yml) rebuilds the signed update manifest (ADR-0010) from every published release: the latest App per platform, every firmware with the oldest App it runs with, and `min_supported_app` from `Cargo.toml`. A firmware release's `docs/releases/firmware-vX.Y.Z.md` starts with front matter naming that App (`min_app: 0.4.0` between two `---` lines). [`tools/setup-update-signing.sh`](tools/setup-update-signing.sh) creates the signing key once: the private half goes to the `MANIFEST_SIGNING_KEY` secret and `~/.vibebuddy-signing`, the public half to `manifest/manifest-key.pub`, which the daemon trusts.
 
 ## License
 

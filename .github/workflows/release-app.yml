@@ -256,3 +256,9 @@ jobs:
             "VibeBuddy-firmware-${label}.zip" \
             --title "Vibe Buddy ${label}" \
             --notes-file notes.md
+
+  manifest:
+    # The new App version goes into the update manifest, next to every released firmware.
+    needs: publish
+    uses: ./.github/workflows/update-manifest.yml
+    secrets: inherit

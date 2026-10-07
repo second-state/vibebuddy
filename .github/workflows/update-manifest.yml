@@ -1,0 +1,39 @@
+# Rebuilds and signs the update manifest (ADR-0010) from every published release and the notes in docs/releases.
+# Called after each release of the App or the firmware, so either keeps the other's entry; run it by hand to rebuild.
+# Until the update domain exists (#55), the manifest is only kept as an artifact.
+name: update-manifest
+
+on:
+  workflow_call:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  manifest:
+    runs-on: ubuntu-latest
+    env:
+      SIGNED: ${{ secrets.MANIFEST_SIGNING_KEY != '' }}
+    steps:
+      - name: Skip without a signing key
+        if: env.SIGNED != 'true'
+        run: echo "::notice::MANIFEST_SIGNING_KEY is not set; no manifest built. tools/setup-release-signing.sh sets it up."
+      - uses: actions/checkout@v4
+        if: env.SIGNED == 'true'
+      - name: Build and sign
+        if: env.SIGNED == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          MANIFEST_SIGNING_KEY: ${{ secrets.MANIFEST_SIGNING_KEY }}
+        run: |
+          gh api --paginate --slurp "repos/${GITHUB_REPOSITORY}/releases" > "${RUNNER_TEMP}/releases.json"
+          cargo run --locked --release -q -p vibebuddy-manifest -- build "${RUNNER_TEMP}/releases.json" manifest.json
+          # The checked-in public key is what the daemon trusts; a manifest it can't verify must not go out.
+          cargo run --locked --release -q -p vibebuddy-manifest -- verify manifest/manifest-key.pub manifest.json
+      - uses: actions/upload-artifact@v4
+        if: env.SIGNED == 'true'
+        with:
+          name: manifest
+          path: manifest.json
+          retention-days: 30
