@@ -78,6 +78,12 @@ struct DaemonClient {
 
     func restart() async throws { try await post("/v1/daemon/restart") }
 
+    /// Asks the daemon to read the update manifest now instead of at the next daily check.
+    func checkForUpdates() async throws {
+        let (code, data) = try await post("/v1/updates/check")
+        guard code == 202 else { throw DaemonError(message: DaemonClient.message(in: data) ?? String(localized: "Update check was rejected (\(code))")) }
+    }
+
     private static func message(in data: Data) -> String? {
         (try? JSONSerialization.jsonObject(with: data) as? [String: Any])?["message"] as? String
     }

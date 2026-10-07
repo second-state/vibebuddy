@@ -2,7 +2,7 @@
 """Check that every localizable string in the Mac and Linux apps has a zh-Hans translation.
 
 The app's copy is keyed in English: SwiftUI literals (Text, Label, Button, Toggle,
-LabeledContent) and String(localized:) calls. English needs no table because the
+LabeledContent, Section, Link) and String(localized:) calls. English needs no table because the
 key is the English text; app/Localization/zh-Hans.lproj/Localizable.strings maps
 each key to Chinese. This script extracts the keys from the Swift sources the way
 the compiler builds them and reports keys missing from the table, table entries no
@@ -33,7 +33,7 @@ RUST_SOURCES = ROOT / "desktop/src"
 TABLE = ROOT / "app/Localization/zh-Hans.lproj/Localizable.strings"
 
 # SwiftUI initialisers whose first argument is a LocalizedStringKey.
-VIEW_CALLS = ("Text(", "Label(", "Button(", "Toggle(", "LabeledContent(")
+VIEW_CALLS = ("Text(", "Label(", "Button(", "Toggle(", "LabeledContent(", "Section(", "Link(")
 # Keys that read the same in every language.
 UNTRANSLATED = {"App", "daemon", "—", "›"}
 PLACEHOLDER = "\0"

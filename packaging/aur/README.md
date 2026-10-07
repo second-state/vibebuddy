@@ -5,7 +5,7 @@
 - `/usr/bin`: the daemon, hook and tray app
 - `/usr/lib/systemd/user/vibebuddyd.service`
 - `/usr/share/applications`, `/etc/xdg/autostart`, and the icon
-- `/usr/share/vibebuddy`: voice packs and firmware. The app looks there after `~/.local/share/vibebuddy`.
+- `/usr/share/vibebuddy`: voice packs. The app looks there after `~/.local/share/vibebuddy`. Firmware isn't packaged; the daemon downloads it.
 - `/usr/lib/udev/rules.d/70-vibebuddy.rules`: gives the logged-in user access to the box without joining `uucp`
 
 Per-user setup can't be packaged: after installing, each user runs `systemctl --user enable --now vibebuddyd` and `vibebuddy-hook install`, as the install message says.

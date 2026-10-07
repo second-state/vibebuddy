@@ -18,7 +18,10 @@ let sample = """
  "today":{"done":3,"asks":1,"busy_seconds":4980},
  "hooks":{"codex":"2026-09-16T13:31:30.060465+08:00","claude":null},
  "operation":{"kind":"voice_pack","state":"running","progress":0.42,"message":"writing hsiaoyu"},
- "config":{"voice":"xiaohe2","notify_link":true}}
+ "config":{"voice":"xiaohe2","notify_link":true,"check_updates":null},
+ "updates":{"enabled":true,"last_check":"2026-10-07T12:43:11.068011+08:00","error":null,
+  "app":{"version":"0.4.0","url":"https://example/app.dmg","notes":{"en":"- New"}},"unsupported_app":false,
+  "firmware":{"version":"0.4.0","notes":{"en":"- Fix","zh-Hans":"- 修复"},"directory":"/tmp/fw/0.4.0","newer_than_box":true}}}
 """
 do {
     let status = try StatusCoding.decoder().decode(Status.self, from: Data(sample.utf8))
@@ -40,9 +43,18 @@ do {
     check(offlineMenu.icon == .offline && offlineMenu.deviceLine == "Box not found", "offline menu")
     let down = MenuState.derive(status: nil, daemonAlive: false)
     check(down.icon == .daemonDown && down.deviceLineIsAction, "daemon-down menu")
-    check(Firmware.updateAvailable(device: status.device.firmwareBuild, bundled: "def5678 2026-09-17 09:00"), "different hash offers an update")
-    check(!Firmware.updateAvailable(device: status.device.firmwareBuild, bundled: "abc1234-dirty 2026-09-16 13:11"), "same hash offers no update")
-    check(!Firmware.updateAvailable(device: nil, bundled: "def5678 x"), "no nagging when the box reports no build")
+    check(status.config.checkUpdates == nil, "check_updates null follows the build")
+    check(status.updates?.app?.version == "0.4.0" && status.updates?.lastCheck != nil, "updates decode")
+    check(Firmware.updateAvailable(status.updates), "a downloaded firmware newer than the box is offered")
+    check(Firmware.files(of: status.updates?.firmware)?.app.path == "/tmp/fw/0.4.0/vibebuddy-fw.bin", "flashing uses the downloaded images")
+    var notDownloaded = status.updates
+    notDownloaded?.firmware?.directory = nil
+    check(!Firmware.updateAvailable(notDownloaded), "nothing to flash before the download")
+    var sameAsBox = status.updates
+    sameAsBox?.firmware?.newerThanBox = false
+    check(!Firmware.updateAvailable(sameAsBox), "the box already runs it")
+    check(!Firmware.updateAvailable(nil), "an older daemon offers nothing")
+    check(Firmware.notes(["en": "a", "zh-Hans": "b"], chinese: true) == "b" && Firmware.notes(["en": "a"], chinese: true) == "a", "notes fall back to English")
     check(!Firmware.foreign(status.device), "an older daemon without the field: not foreign")
     check(Firmware.foreign(DeviceState(connected: true, foreignFirmware: true)), "the daemon judged it other firmware")
     check(!Firmware.foreign(DeviceState(connected: true)), "just connected, not judged yet: not foreign")
