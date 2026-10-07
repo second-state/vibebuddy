@@ -53,7 +53,6 @@
 
 /* Settings: tabs and General */
 "General" = "通用";
-"Sound" = "声音";
 "Agents" = "接入";
 "Device" = "设备";
 "Advanced" = "高级";
@@ -189,7 +188,7 @@
 "The box goes offline for a few seconds while the app restarts." = "重启期间盒子会离线几秒。";
 "Also switch the box's voice to %@ (a few minutes over the UART bridge; keep it plugged in)" = "同时把盒子的播报音色换成 %@（走 UART 桥要几分钟，期间别拔线）";
 "Also switch the box's voice to %@" = "同时把盒子的播报音色换成 %@";
-"The box isn't connected, so its voice stays as it is. You can change it later on the Sound tab." = "盒子没连上，这次音色不变，之后可以在「声音」页更换。";
+"The box isn't connected, so its character stays as it is. You can change it later on the Character tab." = "盒子没连上，这次角色不变，之后可以在「角色」页更换。";
 "Restart now" = "立即重启";
 
 /* Your own character */

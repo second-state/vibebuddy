@@ -11,6 +11,8 @@ path = "src/main.rs"
 
 [dependencies]
 futures = "0.3"
+# Decoding the user's drawings for a Character of their own; already in the tree through iced.
+image = { version = "0.25", default-features = false, features = ["png", "jpeg"] }
 # The CPU renderer is plenty for a settings window and spares the wgpu build.
 iced = { version = "0.14", default-features = false, features = ["crisp", "image", "tiny-skia", "tokio", "wayland", "x11"] }
 reqwest = { version = "0.13", default-features = false, features = ["json", "stream"] }
@@ -20,3 +22,5 @@ tokio = { workspace = true, features = ["process"] }
 
 [target.'cfg(target_os = "linux")'.dependencies]
 ksni = "0.3"
+# The file chooser goes through the desktop portal, as other apps' do.
+rfd = { version = "0.15", default-features = false, features = ["xdg-portal", "tokio"] }
