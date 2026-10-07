@@ -40,10 +40,11 @@ do {
     check(Firmware.updateAvailable(device: status.device.firmwareBuild, bundled: "def5678 2026-09-17 09:00"), "different hash offers an update")
     check(!Firmware.updateAvailable(device: status.device.firmwareBuild, bundled: "abc1234-dirty 2026-09-16 13:11"), "same hash offers no update")
     check(!Firmware.updateAvailable(device: nil, bundled: "def5678 x"), "no nagging when the box reports no build")
-    check(Firmware.foreign(connected: true, device: nil, connectedFor: 6), "connected but silent past the grace period: factory firmware")
-    check(!Firmware.foreign(connected: true, device: nil, connectedFor: 1), "just connected, still within the grace period: not foreign")
-    check(!Firmware.foreign(connected: true, device: "abc 1", connectedFor: 60), "a reported build means it is ours")
-    check(!Firmware.foreign(connected: false, device: nil, connectedFor: 60), "not connected: not foreign")
+    check(!Firmware.foreign(status.device), "an older daemon without the field: not foreign")
+    check(Firmware.foreign(DeviceState(connected: true, foreignFirmware: true)), "the daemon judged it other firmware")
+    check(!Firmware.foreign(DeviceState(connected: true)), "just connected, not judged yet: not foreign")
+    check(!Firmware.foreign(DeviceState(connected: true, firmwareBuild: "abc 1", foreignFirmware: true)), "a reported build means it is ours")
+    check(!Firmware.foreign(DeviceState(connected: false, foreignFirmware: true)), "not connected: not foreign")
 } catch {
     check(false, "status decoding threw: \(error)")
 }

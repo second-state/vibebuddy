@@ -16,7 +16,7 @@ mod theme;
 #[cfg(target_os = "linux")]
 mod tray;
 
-use std::time::{Duration, Instant, SystemTime};
+use std::time::{Duration, SystemTime};
 
 use iced::widget::{button, checkbox, column, container, image, pick_list, row, scrollable, slider, space, text, toggler};
 use iced::{Element, Font, Length, Subscription, Task, Theme, window};
@@ -31,10 +31,6 @@ const OMARCHY_FONT: &str = "JetBrainsMono Nerd Font";
 const RESTARTED: &str = "--restarted";
 /// Followed by a voice id: written once the restarted copy sees the box answer, then forgotten.
 const WRITE_VOICE: &str = "--write-voice";
-
-/// Without the box's build this long after its port opened, it isn't running Vibe Buddy firmware (the Mac's
-/// `Firmware.silenceGrace`): ours reports within a second.
-const FOREIGN_GRACE: Duration = Duration::from_secs(5);
 
 /// The running copy's socket, handed to the subscription that listens on it.
 #[cfg(target_os = "linux")]
@@ -149,7 +145,6 @@ struct App {
     /// A voice to write once the box answers, asked for when the language changed.
     pending_voice: Option<&'static str>,
     /// When the box's port was last seen open, to tell a box that never reports a build.
-    connected_since: Option<Instant>,
     /// Whether the shell has a tray host for the icon right now.
     tray_host: bool,
     #[cfg(target_os = "linux")]
@@ -180,7 +175,6 @@ impl App {
             language: UiLanguage::saved(),
             restart_offer: None,
             pending_voice: launch_voice(),
-            connected_since: None,
             tray_host: true,
             #[cfg(target_os = "linux")]
             tray: None,
@@ -220,7 +214,6 @@ impl App {
         match message {
             Message::Daemon(client::Update::Status(status)) => {
                 let device = &status.device;
-                self.connected_since = device.connected.then(|| self.connected_since.unwrap_or_else(Instant::now));
                 let busy = status.operation.as_ref().is_some_and(status::Operation::running);
                 // Wait for the build: the box has answered, not just had its port opened (which resets it).
                 let voice = (device.connected && device.firmware_build.is_some() && !busy)
@@ -231,7 +224,6 @@ impl App {
             }
             Message::Daemon(client::Update::Down) => {
                 self.status = None;
-                self.connected_since = None;
                 return self.refresh_tray();
             }
             #[cfg(target_os = "linux")]
@@ -616,10 +608,9 @@ impl App {
             device.and_then(|device| device.firmware_build.as_deref()),
             self.firmware.as_ref().map(|firmware| firmware.build.as_str()),
         );
-        // A box whose port is open but that never reports a build: a factory box, or one held in download mode with K0.
+        // The daemon judged the box to run other firmware: a factory box, Muse, or one held in download mode with K0.
         let foreign = online
-            && device.is_some_and(|device| device.firmware_build.is_none())
-            && self.connected_since.is_some_and(|since| since.elapsed() >= FOREIGN_GRACE)
+            && device.is_some_and(|device| device.foreign_firmware && device.firmware_build.is_none())
             && self.firmware.is_some();
         // Either offer asks once more before flashing, since the box restarts.
         let confirm = |title: String, detail: String, action: String| -> Element<'_, Message> {

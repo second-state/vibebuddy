@@ -25,7 +25,6 @@ final class AppModel: ObservableObject {
     var managesDaemon = true
 
     private var streamTask: Task<Void, Never>?
-    private var connectedSince: Date?
     private var linkLostSince: Date?
     private var linkNotified = false
     /// A voice the user asked for while changing the UI language, to write once the restarted app sees the box.
@@ -69,8 +68,6 @@ final class AppModel: ObservableObject {
         Timer.scheduledTimer(withTimeInterval: 5, repeats: true) { [weak self] _ in
             Task { @MainActor in
                 self?.checkLink()
-                // Once the grace period passes the status stream sends nothing new, so a timer has to notice the silence.
-                self?.refreshForeignFirmware()
             }
         }
     }
@@ -95,11 +92,6 @@ final class AppModel: ObservableObject {
     }
 
     private func apply(_ status: Status) {
-        if status.device.connected {
-            if connectedSince == nil { connectedSince = Date() }
-        } else {
-            connectedSince = nil
-        }
         self.status = status
         daemonAlive = true
         refreshMenu()
@@ -112,10 +104,7 @@ final class AppModel: ObservableObject {
     }
 
     private func refreshForeignFirmware() {
-        let foreign = Firmware.foreign(
-            connected: status?.device.connected ?? false,
-            device: status?.device.firmwareBuild,
-            connectedFor: connectedSince.map { Date().timeIntervalSince($0) } ?? 0)
+        let foreign = status.map { Firmware.foreign($0.device) } ?? false
         if foreign != foreignFirmware { foreignFirmware = foreign }
     }
 

@@ -15,11 +15,9 @@ public enum Firmware {
         return deviceHash != bundledHash
     }
 
-    /// If the serial port has been open this long without a build ID, assume the box isn't running Vibe Buddy firmware (a factory box).
-    /// Our firmware reports within a second of the daemon's hello, so the grace period is 5 seconds.
-    public static let silenceGrace: TimeInterval = 5
-
-    public static func foreign(connected: Bool, device: String?, connectedFor: TimeInterval) -> Bool {
-        connected && device == nil && connectedFor >= silenceGrace
+    /// The box is connected but runs other firmware (a factory box, or Muse on a box that runs it). The daemon judges
+    /// it from what the box prints (docs/architecture.md, decision 17); a reported build always means it is ours.
+    public static func foreign(_ device: DeviceState) -> Bool {
+        device.connected && device.foreignFirmware == true && device.firmwareBuild == nil
     }
 }
