@@ -1852,7 +1852,7 @@ dependencies = [
 
 [[package]]
 name = "vibebuddy-firmware-core"
-version = "0.3.3"
+version = "0.3.4"
 dependencies = [
  "libm",
  "serde_json",
@@ -1861,7 +1861,7 @@ dependencies = [
 
 [[package]]
 name = "vibebuddy-protocol"
-version = "0.3.3"
+version = "0.3.4"
 dependencies = [
  "serde",
  "serde_json",
