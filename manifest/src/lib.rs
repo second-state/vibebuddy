@@ -9,6 +9,7 @@ use ed25519_dalek::{Signature, Signer, Verifier};
 pub use ed25519_dalek::{SigningKey, VerifyingKey};
 use serde::{Deserialize, Serialize};
 
+pub mod appcast;
 pub mod build;
 
 /// Bumped only when an old daemon would misread the manifest; adding fields doesn't need it.

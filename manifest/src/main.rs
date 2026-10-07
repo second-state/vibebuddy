@@ -3,6 +3,8 @@
 //!   vibebuddy-manifest keygen <private-key-file>      writes a new private key (mode 600), prints the public key
 //!   vibebuddy-manifest build <releases.json> <out>    builds and signs; the key comes from MANIFEST_SIGNING_KEY
 //!   vibebuddy-manifest verify <public-key-file> <manifest>
+//!   vibebuddy-manifest appcast <manifest> <dmg> <out>    Sparkle's appcast for the macOS App in <manifest>, with
+//!                                                        <dmg> signed by SPARKLE_SIGNING_KEY
 //!
 //! `releases.json` is `gh api --paginate --slurp repos/{owner}/{repo}/releases`. `build` runs from the repo root:
 //! it reads the notes in `docs/releases` and `min_supported_app` from `Cargo.toml`.
@@ -20,7 +22,11 @@ fn main() -> ExitCode {
         ["keygen", private] => keygen(Path::new(private)),
         ["build", releases, out] => build(Path::new(releases), Path::new(out)),
         ["verify", public, manifest] => check(Path::new(public), Path::new(manifest)),
-        _ => Err("usage: vibebuddy-manifest keygen <private-key-file> | build <releases.json> <out> | verify <public-key-file> <manifest>".to_owned()),
+        ["appcast", manifest, dmg, out] => appcast(Path::new(manifest), Path::new(dmg), Path::new(out)),
+        _ => Err(
+            "usage: vibebuddy-manifest keygen <private-key-file> | build <releases.json> <out> | verify <public-key-file> <manifest> | appcast <manifest> <dmg> <out>"
+                .to_owned(),
+        ),
     };
     match result {
         Ok(()) => ExitCode::SUCCESS,
@@ -70,6 +76,19 @@ fn check(public: &Path, manifest: &Path) -> Result<(), String> {
     let signed: Signed = serde_json::from_str(&text).map_err(|error| error.to_string())?;
     verify(&signed, &key).map_err(|error| error.to_string())?;
     println!("signature ok");
+    Ok(())
+}
+
+fn appcast(manifest: &Path, dmg: &Path, out: &Path) -> Result<(), String> {
+    let key = std::env::var("SPARKLE_SIGNING_KEY").map_err(|_| "SPARKLE_SIGNING_KEY is not set".to_owned())?;
+    let key = signing_key(&key).map_err(|error| error.to_string())?;
+    let text = std::fs::read_to_string(manifest).map_err(|error| format!("{}: {error}", manifest.display()))?;
+    let signed: Signed = serde_json::from_str(&text).map_err(|error| error.to_string())?;
+    let manifest: vibebuddy_manifest::Manifest = serde_json::from_str(&signed.manifest).map_err(|error| error.to_string())?;
+    let dmg = std::fs::read(dmg).map_err(|error| format!("{}: {error}", dmg.display()))?;
+    let xml = vibebuddy_manifest::appcast::appcast(&manifest, &dmg, &key)?;
+    std::fs::write(out, xml).map_err(|error| format!("{}: {error}", out.display()))?;
+    println!("appcast for {} {}", vibebuddy_manifest::appcast::PLATFORM, manifest.app[vibebuddy_manifest::appcast::PLATFORM].version);
     Ok(())
 }
 

@@ -134,6 +134,16 @@ curl -H 'content-type: application/json' \
 
 事件列表见 [`docs/protocol.md`](docs/protocol.md)。
 
+### 更新
+
+App 和盒子固件分开发布，Vibe Buddy 会检查两者有没有新版本（[ADR-0010](docs/adr/0010-firmware-and-app-release-separately-behind-an-update-manifest.md)）。这是它唯一会联网的地方：
+
+- **什么时候**：启动时、每天一次，以及你在设置 → 通用里点「立即检查」时。
+- **发送什么**：你的平台（`macos-arm64` 或 `linux-x86_64`）、App 版本和盒子的固件版本。别的都不发：没有任何标识，没有 Hook 数据，不涉及你的 Agent 和项目。在 Mac 上，Sparkle 还会拉取 App 的更新源，带上常规的 User-Agent（App 名称和版本），它的系统信息收集保持关闭。
+- **从哪里**：Vibe Buddy 放在 Cloudflare 上的更新站点里的一份签名发布清单（地址还没定，定下来之前任何构建都不会联网）。下载本身来自 GitHub Releases。
+- **之后会怎样**：不经你同意什么都不会安装。Mac 上有新 App 时会弹出 Sparkle 的窗口，你可以安装、稍后或跳过；Linux 上通用页会说明怎么升级。更新的固件会在后台下载并校验，然后设置 → 设备会用一个按钮提示你更新。
+- **怎么关掉**：设置 → 通用 →「检查更新」。从源码编译的默认关闭；Releases 页面上的构建默认开启。
+
 ## 开发
 
 日常操作都收在根目录的 [`justfile`](justfile) 里，`just` 列出全部。如何搭环境、跑测试、提交改动见 [`CONTRIBUTING.md`](CONTRIBUTING.md)（英文）。先读这些：[`docs/architecture.md`](docs/architecture.md)（边界与决定）、[`CONTEXT.md`](CONTEXT.md)（领域词汇）、[`docs/pet.md`](docs/pet.md)（氛围小助手设计）、[`docs/protocol.md`](docs/protocol.md)（协议决定）、[`docs/references.md`](docs/references.md)（外部项目的借鉴边界）和 [`LESSONS.md`](LESSONS.md)（经验教训）。
@@ -239,7 +249,7 @@ daemon 平时由 App 看管。没有 App 的开发机可以用 [`packaging/com.v
 
 仓库配齐五个签名 secrets 后用 Developer ID 签名并公证，下载即可打开；没配时退回 ad-hoc 签名，首次打开要在「隐私与安全性」里放行。secrets 用 [`tools/setup-release-signing.sh`](tools/setup-release-signing.sh) 配：它带着走完申请证书、打包 p12、生成 App 专用密码，并逐项验证后写进 GitHub。
 
-每次发版后，[`update-manifest`](.github/workflows/update-manifest.yml) 会根据所有已发布的 release 重新生成并签名更新清单（ADR-0010）：每个平台最新的 App、每个固件及其所需的最低 App 版本，以及 `Cargo.toml` 里的 `min_supported_app`。签名密钥用 [`tools/setup-update-signing.sh`](tools/setup-update-signing.sh) 生成一次：私钥写进 `MANIFEST_SIGNING_KEY` secret 和 `~/.vibebuddy-signing`，公钥写进 `manifest/manifest-key.pub`，daemon 信任的就是它。
+每次发版后，[`update-manifest`](.github/workflows/update-manifest.yml) 会根据所有已发布的 release 重新生成并签名更新清单（ADR-0010）：每个平台最新的 App、每个固件及其所需的最低 App 版本，以及 `Cargo.toml` 里的 `min_supported_app`。它还会为 Mac App 生成 Sparkle 的 appcast，用第二把钥匙给已发布的 DMG 签名（签名前会核对清单里的 sha256）。两把钥匙都用 [`tools/setup-update-signing.sh`](tools/setup-update-signing.sh) 生成一次。私钥写进 `MANIFEST_SIGNING_KEY` 和 `SPARKLE_SIGNING_KEY` 两个 secret 以及 `~/.vibebuddy-signing`；公钥分别写进 `manifest/manifest-key.pub`（daemon 信任它）和 `app/sparkle-key.pub`（`build-app.sh` 把它写进 App 的 `SUPublicEDKey`）。
 
 ## 许可证
 

@@ -45,8 +45,12 @@ struct GeneralView: View {
                 HStack {
                     Text(updateSummary).foregroundStyle(.secondary)
                     Spacer()
-                    if let app = model.updates?.app, let url = URL(string: app.url) {
-                        Link("Download \(app.version)", destination: url)
+                    if let app = model.updates?.app {
+                        if model.updater.available {
+                            Button("Install \(app.version)…") { model.installApp(app) }
+                        } else {
+                            Button("Download \(app.version)") { model.installApp(app) }
+                        }
                     }
                     Button("Check now") { model.checkForUpdates() }.disabled(!(model.updates?.enabled ?? false))
                 }

@@ -17,5 +17,12 @@
     <key>LSUIElement</key><true/>
     <key>NSHumanReadableCopyright</key><string>Licensed under GPL-3.0-or-later</string>
     <key>NSPrincipalClass</key><string>NSApplication</string>
+    <!-- Sparkle (ADR-0010): the key the appcast's downloads are signed with; build-app.sh fills it in from
+         app/sparkle-key.pub, or drops it, and then Sparkle stays off. Checks follow the daemon's switch, and nothing
+         is installed without the user: no automatic download-and-install, no permission prompt of Sparkle's own. -->
+    <key>SUPublicEDKey</key><string>__SPARKLE_KEY__</string>
+    <key>SUEnableAutomaticChecks</key><false/>
+    <key>SUAllowsAutomaticUpdates</key><false/>
+    <key>SUAutomaticallyUpdate</key><false/>
 </dict>
 </plist>
