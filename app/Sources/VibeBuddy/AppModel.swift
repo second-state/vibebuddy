@@ -213,8 +213,11 @@ final class AppModel: ObservableObject {
     func setFormOfAddress(_ form: String?, for language: VoiceLanguage) {
         UserDefaults.standard.set(form, forKey: "address.\(language.rawValue)")
         objectWillChange.send()
-        if let current = status?.device.voice, VoiceCatalogEntry.language(ofVoice: current) == language, current != "builtin" {
+        guard let current = status?.device.voice else { return }
+        if VoiceCatalogEntry.language(ofVoice: current) == language, current != "builtin" {
             writeVoice(current)
+        } else if current == "custom", let saved = savedCustomCharacter, VoiceCatalogEntry.language(ofVoice: saved.lender) == language {
+            writeCustomCharacter(look: saved.look, lender: saved.lender)
         }
     }
 
@@ -229,6 +232,28 @@ final class AppModel: ObservableObject {
     /// Writes a pack the app put together itself, such as a custom Character.
     func writePack(_ data: Data) {
         run { try await self.client.writeVoicePack(data) }
+    }
+
+    private static let customLookURL = Resources.applicationSupport.appendingPathComponent("custom-look.bin")
+    private static let customLenderKey = "custom.lender"
+
+    /// The user's own Character as last written: its look and the Character lending voice and lines.
+    var savedCustomCharacter: (look: Data, lender: String)? {
+        guard let look = try? Data(contentsOf: Self.customLookURL),
+              let lender = UserDefaults.standard.string(forKey: Self.customLenderKey) else { return nil }
+        return (look, lender)
+    }
+
+    /// Writes the user's own Character, with the form of address of the lender's language, and keeps
+    /// it so the Character tab can show it later. False if the lender can't lend.
+    @discardableResult
+    func writeCustomCharacter(look: Data, lender: String) -> Bool {
+        guard let base = Resources.voicePack(lender), let pack = addressed(base, id: lender).withLook(look, id: "custom") else { return false }
+        try? FileManager.default.createDirectory(at: Resources.applicationSupport, withIntermediateDirectories: true)
+        try? look.write(to: Self.customLookURL)
+        UserDefaults.standard.set(lender, forKey: Self.customLenderKey)
+        writePack(pack)
+        return true
     }
 
     func togglePreview(_ id: String) {

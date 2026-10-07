@@ -260,8 +260,10 @@ impl App {
                 if let Some(id) = self.settings {
                     return window::gain_focus(id);
                 }
+                // The same as the Mac's: room for the whole Character tab, resizable down to the old size.
                 let (id, open) = window::open(window::Settings {
-                    size: iced::Size::new(620.0, 460.0),
+                    size: iced::Size::new(760.0, 640.0),
+                    min_size: Some(iced::Size::new(640.0, 480.0)),
                     #[cfg(target_os = "linux")]
                     platform_specific: window::settings::PlatformSpecific {
                         application_id: "vibebuddy".to_owned(),
@@ -433,7 +435,7 @@ impl App {
     fn view(&self, _window: window::Id) -> Element<'_, Message> {
         let tabs = [
             (Tab::General, tr("General", &[])),
-            (Tab::Sound, tr("Sound", &[])),
+            (Tab::Sound, tr("Character", &[])),
             (Tab::Agents, tr("Agents", &[])),
             (Tab::Device, tr("Device", &[])),
             (Tab::Advanced, tr("Advanced", &[])),
@@ -542,7 +544,7 @@ impl App {
                 Some(checkbox(offer.switch_voice).label(label).on_toggle(Message::SwitchVoice).into())
             }
             None if !device.is_some_and(|device| device.connected) => Some(
-                text(tr("The box isn't connected, so its voice stays as it is. You can change it later on the Sound tab.", &[]))
+                text(tr("The box isn't connected, so its character stays as it is. You can change it later on the Character tab.", &[]))
                     .size(13)
                     .into(),
             ),
