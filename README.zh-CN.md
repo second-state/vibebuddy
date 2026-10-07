@@ -140,7 +140,7 @@ App 和盒子固件分开发布，Vibe Buddy 会检查两者有没有新版本�
 
 - **什么时候**：启动时、每天一次，以及你在设置 → 通用里点「立即检查」时。
 - **发送什么**：你的平台（`macos-arm64` 或 `linux-x86_64`）、App 版本和盒子的固件版本。别的都不发：没有任何标识，没有 Hook 数据，不涉及你的 Agent 和项目。在 Mac 上，Sparkle 还会拉取 App 的更新源，带上常规的 User-Agent（App 名称和版本），它的系统信息收集保持关闭。
-- **从哪里**：Vibe Buddy 放在 Cloudflare 上的更新站点里的一份签名发布清单（地址还没定，定下来之前任何构建都不会联网）。下载本身来自 GitHub Releases。
+- **从哪里**：`https://updates.korekore.ai/vibebuddy/manifest.json` 上的一份签名发布清单（Sparkle 的 `appcast.xml` 就在旁边），由 Cloudflare 提供。下载本身来自 GitHub Releases。
 - **之后会怎样**：不经你同意什么都不会安装。Mac 上有新 App 时会弹出 Sparkle 的窗口，你可以安装、稍后或跳过；Linux 上通用页会说明怎么升级。更新的固件会在后台下载并校验，然后设置 → 设备会用一个按钮提示你更新。
 - **怎么关掉**：设置 → 通用 →「检查更新」。从源码编译的默认关闭；Releases 页面上的构建默认开启。
 

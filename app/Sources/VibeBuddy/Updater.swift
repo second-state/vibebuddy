@@ -6,8 +6,8 @@ import Sparkle
 /// when the build knows both the appcast and the key; otherwise the General tab's download link is all there is.
 @MainActor
 final class Updater: NSObject, SPUUpdaterDelegate {
-    /// Where the appcast lives. None until the update domain exists (#55); `VIBEBUDDY_APPCAST_URL` overrides it for testing.
-    private nonisolated static let appcastURL: String? = nil
+    /// Where the appcast lives, next to the update manifest; `VIBEBUDDY_APPCAST_URL` overrides it for testing.
+    private nonisolated static let appcastURL: String? = "https://updates.korekore.ai/vibebuddy/appcast.xml"
 
     private nonisolated static var feed: String? {
         ProcessInfo.processInfo.environment["VIBEBUDDY_APPCAST_URL"].flatMap { $0.isEmpty ? nil : $0 } ?? appcastURL
