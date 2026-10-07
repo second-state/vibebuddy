@@ -250,7 +250,7 @@ Anything started at login can't treat a missing desktop service as final: wait f
 
 ## One flashing session per job, and never kill one halfway
 
-Putting the box into the layout it shares with Muse took three unplugs. Chained espflash calls with `--after no-reset` left the chip in its loader, and the next connection hung at "Connecting..." for minutes; killing that hung process, then trying esptool with `--before usb-reset`, didn't recover it either. RST didn't help; only pulling the USB cable did. `tools/flash.sh` chains calls the same way and has worked, so the hang depends on what the previous call left behind, which makes it worse than a steady failure.
+Putting the box into the layout it shares with Muse took three unplugs. Chained espflash calls with `--after no-reset` left the chip in its loader, and the next connection hung at "Connecting..." for minutes; killing that hung process, then trying esptool with `--before usb-reset`, didn't recover it either. RST didn't help; only pulling the USB cable did. `tools/flash.sh` chained calls the same way and had worked, so the hang depends on what the previous call left behind, which makes it worse than a steady failure. On 2026-10-07 it hung too, on the partition-table call over native USB; it now writes all three images in one esptool `write-flash`.
 
 A flashing job is one esptool `write-flash` with every address in it (and an area to clear written as 0xFF in the same call): one connection, one reset at the end. If a flashing process hangs, ask for an unplug straight away instead of stacking more connection attempts on a wedged chip.
 

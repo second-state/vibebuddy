@@ -157,10 +157,11 @@ tools/     # 探测、烧录与素材脚本
 
 固件是 Rust（esp-hal + embassy，`no_std`），分两层：[`firmware-rs/core`](firmware-rs/core) 放所有不碰硬件的逻辑，[`firmware-rs/device`](firmware-rs/device) 只做硬件胶水。取舍见 [ADR-0006](docs/adr/0006-firmware-in-rust-with-esp-hal.md)，第一次上机的验收步骤见 [`docs/firmware-bringup.md`](docs/firmware-bringup.md)。
 
-先装一次 Xtensa 工具链与 espflash：
+先装一次 Xtensa 工具链与 espflash（用来构建镜像），再装写入用的 esptool：
 
 ```bash
 cargo install espup espflash --locked
+pip install esptool
 espup install --targets esp32s3
 ```
 
@@ -171,7 +172,7 @@ just flash /dev/cu.usbmodem8401
 uv run --with pyserial python tools/serial-hello.py /dev/cu.usbmodem8401
 ```
 
-`just flash` 先构建三件套（bootloader、分区表、app）再用 espflash 写入，`voices` 分区与设置区不动，换固件不丢音色。
+`just flash` 先构建三件套（bootloader、分区表、app）再用一次 esptool `write-flash` 写入（一次连接，最后只复位一次），`voices` 分区与设置区不动，换固件不丢音色。
 
 烧录前可以在 Mac 上验证固件里不依赖硬件的部分：`just test-firmware` 跑 firmware-core 的测试（状态机、绘制、串口协议、存储、codec 序列），并把 Rust 与 C 两份固件的画面逐像素比对。
 
