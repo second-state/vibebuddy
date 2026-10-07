@@ -148,10 +148,6 @@ final class AppModel: ObservableObject {
 
     func identify() { run { try await self.client.identify() } }
 
-    func setVolume(_ level: Int, preview: Bool = false) {
-        run { try await self.client.setVolume(level, preview: preview) }
-    }
-
     func setNotifyLink(_ enabled: Bool) {
         guard var config = status?.config else { return }
         config.notifyLink = enabled

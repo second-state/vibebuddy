@@ -108,50 +108,11 @@ struct GeneralView: View {
     }
 }
 
-/// Volume slider: the value comes from the box's status and is sent on release; while dragging, the status stream can't yank it back.
-/// Floor of 20: a saved zero volume would be a persistent mute, and muting is deliberately box-only and not persisted.
-struct VolumeRow: View {
-    @ObservedObject var model: AppModel
-    @State private var level: Double = 65
-    @State private var editing = false
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            HStack {
-                Text("Volume").font(.headline)
-                Spacer()
-                Text("\(Int(level))").monospacedDigit().foregroundStyle(.secondary)
-            }
-            HStack(spacing: 12) {
-                Slider(value: $level, in: 20...100, step: 5) { isEditing in
-                    editing = isEditing
-                    if !isEditing { model.setVolume(Int(level)) }
-                }
-                Button("Play a line on the box") { model.setVolume(Int(level), preview: true) }
-            }
-            .disabled(!connected || model.operationRunning)
-            Text("Saved on the box and kept across restarts. Previews on this Mac aren't affected; to mute, long-press K2 on the box.")
-                .font(.caption).foregroundStyle(.secondary)
-        }
-        .onAppear(perform: sync)
-        .onChange(of: model.status?.device.volume) { sync() }
-    }
-
-    private var connected: Bool { model.status?.device.connected ?? false }
-
-    private func sync() {
-        guard !editing, let volume = model.status?.device.volume else { return }
-        level = Double(volume)
-    }
-}
-
 struct VoicesView: View {
     @ObservedObject var model: AppModel
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            VolumeRow(model: model)
-            Divider()
             Text("Character").font(.headline)
             Text("The box is speaking as “\(currentVoiceName)”. Each character has its own voice and lines. Preview one, then click Use to write it to the box — no firmware flash needed. Over the UART port this takes a few minutes; when it's done the box says a line as the new character.")
                 .font(.callout).foregroundStyle(.secondary)
@@ -369,7 +330,7 @@ struct DeviceView: View {
                     BoxNotFoundHelp()
                 }
                 LabeledContent("Box firmware", value: model.boxFirmware ?? "—")
-                LabeledContent("Latest firmware", value: model.offeredFirmware?.version ?? "—")
+                LabeledContent("Latest firmware", value: latestFirmware)
                 if model.firmwareUpdateAvailable, let offer = model.offeredFirmware {
                     Button("Update to \(offer.version)") { confirmUpdate(offer) }
                         .disabled(model.operationRunning || !connected)
@@ -403,7 +364,8 @@ struct DeviceView: View {
                 ZStack {
                     RoundedRectangle(cornerRadius: 6).fill(Color.black.opacity(0.85))
                     if let image = model.screenshot {
-                        Image(nsImage: image).interpolation(.none).resizable().aspectRatio(contentMode: .fit).padding(4)
+                        // The box's 320×240 at one point per pixel: any other scale makes the pixel art uneven.
+                        Image(nsImage: image).interpolation(.none).resizable().frame(width: 320, height: 240)
                     } else if model.screenshotBusy {
                         ProgressView()
                     } else {
@@ -411,7 +373,7 @@ struct DeviceView: View {
                         Text("Click Refresh to see what the box is showing").foregroundStyle(.white.opacity(0.6))
                     }
                 }
-                .frame(height: 150)
+                .frame(height: 256)
             } header: {
                 HStack {
                     Text("Box screen")
@@ -425,6 +387,16 @@ struct DeviceView: View {
     }
 
     private var connected: Bool { model.status?.device.connected ?? false }
+
+    /// The offered version, or why there is none: a bare dash read as "no update checks at all".
+    private var latestFirmware: String {
+        if let offer = model.offeredFirmware { return offer.version }
+        guard let updates = model.updates else { return "—" }
+        guard updates.enabled else { return String(localized: "Update checks are off (General)") }
+        if updates.error != nil { return String(localized: "Last check failed") }
+        guard updates.lastCheck != nil else { return String(localized: "Not checked yet") }
+        return String(localized: "None released yet")
+    }
 
     private var connectionText: String {
         guard let device = model.status?.device else { return String(localized: "daemon isn't running") }
