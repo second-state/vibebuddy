@@ -157,10 +157,11 @@ tools/     # detection, flashing and asset scripts
 
 The firmware is Rust (esp-hal + embassy, `no_std`) in two layers: [`firmware-rs/core`](firmware-rs/core) holds all the logic that doesn't touch hardware, and [`firmware-rs/device`](firmware-rs/device) is only hardware glue. The reasoning is in [ADR-0006](docs/adr/0006-firmware-in-rust-with-esp-hal.md), and the first on-device acceptance steps are in [`docs/firmware-bringup.md`](docs/firmware-bringup.md).
 
-Install the Xtensa toolchain and espflash once:
+Install the Xtensa toolchain and espflash once (espflash builds the images), plus esptool, which writes them:
 
 ```bash
 cargo install espup espflash --locked
+pip install esptool
 espup install --targets esp32s3
 ```
 
@@ -171,7 +172,7 @@ just flash /dev/cu.usbmodem8401
 uv run --with pyserial python tools/serial-hello.py /dev/cu.usbmodem8401
 ```
 
-`just flash` builds the three images (bootloader, partition table, app) and writes them with espflash. It leaves the `voices` partition and the settings area alone, so changing firmware keeps your voice.
+`just flash` builds the three images (bootloader, partition table, app) and writes them with a single esptool `write-flash`: one connection, one reset at the end. It leaves the `voices` partition and the settings area alone, so changing firmware keeps your voice.
 
 Before flashing you can check the hardware-independent parts on the Mac: `just test-firmware` runs the firmware-core tests (state machine, drawing, serial protocol, storage, codec sequences) and compares the Rust and C firmware's screens pixel by pixel.
 
