@@ -86,6 +86,10 @@ if [[ -f "${fw}/bootloader.bin" && -f "${fw}/partition-table.bin" && -f "${fw}/v
     for file in bootloader.bin partition-table.bin vibebuddy-fw.bin build.txt; do
         cp "${fw}/${file}" "${contents}/Resources/firmware/${file}"
     done
+    # version.txt goes into the firmware zip CI cuts from this folder; output from before it existed has none.
+    if [[ -f "${fw}/version.txt" ]]; then
+        cp "${fw}/version.txt" "${contents}/Resources/firmware/version.txt"
+    fi
     echo "Bundled firmware $(cat "${contents}/Resources/firmware/build.txt")"
 elif [[ ${debug} -eq 1 ]]; then
     echo "No firmware build output; debug build ships without firmware"

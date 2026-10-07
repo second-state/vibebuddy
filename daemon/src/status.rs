@@ -8,6 +8,9 @@ use crate::activity::TodaySummary;
 use crate::config::Config;
 use crate::serial_transport::{BUILD_MARKER, DeviceMessage};
 
+/// Reported next to the build, at boot and in answer to hello, so it can arrive glued behind a stray line too.
+const VERSION_MARKER: &str = "FIRMWARE VERSION ";
+
 /// What the device looks like right now, pieced together from diagnostic lines; a device reboot reports it all again.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize)]
 pub struct DeviceState {
@@ -18,6 +21,8 @@ pub struct DeviceState {
     /// duty / pomodoro / leisure
     pub mode: Option<String>,
     pub firmware_build: Option<String>,
+    /// The firmware version, such as `0.2.2`, which orders releases; firmware older than ADR-0010 reports none.
+    pub firmware_version: Option<String>,
     /// Id of the announcement voice the device is using; `builtin` means the built-in voice.
     pub voice: Option<String>,
     /// Speaker volume (the codec's 20 to 100), stored on the device; the app is just a remote.
@@ -45,6 +50,7 @@ impl DeviceState {
                 self.usb_serial = usb_serial.clone();
                 self.foreign_firmware = false;
                 self.firmware_build = None;
+                self.firmware_version = None;
                 self.mode = None;
                 self.voice = None;
                 self.volume = None;
@@ -53,6 +59,7 @@ impl DeviceState {
                 // Over the bridge the port survives a reset into other firmware, so what ours reported must go too.
                 self.foreign_firmware = true;
                 self.firmware_build = None;
+                self.firmware_version = None;
                 self.mode = None;
                 self.voice = None;
                 self.volume = None;
@@ -71,6 +78,8 @@ impl DeviceState {
                 } else if let Some((_, build)) = line.split_once(BUILD_MARKER) {
                     self.foreign_firmware = false;
                     self.firmware_build = Some(build.trim().to_owned());
+                } else if let Some((_, version)) = line.split_once(VERSION_MARKER) {
+                    self.firmware_version = Some(version.trim().to_owned());
                 } else if let Some(voice) = line.strip_prefix("VOICES ") {
                     let voice = voice.trim();
                     if voice != "NO PARTITION" {
@@ -156,10 +165,18 @@ mod tests {
     }
 
     #[test]
+    fn a_version_glued_behind_a_stray_line_is_still_read() {
+        let mut state = DeviceState::default();
+        state.apply(&line("LEISURE SKIT FIRMWARE VERSION 0.3.0"));
+        assert_eq!(state.firmware_version.as_deref(), Some("0.3.0"));
+    }
+
+    #[test]
     fn device_state_is_read_off_the_diagnostic_lines() {
         let mut state = DeviceState::default();
         assert!(state.apply(&DeviceMessage::Connected { port: "/dev/cu.x".to_owned(), bridge: true, usb_serial: None }));
         assert!(state.apply(&line("DISPLAY READY BUILD 21a8360-dirty 2026-09-16 10:23")));
+        assert!(state.apply(&line("FIRMWARE VERSION 0.2.2")));
         assert!(state.apply(&line("VOICES builtin")));
         assert!(state.apply(&line("MODE POMODORO")));
         assert!(!state.apply(&line("MODE POMODORO")), "no change is not a change");
@@ -173,6 +190,7 @@ mod tests {
                 bridge: true,
                 mode: Some("pomodoro".to_owned()),
                 firmware_build: Some("21a8360-dirty 2026-09-16 10:23".to_owned()),
+                firmware_version: Some("0.2.2".to_owned()),
                 voice: Some("builtin".to_owned()),
                 volume: Some(65),
                 usb_serial: None,
@@ -200,8 +218,10 @@ mod tests {
         let mut state = DeviceState::default();
         state.apply(&DeviceMessage::Connected { port: "/dev/cu.x".to_owned(), bridge: true, usb_serial: None });
         state.apply(&line("DISPLAY READY BUILD abc 2026-09-16 10:23"));
+        state.apply(&line("FIRMWARE VERSION 0.2.2"));
         state.apply(&DeviceMessage::Disconnected);
         assert!(state.apply(&DeviceMessage::Connected { port: "/dev/cu.y".to_owned(), bridge: false, usb_serial: None }));
+        assert_eq!(state.firmware_version, None);
         assert_eq!(state.firmware_build, None);
     }
 
