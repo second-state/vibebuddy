@@ -54,7 +54,12 @@ if [[ ${release} -eq 1 ]]; then
     cp "${share}"/voices/*.bin "${assets}/voices/"
 else
     for pack in "${repo}"/characters/*/pack.bin; do
-        cp "${pack}" "${assets}/voices/$(basename "$(dirname "${pack}")").bin"
+        id="$(basename "$(dirname "${pack}")")"
+        cp "${pack}" "${assets}/voices/${id}.bin"
+        # Its lines said with each form of address; the app swaps in the one picked.
+        for variant in "$(dirname "${pack}")"/address/*.bin; do
+            [[ -f "${variant}" ]] && cp "${variant}" "${assets}/voices/${id}.$(basename "${variant}")"
+        done
     done
 fi
 # Firmware from earlier versions of this script; the daemon keeps its own now.

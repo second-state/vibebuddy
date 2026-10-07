@@ -26,11 +26,43 @@ fn search_dirs(data_home: Option<OsString>, home: Option<OsString>, data_dirs: O
         .collect()
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum Language {
     Chinese,
     English,
 }
+
+impl Language {
+    pub const ALL: [Language; 2] = [Language::Chinese, Language::English];
+
+    /// As in file and setting names, the Mac's `VoiceLanguage` raw value.
+    pub fn code(self) -> &'static str {
+        match self {
+            Language::Chinese => "zh",
+            Language::English => "en",
+        }
+    }
+}
+
+/// What the buddy can call the user, the Mac's `FormOfAddress.all` and characters/addresses.tsv.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct FormOfAddress {
+    pub id: &'static str,
+    /// The words spoken, shown as they are in every UI language.
+    pub words: &'static str,
+    pub language: Language,
+}
+
+pub const FORMS_OF_ADDRESS: [FormOfAddress; 8] = [
+    FormOfAddress { id: "laoban", words: "老板", language: Language::Chinese },
+    FormOfAddress { id: "dalao", words: "大佬", language: Language::Chinese },
+    FormOfAddress { id: "ge", words: "哥", language: Language::Chinese },
+    FormOfAddress { id: "jie", words: "姐", language: Language::Chinese },
+    FormOfAddress { id: "qin", words: "亲", language: Language::Chinese },
+    FormOfAddress { id: "boss", words: "boss", language: Language::English },
+    FormOfAddress { id: "captain", words: "captain", language: Language::English },
+    FormOfAddress { id: "buddy", words: "buddy", language: Language::English },
+];
 
 /// The Mac app's `VoiceCatalogEntry.all`, with the same English keys for names and tags.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -39,10 +71,12 @@ pub struct Voice {
     pub name: String,
     pub tag: String,
     pub language: Language,
+    /// The normal frame of the Character's look, for its card; None for a pack without one.
+    pub face: Option<crate::character::Image>,
 }
 
 fn catalog() -> Vec<Voice> {
-    let voice = |id, name: String, tag: String, language| Voice { id, name, tag, language };
+    let voice = |id, name: String, tag: String, language| Voice { id, name, tag, language, face: None };
     vec![
         voice(
             "wanwanxiaohe",
@@ -59,7 +93,18 @@ fn catalog() -> Vec<Voice> {
 /// The voices whose pack was installed, those in the UI's language first.
 pub fn voices() -> Vec<Voice> {
     let preferred = if i18n::is_chinese() { Language::Chinese } else { Language::English };
-    let mut voices: Vec<Voice> = catalog().into_iter().filter(|voice| find_voice_pack(voice.id).is_some()).collect();
+    let mut voices: Vec<Voice> = catalog()
+        .into_iter()
+        .filter_map(|mut voice| {
+            let pack = std::fs::read(find_voice_pack(voice.id)?).ok();
+            voice.face = pack
+                .as_deref()
+                .and_then(crate::character::Pack::parse)
+                .and_then(|pack| crate::character::look_frames(pack.look.as_deref()?))
+                .and_then(|frames| frames.into_iter().next());
+            Some(voice)
+        })
+        .collect();
     voices.sort_by_key(|voice| voice.language != preferred);
     voices
 }
@@ -72,6 +117,9 @@ pub fn voice_id(id: &str) -> Option<&'static str> {
 pub fn voice_name(id: &str) -> String {
     if id == "builtin" {
         return tr("Built-in voice (Jessica)", &[]);
+    }
+    if id == "custom" {
+        return tr("Your own character", &[]);
     }
     catalog().into_iter().find(|voice| voice.id == id).map(|voice| voice.name).unwrap_or_else(|| id.to_owned())
 }
@@ -103,9 +151,24 @@ fn find_voice_pack(id: &str) -> Option<PathBuf> {
     data_dirs().into_iter().map(|dir| voice_pack(&dir, id)).find(|path| path.is_file())
 }
 
-pub async fn read_voice_pack(id: &'static str) -> Result<Vec<u8>, String> {
+/// The language a box Character speaks, from the id the box reports; None for one the catalog doesn't know.
+pub fn language_of(id: &str) -> Option<Language> {
+    catalog().into_iter().find(|voice| voice.id == id).map(|voice| voice.language)
+}
+
+/// Character `id` as the box should get it: its pack, with the lines of the form of address picked for
+/// its language swapped in when one is (installed as voices/<id>.<form>.bin next to the pack).
+pub async fn read_character(id: &str, form: Option<&str>) -> Result<crate::character::Pack, String> {
     let path = find_voice_pack(id).ok_or_else(|| format!("no voice pack named {id} is installed"))?;
-    tokio::fs::read(&path).await.map_err(|error| format!("{}: {error}", path.display()))
+    let data = tokio::fs::read(&path).await.map_err(|error| format!("{}: {error}", path.display()))?;
+    let pack = crate::character::Pack::parse(&data).ok_or_else(|| format!("{} is not a Character pack", path.display()))?;
+    let variant = form.and_then(|form| {
+        data_dirs().into_iter().map(|dir| dir.join("voices").join(format!("{id}.{form}.bin"))).find(|path| path.is_file())
+    });
+    Ok(match variant.and_then(|path| std::fs::read(path).ok()).as_deref().and_then(crate::character::Pack::parse) {
+        Some(variant) => pack.with_address(&variant),
+        None => pack,
+    })
 }
 
 #[cfg(test)]

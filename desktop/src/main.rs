@@ -6,7 +6,9 @@
 #![cfg_attr(not(target_os = "linux"), allow(dead_code))]
 
 mod assets;
+mod character;
 mod client;
+mod custom;
 mod face;
 mod i18n;
 #[cfg(target_os = "linux")]
@@ -96,6 +98,13 @@ enum Message {
     PlayLine,
     Identify,
     UseVoice(&'static str),
+    /// A form of address for a language, or none.
+    PickAddress(assets::Language, Option<&'static str>),
+    ChooseDrawings,
+    Drawings(Result<Option<Vec<character::Image>>, String>),
+    PickLender(Lender),
+    UseCustom,
+    CopyPrompt,
     AskFirmwareUpdate(bool),
     FlashFirmware,
     TakeScreenshot,
@@ -137,6 +146,14 @@ struct App {
     screenshot_busy: bool,
     /// Installed alongside the app; read once, since only reinstalling changes them.
     voices: Vec<assets::Voice>,
+    /// Each installed Character's face, ready to draw.
+    faces: Vec<Option<image::Handle>>,
+    /// The forms of address picked and the user's own Character as last written.
+    characters: custom::Settings,
+    /// The user's own Character on the card: its look, its four frames to show, and who lends it voice and lines.
+    custom_look: Option<(Vec<u8>, Vec<image::Handle>)>,
+    lender: Option<Lender>,
+    custom_problem: Option<String>,
     /// The firmware update waits for a second click, since the box restarts.
     confirm_firmware: bool,
     /// The outcome of the last action, shown at the bottom of the window.
@@ -170,7 +187,12 @@ impl App {
             volume: None,
             screenshot: None,
             screenshot_busy: false,
-            voices: assets::voices(),
+            voices: Vec::new(),
+            faces: Vec::new(),
+            characters: custom::Settings::load(),
+            custom_look: None,
+            lender: None,
+            custom_problem: None,
             confirm_firmware: false,
             notice: None,
             language: UiLanguage::saved(),
@@ -183,6 +205,19 @@ impl App {
         // The first launch shows the window, so it's clear where the app went; later ones stay in the tray, unless a
         // language change restarted the app from its window. Without a tray (macOS builds, for development) the
         // window is the only way in.
+        let mut app = app;
+        app.voices = assets::voices();
+        app.faces = app.voices.iter().map(|voice| voice.face.as_ref().map(|face| handle(face, 1))).collect();
+        app.lender = app
+            .characters
+            .custom_lender
+            .as_deref()
+            .and_then(|id| app.voices.iter().find(|voice| voice.id == id))
+            .or(app.voices.first())
+            .map(Lender::of);
+        app.custom_look = custom::custom_look_file()
+            .and_then(|path| std::fs::read(path).ok())
+            .and_then(|look| character::look_frames(&look).map(|frames| (look, frames.iter().map(|frame| handle(frame, 2)).collect())));
         let restarted = std::env::args().any(|arg| arg == RESTARTED);
         let open = first_launch() || restarted || !cfg!(target_os = "linux");
         let task = if open { Task::done(Message::OpenSettings) } else { Task::none() };
@@ -356,9 +391,53 @@ impl App {
             }
             Message::Identify => return Task::perform(client::identify(), Message::Done),
             Message::UseVoice(id) => {
-                let write = async move { client::write_voice_pack(assets::read_voice_pack(id).await?).await };
+                let form = assets::language_of(id).and_then(|language| self.characters.address(language)).map(str::to_owned);
+                let write = async move {
+                    let pack = assets::read_character(id, form.as_deref()).await?;
+                    client::write_voice_pack(pack.build().ok_or("the Character pack doesn't fit")?).await
+                };
                 return Task::perform(write, Message::Done);
             }
+            Message::PickAddress(language, form) => {
+                self.characters.set_address(language, form);
+                self.characters.save();
+                // The box says it at once when it wears a Character of that language.
+                let current = self.status.as_ref().and_then(|status| status.device.voice.clone());
+                if let Some(id) = current.as_deref().and_then(assets::voice_id).filter(|&id| assets::language_of(id) == Some(language)) {
+                    return Task::done(Message::UseVoice(id));
+                }
+                let lends = self.lender.is_some_and(|lender| assets::language_of(lender.id) == Some(language));
+                if current.as_deref() == Some(CUSTOM) && lends && self.custom_look.is_some() {
+                    return Task::done(Message::UseCustom);
+                }
+            }
+            Message::ChooseDrawings => return Task::perform(custom::choose_drawings(), Message::Drawings),
+            Message::Drawings(Ok(None)) => {}
+            Message::Drawings(Ok(Some(drawings))) => match character::build_look(&drawings) {
+                Some(look) => {
+                    let frames = character::look_frames(&look).unwrap_or_default();
+                    self.custom_look = Some((look, frames.iter().map(|frame| handle(frame, 2)).collect()));
+                    self.custom_problem = None;
+                }
+                None => self.custom_problem = Some(tr("No figure found: use a plain white or transparent background.", &[])),
+            },
+            Message::Drawings(Err(error)) => self.custom_problem = Some(error),
+            Message::PickLender(lender) => self.lender = Some(lender),
+            Message::UseCustom => {
+                let (Some((look, _)), Some(lender)) = (self.custom_look.clone(), self.lender) else { return Task::none() };
+                if let Some(path) = custom::custom_look_file() {
+                    custom::write(&path, &look);
+                }
+                self.characters.custom_lender = Some(lender.id.to_owned());
+                self.characters.save();
+                let form = assets::language_of(lender.id).and_then(|language| self.characters.address(language)).map(str::to_owned);
+                let write = async move {
+                    let pack = assets::read_character(lender.id, form.as_deref()).await?.with_look(look, CUSTOM);
+                    client::write_voice_pack(pack.build().ok_or("that character can't lend its voice")?).await
+                };
+                return Task::perform(write, Message::Done);
+            }
+            Message::CopyPrompt => return iced::clipboard::write(CUSTOM_PROMPT.to_owned()),
             Message::AskFirmwareUpdate(asking) => self.confirm_firmware = asking,
             Message::FlashFirmware => {
                 self.confirm_firmware = false;
@@ -574,18 +653,77 @@ impl App {
         let operation = self.status.as_ref().and_then(|status| status.operation.as_ref());
         let busy = operation.is_some_and(status::Operation::running);
         let current = self.status.as_ref().and_then(|status| status.device.voice.clone());
-        let cards = self.voices.iter().map(|voice| {
-            let action: Element<'_, Message> = if current.as_deref() == Some(voice.id) {
+        let cards = self.voices.iter().zip(&self.faces).map(|(voice, face)| {
+            let in_use = current.as_deref() == Some(voice.id);
+            let action: Element<'_, Message> = if in_use {
                 text(tr("In use", &[])).style(text::success).into()
             } else {
                 button(text(tr("Use", &[])))
                     .on_press_maybe((online && !busy).then_some(Message::UseVoice(voice.id)))
                     .into()
             };
-            row![column![text(voice.name.clone()), text(voice.tag.clone()).size(13)], space::horizontal(), action]
+            let card = row![]
+                .push(face.clone().map(image))
+                .push(column![text(voice.name.clone()), text(voice.tag.clone()).size(13)])
+                .push(space::horizontal())
+                .push(action)
                 .spacing(12)
-                .into()
+                .align_y(iced::Alignment::Center);
+            character_card(card.into(), in_use)
         });
+        let address = row![text(tr("What the buddy calls you", &[]))]
+            .extend(assets::Language::ALL.map(|language| {
+                let options: Vec<AddressChoice> = std::iter::once(AddressChoice { form: None, language })
+                    .chain(assets::FORMS_OF_ADDRESS.iter().filter(|form| form.language == language).map(|form| AddressChoice { form: Some(form.id), language }))
+                    .collect();
+                let picked = options.iter().copied().find(|choice| choice.form == self.characters.address(language));
+                let label = match language {
+                    assets::Language::Chinese => tr("Chinese", &[]),
+                    assets::Language::English => tr("English", &[]),
+                };
+                row![text(label), pick_list(options, picked, move |choice: AddressChoice| Message::PickAddress(language, choice.form))]
+                    .spacing(6)
+                    .align_y(iced::Alignment::Center)
+                    .into()
+            }))
+            .spacing(16)
+            .align_y(iced::Alignment::Center);
+        let custom_in_use = current.as_deref() == Some(CUSTOM);
+        let lenders: Vec<Lender> = self.voices.iter().map(Lender::of).collect();
+        let custom_card = column![
+            row![text(tr("Your own character", &[]))]
+                .push(space::horizontal())
+                .push(custom_in_use.then(|| text(tr("In use", &[])).style(text::success))),
+            text(tr(
+                "Draw a figure with any image tool, on a plain white background: one image, or four in the order normal, eyes closed, happy, sad. The box shows it in place of the robot, with the voice and lines of the character you pick.",
+                &[]
+            ))
+            .size(13),
+            row![
+                button(text(tr("Choose images…", &[]))).on_press(Message::ChooseDrawings),
+                button(text(tr("Copy a prompt", &[]))).style(button::secondary).on_press(Message::CopyPrompt),
+            ]
+            .spacing(8),
+        ]
+        .push(self.custom_problem.as_ref().map(|problem| text(problem.clone()).size(13).style(text::danger)))
+        .push(self.custom_look.as_ref().map(|(_, frames)| {
+            column![
+                row(frames.iter().map(|frame| container(image(frame.clone())).style(|_: &Theme| container::Style {
+                    background: Some(iced::Color::BLACK.into()),
+                    ..container::Style::default()
+                }).into()))
+                .spacing(6),
+                row![
+                    text(tr("Voice and lines from", &[])),
+                    pick_list(lenders, self.lender, Message::PickLender),
+                    button(text(tr("Use", &[]))).on_press_maybe((online && !busy && self.lender.is_some()).then_some(Message::UseCustom)),
+                ]
+                .spacing(8)
+                .align_y(iced::Alignment::Center),
+            ]
+            .spacing(8)
+        }))
+        .spacing(8);
         let progress = operation.filter(|operation| operation.kind == status::OperationKind::VoicePack).map(|operation| {
             let failed = operation.state == status::OperationState::Failed;
             column![text(operation.summary()).size(13)].push(failed.then(|| {
@@ -605,7 +743,9 @@ impl App {
                 &[&using]
             ))
             .size(13),
+            address,
             column(cards).spacing(10),
+            character_card(custom_card.into(), custom_in_use),
         ]
         .push(progress)
         .spacing(12);
@@ -896,6 +1036,79 @@ async fn export_diagnostics(summary: String, config: Option<Config>) -> Result<S
 
 /// Where every release lives: the new App, and the firmware zip for flashing by hand when the daemon can't get it.
 const RELEASES_PAGE: &str = "https://github.com/second-state/vibebuddy/releases";
+
+/// The id under which the box wears the user's own Character.
+const CUSTOM: &str = "custom";
+
+/// The Mac app's `CustomCharacterCard.prompt`: a start for any image model.
+const CUSTOM_PROMPT: &str = "Pixel art game sprite of [describe your character], chibi proportions, standing, front view, full body, centered, arms down, flat colors, thick dark outline, limited 16-color palette, plain solid white background. Then the same character in exactly the same pose with the eyes closed; with a big happy smile; with a sad face.";
+
+/// A look frame as an image to draw, each pixel `scale` pixels wide.
+fn handle(frame: &character::Image, scale: usize) -> image::Handle {
+    let (w, h) = (frame.width * scale, frame.height * scale);
+    let mut pixels = vec![0u8; w * h * 4];
+    for y in 0..h {
+        for x in 0..w {
+            let from = ((y / scale) * frame.width + x / scale) * 4;
+            pixels[(y * w + x) * 4..(y * w + x) * 4 + 4].copy_from_slice(&frame.pixels[from..from + 4]);
+        }
+    }
+    image::Handle::from_rgba(w as u32, h as u32, pixels)
+}
+
+/// A Character's card, outlined in the accent color when the box wears it.
+fn character_card(content: Element<'_, Message>, in_use: bool) -> Element<'_, Message> {
+    container(content)
+        .padding(10)
+        .width(Length::Fill)
+        .style(move |theme: &Theme| {
+            let palette = theme.extended_palette();
+            container::Style {
+                background: Some(palette.background.weak.color.into()),
+                border: iced::Border {
+                    color: if in_use { palette.primary.base.color } else { iced::Color::TRANSPARENT },
+                    width: 2.0,
+                    radius: 8.0.into(),
+                },
+                ..container::Style::default()
+            }
+        })
+        .into()
+}
+
+/// A Character that can lend voice and lines, as the picker shows it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct Lender {
+    id: &'static str,
+}
+
+impl Lender {
+    fn of(voice: &assets::Voice) -> Lender {
+        Lender { id: voice.id }
+    }
+}
+
+impl std::fmt::Display for Lender {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&assets::voice_name(self.id))
+    }
+}
+
+/// One entry of a form-of-address picker: a form of a language, or none.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct AddressChoice {
+    form: Option<&'static str>,
+    language: assets::Language,
+}
+
+impl std::fmt::Display for AddressChoice {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self.form.and_then(|id| assets::FORMS_OF_ADDRESS.iter().find(|form| form.id == id)) {
+            Some(form) => f.write_str(form.words),
+            None => f.write_str(&tr("Nothing", &[])),
+        }
+    }
+}
 
 /// The daemon's XDG directories (see `daemon/src/config.rs`), where it keeps state and config and the hook its log.
 fn state_dir() -> Option<std::path::PathBuf> {

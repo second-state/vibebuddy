@@ -22,7 +22,12 @@ for file in vibebuddyd.service vibebuddy.desktop vibebuddy.svg 70-vibebuddy.rule
     install -m644 "${repo}/packaging/linux/${file}" "${stage}/share/${file}"
 done
 for pack in "${repo}"/characters/*/pack.bin; do
-    cp "${pack}" "${stage}/share/voices/$(basename "$(dirname "${pack}")").bin"
+    id="$(basename "$(dirname "${pack}")")"
+    cp "${pack}" "${stage}/share/voices/${id}.bin"
+    # Its lines said with each form of address; the app swaps in the one picked.
+    for variant in "$(dirname "${pack}")"/address/*.bin; do
+        [[ -f "${variant}" ]] && cp "${variant}" "${stage}/share/voices/${id}.$(basename "${variant}")"
+    done
 done
 python3 "${repo}/tools/package-licenses.py" "${stage}/share" x86_64-unknown-linux-gnu
 mv "${stage}/share/licenses" "${stage}/licenses"
