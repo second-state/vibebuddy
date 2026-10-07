@@ -1,5 +1,6 @@
 use std::collections::VecDeque;
 use std::env;
+use std::path::PathBuf;
 use std::time::Duration;
 
 use vibebuddy_protocol::Event;
@@ -30,7 +31,8 @@ pub enum DeviceMessage {
     Event(Event),
     Line(String),
     /// `bridge` means we're on the BOX's CH343 UART bridge: writes must be chunked and flashing uses small blocks.
-    Connected { port: String, bridge: bool },
+    /// `usb_serial` is the port's USB serial number, when the system knows it.
+    Connected { port: String, bridge: bool, usb_serial: Option<String> },
     Disconnected,
 }
 
@@ -42,15 +44,34 @@ pub trait Transport: Send + Sync {
 pub struct SerialConfig {
     explicit_port: Option<String>,
     usb_serial: Option<String>,
+    /// Where the USB serial number of the last device that proved to be the box is kept; see [`remember_box`].
+    known_box: Option<PathBuf>,
 }
 
 impl SerialConfig {
-    pub fn from_env() -> Self {
+    pub fn from_env(known_box: Option<PathBuf>) -> Self {
         Self {
             explicit_port: env::var("VIBEBUDDY_SERIAL_PORT").ok(),
             usb_serial: env::var("VIBEBUDDY_USB_SERIAL").ok(),
+            known_box,
         }
     }
+
+    fn known_box_serial(&self) -> Option<String> {
+        let text = std::fs::read_to_string(self.known_box.as_ref()?).ok()?;
+        let serial = text.trim();
+        (!serial.is_empty()).then(|| serial.to_owned())
+    }
+}
+
+/// Remembers a device as the box once it has reported our firmware: every ESP32-S3 on native USB is
+/// the same 303A:1001, so with another one plugged in (a Muse, a devkit) the serial number is the only
+/// way to tell which is ours.
+pub fn remember_box(path: &std::path::Path, usb_serial: &str) {
+    if let Some(parent) = path.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    let _ = std::fs::write(path, format!("{usb_serial}\n"));
 }
 
 #[derive(Debug, PartialEq)]
@@ -114,7 +135,7 @@ async fn serial_worker(
             }
             continue;
         }
-        let PortChoice { name: port_name, paced } = match find_port(&config) {
+        let PortChoice { name: port_name, paced, usb_serial } = match find_port(&config) {
             Ok(Some(choice)) => choice,
             Ok(None) => {
                 tokio::time::sleep(RECONNECT_DELAY).await;
@@ -138,7 +159,7 @@ async fn serial_worker(
         info!(port = %port_name, paced, "serial port connected");
         tokio::time::sleep(CONNECT_SETTLE_DELAY).await;
         let _ = device_event_sender
-            .send(DeviceMessage::Connected { port: port_name.clone(), bridge: paced })
+            .send(DeviceMessage::Connected { port: port_name.clone(), bridge: paced, usb_serial })
             .await;
 
         match run_session(&mut port, &port_name, paced, &mut pending, &mut receiver, &device_event_sender, &mut suspend)
@@ -276,6 +297,7 @@ fn needs_pacing(vid: u16, pid: u16) -> bool {
 struct PortChoice {
     name: String,
     paced: bool,
+    usb_serial: Option<String>,
 }
 
 fn find_port(config: &SerialConfig) -> Result<Option<PortChoice>, String> {
@@ -290,7 +312,7 @@ fn find_port(config: &SerialConfig) -> Result<Option<PortChoice>, String> {
                 _ => None,
             })
             .unwrap_or(true);
-        return Ok(Some(PortChoice { name: port.clone(), paced }));
+        return Ok(Some(PortChoice { name: port.clone(), paced, usb_serial: None }));
     }
 
     let mut matches: Vec<PortChoice> = ports
@@ -304,7 +326,7 @@ fn find_port(config: &SerialConfig) -> Result<Option<PortChoice>, String> {
                             .is_some_and(|actual| serials_equal(actual, expected))
                     }) =>
             {
-                Some(PortChoice { name: port.port_name, paced: needs_pacing(info.vid, info.pid) })
+                Some(PortChoice { name: port.port_name, paced: needs_pacing(info.vid, info.pid), usb_serial: info.serial_number })
             }
             _ => None,
         })
@@ -320,7 +342,23 @@ fn find_port(config: &SerialConfig) -> Result<Option<PortChoice>, String> {
     }
     matches.sort_by(|left, right| left.name.cmp(&right.name));
     matches.dedup_by(|left, right| left.name == right.name);
+    choose_port(matches, config.known_box_serial().as_deref())
+}
 
+/// One candidate is the box; several are, too, when one of them is the box we have seen before.
+fn choose_port(mut matches: Vec<PortChoice>, known_box: Option<&str>) -> Result<Option<PortChoice>, String> {
+    if matches.len() > 1
+        && let Some(known) = known_box
+    {
+        let ours: Vec<PortChoice> = matches
+            .iter()
+            .filter(|choice| choice.usb_serial.as_deref().is_some_and(|serial| serials_equal(serial, known)))
+            .cloned()
+            .collect();
+        if ours.len() == 1 {
+            matches = ours;
+        }
+    }
     match matches.as_slice() {
         [] => Ok(None),
         [choice] => Ok(Some(choice.clone())),
@@ -414,6 +452,21 @@ fn process_device_line(line: &[u8], event_sender: &mpsc::Sender<DeviceMessage>) 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn candidate(name: &str, serial: &str) -> PortChoice {
+        PortChoice { name: name.to_owned(), paced: false, usb_serial: Some(serial.to_owned()) }
+    }
+
+    #[test]
+    fn with_another_device_plugged_in_the_known_box_wins() {
+        let both = vec![candidate("/dev/cu.usbmodem1101", "30:ED:A0:A4:0D:08"), candidate("/dev/cu.usbmodem8401", "98:88:E0:06:8B:CC")];
+        let chosen = choose_port(both.clone(), Some("98:88:e0:06:8b:cc")).unwrap().unwrap();
+        assert_eq!(chosen.name, "/dev/cu.usbmodem8401");
+        assert!(choose_port(both.clone(), None).is_err(), "no box known yet: don't guess");
+        assert!(choose_port(both, Some("11:22:33:44:55:66")).is_err(), "the known box isn't one of them");
+        let alone = vec![candidate("/dev/cu.usbmodem1101", "30:ED:A0:A4:0D:08")];
+        assert_eq!(choose_port(alone, Some("98:88:E0:06:8B:CC")).unwrap().unwrap().name, "/dev/cu.usbmodem1101", "a lone device is still tried");
+    }
 
     #[test]
     fn usb_serial_comparison_ignores_case_and_separators() {

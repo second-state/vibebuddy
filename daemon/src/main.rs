@@ -162,7 +162,7 @@ async fn main() {
         .unwrap_or_else(|_| "127.0.0.1:7331".to_owned())
         .parse::<SocketAddr>()
         .unwrap_or_else(|error| panic!("invalid VIBEBUDDY_BIND: {error}"));
-    let serial_config = SerialConfig::from_env();
+    let serial_config = SerialConfig::from_env(known_box_file());
     let (serial_transport, device_events) = SerialTransport::spawn(serial_config);
     let serial_transport = Arc::new(serial_transport);
     let transport: Arc<dyn Transport> = serial_transport.clone();
@@ -211,12 +211,16 @@ async fn handle_device_events(
 /// Every device message goes through here: update device state, broadcast to operations waiting for acks, and K2 opens the source.
 /// Tests inject device messages here too, so it must not depend on the serial port.
 async fn publish_device_message(state: &AppState, message: DeviceMessage) {
-    let (changed, booted) = {
+    let (changed, booted, usb_serial) = {
         let mut device = state.device.lock().await;
         let had_build = device.firmware_build.is_some();
         let changed = device.apply(&message);
-        (changed, !had_build && device.firmware_build.is_some())
+        (changed, !had_build && device.firmware_build.is_some(), device.usb_serial.clone())
     };
+    // Our firmware reported its build: this device is the box, so prefer it when others are plugged in too.
+    if booted && let (Some(serial), Some(path)) = (usb_serial, known_box_file()) {
+        serial_transport::remember_box(&path, &serial);
+    }
     if changed {
         state.notify_status();
     }
@@ -329,6 +333,11 @@ fn stats_file() -> Option<PathBuf> {
         return Some(PathBuf::from(path));
     }
     Some(config::state_dir()?.join("stats.json"))
+}
+
+/// The USB serial number of the device that last proved to be the box.
+fn known_box_file() -> Option<PathBuf> {
+    Some(config::state_dir()?.join("box-usb-serial"))
 }
 
 fn app(state: AppState) -> Router {
@@ -959,7 +968,7 @@ mod tests {
     async fn status_reflects_device_lines_hooks_and_config() {
         let transport = Arc::new(RecordingTransport::default());
         let state = test_state(transport);
-        publish_device_message(&state, DeviceMessage::Connected { port: "/dev/cu.test".to_owned(), bridge: true }).await;
+        publish_device_message(&state, DeviceMessage::Connected { port: "/dev/cu.test".to_owned(), bridge: true, usb_serial: None }).await;
         publish_device_message(&state, DeviceMessage::Line("MODE LEISURE".to_owned())).await;
         publish_device_message(&state, DeviceMessage::Line("VOICES hsiaoyu".to_owned())).await;
         state.hooks_seen.lock().await.codex = Some(chrono::Local::now());
@@ -989,7 +998,7 @@ mod tests {
         assert!(first.starts_with("event: status\n"), "{first}");
         assert!(first.contains("\"connected\":false"), "{first}");
 
-        publish_device_message(&state, DeviceMessage::Connected { port: "/dev/cu.s".to_owned(), bridge: false }).await;
+        publish_device_message(&state, DeviceMessage::Connected { port: "/dev/cu.s".to_owned(), bridge: false, usb_serial: None }).await;
         let second = body.frame().await.expect("another snapshot is pushed after the status changes").expect("frame is readable");
         let second = String::from_utf8_lossy(second.data_ref().expect("data frame")).into_owned();
         assert!(second.contains("\"connected\":true"), "{second}");
