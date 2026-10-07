@@ -595,7 +595,7 @@ impl App {
                 format!("{} · {kind}", device.port.as_deref().unwrap_or("?"))
             }
         };
-        let firmware = device.and_then(|device| device.firmware_build.clone()).unwrap_or_else(|| "—".to_owned());
+        let firmware = device.and_then(|device| device.firmware_label()).unwrap_or_else(|| "—".to_owned());
         let online = device.is_some_and(|device| device.connected);
         let bundled = self
             .firmware
@@ -764,7 +764,7 @@ impl App {
             "App {}\ndaemon {}\nfirmware {}\nbundled firmware {}\nvoice {}\n",
             env!("CARGO_PKG_VERSION"),
             self.status.as_ref().map_or("not connected", |status| status.daemon.build.as_str()),
-            device.and_then(|device| device.firmware_build.as_deref()).unwrap_or("—"),
+            device.and_then(|device| device.firmware_label()).as_deref().unwrap_or("—"),
             self.firmware.as_ref().map_or("—", |firmware| firmware.build.as_str()),
             device.and_then(|device| device.voice.as_deref()).unwrap_or("—"),
         )

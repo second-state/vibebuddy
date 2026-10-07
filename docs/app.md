@@ -93,7 +93,7 @@ New events the device protocol needs (a draft, to be written into `protocol.md` 
 
 The app bundles the matching firmware trio (bootloader, partition table, app). A Release build requires them in `firmware/build` and fails with a prompt to build the firmware first if they're missing; a Debug build can go without them, in which case the Device tab hides "Update".
 
-Versions are compared by hash only: if they differ, "Update to bundled version" is shown, with no judgment of newer or older, and a `-dirty` build is shown as is. The firmware has no semantic version number; adding one would just be something else to maintain.
+Versions are compared by hash only: if they differ, "Update to bundled version" is shown, with no judgment of newer or older, and a `-dirty` build is shown as is. The firmware now reports a version too (ADR-0010), shown ahead of the build ID; comparing by it comes with the update manifest (#57).
 
 Flow: confirm → daemon releases the serial port → espflash flashes (automatically no-stub over the bridge) → box restarts → reconnect, with progress visible throughout. On failure it offers a retry and a fallback instruction to "hold K0 and replug the cable". Updates don't erase the `voices` and `nvs` partitions, so changing firmware keeps the voice and today's stats. Never updates automatically.
 

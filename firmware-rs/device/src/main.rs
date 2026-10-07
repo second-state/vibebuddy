@@ -327,7 +327,7 @@ async fn main(spawner: Spawner) -> ! {
     Timer::after_millis(20).await;
 
     let seed = Rng::new().random();
-    let mut firmware = Firmware::new(seed, board.now_ms(), BUILD.as_bytes());
+    let mut firmware = Firmware::new(seed, board.now_ms(), BUILD.as_bytes(), env!("CARGO_PKG_VERSION"));
     firmware.boot(&mut board);
 
     let mut input = [0u8; 256];

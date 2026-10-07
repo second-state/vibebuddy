@@ -33,8 +33,6 @@ const DONE_TO_IDLE_MS: u32 = 5000;
 /// voice.begin waits at most this long for the line being played to finish; the longest line is under 7 seconds.
 const AUDIO_DRAIN_MS: u32 = 10000;
 
-pub const FIRMWARE_NAME: &str = "vibebuddy-fw 0.1.0";
-
 /// Result of audio init: the codec model (ES8311 or NS4168) on success, or the step it got
 /// stuck at on failure. Either is reported to the Mac as is.
 pub type AudioStatus = Result<&'static str, &'static str>;
@@ -90,6 +88,8 @@ pub struct Firmware {
     volume: u32,
     audio_ready: bool,
     build: Vec<u8>,
+    /// The firmware version, which orders releases (ADR-0010); the build ID only identifies the exact build.
+    version: alloc::string::String,
     /// The Mac side's build stamp, from the heartbeat. Kept when the link drops: which version was
     /// connected last is exactly what's worth knowing then.
     daemon_build: Vec<u8>,
@@ -183,7 +183,7 @@ fn occasion_label(occasion: Occasion) -> &'static str {
 }
 
 impl Firmware {
-    pub fn new(seed: u32, now_ms: u32, build: &[u8]) -> Self {
+    pub fn new(seed: u32, now_ms: u32, build: &[u8], version: &str) -> Self {
         Self {
             pomodoro: Pomodoro::new(),
             leisure: Leisure::new(seed, now_ms),
@@ -195,6 +195,7 @@ impl Firmware {
             volume: VOLUME_DEFAULT,
             audio_ready: false,
             build: build.to_vec(),
+            version: version.into(),
             daemon_build: Vec::new(),
             line: Vec::with_capacity(LINE_BUFFER_BYTES),
             discarding: false,
@@ -256,6 +257,7 @@ impl Firmware {
         } else {
             Self::write_literal(board, "DISPLAY ERROR\n");
         }
+        Self::write_value_line(board, "FIRMWARE VERSION ", self.version.as_bytes());
 
         let voices_region = find_partition(board.flash(), "voices");
         match self.voices.init(board.flash(), voices_region) {
@@ -283,7 +285,8 @@ impl Firmware {
         }
 
         self.last_message_ms = board.now_ms();
-        Self::write_value_line(board, "READY ", FIRMWARE_NAME.as_bytes());
+        board.write(b"READY vibebuddy-fw ");
+        Self::write_value_line(board, "", self.version.as_bytes());
     }
 
     /// Bytes received on the serial port; both UART and USB feed in here.
@@ -925,10 +928,10 @@ impl Firmware {
         }
     }
 
-    /// Reports the device's whole static state: firmware build, mode, voice and volume. Both
-    /// boot and hello go through here.
+    /// Reports the device's whole static state: firmware build and version, mode, voice and volume.
     fn announce_state<B: Board>(&self, board: &mut B) {
         Self::write_value_line(board, "DISPLAY READY BUILD ", &self.build);
+        Self::write_value_line(board, "FIRMWARE VERSION ", self.version.as_bytes());
         Self::write_value_line(board, "MODE ", self.display.mode().name().as_bytes());
         Self::write_value_line(board, "VOICES ", self.voices.current_id().as_bytes());
         self.announce_volume(board);

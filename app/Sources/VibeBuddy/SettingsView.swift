@@ -338,7 +338,7 @@ struct DeviceView: View {
                 if model.daemonAlive, !connected, !model.operationRunning, model.operation?.state != .replug {
                     BoxNotFoundHelp()
                 }
-                LabeledContent("Box firmware", value: model.status?.device.firmwareBuild ?? "—")
+                LabeledContent("Box firmware", value: model.boxFirmware ?? "—")
                 LabeledContent("Bundled with app", value: model.bundledFirmwareBuild ?? String(localized: "This build has no bundled firmware"))
                 if model.firmwareUpdateAvailable {
                     Button("Update to bundled version") { confirmUpdate() }
@@ -410,8 +410,9 @@ struct DeviceView: View {
         }
         let alert = NSAlert()
         alert.messageText = String(localized: "Flash this firmware?")
-        let current = model.status?.device.firmwareBuild ?? String(localized: "unknown")
-        alert.informativeText = String(localized: "Firmware package: \(package.build)\nBox now: \(current)\nThe box restarts once; its voice pack and today's stats are kept. Over the UART bridge this takes a few minutes.")
+        let current = model.boxFirmware ?? String(localized: "unknown")
+        let offered = Firmware.label(version: package.version, build: package.build) ?? package.build
+        alert.informativeText = String(localized: "Firmware package: \(offered)\nBox now: \(current)\nThe box restarts once; its voice pack and today's stats are kept. Over the UART bridge this takes a few minutes.")
         alert.addButton(withTitle: String(localized: "Flash"))
         alert.addButton(withTitle: String(localized: "Cancel"))
         if alert.runModal() == .alertFirstButtonReturn { model.flashFirmware(package) }
@@ -506,7 +507,7 @@ struct AdvancedView: View {
         let summary = """
         App \(Resources.displayVersion)
         daemon \(model.status?.daemon.build ?? "not connected")
-        firmware \(model.status?.device.firmwareBuild ?? "—")
+        firmware \(model.boxFirmware ?? "—")
         bundled firmware \(model.bundledFirmwareBuild ?? "—")
         voice \(model.status?.device.voice ?? "—")
         """

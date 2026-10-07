@@ -9,6 +9,15 @@ public enum Firmware {
         return first.isEmpty ? nil : first
     }
 
+    /// How a firmware is shown: version first, then the build ID; firmware older than ADR-0010 has only the build.
+    public static func label(version: String?, build: String?) -> String? {
+        switch (version, build) {
+        case let (version?, build?): return "\(version) · \(build)"
+        case let (version?, nil): return version
+        case let (nil, build): return build
+        }
+    }
+
     /// An update is available only when a bundled version exists and differs from the box's; no nagging before the box reports its build.
     public static func updateAvailable(device: String?, bundled: String?) -> Bool {
         guard let deviceHash = hash(of: device), let bundledHash = hash(of: bundled) else { return false }
