@@ -33,6 +33,5 @@ package() {
   install -Dm644 share/vibebuddy.svg -t "${pkgdir}/usr/share/icons/hicolor/scalable/apps/"
   install -Dm644 share/70-vibebuddy.rules -t "${pkgdir}/usr/lib/udev/rules.d/"
   install -Dm644 share/voices/*.bin -t "${pkgdir}/usr/share/vibebuddy/voices/"
-  install -Dm644 share/firmware/{bootloader.bin,partition-table.bin,vibebuddy-fw.bin,build.txt} -t "${pkgdir}/usr/share/vibebuddy/firmware/"
   install -Dm644 licenses/* -t "${pkgdir}/usr/share/licenses/${pkgname}/"
 }

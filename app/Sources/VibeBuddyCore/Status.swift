@@ -8,14 +8,17 @@ public struct Status: Codable, Equatable {
     public var hooks: HooksSeen
     public var operation: DeviceOperation?
     public var config: DaemonConfig
+    /// What the update manifest offers (ADR-0010); absent from older daemons.
+    public var updates: UpdateStatus?
 
-    public init(daemon: DaemonInfo, device: DeviceState, today: TodaySummary, hooks: HooksSeen, operation: DeviceOperation?, config: DaemonConfig) {
+    public init(daemon: DaemonInfo, device: DeviceState, today: TodaySummary, hooks: HooksSeen, operation: DeviceOperation?, config: DaemonConfig, updates: UpdateStatus? = nil) {
         self.daemon = daemon
         self.device = device
         self.today = today
         self.hooks = hooks
         self.operation = operation
         self.config = config
+        self.updates = updates
     }
 }
 
@@ -74,8 +77,50 @@ public struct DeviceOperation: Codable, Equatable {
 public struct DaemonConfig: Codable, Equatable {
     public var voice: String?
     public var notifyLink: Bool
-    enum CodingKeys: String, CodingKey { case voice, notifyLink = "notify_link" }
-    public init(voice: String? = nil, notifyLink: Bool = true) { self.voice = voice; self.notifyLink = notifyLink }
+    /// nil follows the build: on in releases CI makes, off when built from source.
+    public var checkUpdates: Bool?
+    enum CodingKeys: String, CodingKey { case voice, notifyLink = "notify_link", checkUpdates = "check_updates" }
+    public init(voice: String? = nil, notifyLink: Bool = true, checkUpdates: Bool? = nil) {
+        self.voice = voice; self.notifyLink = notifyLink; self.checkUpdates = checkUpdates
+    }
+}
+
+/// The daemon's view of updates, from the signed update manifest.
+public struct UpdateStatus: Codable, Equatable {
+    /// Checks run: switched on, and the build knows where to check.
+    public var enabled: Bool
+    public var lastCheck: Date?
+    public var error: String?
+    /// A newer App for this platform.
+    public var app: AppOffer?
+    /// This App is older than the oldest one still supported.
+    public var unsupportedApp: Bool
+    /// The newest firmware this App can run.
+    public var firmware: FirmwareOffer?
+    enum CodingKeys: String, CodingKey { case enabled, lastCheck = "last_check", error, app, unsupportedApp = "unsupported_app", firmware }
+    public init(enabled: Bool, lastCheck: Date? = nil, error: String? = nil, app: AppOffer? = nil, unsupportedApp: Bool = false, firmware: FirmwareOffer? = nil) {
+        self.enabled = enabled; self.lastCheck = lastCheck; self.error = error; self.app = app; self.unsupportedApp = unsupportedApp; self.firmware = firmware
+    }
+}
+
+public struct AppOffer: Codable, Equatable {
+    public var version: String
+    public var url: String
+    public var notes: [String: String]
+    public init(version: String, url: String, notes: [String: String]) { self.version = version; self.url = url; self.notes = notes }
+}
+
+public struct FirmwareOffer: Codable, Equatable {
+    public var version: String
+    public var notes: [String: String]
+    /// The unpacked images once the daemon has downloaded and checked them.
+    public var directory: String?
+    /// The connected box runs something older, unversioned or a dirty build; never set for a downgrade.
+    public var newerThanBox: Bool
+    enum CodingKeys: String, CodingKey { case version, notes, directory, newerThanBox = "newer_than_box" }
+    public init(version: String, notes: [String: String], directory: String? = nil, newerThanBox: Bool) {
+        self.version = version; self.notes = notes; self.directory = directory; self.newerThanBox = newerThanBox
+    }
 }
 
 public enum StatusCoding {

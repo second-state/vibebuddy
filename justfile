@@ -15,7 +15,7 @@ test-firmware:
     cargo test -p vibebuddy-firmware-core
     tools/compare-display.sh
 
-# Build the Rust firmware images into firmware-rs/device/build (needed for a Release app bundle); FAST_CLOCK=1 builds the acceptance-test variant
+# Build the Rust firmware images into firmware-rs/device/build (for flashing by hand or a firmware release); FAST_CLOCK=1 builds the acceptance-test variant
 firmware:
     tools/build-firmware.sh
 
@@ -81,3 +81,28 @@ release version:
     git tag -a "v${v}" -m "Vibe Buddy v${v}"
     git push -q origin main "v${v}"
     echo "pushed v${v}; CI will notarize and publish the Release: gh run watch"
+
+# Cut a firmware release: just release-firmware 0.3.3 → bump firmware-rs/device/Cargo.toml, commit, tag firmware-v0.3.3, push; CI publishes it and rebuilds the update manifest
+release-firmware version:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    v="{{version}}"
+    [[ "${v}" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "version must look like 0.3.3, without a leading v" >&2; exit 2; }
+    [[ "$(git branch --show-current)" == "main" ]] || { echo "releases are cut from main only" >&2; exit 2; }
+    [[ -z "$(git status --porcelain)" ]] || { echo "working tree is not clean" >&2; exit 2; }
+    git fetch -q origin main
+    [[ "$(git rev-parse HEAD)" == "$(git rev-parse origin/main)" ]] || { echo "local main differs from origin/main" >&2; exit 2; }
+    ! git rev-parse -q --verify "refs/tags/firmware-v${v}" >/dev/null || { echo "firmware-v${v} already exists" >&2; exit 2; }
+    # The notes say what the firmware does, and their front matter names the oldest App it runs with: the update
+    # manifest offers it only to that App or newer.
+    notes="docs/releases/firmware-v${v}.md"
+    [[ -s "${notes}" ]] || { echo "write ${notes} (front matter with min_app, then what this firmware does) and commit it first" >&2; exit 2; }
+    sed -n '2,/^---$/p' "${notes}" | grep -q '^min_app: [0-9]*\.[0-9]*\.[0-9]*$' \
+        || { echo "${notes} must start with ---, min_app: X.Y.Z, ---" >&2; exit 2; }
+    perl -pi -e 'BEGIN{$new=shift} s/^version = ".*"/version = "$new"/ && ($done++) unless $done' "${v}" firmware-rs/device/Cargo.toml
+    RUSTUP_TOOLCHAIN=stable cargo update --manifest-path firmware-rs/device/Cargo.toml -p vibebuddy-firmware --offline -q
+    git add firmware-rs/device/Cargo.toml firmware-rs/device/Cargo.lock
+    git commit -q -m "release: firmware-v${v}"
+    git tag -a "firmware-v${v}" -m "Vibe Buddy firmware v${v}"
+    git push -q origin main "firmware-v${v}"
+    echo "pushed firmware-v${v}; CI will build and publish it: gh run watch"

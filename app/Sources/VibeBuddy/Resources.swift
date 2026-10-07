@@ -1,7 +1,8 @@
 import Foundation
 import VibeBuddyCore
 
-/// Where things live in the app bundle: the two helpers, the three firmware images, the voice packs.
+/// Where things live in the app bundle: the two helpers and the voice packs. Firmware isn't bundled; the daemon
+/// downloads it (ADR-0010).
 enum Resources {
     /// Semantic version, reported to the device with the heartbeat.
     static var bundleVersion: String {
@@ -15,6 +16,9 @@ enum Resources {
 
     static var displayVersion: String { "\(bundleVersion) (\(bundleBuild))" }
 
+    /// Where every release lives, for downloading firmware by hand when the daemon can't.
+    static let releasesPage = URL(string: "https://github.com/second-state/vibebuddy/releases")!
+
     static var macOSDirectory: URL {
         Bundle.main.executableURL!.deletingLastPathComponent()
     }
@@ -24,25 +28,6 @@ enum Resources {
 
     static var resourcesDirectory: URL {
         Bundle.main.resourceURL ?? macOSDirectory
-    }
-
-    static var firmwareDirectory: URL { resourcesDirectory.appendingPathComponent("firmware") }
-
-    /// Build ID of the bundled firmware (written by the bundling script); nil when no firmware is bundled.
-    static var bundledFirmwareBuild: String? {
-        let url = firmwareDirectory.appendingPathComponent("build.txt")
-        guard let text = try? String(contentsOf: url, encoding: .utf8) else { return nil }
-        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        return trimmed.isEmpty ? nil : trimmed
-    }
-
-    static var firmwareFiles: (bootloader: URL, partitionTable: URL, app: URL)? {
-        let bootloader = firmwareDirectory.appendingPathComponent("bootloader.bin")
-        let table = firmwareDirectory.appendingPathComponent("partition-table.bin")
-        let app = firmwareDirectory.appendingPathComponent("vibebuddy-fw.bin")
-        let manager = FileManager.default
-        guard [bootloader, table, app].allSatisfy({ manager.fileExists(atPath: $0.path) }) else { return nil }
-        return (bootloader, table, app)
     }
 
     static func voicePackURL(_ id: String) -> URL {

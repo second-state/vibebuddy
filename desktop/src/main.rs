@@ -83,6 +83,9 @@ enum Message {
     WindowClosed(window::Id),
     Tab(Tab),
     NotifyLink(bool),
+    CheckUpdates(bool),
+    CheckForUpdatesNow,
+    OpenReleases,
     PickLanguage(UiLanguage),
     SwitchVoice(bool),
     /// Restart now (true) or later (false) to apply the picked language.
@@ -134,7 +137,6 @@ struct App {
     screenshot_busy: bool,
     /// Installed alongside the app; read once, since only reinstalling changes them.
     voices: Vec<assets::Voice>,
-    firmware: Option<assets::Firmware>,
     /// The firmware update waits for a second click, since the box restarts.
     confirm_firmware: bool,
     /// The outcome of the last action, shown at the bottom of the window.
@@ -169,7 +171,6 @@ impl App {
             screenshot: None,
             screenshot_busy: false,
             voices: assets::voices(),
-            firmware: assets::firmware(),
             confirm_firmware: false,
             notice: None,
             language: UiLanguage::saved(),
@@ -283,6 +284,17 @@ impl App {
                 config.notify_link = enabled;
                 return Task::perform(client::put_config(config), Message::ConfigSaved);
             }
+            Message::CheckUpdates(enabled) => {
+                let mut config = self.status.as_ref().map(|status| status.config.clone()).unwrap_or_default();
+                config.check_updates = Some(enabled);
+                return Task::perform(client::put_config(config), Message::ConfigSaved);
+            }
+            Message::CheckForUpdatesNow => return Task::perform(client::check_for_updates(), Message::Done),
+            Message::OpenReleases => {
+                if let Err(error) = launch("xdg-open", &[std::ffi::OsStr::new(RELEASES_PAGE)]) {
+                    self.notice = Some(Err(error));
+                }
+            }
             Message::PickLanguage(choice) => {
                 if choice == self.language {
                     return Task::none();
@@ -348,8 +360,8 @@ impl App {
             Message::AskFirmwareUpdate(asking) => self.confirm_firmware = asking,
             Message::FlashFirmware => {
                 self.confirm_firmware = false;
-                if let Some(firmware) = self.firmware.clone() {
-                    return Task::perform(client::flash_firmware(firmware), Message::Done);
+                if let Some(directory) = self.updates().and_then(status::Updates::firmware_directory) {
+                    return Task::perform(client::flash_firmware(directory.to_path_buf()), Message::Done);
                 }
             }
             Message::TakeScreenshot => {
@@ -449,23 +461,71 @@ impl App {
         container(content).width(Length::Fill).height(Length::Fill).into()
     }
 
+    fn updates(&self) -> Option<&status::Updates> {
+        self.status.as_ref()?.updates.as_ref()
+    }
+
     fn general(&self) -> Element<'_, Message> {
         let notify = self.status.as_ref().is_none_or(|status| status.config.notify_link);
         let menu = MenuState::derive(self.status.as_ref());
-        column![
-            text(menu.device_line),
-            text(menu.mode_line),
-            text(menu.today_line),
-            space().height(8),
-            toggler(notify)
-                .label(tr("Notify me when the box disconnects or the daemon fails", &[]))
-                .on_toggle_maybe(self.status.is_some().then_some(Message::NotifyLink)),
-            space().height(8),
-            row![text(tr("Language", &[])), pick_list(UiLanguage::ALL, Some(self.language), Message::PickLanguage)]
-                .spacing(12)
+        let updates = self.updates();
+        let enabled = updates.is_some_and(|updates| updates.enabled);
+        let check = self
+            .status
+            .as_ref()
+            .and_then(|status| status.config.check_updates)
+            .unwrap_or(enabled);
+        let summary = match updates {
+            Some(updates) if updates.enabled => match (&updates.error, &updates.app, &updates.last_check) {
+                (Some(error), _, _) => tr("Last check failed: %@", &[error]),
+                (None, Some(app), _) => tr("Vibe Buddy %@ is available", &[&app.version]),
+                (None, None, Some(_)) => tr("Up to date", &[]),
+                (None, None, None) => tr("Not checked yet", &[]),
+            },
+            _ => tr("Off", &[]),
+        };
+        // No self-update here: a new release is installed by rerunning its install.sh, as the README says.
+        let upgrade = updates.and_then(|updates| updates.app.as_ref()).map(|_| {
+            text(tr("To upgrade, download the new release and run its install.sh again.", &[])).size(13)
+        });
+        let unsupported = updates.filter(|updates| updates.unsupported_app).map(|_| {
+            text(tr("This version of Vibe Buddy is no longer supported. Update it to keep getting firmware for the box.", &[]))
+                .style(text::warning)
+        });
+        column![]
+            .push(unsupported)
+            .push(text(menu.device_line))
+            .push(text(menu.mode_line))
+            .push(text(menu.today_line))
+            .push(space().height(8))
+            .push(
+                toggler(notify)
+                    .label(tr("Notify me when the box disconnects or the daemon fails", &[]))
+                    .on_toggle_maybe(self.status.is_some().then_some(Message::NotifyLink)),
+            )
+            .push(
+                toggler(check)
+                    .label(tr("Check for updates", &[]))
+                    .on_toggle_maybe(self.status.is_some().then_some(Message::CheckUpdates)),
+            )
+            .push(
+                row![
+                    text(summary).size(13),
+                    space::horizontal(),
+                    button(text(tr("Check now", &[]))).on_press_maybe(enabled.then_some(Message::CheckForUpdatesNow)),
+                    button(text(tr("Releases", &[]))).style(button::secondary).on_press(Message::OpenReleases),
+                ]
+                .spacing(8)
                 .align_y(iced::Alignment::Center),
-        ]
-        .push(self.restart_offer.as_ref().map(|offer| self.restart_prompt(offer)))
+            )
+            .push(upgrade)
+            .push(space().height(8))
+            .push(
+                row![text(tr("Language", &[])), pick_list(UiLanguage::ALL, Some(self.language), Message::PickLanguage)]
+                    .spacing(12)
+                    .align_y(iced::Alignment::Center),
+            )
+            .push(self.restart_offer.as_ref().map(|offer| self.restart_prompt(offer)))
         .spacing(8)
         .into()
     }
@@ -597,21 +657,38 @@ impl App {
         };
         let firmware = device.and_then(|device| device.firmware_label()).unwrap_or_else(|| "—".to_owned());
         let online = device.is_some_and(|device| device.connected);
-        let bundled = self
-            .firmware
-            .as_ref()
-            .map(|firmware| firmware.build.clone())
-            .unwrap_or_else(|| tr("This build has no bundled firmware", &[]));
+        let updates = self.updates();
+        let offer = updates.and_then(|updates| updates.firmware.as_ref());
+        let latest = offer.map_or_else(|| "—".to_owned(), |offer| offer.version.clone());
+        let downloaded = updates.and_then(status::Updates::firmware_directory).is_some();
         let operation = self.status.as_ref().and_then(|status| status.operation.as_ref());
         let busy = operation.is_some_and(status::Operation::running);
-        let outdated = status::firmware_update_available(
-            device.and_then(|device| device.firmware_build.as_deref()),
-            self.firmware.as_ref().map(|firmware| firmware.build.as_str()),
-        );
+        let outdated = updates.is_some_and(status::Updates::firmware_update_available);
         // The daemon judged the box to run other firmware: a factory box, Muse, or one held in download mode with K0.
-        let foreign = online
-            && device.is_some_and(|device| device.foreign_firmware && device.firmware_build.is_none())
-            && self.firmware.is_some();
+        let other_firmware = online && device.is_some_and(|device| device.foreign_firmware && device.firmware_build.is_none());
+        let foreign = other_firmware && downloaded;
+        // Firmware is wanted (a factory box, or a newer one exists) but isn't on disk yet: say why, and what else works.
+        let unavailable = ((other_firmware || offer.is_some_and(|offer| offer.newer_than_box)) && !downloaded).then(|| {
+            let reason = match updates {
+                Some(updates) if updates.enabled => match (&updates.error, offer) {
+                    (Some(error), _) => tr("Couldn't get the firmware: %@", &[error]),
+                    (None, Some(_)) => tr("Downloading the firmware…", &[]),
+                    (None, None) => tr("Looking for firmware…", &[]),
+                },
+                _ => tr("Update checks are off, so Vibe Buddy can't download firmware.", &[]),
+            };
+            column![
+                text(reason).size(13),
+                text(tr("Or download the firmware zip yourself and use Flash from file… on the Device tab:", &[])).size(13),
+                row![
+                    button(text(tr("Check again", &[])))
+                        .on_press_maybe(updates.is_some_and(|updates| updates.enabled).then_some(Message::CheckForUpdatesNow)),
+                    button(text(tr("Releases", &[]))).style(button::secondary).on_press(Message::OpenReleases),
+                ]
+                .spacing(8),
+            ]
+            .spacing(4)
+        });
         // Either offer asks once more before flashing, since the box restarts.
         let confirm = |title: String, detail: String, action: String| -> Element<'_, Message> {
             column![
@@ -647,15 +724,21 @@ impl App {
                 .into(),
             ),
             (false, true, true) => Some(confirm(
-                tr("Update the box firmware?", &[]),
-                tr(
-                    "The box restarts once; its voice pack and today's stats are kept. Over the UART bridge this takes a few minutes.",
-                    &[],
-                ),
+                tr("Update the box firmware to %@?", &[&latest]),
+                {
+                    let restart = tr(
+                        "The box restarts once; its voice pack and today's stats are kept. Over the UART bridge this takes a few minutes.",
+                        &[],
+                    );
+                    match offer.and_then(|offer| offer.notes(i18n::is_chinese())) {
+                        Some(notes) => format!("{notes}\n\n{restart}"),
+                        None => restart,
+                    }
+                },
                 tr("Update", &[]),
             )),
             (false, true, false) => Some(
-                button(text(tr("Update to bundled version", &[])))
+                button(text(tr("Update to %@", &[&latest])))
                     .on_press_maybe((!busy).then_some(Message::AskFirmwareUpdate(true)))
                     .into(),
             ),
@@ -667,7 +750,7 @@ impl App {
                     text(tr("Before retrying, hold K0 on the box and replug the cable to put it in download mode.", &[]))
                         .size(13),
                     button(text(tr("Retry", &[])))
-                        .on_press_maybe((online && self.firmware.is_some()).then_some(Message::FlashFirmware)),
+                        .on_press_maybe((online && downloaded).then_some(Message::FlashFirmware)),
                 ]
                 .spacing(8)
             });
@@ -706,8 +789,9 @@ impl App {
         column![row![text(tr("Link", &[])).width(140), text(link)].spacing(12)]
             .push(not_found)
             .push(row![text(tr("Box firmware", &[])).width(140), text(firmware)].spacing(12))
-            .push(row![text(tr("Bundled with app", &[])).width(140), text(bundled)].spacing(12))
+            .push(row![text(tr("Latest firmware", &[])).width(140), text(latest)].spacing(12))
             .push(update)
+            .push(unavailable)
             .push(flashing)
             .push(column![
                 button(text(tr("Make the box blink", &[]))).on_press_maybe(online.then_some(Message::Identify)),
@@ -761,11 +845,11 @@ impl App {
     fn diagnostics_summary(&self) -> String {
         let device = self.status.as_ref().map(|status| &status.device);
         format!(
-            "App {}\ndaemon {}\nfirmware {}\nbundled firmware {}\nvoice {}\n",
+            "App {}\ndaemon {}\nfirmware {}\noffered firmware {}\nvoice {}\n",
             env!("CARGO_PKG_VERSION"),
             self.status.as_ref().map_or("not connected", |status| status.daemon.build.as_str()),
             device.and_then(|device| device.firmware_label()).as_deref().unwrap_or("—"),
-            self.firmware.as_ref().map_or("—", |firmware| firmware.build.as_str()),
+            self.updates().and_then(|updates| updates.firmware.as_ref()).map_or("—", |offer| offer.version.as_str()),
             device.and_then(|device| device.voice.as_deref()).unwrap_or("—"),
         )
     }
@@ -807,6 +891,9 @@ async fn export_diagnostics(summary: String, config: Option<Config>) -> Result<S
     launch("xdg-open", &[target.as_os_str()])?;
     Ok(tr("Saved to %@", &[&target.display()]))
 }
+
+/// Where every release lives: the new App, and the firmware zip for flashing by hand when the daemon can't get it.
+const RELEASES_PAGE: &str = "https://github.com/second-state/vibebuddy/releases";
 
 /// The daemon's XDG directories (see `daemon/src/config.rs`), where it keeps state and config and the hook its log.
 fn state_dir() -> Option<std::path::PathBuf> {

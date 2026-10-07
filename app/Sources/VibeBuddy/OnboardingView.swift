@@ -89,8 +89,8 @@ struct OnboardingView: View {
                 // Factory box: the serial port is there but the firmware isn't ours. Flashing uses the same path as an upgrade.
                 Label("Found a box (\(device.port ?? "")), but it isn't running Vibe Buddy firmware.", systemImage: "exclamationmark.triangle")
                     .foregroundStyle(.orange)
-                if model.bundledFirmwareBuild == nil {
-                    Text("This build has no bundled firmware, so it can't flash the box.").font(.caption).foregroundStyle(.secondary)
+                if !model.firmwareDownloaded {
+                    FirmwareUnavailable(model: model)
                 } else {
                     Button("Flash Vibe Buddy firmware") { FlashConfirm.foreign(then: model.updateFirmware) }
                     Text("This erases the box's current firmware and data for good. If the native USB port doesn't find the box, use its UART port instead.")

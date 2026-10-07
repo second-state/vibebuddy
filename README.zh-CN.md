@@ -58,7 +58,7 @@ Vibe Buddy 是给 AI 编程 Agent 配的桌面宠物。它住在键盘旁一个�
    - 挑一个播报音色写进盒子；
    - 设置登录时启动。
 
-之后 Vibe Buddy 住在菜单栏，随时再打开一次 App 就能调出设置：图标告诉你盒子在不在线、什么模式、今天干了多少。设置窗有五页：通用（含界面语言）、声音、接入、设备（固件更新、截图）、高级。盒子上的固件与 App 附带的不一致时，设置 → 设备会提供更新。
+之后 Vibe Buddy 住在菜单栏，随时再打开一次 App 就能调出设置：图标告诉你盒子在不在线、什么模式、今天干了多少。设置窗有五页：通用（含界面语言）、声音、接入、设备（固件更新、截图）、高级。固件单独发布：有 App 能运行的新固件时，Vibe Buddy 会自动下载，设置 → 设备会提示更新盒子，由你确认。
 
 Release 若还没签名，macOS 会拦下第一次打开，到「系统设置 → 隐私与安全性」里放行即可。
 
@@ -79,9 +79,9 @@ cd vibebuddy/packaging/aur/vibebuddy-bin && makepkg -si
 systemctl --user enable --now vibebuddyd && vibebuddy-hook install
 ```
 
-等 AUR 重新开放注册后，它会以 `vibebuddy-bin` 上架。想从源码编译的话，在装好 Rust 工具链和 python3 的仓库里运行 `packaging/linux/install.sh`，它会编译所有程序，并从 GitHub 下载这个版本的固件。两种方式都一样：脚本把程序装进 `~/.local/bin`，把 `vibebuddyd` 注册成 systemd 用户服务，把 Vibe Buddy App 放进启动器并设为登录时启动，再给本机有的 Claude Code 和 Codex 加上 Hook（Codex 之后需要你在 `/hooks` 里信任它们）。升级时重新运行即可。daemon 要在 `/dev/ttyACM*` 所属的组里（Arch 是 `uucp`，Debian 和 Ubuntu 是 `dialout`），不在的话脚本会提示。配置放在 `~/.config/vibebuddy`，统计放在 `~/.local/state/vibebuddy`；盒子断开 30 秒后会通过 `notify-send` 弹一条桌面通知。
+等 AUR 重新开放注册后，它会以 `vibebuddy-bin` 上架。想从源码编译的话，在装好 Rust 工具链的仓库里运行 `packaging/linux/install.sh`，它会编译所有程序。两种方式都一样：脚本把程序装进 `~/.local/bin`，把 `vibebuddyd` 注册成 systemd 用户服务，把 Vibe Buddy App 放进启动器并设为登录时启动，再给本机有的 Claude Code 和 Codex 加上 Hook（Codex 之后需要你在 `/hooks` 里信任它们）。升级时重新运行即可。daemon 要在 `/dev/ttyACM*` 所属的组里（Arch 是 `uucp`，Debian 和 Ubuntu 是 `dialout`），不在的话脚本会提示。配置放在 `~/.config/vibebuddy`，统计放在 `~/.local/state/vibebuddy`；盒子断开 30 秒后会通过 `notify-send` 弹一条桌面通知。
 
-在 Hyprland 上，K2 会切回会话所在的终端窗口，不管它在哪个工作区；跑在 tmux 里或通过 SSH 的会话没有窗口可回。App 是一个托盘图标（氛围小助手的脸，点一下打开设置）加一个设置窗口，标签页和 Mac 版一样。它从 Omarchy 主题取配色和字体，切换主题时会跟着变。它只是个客户端：退出它，daemon 和盒子照常在线。设备页点「刷新」能看到盒子当前的屏幕，「保存图片」会存进你的图片文件夹。声音页列出脚本生成的音色包，选中的会写进盒子；盒子上的固件和这个版本不同时，设备页会提供更新，固件由脚本下载并按 GitHub 记录的 sha256 校验。首次启动会打开设置窗口，App 运行时再次启动它也会打开；没有单独的首次引导，那些事脚本已经做了。Omarchy 把托盘图标收在状态栏箭头后面的抽屉里，所以 App 第一次运行时会把它的脸固定（Pin）到状态栏上；之后你在那里（右键那个箭头）取消固定或隐藏它，App 不会再改回来。和 Mac 版一样，可以在「通用 → 语言」里改用和系统不同的语言。想让设置窗口在 Omarchy 上浮动显示，在 `~/.config/hypr/hyprland.lua` 里加两行 `o.window("^vibebuddy$", { tag = "+floating-window" })` 和 `o.window("^vibebuddy$", { tag = "-default-opacity" })`（每条规则只能写一个标签：Hyprland 会把空格当成标签名的一部分）；和所有 Hyprland 窗口一样，按住 Super 拖动就能移动它。卸载时先运行 `vibebuddy-hook uninstall`，再运行 `systemctl --user disable --now vibebuddyd`，然后删掉脚本装的文件。
+在 Hyprland 上，K2 会切回会话所在的终端窗口，不管它在哪个工作区；跑在 tmux 里或通过 SSH 的会话没有窗口可回。App 是一个托盘图标（氛围小助手的脸，点一下打开设置）加一个设置窗口，标签页和 Mac 版一样。它从 Omarchy 主题取配色和字体，切换主题时会跟着变。它只是个客户端：退出它，daemon 和盒子照常在线。设备页点「刷新」能看到盒子当前的屏幕，「保存图片」会存进你的图片文件夹。声音页列出脚本生成的音色包，选中的会写进盒子；daemon 下载好更新的固件后，设备页会提供更新，和 Mac 上一样。首次启动会打开设置窗口，App 运行时再次启动它也会打开；没有单独的首次引导，那些事脚本已经做了。Omarchy 把托盘图标收在状态栏箭头后面的抽屉里，所以 App 第一次运行时会把它的脸固定（Pin）到状态栏上；之后你在那里（右键那个箭头）取消固定或隐藏它，App 不会再改回来。和 Mac 版一样，可以在「通用 → 语言」里改用和系统不同的语言。想让设置窗口在 Omarchy 上浮动显示，在 `~/.config/hypr/hyprland.lua` 里加两行 `o.window("^vibebuddy$", { tag = "+floating-window" })` 和 `o.window("^vibebuddy$", { tag = "-default-opacity" })`（每条规则只能写一个标签：Hyprland 会把空格当成标签名的一部分）；和所有 Hyprland 窗口一样，按住 Super 拖动就能移动它。卸载时先运行 `vibebuddy-hook uninstall`，再运行 `systemctl --user disable --now vibebuddyd`，然后删掉脚本装的文件。
 
 ## 工作原理
 
@@ -206,7 +206,6 @@ diff -ru .probe/baseline .probe/connected
 Mac 端是一个菜单栏 App，它把 `vibebuddyd` 与 `vibebuddy-hook` 带在身上并看管 daemon，取代了 LaunchAgent；发现旧的 LaunchAgent 会提议卸掉并接管。设计见 [`docs/app.md`](docs/app.md)。
 
 ```bash
-just firmware   # 固件三件套，Release 装包要附带；build-app.sh --debug 可以不带
 just install    # 装包、装进 /Applications 并启动
 ```
 
@@ -228,18 +227,19 @@ daemon 平时由 App 看管。没有 App 的开发机可以用 [`packaging/com.v
 
 ### 发布
 
-发布由 CI 完成，见 [`release-app`](.github/workflows/release-app.yml)：先在 Linux 上构建固件，再分别在 Apple 芯片的 runner 上构建 Mac App（用 `app/scripts/make-dmg.sh` 打成 DMG）、在 Ubuntu 22.04 上构建 Linux 包（`packaging/linux/make-tarball.sh`），两边都跑测试。
+发布由 CI 完成。App 和固件分开发布（ADR-0010）。[`release-app`](.github/workflows/release-app.yml) 分别在 Apple 芯片的 runner 上构建 Mac App（用 `app/scripts/make-dmg.sh` 打成 DMG）、在 Ubuntu 22.04 上构建 Linux 包（`packaging/linux/make-tarball.sh`），两边都跑测试。
 
-- main 上动到装包内容（`app/`、`daemon/`、`desktop/`、`hook/`、`protocol/`、`firmware/`、`voices/`、`packaging/`）的提交只出保留 7 天的 artifact 供自测。
-- 打 `vX.Y.Z` 标签才公证并发 GitHub Release，同一个 Release 里有 DMG、Linux 包和固件 zip。标签必须与 `Cargo.toml` 的 `version` 一致，否则构建失败。
+- main 上动到装包内容（`app/`、`daemon/`、`desktop/`、`hook/`、`protocol/`、`voices/`、`packaging/`）的提交只出保留 7 天的 artifact 供自测。
+- 打 `vX.Y.Z` 标签才公证并发 GitHub Release，同一个 Release 里有 DMG 和 Linux 包。标签必须与 `Cargo.toml` 的 `version` 一致，否则构建失败。
 - 发版前先写 `docs/releases/vX.Y.Z.md`：用几条要点说这个版本做了什么。它是发布说明的开头，CI 会在后面接上下载说明。旁边再放一份 `vX.Y.Z.zh-Hans.md`，App 就显示中文说明；没有时显示英文。
 - 然后发版一条命令：在干净的 main 上 `just release 0.3.0`，它检查那份文件，更新 `Cargo.toml` 和两份锁文件里的版本号，提交、打标签、推送。
-- `VibeBuddy-firmware-vX.Y.Z.zip` 是固件三件套加 `build.txt`，拿到它的人在 Mac 上的设置 → 设备「从文件刷入…」里选它即可烧进盒子。
+- [`release-firmware`](.github/workflows/release-firmware.yml) 在 Linux 上构建固件。打 `firmware-vX.Y.Z` 标签会发一个单独的 Release（不标为最新版），里面是 `VibeBuddy-firmware-vX.Y.Z.zip`：固件三件套、`build.txt`、`version.txt` 和固件自己的许可证声明。daemon 下载的就是这个 zip，任何人也可以在设置 → 设备「从文件刷入…」里选它。标签必须与 `firmware-rs/device/Cargo.toml` 的 `version` 一致。
+- 固件发版前先写 `docs/releases/firmware-vX.Y.Z.md`：开头用 front matter 写明它能配合的最低 App 版本（两行 `---` 之间写 `min_app: 0.4.0`），然后写它做了什么。`just release-firmware 0.3.3` 检查那份文件，改版本号，提交、打标签、推送。
 - Mac 出 arm64，Linux 出 x86_64。发布后怎么更新 AUR 包，见 `packaging/aur/README.md`。
 
 仓库配齐五个签名 secrets 后用 Developer ID 签名并公证，下载即可打开；没配时退回 ad-hoc 签名，首次打开要在「隐私与安全性」里放行。secrets 用 [`tools/setup-release-signing.sh`](tools/setup-release-signing.sh) 配：它带着走完申请证书、打包 p12、生成 App 专用密码，并逐项验证后写进 GitHub。
 
-每次发版后，[`update-manifest`](.github/workflows/update-manifest.yml) 会根据所有已发布的 release 重新生成并签名更新清单（ADR-0010）：每个平台最新的 App、每个固件及其所需的最低 App 版本，以及 `Cargo.toml` 里的 `min_supported_app`。固件发版的 `docs/releases/firmware-vX.Y.Z.md` 开头要用 front matter 写明这个最低版本（两行 `---` 之间写 `min_app: 0.4.0`）。签名密钥用 [`tools/setup-update-signing.sh`](tools/setup-update-signing.sh) 生成一次：私钥写进 `MANIFEST_SIGNING_KEY` secret 和 `~/.vibebuddy-signing`，公钥写进 `manifest/manifest-key.pub`，daemon 信任的就是它。
+每次发版后，[`update-manifest`](.github/workflows/update-manifest.yml) 会根据所有已发布的 release 重新生成并签名更新清单（ADR-0010）：每个平台最新的 App、每个固件及其所需的最低 App 版本，以及 `Cargo.toml` 里的 `min_supported_app`。签名密钥用 [`tools/setup-update-signing.sh`](tools/setup-update-signing.sh) 生成一次：私钥写进 `MANIFEST_SIGNING_KEY` secret 和 `~/.vibebuddy-signing`，公钥写进 `manifest/manifest-key.pub`，daemon 信任的就是它。
 
 ## 许可证
 

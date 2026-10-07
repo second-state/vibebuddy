@@ -1,5 +1,5 @@
-//! What was installed next to the app: the Character packs from `characters/`, and the firmware of the release this app
-//! belongs to. On the Mac both ride inside the app bundle. Here `install.sh` puts them in `~/.local/share/vibebuddy`
+//! What was installed next to the app: the Character packs from `characters/`. Firmware isn't installed; the daemon
+//! downloads it (ADR-0010). On the Mac the packs ride inside the app bundle. Here `install.sh` puts them in `~/.local/share/vibebuddy`
 //! and a distribution package in `/usr/share/vibebuddy`; the user's copy wins, as XDG data lookups go.
 
 use std::ffi::OsString;
@@ -106,33 +106,6 @@ fn find_voice_pack(id: &str) -> Option<PathBuf> {
 pub async fn read_voice_pack(id: &'static str) -> Result<Vec<u8>, String> {
     let path = find_voice_pack(id).ok_or_else(|| format!("no voice pack named {id} is installed"))?;
     tokio::fs::read(&path).await.map_err(|error| format!("{}: {error}", path.display()))
-}
-
-/// The three images the daemon flashes, and the build they carry ("hash date time", like the box reports).
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct Firmware {
-    pub bootloader: PathBuf,
-    pub partition_table: PathBuf,
-    pub app: PathBuf,
-    pub build: String,
-}
-
-pub fn firmware() -> Option<Firmware> {
-    data_dirs().iter().find_map(|dir| firmware_in(&dir.join("firmware")))
-}
-
-fn firmware_in(dir: &Path) -> Option<Firmware> {
-    let build = std::fs::read_to_string(dir.join("build.txt")).ok()?.trim().to_owned();
-    let firmware = Firmware {
-        bootloader: dir.join("bootloader.bin"),
-        partition_table: dir.join("partition-table.bin"),
-        app: dir.join("vibebuddy-fw.bin"),
-        build,
-    };
-    [&firmware.bootloader, &firmware.partition_table, &firmware.app]
-        .iter()
-        .all(|path| path.is_file())
-        .then_some(firmware)
 }
 
 #[cfg(test)]
