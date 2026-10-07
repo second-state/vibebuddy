@@ -5,10 +5,12 @@
 //! Coordinates, colors and frame pacing are copied from the C firmware's agent_display.c; the screens
 //! should match pixel for pixel.
 
+use alloc::boxed::Box;
 use alloc::vec::Vec;
 
 use crate::canvas::{Canvas, FRAME_BYTES, HEIGHT, WIDTH, half_bright};
 use crate::leisure::{self, Skit};
+use crate::look::{self, Look};
 use crate::pomodoro::{self, Phase, Run};
 use crate::text;
 use crate::text::{Text, truncated};
@@ -175,6 +177,8 @@ pub struct Display {
     ring_alarm_shake_frames: u32,
     /// Drawn over everything while set.
     panel: Option<Panel>,
+    /// The current Character's look; None draws the robot.
+    look: Option<Box<Look>>,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -321,6 +325,114 @@ fn draw_buddy(canvas: &mut Canvas, state: State, frame: u32, x_offset: i32, colo
     draw_pet_body(canvas, x_offset, y_offset, antenna, color, 0, 0);
     draw_pet_face(canvas, state, frame, x_offset, y_offset, color);
     draw_pet_legs(canvas, x_offset, y_offset, 0, 0);
+}
+
+/// Where a look stands: horizontally centered where the robot stands, feet just above the state label.
+const LOOK_CENTER_X: i32 = 160;
+const LOOK_BOTTOM: i32 = 156;
+
+/// What is drawn next to a look's head.
+#[derive(Clone, Copy, Default, PartialEq, Eq)]
+enum Mark {
+    #[default]
+    None,
+    /// Working: one to three dots.
+    Dots(u32),
+    /// Needs input.
+    Ask,
+    /// Asleep: a Z floating up with the frame count.
+    Z(u32),
+    /// Startled.
+    Bang,
+}
+
+#[derive(Clone, Copy)]
+struct LookPose {
+    frame: look::Frame,
+    dx: i32,
+    dy: i32,
+    mirror: bool,
+    mark: Mark,
+}
+
+impl Default for LookPose {
+    fn default() -> Self {
+        LookPose { frame: look::Frame::Normal, dx: 0, dy: 0, mirror: false, mark: Mark::None }
+    }
+}
+
+fn draw_look_pose(canvas: &mut Canvas, look: &Look, pose: &LookPose, center_x: i32, gray: bool, color: u16) {
+    let left = center_x + pose.dx - look::WIDTH * look::SCALE / 2;
+    let top = LOOK_BOTTOM + pose.dy - look::HEIGHT * look::SCALE;
+    look.draw(canvas, pose.frame, left, top, pose.mirror, gray);
+    // Marks go beside the head, not above it: above is the title.
+    let x = center_x + pose.dx + 30;
+    let y = top + look.head_row() * look::SCALE;
+    match pose.mark {
+        Mark::None => {}
+        Mark::Dots(count) => {
+            for index in 0..count as i32 {
+                canvas.fill_rect(x + index * 8, y + 16, 5, 3, color);
+            }
+        }
+        Mark::Ask => canvas.draw_text(x, y + 4, b"!?", 2, color, 2),
+        Mark::Z(frame) => canvas.draw_text(x, (y + 8 - (frame % 16) as i32).max(30), b"Z", 2, color, 1),
+        Mark::Bang => canvas.draw_text(x, y, b"!", 3, COLOR_INPUT, 1),
+    }
+}
+
+/// A look on duty: the four frames, moved and marked for the state the buddy is showing.
+fn draw_look_on_duty(canvas: &mut Canvas, look: &Look, state: State, frame: u32, center_x: i32, color: u16) {
+    let blink = if frame % 8 == 7 { look::Frame::EyesClosed } else { look::Frame::Normal };
+    let pose = match state {
+        State::Idle => match idle_mood(frame) {
+            IdleMood::Nap => LookPose { frame: look::Frame::EyesClosed, mark: Mark::Z(idle_mood_phase(frame) as u32), ..LookPose::default() },
+            IdleMood::Look => LookPose { mirror: frame % 4 < 2, ..LookPose::default() },
+            IdleMood::Stretch => LookPose { dy: -3, ..LookPose::default() },
+            IdleMood::None => LookPose { frame: blink, dy: if frame.is_multiple_of(8) { 1 } else { 0 }, ..LookPose::default() },
+        },
+        State::Working => LookPose { dx: if frame.is_multiple_of(2) { -1 } else { 1 }, mark: Mark::Dots(frame % 3 + 1), ..LookPose::default() },
+        State::InputRequired => LookPose { dy: if frame.is_multiple_of(2) { -2 } else { 0 }, mark: Mark::Ask, ..LookPose::default() },
+        State::Done => LookPose { frame: look::Frame::Happy, dy: if frame.is_multiple_of(2) { -10 } else { 0 }, ..LookPose::default() },
+        State::Failed => LookPose { frame: look::Frame::Sad, dy: 4, ..LookPose::default() },
+        State::Offline => LookPose { frame: look::Frame::EyesClosed, ..LookPose::default() },
+    };
+    draw_look_pose(canvas, look, &pose, center_x, state == State::Offline, color);
+}
+
+/// The patrol's horizontal path, shared by the robot and the looks: how far from home, whether
+/// walking, and whether heading left.
+fn patrol_path(frame: u32) -> (i32, bool, bool) {
+    let frame_i = frame as i32;
+    if frame < 24 {
+        (3 * frame_i, true, false)
+    } else if frame < 36 {
+        (72, false, false)
+    } else if frame < 72 {
+        (72 - 3 * (frame_i - 36), true, true)
+    } else if frame < 84 {
+        (-36, false, true)
+    } else {
+        (-36 + 3 * (frame_i - 84), true, false)
+    }
+}
+
+/// Hide and seek's horizontal path: off past the right edge, half back for a look, then home.
+fn hide_path(frame: u32) -> i32 {
+    let frame_i = frame as i32;
+    if frame < 12 {
+        16 * frame_i
+    } else if frame < 28 {
+        192
+    } else if frame < 36 {
+        192 - 9 * (frame_i - 28)
+    } else if frame < 52 {
+        120
+    } else if frame < 64 {
+        120 + 6 * (frame_i - 52)
+    } else {
+        192 - 12 * (frame_i - 64)
+    }
 }
 
 fn short_state_label(state: State) -> &'static [u8] {
@@ -564,7 +676,7 @@ fn skit_read(canvas: &mut Canvas, frame: u32) {
 }
 
 /// Counting stars: looks up and counts to seven, slower and slower, and falls asleep counting.
-fn skit_stars(canvas: &mut Canvas, frame: u32) {
+fn draw_stars(canvas: &mut Canvas, frame: u32) {
     const STARS: [[i32; 2]; 12] = [
         [20, 36], [48, 52], [75, 40], [100, 60], [130, 34], [200, 44],
         [230, 62], [262, 38], [290, 54], [306, 70], [170, 66], [60, 72],
@@ -574,6 +686,10 @@ fn skit_stars(canvas: &mut Canvas, frame: u32) {
             canvas.fill_rect(star[0], star[1], 2, 2, if index % 3 == 0 { COLOR_TEXT } else { COLOR_MUTED });
         }
     }
+}
+
+fn skit_stars(canvas: &mut Canvas, frame: u32) {
+    draw_stars(canvas, frame);
     let mut pose = resting_pose(frame);
     pose.gaze_y = -3;
     pose.mouth = Mouth::Flat;
@@ -673,6 +789,7 @@ impl Display {
             ring_alarm_phase: Phase::Focus,
             ring_alarm_shake_frames: 0,
             panel: None,
+            look: None,
         }
     }
 
@@ -905,6 +1022,11 @@ impl Display {
     fn skit_dream(&self, canvas: &mut Canvas, frame: u32) {
         let pose = sleeping_pose(frame);
         draw_pet_pose(canvas, &pose);
+        self.draw_dream_bubbles(canvas, frame);
+    }
+
+    /// The sleep-talk bubbles over the buddy's head, reciting today's stats.
+    fn draw_dream_bubbles(&self, canvas: &mut Canvas, frame: u32) {
         const BUBBLES: [[i32; 3]; 3] = [[176, 58, 3], [186, 50, 4], [196, 42, 5]];
         for (index, bubble) in BUBBLES.iter().enumerate() {
             if (frame / 4) % 4 > index as u32 {
@@ -921,8 +1043,46 @@ impl Display {
         canvas.draw_text(212, 43, line, 1, COLOR_TEXT, 15);
     }
 
+    /// Leisure with a Character's look: walking, resting and sleeping, the moves four still frames
+    /// can make. The skits with props are the robot's; here they become plain rest.
+    fn draw_look_skit(&self, canvas: &mut Canvas, look: &Look, skit: Skit, frame: u32) {
+        let resting = LookPose { frame: if frame % 24 == 23 { look::Frame::EyesClosed } else { look::Frame::Normal }, dy: ((frame / 8) % 2) as i32, ..LookPose::default() };
+        let sleeping = LookPose { frame: look::Frame::EyesClosed, dy: ((frame / 8) % 2) as i32, mark: Mark::Z(frame), ..LookPose::default() };
+        let pose = match skit {
+            Skit::Sleep => sleeping,
+            Skit::Dream => LookPose { mark: Mark::None, ..sleeping },
+            Skit::Patrol => {
+                let (dx, walking, left) = patrol_path(frame);
+                LookPose { dx, dy: if walking && frame % 4 >= 2 { 2 } else { 0 }, mirror: left, ..resting }
+            }
+            Skit::Hide => {
+                let dx = hide_path(frame);
+                LookPose { dx, mirror: hide_path(frame + 1) < dx, ..resting }
+            }
+            Skit::Startle => match frame {
+                24..28 => LookPose { frame: look::Frame::Normal, dy: -6, mark: Mark::Bang, ..LookPose::default() },
+                28..56 => LookPose { frame: look::Frame::Normal, mirror: (36..44).contains(&frame), ..LookPose::default() },
+                _ => sleeping,
+            },
+            Skit::Stars => {
+                draw_stars(canvas, frame);
+                if frame >= 88 { sleeping } else { LookPose { frame: look::Frame::Normal, ..LookPose::default() } }
+            }
+            Skit::Ball | Skit::Read | Skit::None => resting,
+        };
+        draw_look_pose(canvas, look, &pose, LOOK_CENTER_X, false, COLOR_READY);
+        if skit == Skit::Dream {
+            self.draw_dream_bubbles(canvas, frame);
+        }
+    }
+
     fn draw_leisure_scene(&self, canvas: &mut Canvas, scene: &Scene, view: &leisure::View) {
         let frame = view.skit_frame;
+        if let Some(look) = &self.look {
+            self.draw_look_skit(canvas, look, view.skit, frame);
+            self.draw_pomodoro_badge(canvas, scene);
+            return;
+        }
         match view.skit {
             Skit::Patrol => skit_patrol(canvas, frame),
             Skit::Ball => skit_ball(canvas, frame),
@@ -942,7 +1102,11 @@ impl Display {
             self.draw_task_cards(canvas, scene.now_ms);
         }
         let state = if self.link_lost { State::Offline } else { self.state };
-        draw_buddy(canvas, state, self.animation_frame, if self.tasks.is_empty() { 0 } else { 96 }, status_color);
+        let x_offset = if self.tasks.is_empty() { 0 } else { 96 };
+        match &self.look {
+            Some(look) => draw_look_on_duty(canvas, look, state, self.animation_frame, LOOK_CENTER_X + x_offset, status_color),
+            None => draw_buddy(canvas, state, self.animation_frame, x_offset, status_color),
+        }
         canvas.draw_text_centered(162, label, if self.state == State::InputRequired { 2 } else { 3 }, status_color);
         if !self.tasks.is_empty() {
             canvas.draw_text_centered(195, b"LATEST ON TOP", 1, COLOR_MUTED);
@@ -1153,6 +1317,17 @@ impl Display {
             self.ring_alarm_shake_frames = 0;
         }
         self.next_animation_at = scene.now_ms.wrapping_add(self.animation_period());
+        if self.ready {
+            let _ = self.render(screen, scene);
+        }
+    }
+
+    /// Wears a Character's look, or the robot with None.
+    pub fn set_look(&mut self, screen: &mut dyn Screen, scene: &Scene, look: Option<Box<Look>>) {
+        if self.look.is_none() && look.is_none() {
+            return;
+        }
+        self.look = look;
         if self.ready {
             let _ = self.render(screen, scene);
         }

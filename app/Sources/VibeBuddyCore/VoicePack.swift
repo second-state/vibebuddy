@@ -13,6 +13,8 @@ public struct VoicePack: Equatable, Sendable {
     /// A Character pack's preview: the first line of each ordinary occasion that has one, with its
     /// sample count. Empty for a voice pack.
     public var previewLines: [(bytes: Range<Int>, samples: Int)]
+    /// A Character pack's look (format version 2), if it carries one.
+    public var look: Data?
     public var data: Data
 
     public var isCharacter: Bool { !previewLines.isEmpty }
@@ -29,6 +31,7 @@ public struct VoicePack: Equatable, Sendable {
         guard let id = String(bytes: idBytes, encoding: .ascii), !id.isEmpty else { return nil }
         var clips: [Range<Int>] = []
         var previewLines: [(bytes: Range<Int>, samples: Int)] = []
+        var look: Data?
         switch data.prefix(4) {
         case Data("VBVP".utf8):
             for index in 0..<5 {
@@ -52,12 +55,18 @@ public struct VoicePack: Equatable, Sendable {
                 previewLines.append((offset..<(offset + length), samples))
             }
             guard !previewLines.isEmpty else { return nil }
+            if u32(4) == 2, u32(1012) > 0 {
+                let offset = u32(1008), length = u32(1012)
+                guard offset >= VoicePack.characterHeaderBytes, offset + length <= data.count else { return nil }
+                look = data.subdata(in: offset..<(offset + length))
+            }
         default:
             return nil
         }
         self.voiceID = id
         self.clips = clips
         self.previewLines = previewLines
+        self.look = look
         self.data = data
     }
 
@@ -126,6 +135,26 @@ enum ADPCM {
 /// The language a voice speaks its lines in, and the language the UI is shown in.
 public enum VoiceLanguage: String, Equatable, Sendable {
     case zh, en
+}
+
+/// The forms of address the buddy can call the user by, matching characters/addresses.tsv. Each is
+/// synthesized in advance for every Character of its language, so the list is fixed.
+public struct FormOfAddress: Equatable, Identifiable, Sendable {
+    public var id: String
+    /// The words spoken, shown as they are: they are the same in every UI language.
+    public var words: String
+    public var language: VoiceLanguage
+
+    public static let all: [FormOfAddress] = [
+        FormOfAddress(id: "laoban", words: "老板", language: .zh),
+        FormOfAddress(id: "dalao", words: "大佬", language: .zh),
+        FormOfAddress(id: "ge", words: "哥", language: .zh),
+        FormOfAddress(id: "jie", words: "姐", language: .zh),
+        FormOfAddress(id: "qin", words: "亲", language: .zh),
+        FormOfAddress(id: "boss", words: "boss", language: .en),
+        FormOfAddress(id: "captain", words: "captain", language: .en),
+        FormOfAddress(id: "buddy", words: "buddy", language: .en),
+    ]
 }
 
 public struct VoiceCatalogEntry: Equatable, Identifiable, Sendable {

@@ -177,7 +177,35 @@ final class AppModel: ObservableObject {
 
     func writeVoice(_ id: String) {
         guard let pack = Resources.voicePack(id) else { lastError = String(localized: "This app has no voice pack for \(id)"); return }
-        run { try await self.client.writeVoicePack(pack.data) }
+        run { try await self.client.writeVoicePack(self.addressed(pack, id: id).data) }
+    }
+
+    /// The form of address picked for a language; nil for none.
+    func formOfAddress(_ language: VoiceLanguage) -> String? {
+        UserDefaults.standard.string(forKey: "address.\(language.rawValue)")
+    }
+
+    /// Picks a form of address and, when the box wears a Character of that language, writes it again
+    /// so the box says it.
+    func setFormOfAddress(_ form: String?, for language: VoiceLanguage) {
+        UserDefaults.standard.set(form, forKey: "address.\(language.rawValue)")
+        objectWillChange.send()
+        if let current = status?.device.voice, VoiceCatalogEntry.language(ofVoice: current) == language, current != "builtin" {
+            writeVoice(current)
+        }
+    }
+
+    /// Character `id` with the user's form of address in its language, or as it is with none.
+    func addressed(_ pack: VoicePack, id: String) -> VoicePack {
+        guard let language = VoiceCatalogEntry.language(ofVoice: id), let form = formOfAddress(language),
+              let variant = Resources.addressPack(id, form: form),
+              let data = pack.withAddress(variant), let addressed = VoicePack(data: data) else { return pack }
+        return addressed
+    }
+
+    /// Writes a pack the app put together itself, such as a custom Character.
+    func writePack(_ data: Data) {
+        run { try await self.client.writeVoicePack(data) }
     }
 
     func togglePreview(_ id: String) {

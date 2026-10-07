@@ -150,6 +150,19 @@ impl Voices {
         }
     }
 
+    /// Where the current Character's look is in flash and how long it is; None for a pack without
+    /// one, an old voice pack, or while a write session is running.
+    pub fn look(&self) -> Option<(u32, u32)> {
+        let Some(Pack::Character(pack)) = self.pack.as_ref() else {
+            return None;
+        };
+        if self.session.is_some() {
+            return None;
+        }
+        let (offset, length) = pack.look?;
+        Some((self.partition?.offset + offset, length))
+    }
+
     /// The line to play for an occasion, following the occasion's fallbacks; None means the
     /// built-in line, or silence for an occasion that has none. While a write session is running it
     /// is always None: the partition is being rewritten.

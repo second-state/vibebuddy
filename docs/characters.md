@@ -27,13 +27,15 @@ An announcement speaks one line, drawn from the pool for its occasion. There are
 | `greeting_morning` | First link of the day, 05:00 to 12:00 | silence |
 | `greeting_afternoon` | First link of the day, 12:00 to 18:00 | silence |
 | `greeting_evening` | First link of the day, 18:00 to 05:00 | silence |
+| `long_session` | The first done after today's busy time passes another whole hour (up to three) | `done` |
+| `welcome_back` | The first activity after three quiet hours, on a day already greeted | silence |
 
 Rules:
 
 - **One edge, one line.** A special occasion replaces the ordinary line rather than adding a second one.
-- **The rarest wins.** When several special occasions fit the same done, late night beats first done, which beats a milestone.
+- **The rarest wins.** When several special occasions fit the same done, late night beats first done, which beats a long session, which beats a milestone.
 - **Late night is once a night**, shared between done and needs input. A night runs from 23:00 to 05:00 the next morning.
-- **The greeting follows the link, not the power.** The box restarts every time the daemon opens the serial port, so "booted" happens many times a day. The greeting fires the first time the link comes up on a local calendar day.
+- **The greeting follows the link and the work, not the power.** The box restarts every time the daemon opens the serial port, so "booted" happens many times a day; and a box left plugged in overnight never sees the link come up in the morning. The greeting fires once a local calendar day, the first time the link comes up or an Agent does something, whichever comes first. A welcome back is the same kind of line for coming back to work later in a day: an Agent doing something after three quiet hours, never right after a greeting.
 - **The buddy still never speaks up on its own.** Each special occasion rides an edge that would have made a sound anyway; the daily greeting is the one exception, and it happens once a day at the moment the user plugs in or starts working.
 - **Mute wins.** A muted box swallows every line, special or not. The daemon still counts the occasion as used.
 
@@ -51,6 +53,12 @@ Whatever the persona, every line:
 2. never mentions a session, a project or any code. The persona never sees them;
 3. never mocks the user when something fails;
 4. for `input_required` and `late_night_input`, is unmistakably a call for attention. All of a Character's needs-input lines start with the same call-out, such as "Hey".
+
+### Forms of address
+
+Some lines call the user something: 老板, 大佬, 哥, 姐 or 亲 in Chinese, boss, captain or buddy in English, or nothing. The user picks one per language in the App; every Character of that language then says it. The forms are a fixed list because every line is synthesized in advance (ADR-0007): a name the user typed would need speech synthesis at the moment they type it.
+
+A line in `lines.tsv` that can carry a form of address has `{address}` where it goes. `tools/make-character.sh` synthesizes it once without a form (the `{address}` and the comma that joins it dropped) into `pack.bin`, and once with each form of the Character's language into `address/<form>.bin`, which holds only those lines, first in their pools in row order. When it writes a Character, the App swaps the lines of the picked form in for the plain ones, so the box only ever holds one form.
 
 ### Characters at launch
 
@@ -124,12 +132,38 @@ Firmware that doesn't know `occasion` ignores it and plays the ordinary line; fi
 
 ## Phase 2: looks
 
-Phase 2 waits until phase 1 has shipped. What is settled:
+Each of the four Characters gets a look of its own; the code-drawn robot stays the built-in default Character's look, shown when the box has no Character pack.
 
-- **What a look provides.** Required animations: idle (with a blink), working, needs input, done, failed, sleeping (used both for a lost link and for the sleepy tier, told apart by the grayed screen), and walking. Optionally two or three generic moves, such as waving or a hop. The skits with props (the ball, the book, the stars) stay with the robot; other Characters spend leisure walking, sleeping and doing their generic moves.
-- **Pixel spec.** 64×64 frames drawn at 2× on screen, at most 16 colors per look. A mockup on the real screen comes first; the spec is only frozen after that.
-- **State colors.** A sprite is never recolored by state. The status bar and the task cards carry the state colors; on a lost link the whole Character is drawn gray, like the rest of the screen.
-- **The robot stays code-drawn.** It is the look built into the firmware, used whenever the pack carries none, which is the case for all four launch Characters. Only other looks are sprite sheets, drawn by a second renderer.
-- **Where looks come from.** Preset looks we make, and looks the user makes from our published sprite-sheet template and prompt with any image tool, then drops into the App. The App validates, reduces colors and converts; it never calls an image model (ADR-0009).
-- **A custom Character is a custom look.** The user picks a preset Character to lend its voice, persona and lines. Custom personas and lines come later, if ever.
-- **Storage.** The look travels inside the same Character pack, so changing Character rewrites the whole pack. The header format above gets a new version for it.
+### Four key frames, moved by the firmware
+
+A look is four still frames, not an animation: **normal**, **eyes closed**, **happy** and **sad**. The firmware does all the moving, so a look stays something an image model, or a person, can draw consistently:
+
+| What the buddy is doing | Frame | Motion and marks |
+| --- | --- | --- |
+| Idle | normal, eyes closed for a blink now and then | breathes up and down |
+| Working | normal | a slight sway, `...` above the head |
+| Needs input | normal | `!?` above the head |
+| Done | happy | hops |
+| Failed | sad | sinks a little |
+| Sleeping (lost link, sleepy tier) | eyes closed | `Z` floating up; on a lost link the whole screen is gray as before |
+| Walking (leisure) | normal | slides sideways with a bob, mirrored when turning |
+
+The skits with props (the ball, the book, the stars) stay with the robot; other Characters spend leisure walking, sleeping and resting. If four frames turn out to be too stiff, optional frames can be added on top later.
+
+### Pixel spec
+
+Each frame is **48 wide × 64 high**, drawn at 2× (96 × 128 on screen), with at most **16 colors** shared by the four frames, one of them transparent. A chibi figure is about twice as tall as it is wide; a square frame left half of it empty, and at 64 high on screen the head already reaches the title. A mockup of an image-model figure reduced to this spec on a real screenshot held up at 16 colors.
+
+### State colors
+
+A sprite is never recolored by state. The status bar and the task cards carry the state colors; on a lost link the whole Character is drawn gray, like the rest of the screen.
+
+### Where looks come from
+
+- **Preset looks.** A local image model (Qwen-Image) draws the base figure and edits it into the other three expressions; a script reduces the colors, removes the background and aligns the frames; a person approves the result. As with lines, the tool drafts and a person decides.
+- **Custom looks.** The App's Character tab takes one to four images (normal, eyes closed, happy, sad, in file name order; one image stands in for all four) on a plain white or transparent background, made with any tool; "Copy a prompt" gives a starting prompt for an image model. The App removes the background, scales and aligns the figures and reduces the colors exactly as `tools/draft-look.py` does, and writes the result as the Character `custom`. It never calls an image model (ADR-0009). The Linux app doesn't offer this yet.
+- **A custom Character is a custom look.** The user picks a preset Character to lend its voice, persona and lines.
+
+### Storage
+
+The look travels inside the same Character pack, so changing Character rewrites the whole pack (a look adds about 6 KB). The pack format gets a new version for it; packs without a look keep drawing the robot.

@@ -22,6 +22,8 @@ pub struct DeviceState {
     pub voice: Option<String>,
     /// Speaker volume (the codec's 20 to 100), stored on the device; the app is just a remote.
     pub volume: Option<u8>,
+    /// The connected port's USB serial number, which tells this device from another ESP32-S3.
+    pub usb_serial: Option<String>,
 }
 
 impl DeviceState {
@@ -29,14 +31,19 @@ impl DeviceState {
     pub fn apply(&mut self, message: &DeviceMessage) -> bool {
         let before = self.clone();
         match message {
-            DeviceMessage::Connected { port, bridge } => {
+            DeviceMessage::Connected { port, bridge, usb_serial } => {
                 self.connected = true;
                 self.port = Some(port.clone());
                 self.bridge = *bridge;
-                // A newly connected port starts with unknown identity: our firmware re-reports its build as soon as it gets hello;
-                // one that never does runs other firmware (a factory unit), and the app offers to flash it. A build id left by
-                // the previous box mustn't pass for this one.
+                // A newly connected port starts with unknown identity: our firmware re-reports its build, mode, voice and volume
+                // as soon as it gets hello; one that never does runs other firmware (a factory unit, or another ESP32-S3 product
+                // entirely), and the app offers to flash it. Nothing left by the previous device may pass for this one: on
+                // 2026-10-06 a leftover voice made another product look like the box, and it nearly got flashed.
+                self.usb_serial = usb_serial.clone();
                 self.firmware_build = None;
+                self.mode = None;
+                self.voice = None;
+                self.volume = None;
             }
             DeviceMessage::Disconnected => {
                 self.connected = false;
@@ -137,7 +144,7 @@ mod tests {
     #[test]
     fn device_state_is_read_off_the_diagnostic_lines() {
         let mut state = DeviceState::default();
-        assert!(state.apply(&DeviceMessage::Connected { port: "/dev/cu.x".to_owned(), bridge: true }));
+        assert!(state.apply(&DeviceMessage::Connected { port: "/dev/cu.x".to_owned(), bridge: true, usb_serial: None }));
         assert!(state.apply(&line("DISPLAY READY BUILD 21a8360-dirty 2026-09-16 10:23")));
         assert!(state.apply(&line("VOICES builtin")));
         assert!(state.apply(&line("MODE POMODORO")));
@@ -154,6 +161,7 @@ mod tests {
                 firmware_build: Some("21a8360-dirty 2026-09-16 10:23".to_owned()),
                 voice: Some("builtin".to_owned()),
                 volume: Some(65),
+                usb_serial: None,
             }
         );
     }
@@ -161,7 +169,7 @@ mod tests {
     #[test]
     fn disconnecting_keeps_the_last_known_firmware_and_voice() {
         let mut state = DeviceState::default();
-        state.apply(&DeviceMessage::Connected { port: "/dev/cu.x".to_owned(), bridge: true });
+        state.apply(&DeviceMessage::Connected { port: "/dev/cu.x".to_owned(), bridge: true, usb_serial: None });
         state.apply(&line("DISPLAY READY BUILD abc 2026-09-16 10:23"));
         state.apply(&line("VOICES wanwanxiaohe"));
         assert!(state.apply(&DeviceMessage::Disconnected));
@@ -175,11 +183,23 @@ mod tests {
     fn a_new_connection_forgets_the_previous_firmware_build() {
         // A different factory unit got plugged in; the previous box's build id mustn't make the app think it's ours.
         let mut state = DeviceState::default();
-        state.apply(&DeviceMessage::Connected { port: "/dev/cu.x".to_owned(), bridge: true });
+        state.apply(&DeviceMessage::Connected { port: "/dev/cu.x".to_owned(), bridge: true, usb_serial: None });
         state.apply(&line("DISPLAY READY BUILD abc 2026-09-16 10:23"));
         state.apply(&DeviceMessage::Disconnected);
-        assert!(state.apply(&DeviceMessage::Connected { port: "/dev/cu.y".to_owned(), bridge: false }));
+        assert!(state.apply(&DeviceMessage::Connected { port: "/dev/cu.y".to_owned(), bridge: false, usb_serial: None }));
         assert_eq!(state.firmware_build, None);
+    }
+
+    #[test]
+    fn a_new_connection_forgets_everything_the_previous_device_said() {
+        let mut state = DeviceState::default();
+        state.apply(&DeviceMessage::Connected { port: "/dev/cu.x".to_owned(), bridge: false, usb_serial: None });
+        for said in ["MODE DUTY", "VOICES ahu", "VOLUME 50"] {
+            state.apply(&line(said));
+        }
+        state.apply(&DeviceMessage::Disconnected);
+        state.apply(&DeviceMessage::Connected { port: "/dev/cu.y".to_owned(), bridge: false, usb_serial: None });
+        assert_eq!((state.mode.as_deref(), state.voice.as_deref(), state.volume), (None, None, None));
     }
 
     #[test]

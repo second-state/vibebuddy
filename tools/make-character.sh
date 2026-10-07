@@ -6,6 +6,11 @@
 #   2.0 voice VOLC_RESOURCE_ID=seed-tts-2.0. The API keys stay in your environment, never in the repo:
 #   VOLC_API_KEY or ELEVENLABS_API_KEY (a paid plan; the free one has no commercial license).
 # - lines.tsv has one line per row: occasion<TAB>text. Blank rows and rows starting with # are skipped.
+#   A line with {address} is said with each form of address of the Character's LANGUAGE (voice.env)
+#   from characters/addresses.tsv: pack.bin has it said with none, and address/<form>.bin holds
+#   only those lines with that form, which the App swaps in for the one the user picked. Such lines
+#   come first in their pool, in row order, in both.
+# - look.png, optional: the look sheet (see tools/make-look.py); without it the box draws the robot.
 #
 # Each line is synthesized once and cached in characters/<id>/audio/<occasion>/, named by a hash of
 # its text, so editing a few rows only re-synthesizes those; audio for rows that are gone is deleted.
@@ -39,13 +44,14 @@ mkdir -p "${audio}"
 : > "${work}/keep"
 too_long=0
 
+# synth <audio dir> <occasion> <name prefix> <text>: the prefix orders the pool (0-<row> before 1).
 synth() {
-    local occasion="$1" text="$2" name source
-    name="$(printf '%s' "${text}" | shasum -a 1 | cut -c1-10)"
-    local target="${audio}/${occasion}/${name}.pcm"
+    local into="$1" occasion="$2" prefix="$3" text="$4" name source
+    name="${prefix}-$(printf '%s' "${text}" | shasum -a 1 | cut -c1-10)"
+    local target="${into}/${occasion}/${name}.pcm"
     echo "${target}" >> "${work}/keep"
     if [[ ! -f "${target}" ]]; then
-        mkdir -p "${audio}/${occasion}"
+        mkdir -p "${into}/${occasion}"
         source="${work}/${name}.wav"
         case "${ENGINE}" in
             volc) "${repo_root}/tools/volc-tts.py" "${VOICE}" "${text}" "${source}" ;;
@@ -72,19 +78,63 @@ synth() {
     fi
 }
 
+# The forms of address of this Character's language: id<TAB>words.
+forms=()
+while IFS=$'\t' read -r language form words || [[ -n "${language}" ]]; do
+    [[ -z "${language}" || "${language}" == \#* || "${language}" != "${LANGUAGE:-}" ]] && continue
+    forms+=("${form}"$'\t'"${words}")
+done < "${repo_root}/characters/addresses.tsv"
+
+# A line said with no form of address: {address} and the comma or space that joins it go.
+without_address() {
+    python3 - "$1" <<'PY'
+import re, sys
+text = sys.argv[1]
+# "…, {address}." and "…，{address}。" take their comma along; "Hey {address}, …" keeps it;
+# "{address}，…" takes the comma after it; "…，{address}快去睡" keeps the one before.
+for pattern in (r"[，,]\s*\{address\}(?=[。！？.!?，,]|$)", r"\s\{address\}(?=[,.!?])", r"\{address\}[，,]\s*", r"\s?\{address\}"):
+    text = re.sub(pattern, "", text)
+print(text)
+PY
+}
+
+row=0
 while IFS=$'\t' read -r occasion text || [[ -n "${occasion}" ]]; do
     [[ -z "${occasion}" || "${occasion}" == \#* ]] && continue
     [[ -n "${text}" ]] || { echo "lines.tsv: no text for ${occasion}" >&2; exit 2; }
-    synth "${occasion}" "${text}"
+    row=$((row + 1))
+    if [[ "${text}" == *"{address}"* ]]; then
+        prefix="0-$(printf '%03d' "${row}")"
+        synth "${audio}" "${occasion}" "${prefix}" "$(without_address "${text}")"
+        for entry in ${forms[@]+"${forms[@]}"}; do
+            synth "${dir}/audio-address/${entry%%$'\t'*}" "${occasion}" "${prefix}" "${text//\{address\}/${entry#*$'\t'}}"
+        done
+    else
+        synth "${audio}" "${occasion}" 1 "${text}"
+    fi
 done < "${dir}/lines.tsv"
 
 # Drop the audio of rows that were deleted or reworded.
-find "${audio}" -name '*.pcm' | while read -r file; do
+find "${audio}" "${dir}/audio-address" -name '*.pcm' 2>/dev/null | while read -r file; do
     grep -qxF "${file}" "${work}/keep" || rm -f "${file}" "${file%.pcm}.txt"
 done
-find "${audio}" -type d -empty -delete
+find "${audio}" "${dir}/audio-address" -type d -empty -delete 2>/dev/null || true
 
-"${repo_root}/tools/character_pack.py" "${id}" "${audio}" "${dir}/pack.bin"
+# A look sheet, if the Character has one, goes into the pack too.
+look=()
+if [[ -f "${dir}/look.png" ]]; then
+    "${repo_root}/tools/make-look.py" "${dir}/look.png" "${work}/look.bin" >/dev/null
+    look=("${work}/look.bin")
+fi
+"${repo_root}/tools/character_pack.py" "${id}" "${audio}" "${dir}/pack.bin" ${look[@]+"${look[@]}"}
+rm -rf "${dir}/address"
+for entry in ${forms[@]+"${forms[@]}"}; do
+    form="${entry%%$'\t'*}"
+    if [[ -d "${dir}/audio-address/${form}" ]]; then
+        mkdir -p "${dir}/address"
+        "${repo_root}/tools/character_pack.py" "${id}" "${dir}/audio-address/${form}" "${dir}/address/${form}.bin"
+    fi
+done
 if [[ "${too_long}" == 1 ]]; then
     echo "some lines are longer than 3 seconds; shorten them in lines.tsv" >&2
     exit 1

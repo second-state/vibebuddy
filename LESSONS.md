@@ -259,3 +259,10 @@ A flashing job is one esptool `write-flash` with every address in it (and an are
 With the box switched to Muse and vibebuddyd connected, Muse's menu scrolled by itself, it recorded empty voice notes, its mic gain dropped to 0 dB and in the end its pairing was reset. Muse's bench console reads single characters from the USB port as keys, and the daemon's heartbeat JSON is full of them: `a`, `s`, `d`, `u`, `z`, `w`. The risk had been written down ("the daemon may disturb Muse") and then tested only with the daemon stopped, which is exactly the case where it can't happen.
 
 When two firmwares share a box, everything that talks to the port has to be tried against each of them, with the Mac side running as it normally does. A firmware that might sit behind someone else's serial writer reads no keys from the port by default, and the writer stops writing once it sees the firmware isn't its own.
+
+## Make sure which device is on the port before flashing it
+
+Asked to "flash and verify" after the user unplugged one of two ESP32-S3 devices, I flashed the one left: it was another product (a Muse unit), not the box. The status said `voice: ahu`, which I took as proof it was the box; that value had been left over from the box before, because a new connection only cleared the firmware build. The flash failed before writing anything, by luck.
+
+Every ESP32-S3 with native USB enumerates as the same `303A:1001`, so the port tells nothing. Before flashing, check that the device on the port has reported our firmware build in this connection, or that the user has said which device it is; when it reports nothing, it is someone else's until shown otherwise. And state derived from a device must be dropped when the connection changes, not only the field that happened to bite first.
+

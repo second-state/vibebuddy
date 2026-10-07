@@ -57,7 +57,7 @@ One finished spoken sentence in a Character's voice. Each Character has many lin
 _Avoid_: prompt (the firmware's old name for a clip), clip (the audio of a line), phrase, script
 
 **Look (外观)**:
-How a Character appears on screen: its animations for each state and its leisure moves. The default Character's look is built into the firmware; every other look is a sprite sheet carried in the Character pack.
+How a Character appears on screen. The default Character's look is the robot, drawn by the firmware; every other look is four still key frames (normal, eyes closed, happy, sad) carried in the Character pack, which the firmware moves and marks for each state.
 _Avoid_: skin, avatar, sprite (that is the image format)
 
 **Character pack (角色包)**:
@@ -160,7 +160,7 @@ An edge notification that must be consumed exactly once, corresponding to one sh
 _Avoid_: notification, reminder, voice event
 
 **Occasion (时机)**:
-The situation an announcement is made in, which decides which lines it draws from. Ordinary occasions follow the edge itself: needs input, done, failed, focus done, break done. Special occasions are rarer readings of the same edge: first done of the day, a milestone, late night, and the daily greeting. One edge speaks at most one line; when several occasions fit, the rarest one wins.
+The situation an announcement is made in, which decides which lines it draws from. Ordinary occasions follow the edge itself: needs input, done, failed, focus done, break done. Special occasions are rarer readings of the same edge: first done of the day, a long session, a milestone and late night; the daily greeting and welcome back ride the first activity after a quiet spell. One edge speaks at most one line; when several occasions fit, the rarest one wins.
 _Avoid_: trigger, event (that is the protocol message), case
 
 **Milestone (里程碑)**:
@@ -172,8 +172,20 @@ The special occasion of the first done or needs input between 23:00 and 05:00, a
 _Avoid_: overtime, night mode
 
 **Daily greeting (每日问候)**:
-The line said the first time the link comes up on a local calendar day, worded for the time of day. It is tied to the link, not to the box powering on, because the box restarts many times a day.
+The line said once a local calendar day, the first time the link comes up or an Agent does something, whichever comes first, worded for the time of day. It is tied to the link and to the user's work, not to the box powering on, because the box restarts many times a day and may also stay plugged in for days.
 _Avoid_: boot greeting, startup sound, hello (that is the device.hello event)
+
+**Long session (长时间工作)**:
+The special occasion of the first done after today's busy time passes another whole hour (one, two, three hours): the buddy tells the user to take a break.
+_Avoid_: overtime, marathon
+
+**Welcome back (久别重逢)**:
+The line said when an Agent does something after the Agents have been quiet for hours on a day that has already had its greeting.
+_Avoid_: reconnect (that is the link), resume
+
+**Form of address (称呼)**:
+What the buddy calls the user in some of its lines, picked from a fixed list in the App (boss, 老板, 哥…) or none at all. Every form is synthesized in advance, so the user's own name can't be one.
+_Avoid_: nickname, username, name (the user's real name is never spoken)
 
 **Today's stats (当日战绩)**:
 The count of completions, the number of needs-input requests and the busy time, accumulated per local calendar day. It describes what happened during the day, not the current state, so it is only shown when idle and isn't deduplicated.
