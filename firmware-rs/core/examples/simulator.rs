@@ -126,7 +126,7 @@ fn main() {
     });
     let mut board = SimulatedBoard { start: Instant::now(), flash: flash_with_partitions(), frame: vec![0; FRAME_BYTES], out: std::io::stdout() };
     let build = std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/../device/build/build.txt")).unwrap_or_else(|_| "simulator".to_owned());
-    let mut firmware = Firmware::new(1, board.now_ms(), build.trim().as_bytes());
+    let mut firmware = Firmware::new(1, board.now_ms(), build.trim().as_bytes(), "0.0.0");
     firmware.boot(&mut board);
     loop {
         while let Ok(bytes) = receiver.try_recv() {

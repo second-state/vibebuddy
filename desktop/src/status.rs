@@ -87,10 +87,22 @@ pub struct Device {
     pub bridge: bool,
     pub mode: Option<String>,
     pub firmware_build: Option<String>,
+    /// Firmware older than ADR-0010 and older daemons report none.
+    pub firmware_version: Option<String>,
     pub voice: Option<String>,
     pub volume: Option<u8>,
     /// Connected but running other firmware, as the daemon judged it (docs/architecture.md, decision 17).
     pub foreign_firmware: bool,
+}
+
+impl Device {
+    /// The firmware as shown in the interface: version first, then the build ID.
+    pub fn firmware_label(&self) -> Option<String> {
+        match (&self.firmware_version, &self.firmware_build) {
+            (Some(version), Some(build)) => Some(format!("{version} · {build}")),
+            (version, build) => version.clone().or_else(|| build.clone()),
+        }
+    }
 }
 
 #[derive(Clone, Debug, Default, Deserialize, PartialEq)]
@@ -210,6 +222,14 @@ mod tests {
         assert_eq!(status.device.volume, Some(40));
         assert_eq!(status.today.busy_seconds, 2217);
         assert!(status.config.notify_link);
+    }
+
+    #[test]
+    fn the_firmware_label_leads_with_the_version() {
+        let mut status: Status = serde_json::from_str(LIVE).expect("status");
+        assert_eq!(status.device.firmware_label().as_deref(), Some("v0.2.1-38-ga0bffc7 2026-09-30 16:29"));
+        status.device.firmware_version = Some("0.2.2".to_owned());
+        assert_eq!(status.device.firmware_label().as_deref(), Some("0.2.2 · v0.2.1-38-ga0bffc7 2026-09-30 16:29"));
     }
 
     #[test]

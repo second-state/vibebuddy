@@ -69,6 +69,7 @@ jobs:
             firmware-rs/device/build/partition-table.bin
             firmware-rs/device/build/vibebuddy-fw.bin
             firmware-rs/device/build/build.txt
+            firmware-rs/device/build/version.txt
 
   app:
     needs: firmware

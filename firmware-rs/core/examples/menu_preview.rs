@@ -90,7 +90,7 @@ struct Preview {
 impl Preview {
     fn new(directory: &Path) -> Self {
         let mut board = PreviewBoard { now: Cell::new(1000), frame: vec![0; FRAME_BYTES], flash: NoFlash, keys: (false, false, false) };
-        let mut firmware = Firmware::new(1, 1000, b"v0.3.2-11-g0adc18b 2026-10-06 16:34");
+        let mut firmware = Firmware::new(1, 1000, b"v0.3.2-11-g0adc18b 2026-10-06 16:34", "0.2.2");
         firmware.boot(&mut board);
         let mut preview = Self { directory: directory.to_path_buf(), board, firmware };
         preview.send(r#"{"version":1,"event":"device.heartbeat","build":"0.3.1 v0.3.1-12-ga4a667c 2026-10-06 16:26","hour":14,"day":20261005}"#);

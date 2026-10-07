@@ -203,6 +203,11 @@ final class AppModel: ObservableObject {
         previewingVoice = preview.playingVoice
     }
 
+    /// The box's firmware as shown in the interface: version and build ID.
+    var boxFirmware: String? {
+        Firmware.label(version: status?.device.firmwareVersion, build: status?.device.firmwareBuild)
+    }
+
     var firmwareUpdateAvailable: Bool {
         Firmware.updateAvailable(device: status?.device.firmwareBuild, bundled: bundledFirmwareBuild)
     }

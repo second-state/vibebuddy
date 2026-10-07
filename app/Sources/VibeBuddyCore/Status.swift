@@ -32,14 +32,16 @@ public struct DeviceState: Codable, Equatable {
     public var bridge: Bool
     public var mode: String?
     public var firmwareBuild: String?
+    /// The firmware version, such as "0.2.2"; firmware older than ADR-0010 and older daemons report none.
+    public var firmwareVersion: String?
     public var voice: String?
     /// Speaker volume (20 to 100) as reported by the box; the app is just a remote control.
     public var volume: Int?
     /// Connected but running other firmware, as the daemon judged it; absent from older daemons.
     public var foreignFirmware: Bool?
-    enum CodingKeys: String, CodingKey { case connected, port, bridge, mode, firmwareBuild = "firmware_build", voice, volume, foreignFirmware = "foreign_firmware" }
-    public init(connected: Bool, port: String? = nil, bridge: Bool = false, mode: String? = nil, firmwareBuild: String? = nil, voice: String? = nil, volume: Int? = nil, foreignFirmware: Bool? = nil) {
-        self.connected = connected; self.port = port; self.bridge = bridge; self.mode = mode; self.firmwareBuild = firmwareBuild; self.voice = voice; self.volume = volume
+    enum CodingKeys: String, CodingKey { case connected, port, bridge, mode, firmwareBuild = "firmware_build", firmwareVersion = "firmware_version", voice, volume, foreignFirmware = "foreign_firmware" }
+    public init(connected: Bool, port: String? = nil, bridge: Bool = false, mode: String? = nil, firmwareBuild: String? = nil, firmwareVersion: String? = nil, voice: String? = nil, volume: Int? = nil, foreignFirmware: Bool? = nil) {
+        self.connected = connected; self.port = port; self.bridge = bridge; self.mode = mode; self.firmwareBuild = firmwareBuild; self.firmwareVersion = firmwareVersion; self.voice = voice; self.volume = volume
         self.foreignFirmware = foreignFirmware
     }
 }
