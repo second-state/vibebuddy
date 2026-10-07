@@ -21,6 +21,13 @@ serialport = "4"
 md-5 = "0.10"
 tracing.workspace = true
 tracing-subscriber.workspace = true
+semver = "1"
+sha2 = "0.10"
+# HTTPS for the update manifest: ring rather than aws-lc (whose OpenSSL license the packaging allowlist doesn't take),
+# and the system's certificate store, so a proxy whose CA the user trusts still works.
+ureq = { version = "3", default-features = false, features = ["_ring", "rustls-no-provider", "platform-verifier"] }
+vibebuddy-manifest = { path = "../manifest" }
+zip = { version = "2", default-features = false, features = ["deflate"] }
 
 [dev-dependencies]
 http-body-util = "0.1"

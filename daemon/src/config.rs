@@ -12,6 +12,8 @@ pub struct Config {
     pub voice: Option<String>,
     /// Whether the user is notified when the link has trouble: by the app on macOS, by the daemon elsewhere.
     pub notify_link: bool,
+    /// Whether to check for updates; None follows the build: on in releases, off when built from source (ADR-0010).
+    pub check_updates: Option<bool>,
 }
 
 impl Default for Config {
@@ -19,6 +21,7 @@ impl Default for Config {
         Self {
             voice: None,
             notify_link: true,
+            check_updates: None,
         }
     }
 }
@@ -102,6 +105,7 @@ mod tests {
         let config = Config {
             voice: Some("wanwanxiaohe".to_owned()),
             notify_link: false,
+            check_updates: Some(false),
         };
         config.save(&path).expect("save config");
         assert_eq!(Config::load(&path), config);
