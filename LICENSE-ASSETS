@@ -20,6 +20,8 @@ Covered:
   personas and lines.
 - firmware/main/assets/*.pcm: a copy of the built-in voice, licensed like
   the voice it was copied from.
+- docs/brand/*.svg: the buddy in each of its states, exported pixel for
+  pixel from the firmware's drawing code.
 - Any artwork added to the repository later (images, sprite sheets,
   sounds), unless a file says otherwise.
 
