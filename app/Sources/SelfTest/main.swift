@@ -227,6 +227,13 @@ for id in ["amanda", "ahu"] {
     }
 }
 
+// The robot wears a Character's lines without its look.
+if let data = try? Data(contentsOf: URL(fileURLWithPath: "characters/ahu/pack.bin")), let ahu = VoicePack(data: data),
+   let robot = ahu.withoutLook(id: "robot").flatMap(VoicePack.init(data:)) {
+    check(robot.voiceID == "robot" && robot.look == nil && robot.data[4] == 1, "the robot is a version 1 pack without a look")
+    check(robot.pools?.count == ahu.pools?.count && robot.pools?[1].count == ahu.pools?[1].count, "with Ahu's lines")
+}
+
 // A form of address: the variant's lines replace the first lines of each pool, the rest stay.
 if let base = VoicePack(data: character), let pools = base.pools {
     check(pools.count == 12 && pools[0].count == 1 && pools[1].count == 1 && pools[1][0].samples == 3, "pools read back")

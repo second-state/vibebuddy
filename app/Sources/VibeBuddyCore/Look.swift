@@ -283,6 +283,12 @@ extension VoicePack {
         return Self.build(id: voiceID, pools: pools, look: look)
     }
 
+    /// This Character's voice and lines worn by the robot: the same pack without a look, under a new id.
+    public func withoutLook(id: String) -> Data? {
+        guard let pools else { return nil }
+        return Self.build(id: id, pools: pools, look: nil)
+    }
+
     /// Lays a Character pack out exactly as tools/character_pack.py does.
     public static func build(id: String, pools: [[(audio: Data, samples: Int)]], look: Data?) -> Data? {
         guard let idBytes = id.data(using: .ascii), (1...31).contains(idBytes.count) else { return nil }

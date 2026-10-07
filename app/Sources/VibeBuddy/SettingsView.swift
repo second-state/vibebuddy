@@ -119,6 +119,7 @@ struct VoicesView: View {
             AddressRow(model: model)
             ScrollView {
                 VStack(spacing: 8) {
+                    RobotCard(model: model)
                     ForEach(Resources.bundledVoices) { entry in
                         VoiceCard(model: model, entry: entry)
                     }
@@ -136,7 +137,7 @@ struct VoicesView: View {
 
     private var currentVoiceName: String {
         let id = model.status?.device.voice ?? "builtin"
-        if id == "builtin" { return String(localized: "Built-in voice (Jessica)") }
+        if id == "builtin" || id == AppModel.robotID { return "Vibe Buddy" }
         if id == CustomCharacterCard.id { return String(localized: "Your own character") }
         return VoiceCatalogEntry.all.first { $0.id == id }?.name ?? id
     }
@@ -671,5 +672,40 @@ struct AddressRow: View {
             }
         }
         .font(.callout)
+    }
+}
+
+/// The robot, the default Character: drawn by the box itself, wearing the voice and lines of the
+/// Character picked here, or the five fixed lines it shipped with.
+struct RobotCard: View {
+    @ObservedObject var model: AppModel
+    @State private var lender = "builtin"
+
+    var body: some View {
+        HStack(spacing: 12) {
+            if let face = Resources.robotFace {
+                Image(nsImage: face)
+            }
+            VStack(alignment: .leading, spacing: 4) {
+                Text(verbatim: "Vibe Buddy").font(.body.weight(.semibold))
+                Text("The original robot, drawn by the box itself").font(.caption).foregroundStyle(.secondary)
+                Picker(String(localized: "Voice and lines from"), selection: $lender) {
+                    Text("Built-in voice (Jessica)").tag("builtin")
+                    ForEach(Resources.bundledVoices) { entry in Text(entry.name).tag(entry.id) }
+                }
+                .frame(maxWidth: 320)
+            }
+            Spacer()
+            if model.wearsRobot && lender == model.robotLender {
+                Label("In use", systemImage: "checkmark.circle.fill").foregroundStyle(.green)
+            } else {
+                Button("Use") { model.writeRobot(lender: lender) }
+                    .disabled(model.operationRunning || !(model.status?.device.connected ?? false))
+            }
+        }
+        .padding(10)
+        .background(RoundedRectangle(cornerRadius: 8).fill(Color(nsColor: .controlBackgroundColor)))
+        .overlay(RoundedRectangle(cornerRadius: 8).stroke(model.wearsRobot ? Color.accentColor : .clear, lineWidth: 2))
+        .onAppear { lender = model.robotLender }
     }
 }

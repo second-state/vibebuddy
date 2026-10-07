@@ -19,6 +19,9 @@ pub struct Settings {
     /// The Character lending voice and lines to the user's own, as last written.
     #[serde(default)]
     pub custom_lender: Option<String>,
+    /// The Character lending voice and lines to the robot; none means its five built-in lines.
+    #[serde(default)]
+    pub robot_lender: Option<String>,
 }
 
 fn settings_file() -> Option<PathBuf> {

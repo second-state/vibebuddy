@@ -134,6 +134,8 @@ Firmware that doesn't know `occasion` ignores it and plays the ordinary line; fi
 
 Each of the four Characters gets a look of its own; the code-drawn robot stays the built-in default Character's look, shown when the box has no Character pack.
 
+The robot is a Character the user can pick again at any time: it comes first on the Character tab. Its card picks who lends it voice and lines, by default the built-in voice's five fixed lines (`voices/jessica/`, packed as `robot`); with a preset lending them, the App writes that Character's pack, form of address included, without its look and under the id `robot`, and the box draws the robot. A box with no pack at all also counts as wearing the robot.
+
 ### Four key frames, moved by the firmware
 
 A look is four still frames, not an animation: **normal**, **eyes closed**, **happy** and **sad**. The firmware does all the moving, so a look stays something an image model, or a person, can draw consistently:

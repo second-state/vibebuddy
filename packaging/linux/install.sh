@@ -53,6 +53,8 @@ mkdir -p "${assets}/voices"
 if [[ ${release} -eq 1 ]]; then
     cp "${share}"/voices/*.bin "${assets}/voices/"
 else
+    # The robot with the built-in voice's five lines; the app writes it when nothing else lends its voice.
+    python3 "${repo}/tools/make_voice_pack.py" "${repo}/voices/jessica" robot "${assets}/voices/robot.bin" >/dev/null
     for pack in "${repo}"/characters/*/pack.bin; do
         id="$(basename "$(dirname "${pack}")")"
         cp "${pack}" "${assets}/voices/${id}.bin"

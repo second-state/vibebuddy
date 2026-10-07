@@ -91,6 +91,10 @@ cp "${repo_root}/target/release/vibebuddy-hook" "${contents}/MacOS/vibebuddy-hoo
 
 # Each Character's pack is built by tools/make-character.sh and committed as characters/<id>/pack.bin.
 echo "== Character packs"
+# The robot: the built-in voice's five lines as a pack without a look, and its face for the card.
+"${repo_root}/tools/make_voice_pack.py" "${repo_root}/voices/jessica" robot "${contents}/Resources/voices/robot.bin" >/dev/null
+cp "${repo_root}/characters/robot/face.png" "${contents}/Resources/robot-face.png"
+echo "  robot"
 for pack in "${repo_root}"/characters/*/pack.bin; do
     id="$(basename "$(dirname "${pack}")")"
     cp "${pack}" "${contents}/Resources/voices/${id}.bin"
