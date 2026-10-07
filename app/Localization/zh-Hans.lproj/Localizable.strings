@@ -78,9 +78,8 @@
 /* Voice catalog */
 "Wanwan Xiaohe" = "湾湾小何";
 "Ahu" = "阿虎";
-"Chinese · Mandarin · Doubao" = "中文 · 普通话 · 豆包语音";
-"Chinese · Taiwanese accent · Doubao · same voice as Xiaozhi" = "中文 · 台湾口音 · 豆包语音 · 小智同款";
-"English · Doubao" = "英文 · 豆包语音";
+"Chinese · Mandarin" = "中文 · 普通话";
+"Chinese · Taiwanese accent" = "中文 · 台湾口音";
 
 /* Settings: Agents */
 "Connect agents" = "接入 Agent";

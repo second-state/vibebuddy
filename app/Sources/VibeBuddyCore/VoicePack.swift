@@ -168,10 +168,10 @@ public struct VoiceCatalogEntry: Equatable, Identifiable, Sendable {
 
     /// Built once: names and tags are localized for the language the process started in.
     public static let all: [VoiceCatalogEntry] = [
-        VoiceCatalogEntry(id: "wanwanxiaohe", name: String(localized: "Wanwan Xiaohe"), tag: String(localized: "Chinese · Taiwanese accent · Doubao · same voice as Xiaozhi"), language: .zh),
-        VoiceCatalogEntry(id: "ahu", name: String(localized: "Ahu"), tag: String(localized: "Chinese · Mandarin · Doubao"), language: .zh),
-        VoiceCatalogEntry(id: "amanda", name: "Amanda", tag: String(localized: "English · Doubao"), language: .en),
-        VoiceCatalogEntry(id: "jackson", name: "Jackson", tag: String(localized: "English · Doubao"), language: .en),
+        VoiceCatalogEntry(id: "wanwanxiaohe", name: String(localized: "Wanwan Xiaohe"), tag: String(localized: "Chinese · Taiwanese accent"), language: .zh),
+        VoiceCatalogEntry(id: "ahu", name: String(localized: "Ahu"), tag: String(localized: "Chinese · Mandarin"), language: .zh),
+        VoiceCatalogEntry(id: "amanda", name: "Amanda", tag: String(localized: "English"), language: .en),
+        VoiceCatalogEntry(id: "jackson", name: "Jackson", tag: String(localized: "English"), language: .en),
     ]
 
     /// The language a box voice speaks, from the voice id the box reports; "builtin" is Jessica (English).
