@@ -147,6 +147,7 @@ pub struct Status {
     pub hooks: HooksSeen,
     pub operation: Option<Operation>,
     pub config: Config,
+    pub updates: crate::updates::UpdateStatus,
 }
 
 #[cfg(test)]
