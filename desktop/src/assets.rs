@@ -121,6 +121,9 @@ pub fn voice_name(id: &str) -> String {
     if id == "custom" {
         return tr("Your own character", &[]);
     }
+    if id == "robot" {
+        return "Vibe Buddy".to_owned();
+    }
     catalog().into_iter().find(|voice| voice.id == id).map(|voice| voice.name).unwrap_or_else(|| id.to_owned())
 }
 
@@ -149,6 +152,12 @@ fn voice_pack(dir: &Path, id: &str) -> PathBuf {
 
 fn find_voice_pack(id: &str) -> Option<PathBuf> {
     data_dirs().into_iter().map(|dir| voice_pack(&dir, id)).find(|path| path.is_file())
+}
+
+/// An installed pack as it is, such as the robot with the built-in voice's lines (voices/robot.bin).
+pub async fn read_pack(id: &str) -> Result<Vec<u8>, String> {
+    let path = find_voice_pack(id).ok_or_else(|| format!("no voice pack named {id} is installed"))?;
+    tokio::fs::read(&path).await.map_err(|error| format!("{}: {error}", path.display()))
 }
 
 /// The language a box Character speaks, from the id the box reports; None for one the catalog doesn't know.

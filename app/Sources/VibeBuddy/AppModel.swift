@@ -214,7 +214,33 @@ final class AppModel: ObservableObject {
             writeVoice(current)
         } else if current == "custom", let saved = savedCustomCharacter, VoiceCatalogEntry.language(ofVoice: saved.lender) == language {
             writeCustomCharacter(look: saved.look, lender: saved.lender)
+        } else if current == Self.robotID, VoiceCatalogEntry.language(ofVoice: robotLender) == language {
+            writeRobot(lender: robotLender)
         }
+    }
+
+    static let robotID = "robot"
+    private static let robotLenderKey = "robot.lender"
+    /// Who lends the robot voice and lines: "builtin" (the five fixed lines it shipped with) or a Character id.
+    var robotLender: String { UserDefaults.standard.string(forKey: Self.robotLenderKey) ?? "builtin" }
+
+    /// Whether the box wears the robot: written as one, or still on the firmware's own default.
+    var wearsRobot: Bool { [Self.robotID, "builtin"].contains(status?.device.voice) }
+
+    /// Writes the robot, the default Character: drawn by the box itself, so the pack carries no look,
+    /// only the voice and lines of `lender` (with the form of address of its language) or, for
+    /// "builtin", the five fixed lines it shipped with.
+    func writeRobot(lender: String) {
+        let pack: Data?
+        if lender == "builtin" {
+            pack = Resources.voicePack(Self.robotID)?.data
+        } else {
+            pack = Resources.voicePack(lender).flatMap { addressed($0, id: lender).withoutLook(id: Self.robotID) }
+        }
+        guard let pack else { lastError = String(localized: "This app has no voice pack for \(lender)"); return }
+        UserDefaults.standard.set(lender, forKey: Self.robotLenderKey)
+        objectWillChange.send()
+        writePack(pack)
     }
 
     /// Character `id` with the user's form of address in its language, or as it is with none.

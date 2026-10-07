@@ -21,6 +21,8 @@ done
 for file in vibebuddyd.service vibebuddy.desktop vibebuddy.svg 70-vibebuddy.rules; do
     install -m644 "${repo}/packaging/linux/${file}" "${stage}/share/${file}"
 done
+# The robot with the built-in voice's five lines; the app writes it when nothing else lends its voice.
+python3 "${repo}/tools/make_voice_pack.py" "${repo}/voices/jessica" robot "${stage}/share/voices/robot.bin" >/dev/null
 for pack in "${repo}"/characters/*/pack.bin; do
     id="$(basename "$(dirname "${pack}")")"
     cp "${pack}" "${stage}/share/voices/${id}.bin"

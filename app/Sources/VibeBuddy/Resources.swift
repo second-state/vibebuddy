@@ -1,4 +1,4 @@
-import Foundation
+import AppKit
 import VibeBuddyCore
 
 /// Where things live in the app bundle: the two helpers and the voice packs. Firmware isn't bundled; the daemon
@@ -32,6 +32,11 @@ enum Resources {
 
     static func voicePackURL(_ id: String) -> URL {
         resourcesDirectory.appendingPathComponent("voices").appendingPathComponent("\(id).bin")
+    }
+
+    /// The robot's face for its card.
+    static var robotFace: NSImage? {
+        NSImage(contentsOf: resourcesDirectory.appendingPathComponent("robot-face.png"))
     }
 
     /// The lines of Character `id` said with a form of address (characters/<id>/address/<form>.bin).
