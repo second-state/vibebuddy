@@ -30,6 +30,14 @@ _Avoid_: integration, plugin, connector
 Vibe Buddy's graphical interface on the Mac: a menu bar icon plus a settings window. It handles onboarding, settings, characters and firmware, and supervises the daemon. It is not a second reminder channel; everything about Agents is said by the buddy.
 _Avoid_: client, panel, console, companion app
 
+**Firmware version (固件版本)**:
+The semantic version of a firmware release, such as 0.2.2. It orders releases and decides what is offered; it is independent of the App's version. The build ID next to it on the box only identifies the exact build.
+_Avoid_: build, build number (those are the build ID), firmware hash
+
+**Update manifest (更新清单)**:
+The signed list of what can be installed: the latest App per platform and every released firmware with the oldest App it needs.
+_Avoid_: appcast (Sparkle's feed for the macOS App only), update server, feed
+
 **Link (链路)**:
 The connection between the Mac and the device. When the link drops, the buddy closes its eyes and turns gray; a link failure is the only thing the App announces on its own.
 _Avoid_: connection, USB, serial port (those are one implementation of the link)

@@ -19,8 +19,18 @@ if [[ -z "${serial_port}" ]]; then
     serial_port="${ports[0]}"
 fi
 
+# espflash write-bin takes a single address per connection, and chaining connections with --after no-reset
+# can wedge the native USB port (see LESSONS.md), so the write goes through esptool.
+if ! command -v esptool >/dev/null 2>&1; then
+    echo "esptool not found on PATH; install it (pip install esptool) or activate an ESP-IDF environment." >&2
+    exit 1
+fi
+
 "${repo_root}/tools/build-firmware.sh"
-# Stay in the bootloader after the first two images and reset only after the last one, so a half-updated firmware never runs.
-espflash write-bin -S --chip esp32s3 --port "${serial_port}" --after no-reset 0x0 "${build_dir}/bootloader.bin"
-espflash write-bin -S --chip esp32s3 --port "${serial_port}" --after no-reset 0x8000 "${build_dir}/partition-table.bin"
-espflash write-bin -S --chip esp32s3 --port "${serial_port}" 0x10000 "${build_dir}/vibebuddy-fw.bin"
+# One connection writes all three images and resets once at the end, so a half-updated firmware never runs.
+# The bootloader header already says 16 MB; keep the flash settings rather than letting esptool patch them.
+esptool --chip esp32s3 --port "${serial_port}" --before default-reset --after hard-reset \
+    write-flash --flash-mode keep --flash-freq keep --flash-size keep \
+    0x0 "${build_dir}/bootloader.bin" \
+    0x8000 "${build_dir}/partition-table.bin" \
+    0x10000 "${build_dir}/vibebuddy-fw.bin"

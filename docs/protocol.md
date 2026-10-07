@@ -94,7 +94,7 @@ The `READY`, `EVENT`, `TITLE` and `ERROR` lines the firmware prints are diagnost
 
 These messages are the app operating on the device itself. They don't count as agent activity, don't wake Leisure mode, and don't produce `EVENT` diagnostic lines.
 
-`device.hello` is the Mac's greeting right after connecting: mode, firmware build number, voice and volume are otherwise reported only at boot or on change, and the daemon restarts more often than the device, so without asking it would never know. The device replies with four diagnostic lines: `DISPLAY READY BUILD …`, `MODE …`, `VOICES …`, `VOLUME …`.
+`device.hello` is the Mac's greeting right after connecting, sent once the box has been listened to and hasn't given itself away as other firmware (see decision 17 in [`architecture.md`](architecture.md)); a box that runs other firmware is written nothing, hello included, and `/v1/status` reports `device.foreign_firmware: true`. It is needed because mode, firmware build number, voice and volume are otherwise reported only at boot or on change, and the daemon restarts more often than the device, so without asking it would never know. The device replies with five diagnostic lines: `DISPLAY READY BUILD …`, `FIRMWARE VERSION …`, `MODE …`, `VOICES …`, `VOLUME …`. `FIRMWARE VERSION` carries the firmware version (`0.2.2`), which orders releases (ADR-0010); it is also printed at boot, and firmware older than it doesn't print it.
 
 `device.echo` is a link self-test: the device returns the length and CRC32 of the `data` string as `{"event":"echo","length":…,"crc":…}`, then echoes a line `ECHO …` verbatim. It's used to check whether the serial port is receiving corrupted bytes; that's how the UART bridge problem was tracked down.
 

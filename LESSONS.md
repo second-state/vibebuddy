@@ -250,7 +250,7 @@ Anything started at login can't treat a missing desktop service as final: wait f
 
 ## One flashing session per job, and never kill one halfway
 
-Putting the box into the layout it shares with Muse took three unplugs. Chained espflash calls with `--after no-reset` left the chip in its loader, and the next connection hung at "Connecting..." for minutes; killing that hung process, then trying esptool with `--before usb-reset`, didn't recover it either. RST didn't help; only pulling the USB cable did. `tools/flash.sh` chains calls the same way and has worked, so the hang depends on what the previous call left behind, which makes it worse than a steady failure.
+Putting the box into the layout it shares with Muse took three unplugs. Chained espflash calls with `--after no-reset` left the chip in its loader, and the next connection hung at "Connecting..." for minutes; killing that hung process, then trying esptool with `--before usb-reset`, didn't recover it either. RST didn't help; only pulling the USB cable did. `tools/flash.sh` chained calls the same way and had worked, so the hang depends on what the previous call left behind, which makes it worse than a steady failure. On 2026-10-07 it hung too, on the partition-table call over native USB; it now writes all three images in one esptool `write-flash`.
 
 A flashing job is one esptool `write-flash` with every address in it (and an area to clear written as 0xFF in the same call): one connection, one reset at the end. If a flashing process hangs, ask for an unplug straight away instead of stacking more connection attempts on a wedged chip.
 
@@ -266,3 +266,9 @@ Asked to "flash and verify" after the user unplugged one of two ESP32-S3 devices
 
 Every ESP32-S3 with native USB enumerates as the same `303A:1001`, so the port tells nothing. Before flashing, check that the device on the port has reported our firmware build in this connection, or that the user has said which device it is; when it reports nothing, it is someone else's until shown otherwise. And state derived from a device must be dropped when the connection changes, not only the field that happened to bite first.
 
+
+## A USB ID says what chip is there, not what it runs; and a probe is a write too
+
+On 2026-10-05 and again on 2026-10-07 the daemon wrote heartbeats to a box running Muse. Muse enumerates as the same `303A:1001`, and its serial console reads single letters as keys, so the JSON scrolled its menu, recorded voice notes and reset its pairing twice. The first fix proposed held everything back until the box answered hello, then sent hello every 5 seconds to a box that never answered. But `{"version":1,"event":"device.hello"}` holds an `s` (Select) and a `d` (push-to-talk down, with no `u` to let go): the probe was the same bug at a lower rate.
+
+When a link can reach firmware that isn't ours, find out who is there from what it already prints before writing anything; a question written to the wrong peer is input to it. Here that meant listening first (ESP-IDF application logs give other firmware away; our build line gives ours away), asking once only a box that stays quiet, and never probing a box judged foreign: its reset banner is the signal to look again. A test that checks the foreign box got "nothing but hello" would have passed with the bug in; the test that guards it says nothing at all reaches the box.

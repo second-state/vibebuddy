@@ -6,8 +6,9 @@ use std::time::Duration;
 use vibebuddy_protocol::Event;
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 use tokio::sync::{mpsc, watch};
+use tokio::time::Instant;
 use tokio_serial::{ClearBuffer, SerialPort, SerialPortBuilderExt, SerialPortType, SerialStream};
-use tracing::{info, warn};
+use tracing::{debug, info, warn};
 
 const ESPRESSIF_VID: u16 = 0x303a;
 const USB_SERIAL_JTAG_PID: u16 = 0x1001;
@@ -24,6 +25,18 @@ const CONNECT_SETTLE_DELAY: Duration = Duration::from_millis(1_500);
 /// the content shifts. A control experiment polling the FIFO directly on the device cleared the device side. Over the bridge,
 /// write in line-rate chunks and wait for each to clear the wire before writing the next.
 const PACE_MARGIN: Duration = Duration::from_millis(1);
+/// A box just connected or just reset is listened to this long before anything is written to it. Our firmware
+/// reports its build at boot, about two seconds after a reset; other ESP-IDF firmware logs within that time, and
+/// Muse's heartbeat line comes every five seconds even when nothing else happens.
+const LISTEN_FIRST: Duration = Duration::from_secs(6);
+/// After hello, a box that still hasn't reported a build runs other firmware.
+const FOREIGN_FIRMWARE_AFTER: Duration = Duration::from_secs(5);
+/// Every line of our firmware's build report, at boot and in answer to hello, carries this; it can arrive glued
+/// behind a stray line.
+pub const BUILD_MARKER: &str = "DISPLAY READY BUILD ";
+/// The ESP32-S3 ROM prints this at every reset, on the native USB port and on the UART bridge alike. A box that
+/// resets may come back running other firmware (K1 + K2 on a box shared with Muse), so it is judged again.
+const ROM_BANNER: &str = "ESP-ROM:";
 
 /// Everything from the device to the Mac: JSON events, diagnostic lines, and the link connecting and dropping.
 #[derive(Clone, Debug)]
@@ -33,6 +46,8 @@ pub enum DeviceMessage {
     /// `bridge` means we're on the BOX's CH343 UART bridge: writes must be chunked and flashing uses small blocks.
     /// `usb_serial` is the port's USB serial number, when the system knows it.
     Connected { port: String, bridge: bool, usb_serial: Option<String> },
+    /// The box runs other firmware (see [`Firmware::Foreign`]): it's there, but gets nothing written.
+    ForeignFirmware,
     Disconnected,
 }
 
@@ -187,6 +202,81 @@ enum SessionEnd {
     Shutdown,
 }
 
+/// What the box on the other end runs, judged from what it prints. No port is opened just to ask, since opening
+/// the native USB port may reset the chip, and nothing that could act as input is written until it is known.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Firmware {
+    /// Just connected or just reset: nothing is written while the box is listened to.
+    Listening { since: Instant },
+    /// It said nothing that gives it away: hello alone goes out, and the build should come back.
+    Asked { since: Instant },
+    Ours,
+    /// Other firmware. Its console may read our JSON as key presses (Muse's did: 'a'/'s' menu, 'd'/'u'
+    /// push-to-talk, 'z'/'w' sleep), so it is written nothing at all, not even hello, until it resets; and its
+    /// output doesn't pass for ours.
+    Foreign,
+}
+
+impl Firmware {
+    fn after_line(self, line: &str, now: Instant) -> Self {
+        if line.contains(ROM_BANNER) {
+            Self::Listening { since: now }
+        } else if line.contains(BUILD_MARKER) {
+            Self::Ours
+        } else if self != Self::Ours && is_esp_idf_app_log(line) {
+            Self::Foreign
+        } else {
+            self
+        }
+    }
+
+    /// When this state ends on its own, if it does.
+    fn deadline(self) -> Option<Instant> {
+        match self {
+            Self::Listening { since } => Some(since + LISTEN_FIRST),
+            Self::Asked { since } => Some(since + FOREIGN_FIRMWARE_AFTER),
+            Self::Ours | Self::Foreign => None,
+        }
+    }
+
+    /// Whether this frame may be written now.
+    fn writes(self, frame: &[u8]) -> bool {
+        match self {
+            Self::Ours => true,
+            Self::Asked { .. } => is_hello(frame),
+            Self::Listening { .. } | Self::Foreign => false,
+        }
+    }
+}
+
+/// An ESP-IDF application's log line, `I (1234) tag: ...`. Our firmware never prints one; the second-stage
+/// bootloader both firmwares boot through does, under its own tags, so those don't count.
+fn is_esp_idf_app_log(line: &str) -> bool {
+    let Some(rest) = line.strip_prefix(['I', 'W', 'E', 'D', 'V']).and_then(|rest| rest.strip_prefix(" (")) else {
+        return false;
+    };
+    let Some((ticks, rest)) = rest.split_once(") ") else {
+        return false;
+    };
+    let Some((tag, _)) = rest.split_once(':') else {
+        return false;
+    };
+    !ticks.is_empty()
+        && ticks.bytes().all(|byte| byte.is_ascii_digit())
+        && !tag.is_empty()
+        && !tag.contains(' ')
+        && !tag.starts_with("boot")
+        && tag != "esp_image"
+}
+
+fn hello_frame() -> Vec<u8> {
+    Event::named("device.hello").to_ndjson().expect("hello always encodes")
+}
+
+fn is_hello(frame: &[u8]) -> bool {
+    serde_json::from_slice::<Event>(frame).is_ok_and(|event| event.event == "device.hello")
+}
+
 /// Shuttles frames and device output over one open port until it fails or is handed to the flasher.
 async fn run_session<P: AsyncRead + AsyncWrite + Unpin>(
     port: &mut P,
@@ -199,9 +289,12 @@ async fn run_session<P: AsyncRead + AsyncWrite + Unpin>(
 ) -> SessionEnd {
     let mut read_buffer = [0_u8; 256];
     let mut line_buffer = Vec::new();
+    let mut firmware = Firmware::Listening { since: Instant::now() };
 
     loop {
-        if let Some(frame) = pending.pop_front() {
+        // Frames wait, in order, until the box is known to run our firmware; only hello may go first.
+        let next = pending.iter().position(|frame| firmware.writes(frame)).and_then(|index| pending.remove(index));
+        if let Some(frame) = next {
             // A peer that never reads (e.g. firmware that isn't ours) blocks the write forever; the flasher must still get the port.
             tokio::select! {
                 result = write_frame(port, &frame, paced) => {
@@ -225,11 +318,25 @@ async fn run_session<P: AsyncRead + AsyncWrite + Unpin>(
             continue;
         }
 
+        let deadline = firmware.deadline();
         tokio::select! {
             frame = receiver.recv() => {
                 match frame {
+                    // Heartbeats and events for a box running other firmware are dropped, not held: they'd be stale.
+                    Some(_) if firmware == Firmware::Foreign => {}
                     Some(frame) => pending.push_back(frame),
                     None => return SessionEnd::Shutdown,
+                }
+            }
+            () = tokio::time::sleep_until(deadline.unwrap_or_else(Instant::now)), if deadline.is_some() => {
+                if matches!(firmware, Firmware::Listening { .. }) {
+                    firmware = Firmware::Asked { since: Instant::now() };
+                    if !pending.iter().any(|frame| is_hello(frame)) {
+                        pending.push_front(hello_frame());
+                    }
+                } else {
+                    warn!(port = %port_name, "no firmware build after hello: the box runs other firmware, writing it nothing");
+                    become_foreign(&mut firmware, pending, device_event_sender).await;
                 }
             }
             changed = suspend.changed() => {
@@ -247,11 +354,24 @@ async fn run_session<P: AsyncRead + AsyncWrite + Unpin>(
                         warn!(port = %port_name, "serial port closed, reconnecting");
                         return SessionEnd::Reconnect;
                     }
-                    Ok(count) => process_device_bytes(
-                        &read_buffer[..count],
-                        &mut line_buffer,
-                        device_event_sender,
-                    ),
+                    Ok(count) => {
+                        let before = firmware;
+                        process_device_bytes(&read_buffer[..count], &mut line_buffer, &mut firmware, device_event_sender);
+                        match (before, firmware) {
+                            (Firmware::Foreign, Firmware::Foreign) => {}
+                            (_, Firmware::Foreign) => {
+                                warn!(port = %port_name, "the box logs like other ESP-IDF firmware, writing it nothing");
+                                become_foreign(&mut firmware, pending, device_event_sender).await;
+                            }
+                            (Firmware::Ours, Firmware::Listening { .. }) => {
+                                info!(port = %port_name, "the box restarted, listening before writing to it");
+                            }
+                            (Firmware::Listening { .. } | Firmware::Asked { .. } | Firmware::Foreign, Firmware::Ours) => {
+                                info!(port = %port_name, "the box runs Vibe Buddy firmware");
+                            }
+                            _ => {}
+                        }
+                    }
                     Err(error) => {
                         warn!(port = %port_name, %error, "serial read failed, reconnecting");
                         return SessionEnd::Reconnect;
@@ -260,6 +380,16 @@ async fn run_session<P: AsyncRead + AsyncWrite + Unpin>(
             }
         }
     }
+}
+
+async fn become_foreign(
+    firmware: &mut Firmware,
+    pending: &mut VecDeque<Vec<u8>>,
+    device_event_sender: &mpsc::Sender<DeviceMessage>,
+) {
+    *firmware = Firmware::Foreign;
+    pending.clear();
+    let _ = device_event_sender.send(DeviceMessage::ForeignFirmware).await;
 }
 
 /// Bridge ports are written in line-rate chunks; native USB ports get the whole frame at once.
@@ -394,6 +524,7 @@ fn serials_equal(actual: &str, expected: &str) -> bool {
 fn process_device_bytes(
     bytes: &[u8],
     line_buffer: &mut Vec<u8>,
+    firmware: &mut Firmware,
     event_sender: &mpsc::Sender<DeviceMessage>,
 ) {
     for byte in bytes {
@@ -403,7 +534,7 @@ fn process_device_bytes(
             } else {
                 line_buffer.len()
             };
-            process_device_line(&line_buffer[..length], event_sender);
+            process_device_line(&line_buffer[..length], firmware, event_sender);
             line_buffer.clear();
         } else if line_buffer.len() < 4096 {
             line_buffer.push(*byte);
@@ -414,8 +545,14 @@ fn process_device_bytes(
     }
 }
 
-fn process_device_line(line: &[u8], event_sender: &mpsc::Sender<DeviceMessage>) {
+fn process_device_line(line: &[u8], firmware: &mut Firmware, event_sender: &mpsc::Sender<DeviceMessage>) {
     if line.is_empty() {
+        return;
+    }
+    *firmware = firmware.after_line(&String::from_utf8_lossy(line), Instant::now());
+    // Other firmware's output (Muse's log) must not pass for our diagnostic lines or events.
+    if *firmware == Firmware::Foreign {
+        debug!(message = %String::from_utf8_lossy(line), "output from a box running other firmware");
         return;
     }
     let message = if line.first() == Some(&b'{') {
@@ -488,10 +625,11 @@ mod tests {
         process_device_bytes(
             br#"{"version":1,"event":"button","button":"K"#,
             &mut buffer,
+            &mut Firmware::Ours,
             &sender,
         );
         assert!(receiver.try_recv().is_err(), "a partial line must not become an event early");
-        process_device_bytes(b"2\",\"action\":\"press\"}\r\n", &mut buffer, &sender);
+        process_device_bytes(b"2\",\"action\":\"press\"}\r\n", &mut buffer, &mut Firmware::Ours, &sender);
 
         let DeviceMessage::Event(event) = receiver.try_recv().expect("a complete line should enter the event queue")
         else {
@@ -520,7 +658,7 @@ mod tests {
         let (sender, mut receiver) = mpsc::channel(1);
         let mut buffer = Vec::new();
 
-        process_device_bytes(b"DISPLAY READY\n", &mut buffer, &sender);
+        process_device_bytes(b"DISPLAY READY\n", &mut buffer, &mut Firmware::Ours, &sender);
 
         match receiver.try_recv().expect("diagnostic lines should reach the Mac too") {
             DeviceMessage::Line(line) => assert_eq!(line, "DISPLAY READY"),
@@ -531,20 +669,22 @@ mod tests {
 
     #[tokio::test]
     async fn a_peer_that_never_reads_cannot_keep_the_port_from_the_flasher() {
-        // Firmware that isn't ours may never drain the USB serial, so a write can block forever.
+        // Firmware that isn't ours may never drain the USB serial, so a write can block forever: here hello, the
+        // first thing written once the box has been listened to.
+        tokio::time::pause();
         let (mut port, _peer_never_reads) = tokio::io::duplex(16);
-        let mut pending = VecDeque::from([vec![b'x'; 256]]);
+        let mut pending = VecDeque::from([hello_frame()]);
         let (_frame_sender, mut receiver) = mpsc::channel(1);
         let (device_sender, _device_receiver) = mpsc::channel(1);
         let (suspend_sender, mut suspend) = watch::channel(false);
 
         let session = run_session(&mut port, "test", false, &mut pending, &mut receiver, &device_sender, &mut suspend);
         let release = async {
-            tokio::time::sleep(Duration::from_millis(50)).await;
+            tokio::time::sleep(LISTEN_FIRST + Duration::from_millis(50)).await;
             suspend_sender.send(true).unwrap();
             std::future::pending::<()>().await;
         };
-        let end = tokio::time::timeout(Duration::from_secs(1), async {
+        let end = tokio::time::timeout(LISTEN_FIRST + Duration::from_secs(1), async {
             tokio::select! {
                 end = session => end,
                 _ = release => unreachable!(),
@@ -553,5 +693,157 @@ mod tests {
         .await
         .expect("a stuck write must not stop the worker from releasing the port");
         assert_eq!(end, SessionEnd::Released);
+    }
+
+    fn heartbeat_frame() -> Vec<u8> {
+        b"{\"version\":1,\"event\":\"device.heartbeat\",\"build\":\"abc\",\"hour\":9,\"day\":20261007}\n".to_vec()
+    }
+
+    /// Everything the session has written to the box so far.
+    async fn written(peer: &mut tokio::io::DuplexStream) -> String {
+        let mut buffer = vec![0_u8; 8192];
+        match tokio::time::timeout(Duration::from_millis(10), peer.read(&mut buffer)).await {
+            Ok(Ok(count)) => String::from_utf8_lossy(&buffer[..count]).into_owned(),
+            _ => String::new(),
+        }
+    }
+
+    struct Session {
+        peer: tokio::io::DuplexStream,
+        frames: mpsc::Sender<Vec<u8>>,
+        device: mpsc::Receiver<DeviceMessage>,
+        _suspend: watch::Sender<bool>,
+        task: tokio::task::JoinHandle<SessionEnd>,
+    }
+
+    /// A session as the daemon starts one: hello queued on connecting, a heartbeat behind it.
+    async fn connected() -> Session {
+        let (mut port, peer) = tokio::io::duplex(8192);
+        let (frames, mut receiver) = mpsc::channel(16);
+        let (device_sender, device) = mpsc::channel(64);
+        let (suspend_sender, mut suspend) = watch::channel(false);
+        frames.send(hello_frame()).await.unwrap();
+        frames.send(heartbeat_frame()).await.unwrap();
+        let task = tokio::spawn(async move {
+            let mut pending = VecDeque::new();
+            run_session(&mut port, "test", false, &mut pending, &mut receiver, &device_sender, &mut suspend).await
+        });
+        Session { peer, frames, device, _suspend: suspend_sender, task }
+    }
+
+    fn drain(device: &mut mpsc::Receiver<DeviceMessage>) -> Vec<DeviceMessage> {
+        std::iter::from_fn(|| device.try_recv().ok()).collect()
+    }
+
+    // What a box shared with Muse prints from reset until Muse's heartbeat, cut down.
+    const MUSE_BOOT: &[u8] = b"ESP-ROM:esp32s3-20210327\r\nI (27) boot: ESP-IDF v6.0.1 2nd stage bootloader\r\n\
+I (452) esp_image: segment 0: paddr=00020020\r\nI (571) esp_psram: Found 8MB PSRAM device\r\n\
+I (911) muse: board: ALIENTEK ATK-DNESP32S3-BOX\r\n";
+
+    #[test]
+    fn only_an_esp_idf_application_log_gives_other_firmware_away() {
+        assert!(is_esp_idf_app_log("I (911) muse: board: ALIENTEK ATK-DNESP32S3-BOX"));
+        assert!(is_esp_idf_app_log("W (1450) wifi:Password length matches WPA2 standards"));
+        // The bootloader both firmwares boot through.
+        assert!(!is_esp_idf_app_log("I (27) boot: ESP-IDF v6.0.1 2nd stage bootloader"));
+        assert!(!is_esp_idf_app_log("I (35) boot.esp32s3: Boot SPI Speed : 80MHz"));
+        assert!(!is_esp_idf_app_log("I (452) esp_image: segment 0: paddr=00020020"));
+        // Ours.
+        assert!(!is_esp_idf_app_log("TALLY LOADED 0 0S DAY 20261007"));
+        assert!(!is_esp_idf_app_log("DISPLAY READY BUILD v0.3.2 2026-10-07 09:00"));
+        assert!(!is_esp_idf_app_log("I (x) muse: not a tick count"));
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_box_running_muse_is_written_nothing_not_even_hello() {
+        let mut session = connected().await;
+        session.peer.write_all(MUSE_BOOT).await.unwrap();
+        tokio::time::sleep(Duration::from_secs(2)).await;
+        session.frames.send(heartbeat_frame()).await.unwrap();
+        // Long past listening and asking: still nothing, and no probing.
+        tokio::time::sleep(Duration::from_secs(60)).await;
+
+        assert_eq!(written(&mut session.peer).await, "", "Muse's console reads letters as keys");
+        let messages = drain(&mut session.device);
+        assert!(messages.iter().any(|message| matches!(message, DeviceMessage::ForeignFirmware)), "{messages:?}");
+        assert!(
+            !messages.iter().any(|message| matches!(message, DeviceMessage::Line(line) if line.contains("muse"))),
+            "Muse's log is not ours to read: {messages:?}"
+        );
+        session.task.abort();
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn our_firmware_booting_gets_everything_without_waiting() {
+        let mut session = connected().await;
+        session
+            .peer
+            .write_all(b"ESP-ROM:esp32s3-20210327\r\nI (27) boot: ESP-IDF v6.1 2nd stage bootloader\r\nTALLY LOADED 0 0S DAY 20261007\r\nDISPLAY READY BUILD abc 2026-10-07 09:00\r\n")
+            .await
+            .unwrap();
+        tokio::time::sleep(Duration::from_millis(100)).await;
+
+        let output = written(&mut session.peer).await;
+        assert!(output.contains("device.hello") && output.contains("device.heartbeat"), "{output}");
+        assert!(output.find("device.hello") < output.find("device.heartbeat"), "in order: {output}");
+        let messages = drain(&mut session.device);
+        assert!(messages.iter().any(|message| matches!(message, DeviceMessage::Line(line) if line.starts_with("TALLY"))));
+        session.task.abort();
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_quiet_box_is_listened_to_then_asked_once() {
+        // Our firmware on the UART bridge: opening the port doesn't reset it, and idle it says nothing.
+        let mut session = connected().await;
+        tokio::time::sleep(LISTEN_FIRST - Duration::from_millis(100)).await;
+        assert_eq!(written(&mut session.peer).await, "", "nothing before listening is over");
+
+        tokio::time::sleep(Duration::from_millis(200)).await;
+        let output = written(&mut session.peer).await;
+        assert_eq!(output.matches("device.hello").count(), 1, "{output}");
+        assert!(!output.contains("heartbeat"), "{output}");
+
+        session.peer.write_all(b"DISPLAY READY BUILD abc 2026-10-07 09:00\n").await.unwrap();
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        assert!(written(&mut session.peer).await.contains("device.heartbeat"));
+        tokio::time::sleep(Duration::from_secs(30)).await;
+        assert!(!drain(&mut session.device).iter().any(|message| matches!(message, DeviceMessage::ForeignFirmware)));
+        session.task.abort();
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_box_that_never_answers_hello_is_left_alone() {
+        let mut session = connected().await;
+        tokio::time::sleep(LISTEN_FIRST + FOREIGN_FIRMWARE_AFTER + Duration::from_secs(60)).await;
+        let output = written(&mut session.peer).await;
+        assert_eq!(output.matches("device.hello").count(), 1, "asked once, never probed again: {output}");
+        assert!(!output.contains("heartbeat"), "{output}");
+        assert!(drain(&mut session.device).iter().any(|message| matches!(message, DeviceMessage::ForeignFirmware)));
+        session.task.abort();
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_reset_puts_the_box_in_doubt_until_it_says_what_it_runs() {
+        // K1 + K2 on a box shared with Muse: our firmware resets into Muse while the port stays open.
+        let mut session = connected().await;
+        session.peer.write_all(b"DISPLAY READY BUILD abc 2026-10-07 09:00\n").await.unwrap();
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        written(&mut session.peer).await;
+        drain(&mut session.device);
+
+        session.peer.write_all(MUSE_BOOT).await.unwrap();
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        session.frames.send(heartbeat_frame()).await.unwrap();
+        tokio::time::sleep(Duration::from_secs(30)).await;
+        assert_eq!(written(&mut session.peer).await, "");
+        assert!(drain(&mut session.device).iter().any(|message| matches!(message, DeviceMessage::ForeignFirmware)));
+
+        // And back: our firmware reports its build after its own reset.
+        session.peer.write_all(b"ESP-ROM:esp32s3-20210327\r\nDISPLAY READY BUILD abc 2026-10-07 09:00\r\n").await.unwrap();
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        session.frames.send(heartbeat_frame()).await.unwrap();
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        assert!(written(&mut session.peer).await.contains("device.heartbeat"));
+        session.task.abort();
     }
 }

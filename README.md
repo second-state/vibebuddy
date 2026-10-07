@@ -58,7 +58,7 @@ Pomodoro runs entirely on the box: its timer and today's tally keep going withou
    - picking an announcement voice and writing it to the box;
    - launching at login.
 
-After that Vibe Buddy lives in the menu bar; open the app again any time to bring up Settings. Its icon tells you whether the box is online, which mode it's in and how much got done today. Settings has five tabs: General (including the interface language), Character (who the buddy is, and the volume), Agents, Device (firmware updates, screenshots) and Advanced. If the box's firmware differs from the one bundled with the app, Settings → Device offers to update it.
+After that Vibe Buddy lives in the menu bar; open the app again any time to bring up Settings. Its icon tells you whether the box is online, which mode it's in and how much got done today. Settings has five tabs: General (including the interface language), Character (who the buddy is, and the volume), Agents, Device (firmware updates, screenshots) and Advanced. Firmware is released on its own: when a newer one the app can run is out, Vibe Buddy downloads it and Settings → Device offers to update the box, which you confirm.
 
 If a release isn't signed yet, macOS blocks the first launch; allow it under System Settings → Privacy & Security.
 
@@ -79,9 +79,9 @@ cd vibebuddy/packaging/aur/vibebuddy-bin && makepkg -si
 systemctl --user enable --now vibebuddyd && vibebuddy-hook install
 ```
 
-It will be on the AUR as `vibebuddy-bin` once AUR registration reopens. To build from source instead, run `packaging/linux/install.sh` in a checkout with a Rust toolchain and python3; it builds everything and fetches the release's firmware from GitHub. Either way, the script installs the binaries into `~/.local/bin`, runs `vibebuddyd` as a systemd user service, puts the Vibe Buddy app in the launcher and at login, and adds the hooks to Claude Code and Codex, whichever this machine has (Codex then wants you to trust them in `/hooks`). Run it again to upgrade. The daemon needs to be in the group that owns `/dev/ttyACM*` (`uucp` on Arch, `dialout` on Debian and Ubuntu); the script tells you if it isn't. Config lives in `~/.config/vibebuddy`, stats in `~/.local/state/vibebuddy`, and when the box is gone for 30 seconds you get a desktop notification through `notify-send`.
+It will be on the AUR as `vibebuddy-bin` once AUR registration reopens. To build from source instead, run `packaging/linux/install.sh` in a checkout with a Rust toolchain; it builds everything. Either way, the script installs the binaries into `~/.local/bin`, runs `vibebuddyd` as a systemd user service, puts the Vibe Buddy app in the launcher and at login, and adds the hooks to Claude Code and Codex, whichever this machine has (Codex then wants you to trust them in `/hooks`). Run it again to upgrade. The daemon needs to be in the group that owns `/dev/ttyACM*` (`uucp` on Arch, `dialout` on Debian and Ubuntu); the script tells you if it isn't. Config lives in `~/.config/vibebuddy`, stats in `~/.local/state/vibebuddy`, and when the box is gone for 30 seconds you get a desktop notification through `notify-send`.
 
-On Hyprland, K2 brings back the terminal window the session runs in, on whatever workspace it is; a session inside tmux or over SSH has no window to go back to. The app is a tray icon (the buddy's face; click it for settings) plus a settings window with the same tabs as on the Mac. It takes its colors and font from the Omarchy theme and follows theme switches. It is only a client: quitting it leaves the daemon, and the box, running. Device → Refresh shows what the box's screen shows, and Save image puts it in your Pictures folder. Character lists the Characters the script installed and writes the one you pick to the box; Device offers the firmware of this release (downloaded by the script and checked against GitHub's sha256) when the box runs a different build. The first launch opens the settings window, and so does launching the app again while it runs; there is no separate onboarding, since the script does that work. Omarchy keeps tray icons in a drawer behind the bar's chevron, so the app pins its face to the bar the first time it runs; unpin or hide it there (right-click the chevron) and it stays that way. General → Language overrides the system language, as on the Mac. To make the settings window float on Omarchy, add `o.window("^vibebuddy$", { tag = "+floating-window" })` and `o.window("^vibebuddy$", { tag = "-default-opacity" })` to `~/.config/hypr/hyprland.lua` (one tag per rule: Hyprland reads a space as part of the tag name); like every Hyprland window it moves with Super + drag. To remove everything, run `vibebuddy-hook uninstall`, then `systemctl --user disable --now vibebuddyd`, then delete the files the script installed.
+On Hyprland, K2 brings back the terminal window the session runs in, on whatever workspace it is; a session inside tmux or over SSH has no window to go back to. The app is a tray icon (the buddy's face; click it for settings) plus a settings window with the same tabs as on the Mac. It takes its colors and font from the Omarchy theme and follows theme switches. It is only a client: quitting it leaves the daemon, and the box, running. Device → Refresh shows what the box's screen shows, and Save image puts it in your Pictures folder. Character lists the Characters the script installed and writes the one you pick to the box; Device offers newer firmware once the daemon has downloaded it, as on the Mac. The first launch opens the settings window, and so does launching the app again while it runs; there is no separate onboarding, since the script does that work. Omarchy keeps tray icons in a drawer behind the bar's chevron, so the app pins its face to the bar the first time it runs; unpin or hide it there (right-click the chevron) and it stays that way. General → Language overrides the system language, as on the Mac. To make the settings window float on Omarchy, add `o.window("^vibebuddy$", { tag = "+floating-window" })` and `o.window("^vibebuddy$", { tag = "-default-opacity" })` to `~/.config/hypr/hyprland.lua` (one tag per rule: Hyprland reads a space as part of the tag name); like every Hyprland window it moves with Super + drag. To remove everything, run `vibebuddy-hook uninstall`, then `systemctl --user disable --now vibebuddyd`, then delete the files the script installed.
 
 ## How it works
 
@@ -157,10 +157,11 @@ tools/     # detection, flashing and asset scripts
 
 The firmware is Rust (esp-hal + embassy, `no_std`) in two layers: [`firmware-rs/core`](firmware-rs/core) holds all the logic that doesn't touch hardware, and [`firmware-rs/device`](firmware-rs/device) is only hardware glue. The reasoning is in [ADR-0006](docs/adr/0006-firmware-in-rust-with-esp-hal.md), and the first on-device acceptance steps are in [`docs/firmware-bringup.md`](docs/firmware-bringup.md).
 
-Install the Xtensa toolchain and espflash once:
+Install the Xtensa toolchain and espflash once (espflash builds the images), plus esptool, which writes them:
 
 ```bash
 cargo install espup espflash --locked
+pip install esptool
 espup install --targets esp32s3
 ```
 
@@ -171,7 +172,7 @@ just flash /dev/cu.usbmodem8401
 uv run --with pyserial python tools/serial-hello.py /dev/cu.usbmodem8401
 ```
 
-`just flash` builds the three images (bootloader, partition table, app) and writes them with espflash. It leaves the `voices` partition and the settings area alone, so changing firmware keeps your voice.
+`just flash` builds the three images (bootloader, partition table, app) and writes them with a single esptool `write-flash`: one connection, one reset at the end. It leaves the `voices` partition and the settings area alone, so changing firmware keeps your voice.
 
 Before flashing you can check the hardware-independent parts on the Mac: `just test-firmware` runs the firmware-core tests (state machine, drawing, serial protocol, storage, codec sequences) and compares the Rust and C firmware's screens pixel by pixel.
 
@@ -206,7 +207,6 @@ The results can include your machine's USB device identifiers, so `.probe/` is i
 The Mac app is a menu bar app. It carries `vibebuddyd` and `vibebuddy-hook` inside its bundle and supervises the daemon, replacing the old LaunchAgent. If it finds the old LaunchAgent, it offers to remove it and take over. Design: [`docs/app.md`](docs/app.md).
 
 ```bash
-just firmware   # the three firmware images; a Release build needs them, build-app.sh --debug doesn't
 just install    # build the app, install it to /Applications and launch it
 ```
 
@@ -220,7 +220,7 @@ Run `vibebuddyd` on its own:
 cargo run -p vibebuddyd
 ```
 
-By default it only listens on `127.0.0.1:7331` and finds the box by its Espressif USB Serial/JTAG ID, `VID:PID 303A:1001`. `VIBEBUDDY_BIND` changes the listen address, `VIBEBUDDY_SERIAL_PORT` names a serial port explicitly, and `VIBEBUDDY_USB_SERIAL` picks one box among several identical ones. HTTP `202 Accepted` means the event entered the bounded send queue; whether the box actually received it is what the daemon logs from the box's reply.
+By default it only listens on `127.0.0.1:7331` and finds the box by its Espressif USB Serial/JTAG ID, `VID:PID 303A:1001`. `VIBEBUDDY_BIND` changes the listen address, `VIBEBUDDY_SERIAL_PORT` names a serial port explicitly, and `VIBEBUDDY_USB_SERIAL` picks one box among several identical ones; without it, the daemon connects to the box that has reported Vibe Buddy firmware to it before. A box running other firmware, such as Muse, is written nothing. HTTP `202 Accepted` means the event entered the bounded send queue; whether the box actually received it is what the daemon logs from the box's reply.
 
 The app normally supervises the daemon. On a development machine without the app you can install it as a LaunchAgent with [`packaging/com.vibebuddy.vibebuddyd.plist`](packaging/com.vibebuddy.vibebuddyd.plist), but don't run both: they'd fight over the serial port. For the app, the daemon also serves `GET /v1/status`, SSE `/v1/status/stream`, `/v1/config`, `/v1/device/{identify,screenshot,voice-pack,firmware}` and `/v1/daemon/restart`.
 
@@ -228,16 +228,19 @@ When sending through the box's CH343 UART bridge, the daemon writes in line-rate
 
 ### Releases
 
-CI builds releases; see [`release-app`](.github/workflows/release-app.yml). It builds the firmware on Linux, then the Mac app on an Apple silicon runner (packed into a DMG with `app/scripts/make-dmg.sh`) and the Linux tarball on Ubuntu 22.04 (`packaging/linux/make-tarball.sh`), testing on both.
+CI builds releases. The App and the firmware release separately (ADR-0010). [`release-app`](.github/workflows/release-app.yml) builds the Mac app on an Apple silicon runner (packed into a DMG with `app/scripts/make-dmg.sh`) and the Linux tarball on Ubuntu 22.04 (`packaging/linux/make-tarball.sh`), testing on both.
 
-- Commits on main that touch what goes into the packages (`app/`, `daemon/`, `desktop/`, `hook/`, `protocol/`, `firmware/`, `voices/`, `packaging/`) only produce test artifacts kept for 7 days.
-- A `vX.Y.Z` tag notarizes the app and publishes one GitHub Release with the DMG, the Linux tarball and the firmware zip. The tag must match `version` in `Cargo.toml`, or the build fails.
-- Before releasing, write `docs/releases/vX.Y.Z.md`: a few bullets on what the version does. It opens the release notes, and CI adds the downloads after it.
+- Commits on main that touch what goes into the packages (`app/`, `daemon/`, `desktop/`, `hook/`, `protocol/`, `voices/`, `packaging/`) only produce test artifacts kept for 7 days.
+- A `vX.Y.Z` tag notarizes the app and publishes one GitHub Release with the DMG and the Linux tarball. The tag must match `version` in `Cargo.toml`, or the build fails.
+- Before releasing, write `docs/releases/vX.Y.Z.md`: a few bullets on what the version does. It opens the release notes, and CI adds the downloads after it. A `vX.Y.Z.zh-Hans.md` next to it gives the Chinese notes the App shows; without one it shows the English.
 - Then releasing is one command on a clean main: `just release 0.3.0` checks that file, updates the versions in `Cargo.toml` and both lockfiles, commits, tags and pushes.
-- `VibeBuddy-firmware-vX.Y.Z.zip` holds the three firmware images plus `build.txt`. Anyone with it can flash a box from Settings → Device → Flash from file… on the Mac.
+- [`release-firmware`](.github/workflows/release-firmware.yml) builds the firmware on Linux. A `firmware-vX.Y.Z` tag publishes its own Release, never marked latest, with `VibeBuddy-firmware-vX.Y.Z.zip`: the three images, `build.txt`, `version.txt` and the firmware's license notices. That zip is what the daemon downloads, and anyone can flash it from Settings → Device → Flash from file…. The tag must match `version` in `firmware-rs/device/Cargo.toml`.
+- Before a firmware release, write `docs/releases/firmware-vX.Y.Z.md`: front matter naming the oldest App it runs with (`min_app: 0.4.0` between two `---` lines), then what it does. `just release-firmware 0.3.3` checks that file, bumps the version, commits, tags and pushes.
 - Builds are arm64 for the Mac and x86_64 for Linux. After a release, `packaging/aur/README.md` says how to update the AUR package.
 
 With the five signing secrets set on the repository, releases are signed with a Developer ID and notarized, so they open straight after download. Without them the build falls back to ad-hoc signing, and the first launch has to be allowed under Privacy & Security. [`tools/setup-release-signing.sh`](tools/setup-release-signing.sh) sets the secrets up: it walks you through requesting the certificate, packing the p12 and creating an app-specific password, then checks each one before writing it to GitHub.
+
+After each release, [`update-manifest`](.github/workflows/update-manifest.yml) rebuilds the signed update manifest (ADR-0010) from every published release: the latest App per platform, every firmware with the oldest App it runs with, and `min_supported_app` from `Cargo.toml`. [`tools/setup-update-signing.sh`](tools/setup-update-signing.sh) creates the signing key once: the private half goes to the `MANIFEST_SIGNING_KEY` secret and `~/.vibebuddy-signing`, the public half to `manifest/manifest-key.pub`, which the daemon trusts.
 
 ## License
 

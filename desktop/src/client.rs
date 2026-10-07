@@ -6,7 +6,6 @@ use std::time::Duration;
 use futures::{SinkExt, Stream, StreamExt};
 use serde::Deserialize;
 
-use crate::assets::Firmware;
 use crate::status::{Config, Status};
 
 const BASE: &str = "http://127.0.0.1:7331";
@@ -82,13 +81,18 @@ pub async fn write_voice_pack(pack: Vec<u8>) -> Result<(), String> {
 }
 
 /// Like the voice pack, flashing runs in the background; the daemon reads the three images from these paths.
-pub async fn flash_firmware(firmware: Firmware) -> Result<(), String> {
+/// Flashes the three images in `directory`: the firmware the daemon downloaded from the update manifest.
+pub async fn flash_firmware(directory: std::path::PathBuf) -> Result<(), String> {
     let body = serde_json::json!({
-        "bootloader": firmware.bootloader,
-        "partition_table": firmware.partition_table,
-        "app": firmware.app,
+        "bootloader": directory.join("bootloader.bin"),
+        "partition_table": directory.join("partition-table.bin"),
+        "app": directory.join("vibebuddy-fw.bin"),
     });
     post("/v1/device/firmware", Some(body)).await
+}
+
+pub async fn check_for_updates() -> Result<(), String> {
+    post("/v1/updates/check", None).await
 }
 
 pub async fn identify() -> Result<(), String> {

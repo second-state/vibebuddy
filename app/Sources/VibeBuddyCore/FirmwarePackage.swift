@@ -8,11 +8,14 @@ public struct FirmwarePackage: Equatable {
     public let app: URL
     /// "hash date time", the same format the box reports on its DISPLAY READY BUILD line; without build.txt, just the version string in the image.
     public let build: String
+    /// From version.txt; packages from before ADR-0010 have none.
+    public let version: String?
 
     public static let bootloaderName = "bootloader.bin"
     public static let partitionTableName = "partition-table.bin"
     public static let appName = "vibebuddy-fw.bin"
     public static let buildName = "build.txt"
+    public static let versionName = "version.txt"
 
     public enum Failure: Error, LocalizedError, Equatable {
         case missing(String)
@@ -48,11 +51,15 @@ public struct FirmwarePackage: Equatable {
             let version = header[0x30..<0x50].prefix { $0 != 0 }
             build = String(decoding: version, as: UTF8.self)
         }
-        return FirmwarePackage(bootloader: bootloader, partitionTable: table, app: app, build: build)
+        let version = files[versionName]
+            .flatMap { try? String(contentsOf: $0, encoding: .utf8) }
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .flatMap { $0.isEmpty ? nil : $0 }
+        return FirmwarePackage(bootloader: bootloader, partitionTable: table, app: app, build: build, version: version)
     }
 
     private static func locate(in directory: URL) throws -> [String: URL] {
-        let wanted: Set<String> = [bootloaderName, partitionTableName, appName, buildName]
+        let wanted: Set<String> = [bootloaderName, partitionTableName, appName, buildName, versionName]
         var found: [String: URL] = [:]
         guard let walker = FileManager.default.enumerator(at: directory, includingPropertiesForKeys: [.isRegularFileKey]) else {
             throw Failure.missing(appName)

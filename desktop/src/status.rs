@@ -14,6 +14,56 @@ pub struct Status {
     pub hooks: Hooks,
     pub operation: Option<Operation>,
     pub config: Config,
+    /// What the update manifest offers (ADR-0010); absent from older daemons.
+    pub updates: Option<Updates>,
+}
+
+/// The daemon's view of updates; which firmware to offer is its call, as on the Mac.
+#[derive(Clone, Debug, Default, Deserialize, PartialEq)]
+#[serde(default)]
+pub struct Updates {
+    pub enabled: bool,
+    pub last_check: Option<String>,
+    pub error: Option<String>,
+    pub app: Option<AppOffer>,
+    pub unsupported_app: bool,
+    pub firmware: Option<FirmwareOffer>,
+}
+
+#[derive(Clone, Debug, Default, Deserialize, PartialEq)]
+#[serde(default)]
+pub struct AppOffer {
+    pub version: String,
+    pub url: String,
+}
+
+#[derive(Clone, Debug, Default, Deserialize, PartialEq)]
+#[serde(default)]
+pub struct FirmwareOffer {
+    pub version: String,
+    pub notes: std::collections::BTreeMap<String, String>,
+    /// The unpacked images, once the daemon has downloaded and checked them.
+    pub directory: Option<std::path::PathBuf>,
+    pub newer_than_box: bool,
+}
+
+impl FirmwareOffer {
+    /// Release notes in the UI's language, English otherwise.
+    pub fn notes(&self, chinese: bool) -> Option<&str> {
+        chinese.then(|| self.notes.get("zh-Hans")).flatten().or_else(|| self.notes.get("en")).map(String::as_str)
+    }
+}
+
+impl Updates {
+    /// An update is offered only for a box that runs something older, and only once the firmware is on disk.
+    pub fn firmware_update_available(&self) -> bool {
+        self.firmware.as_ref().is_some_and(|offer| offer.newer_than_box && offer.directory.is_some())
+    }
+
+    /// The images to flash, once downloaded.
+    pub fn firmware_directory(&self) -> Option<&std::path::Path> {
+        self.firmware.as_ref()?.directory.as_deref()
+    }
 }
 
 /// Writing a voice pack or flashing firmware; the daemon runs one at a time and reports progress here.
@@ -62,17 +112,6 @@ impl Operation {
     }
 }
 
-/// Builds are reported as "hash date time"; only the hash says which firmware it is.
-pub fn firmware_hash(build: Option<&str>) -> Option<&str> {
-    build.and_then(|build| build.split(' ').next()).filter(|hash| !hash.is_empty())
-}
-
-/// Offered whenever the hashes differ, without judging which is newer, as on the Mac (docs/app.md). Nothing is offered
-/// before the box has reported its build.
-pub fn firmware_update_available(device: Option<&str>, bundled: Option<&str>) -> bool {
-    matches!((firmware_hash(device), firmware_hash(bundled)), (Some(device), Some(bundled)) if device != bundled)
-}
-
 #[derive(Clone, Debug, Default, Deserialize, PartialEq)]
 #[serde(default)]
 pub struct DaemonInfo {
@@ -87,8 +126,22 @@ pub struct Device {
     pub bridge: bool,
     pub mode: Option<String>,
     pub firmware_build: Option<String>,
+    /// Firmware older than ADR-0010 and older daemons report none.
+    pub firmware_version: Option<String>,
     pub voice: Option<String>,
     pub volume: Option<u8>,
+    /// Connected but running other firmware, as the daemon judged it (docs/architecture.md, decision 17).
+    pub foreign_firmware: bool,
+}
+
+impl Device {
+    /// The firmware as shown in the interface: version first, then the build ID.
+    pub fn firmware_label(&self) -> Option<String> {
+        match (&self.firmware_version, &self.firmware_build) {
+            (Some(version), Some(build)) => Some(format!("{version} · {build}")),
+            (version, build) => version.clone().or_else(|| build.clone()),
+        }
+    }
 }
 
 #[derive(Clone, Debug, Default, Deserialize, PartialEq)]
@@ -113,11 +166,13 @@ pub struct Hooks {
 pub struct Config {
     pub voice: Option<String>,
     pub notify_link: bool,
+    /// None follows the build: on in releases CI makes, off when built from source.
+    pub check_updates: Option<bool>,
 }
 
 impl Default for Config {
     fn default() -> Self {
-        Self { voice: None, notify_link: true }
+        Self { voice: None, notify_link: true, check_updates: None }
     }
 }
 
@@ -211,6 +266,14 @@ mod tests {
     }
 
     #[test]
+    fn the_firmware_label_leads_with_the_version() {
+        let mut status: Status = serde_json::from_str(LIVE).expect("status");
+        assert_eq!(status.device.firmware_label().as_deref(), Some("v0.2.1-38-ga0bffc7 2026-09-30 16:29"));
+        status.device.firmware_version = Some("0.2.2".to_owned());
+        assert_eq!(status.device.firmware_label().as_deref(), Some("0.2.2 · v0.2.1-38-ga0bffc7 2026-09-30 16:29"));
+    }
+
+    #[test]
     fn the_menu_says_what_the_mac_app_says() {
         let status: Status = serde_json::from_str(LIVE).expect("status");
         let menu = MenuState::derive(Some(&status));
@@ -253,12 +316,24 @@ mod tests {
     }
 
     #[test]
-    fn firmware_is_compared_by_hash_only() {
-        let device = Some("v0.2.1-38-ga0bffc7 2026-09-30 16:29");
-        assert!(firmware_update_available(device, Some("v0.2.2 2026-09-30 09:13")));
-        assert!(!firmware_update_available(Some("v0.2.2 2026-10-01 10:00"), Some("v0.2.2 2026-09-30 09:13")));
-        assert!(!firmware_update_available(None, Some("v0.2.2 2026-09-30 09:13")));
-        assert!(!firmware_update_available(device, None));
+    fn firmware_is_offered_once_downloaded_and_newer_than_the_box() {
+        let updates: Updates = serde_json::from_str(
+            r#"{"enabled": true, "firmware": {"version": "0.4.0", "notes": {"en": "- Fix", "zh-Hans": "- 修复"},
+                "directory": "/state/updates/firmware/0.4.0", "newer_than_box": true}}"#,
+        )
+        .expect("updates");
+        assert!(updates.firmware_update_available());
+        assert_eq!(updates.firmware_directory(), Some(std::path::Path::new("/state/updates/firmware/0.4.0")));
+        let offer = updates.firmware.clone().unwrap();
+        assert_eq!(offer.notes(true), Some("- 修复"));
+        assert_eq!(offer.notes(false), Some("- Fix"));
+        let mut not_downloaded = updates.clone();
+        not_downloaded.firmware.as_mut().unwrap().directory = None;
+        assert!(!not_downloaded.firmware_update_available());
+        let mut same = updates;
+        same.firmware.as_mut().unwrap().newer_than_box = false;
+        assert!(!same.firmware_update_available());
+        assert!(!Updates::default().firmware_update_available());
     }
 
     #[test]

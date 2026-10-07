@@ -1,5 +1,5 @@
 [workspace]
-members = ["daemon", "desktop", "firmware-rs/core", "hook", "protocol"]
+members = ["daemon", "desktop", "firmware-rs/core", "hook", "manifest", "protocol"]
 # The device firmware builds separately with the Xtensa toolchain; see firmware-rs/device.
 exclude = ["firmware-rs/device"]
 resolver = "3"
@@ -8,6 +8,10 @@ resolver = "3"
 edition = "2024"
 license = "GPL-3.0-or-later"
 version = "0.3.2"
+
+# Apps older than this get a banner they can't dismiss, through the update manifest (ADR-0010).
+[workspace.metadata.vibebuddy]
+min_supported_app = "0.3.2"
 
 [workspace.dependencies]
 axum = "0.8"

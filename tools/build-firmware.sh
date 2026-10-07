@@ -4,6 +4,7 @@
 #   partition-table.bin → 0x8000
 #   vibebuddy-fw.bin    → 0x10000
 #   build.txt           matches the box's DISPLAY READY BUILD line character for character
+#   version.txt         the firmware version (firmware-rs/device/Cargo.toml), the box's FIRMWARE VERSION line
 # None of the three touches the settings area at 0x9000 or the voices partition at 0x410000.
 #
 # FAST_CLOCK=1 builds the time-compressed acceptance firmware (five minutes of leisure become five seconds).
@@ -55,4 +56,6 @@ build = app[start:app.index(b"\0", start)].decode()
 (out / "build.txt").write_text(build + "\n")
 print(f"bootloader {len(bootloader)} B, app {len(app)} B, build ID {build}")
 PY
+sed -n 's/^version = "\(.*\)"$/\1/p' "${device}/Cargo.toml" | head -n 1 > "${out}/version.txt"
+echo "firmware version $(cat "${out}/version.txt")"
 ls -l "${out}"

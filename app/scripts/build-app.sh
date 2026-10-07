@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
-# Assembles Vibe Buddy.app: the two Rust helpers, the Swift app, the three firmware images, and the Character packs.
+# Assembles Vibe Buddy.app: the two Rust helpers, the Swift app and the Character packs. Firmware isn't bundled: it is
+# released on its own and the daemon downloads it (ADR-0010).
 #
 # Usage: app/scripts/build-app.sh [--debug] [--install]
-#   --debug    Allow a build without firmware (the Device tab hides "Update"); Swift uses the debug configuration.
+#   --debug    Swift uses the debug configuration.
 #   --install  Copy the result to /Applications and launch it from there. The app you use day to day must live there:
 #              a worktree's build directory can be deleted at any time, and the login item and hooks point into it,
 #              so after the next reboot nothing is left (this happened once on 2026-09-17).
-# A release build requires the three images in firmware-rs/device/build; if any is missing it fails and says to build the firmware first.
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
@@ -55,7 +55,7 @@ fi
 bundle="${app_dir}/build/Vibe Buddy.app"
 contents="${bundle}/Contents"
 rm -rf "${bundle}"
-mkdir -p "${contents}/MacOS" "${contents}/Resources/firmware" "${contents}/Resources/voices"
+mkdir -p "${contents}/MacOS" "${contents}/Resources/voices"
 
 sed -e "s/__VERSION__/${version}/" -e "s/__BUILD__/${build_number}/" "${app_dir}/Info.plist" > "${contents}/Info.plist"
 cp "${swift_bin}" "${contents}/MacOS/VibeBuddy"
@@ -78,22 +78,6 @@ iconutil -c icns "${app_dir}/build/AppIcon.iconset" -o "${contents}/Resources/Ap
 cp "${repo_root}/target/release/vibebuddyd" "${contents}/MacOS/vibebuddyd"
 cp "${repo_root}/target/release/vibebuddy-hook" "${contents}/MacOS/vibebuddy-hook"
 
-echo "== Firmware"
-# The Rust firmware's three images and build ID, produced by tools/build-firmware.sh. build.txt matches the box's
-# DISPLAY READY BUILD line character for character; the app compares against it to offer updates.
-fw="${repo_root}/firmware-rs/device/build"
-if [[ -f "${fw}/bootloader.bin" && -f "${fw}/partition-table.bin" && -f "${fw}/vibebuddy-fw.bin" && -f "${fw}/build.txt" ]]; then
-    for file in bootloader.bin partition-table.bin vibebuddy-fw.bin build.txt; do
-        cp "${fw}/${file}" "${contents}/Resources/firmware/${file}"
-    done
-    echo "Bundled firmware $(cat "${contents}/Resources/firmware/build.txt")"
-elif [[ ${debug} -eq 1 ]]; then
-    echo "No firmware build output; debug build ships without firmware"
-else
-    echo "A release build needs the three firmware images in firmware-rs/device/build; run tools/build-firmware.sh first" >&2
-    exit 1
-fi
-
 # Each Character's pack is built by tools/make-character.sh and committed as characters/<id>/pack.bin.
 echo "== Character packs"
 for pack in "${repo_root}"/characters/*/pack.bin; do
@@ -106,7 +90,7 @@ for pack in "${repo_root}"/characters/*/pack.bin; do
     echo "  ${id}"
 done
 
-# Both the App and its separately downloadable firmware carry these notices.
+# The firmware zip carries its own notices (release-firmware.yml).
 echo "== Licenses and corresponding source"
 python3 "${repo_root}/tools/package-licenses.py" "${contents}/Resources"
 

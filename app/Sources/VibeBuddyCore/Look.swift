@@ -184,14 +184,21 @@ extension LookBuilder {
     public static func frames(of look: Data) -> [RGBAImage]? {
         let look = Data(look)
         guard look.count == 8 + colors * 2 + 4 * width * height / 2, look.prefix(4) == Data("LOOK".utf8) else { return nil }
-        let palette: [(UInt8, UInt8, UInt8)] = (0..<colors).map { index in
-            let entry = Int(look[8 + index * 2]) | Int(look[9 + index * 2]) << 8
-            return (UInt8((entry >> 11) * 255 / 31), UInt8(((entry >> 5) & 0x3F) * 255 / 63), UInt8((entry & 0x1F) * 255 / 31))
+        // Explicit types and short expressions: Xcode 16's type checker times out on the inferred version.
+        let palette: [(UInt8, UInt8, UInt8)] = (0..<colors).map { (index: Int) -> (UInt8, UInt8, UInt8) in
+            let entry: Int = Int(look[8 + index * 2]) | Int(look[9 + index * 2]) << 8
+            let r = UInt8((entry >> 11) * 255 / 31)
+            let g = UInt8(((entry >> 5) & 0x3F) * 255 / 63)
+            let b = UInt8((entry & 0x1F) * 255 / 31)
+            return (r, g, b)
         }
-        return (0..<4).map { frame in
-            var pixels = [UInt8](repeating: 0, count: width * height * 4)
-            for at in 0..<(width * height) {
-                let byte = look[8 + colors * 2 + frame * width * height / 2 + at / 2]
+        let cells = width * height
+        let firstFrame = 8 + colors * 2
+        return (0..<4).map { (frame: Int) -> RGBAImage in
+            var pixels = [UInt8](repeating: 0, count: cells * 4)
+            let start: Int = firstFrame + frame * cells / 2
+            for at in 0..<cells {
+                let byte: UInt8 = look[start + at / 2]
                 let index = Int(at % 2 == 0 ? byte & 15 : byte >> 4)
                 guard index != 0 else { continue }
                 let (r, g, b) = palette[index]

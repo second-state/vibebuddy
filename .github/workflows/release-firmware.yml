@@ -1,0 +1,123 @@
+# Firmware releases on their own (ADR-0010). A firmware-vX.Y.Z tag builds the three images, publishes
+# VibeBuddy-firmware-vX.Y.Z.zip as its own GitHub Release and rebuilds the update manifest, which is how installed Apps
+# find it. Commits to main that touch the firmware only build it, keeping the zip as a 7-day artifact for self-testing.
+name: release-firmware
+
+on:
+  push:
+    tags: ["firmware-v[0-9]+.[0-9]+.[0-9]+"]
+    branches: [main]
+    paths:
+      - "firmware-rs/**"
+      - "protocol/**"
+      - "firmware/partitions.csv"
+      - "tools/build-firmware.sh"
+      - "tools/make-partition-table.py"
+      - "tools/package-licenses.py"
+      - "packaging/BOOTLOADER-NOTICES.txt"
+      - ".github/workflows/release-firmware.yml"
+  workflow_dispatch:
+
+# Tag releases must not be cancelled by later pushes; consecutive pushes to main keep only the latest run.
+concurrency:
+  group: release-firmware-${{ github.ref }}
+  cancel-in-progress: ${{ !startsWith(github.ref, 'refs/tags/') }}
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    # The Rust firmware (esp-hal + embassy) builds with the Xtensa toolchain; the images are architecture-independent.
+    runs-on: ubuntu-latest
+    env:
+      RELEASE: ${{ startsWith(github.ref, 'refs/tags/') }}
+    outputs:
+      label: ${{ steps.version.outputs.label }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # build.rs uses git describe --tags for the firmware build ID, so tags must be visible.
+          fetch-depth: 0
+      - uses: esp-rs/xtensa-toolchain@v1.7
+        env:
+          # espup asks the GitHub API for the latest toolchain; unauthenticated, a shared runner IP gets 403 rate limits.
+          GITHUB_TOKEN: ${{ github.token }}
+        with:
+          default: true
+          buildtargets: esp32s3
+          ldproxy: false
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: espflash@4.6.0
+      - name: Determine version
+        id: version
+        run: |
+          version="$(sed -n 's/^version = "\(.*\)"/\1/p' firmware-rs/device/Cargo.toml | head -n 1)"
+          if [[ "${RELEASE}" == "true" ]]; then
+            # The tag is the firmware version; stop rather than publish a zip whose version lies.
+            [[ "${GITHUB_REF_NAME}" == "firmware-v${version}" ]] || {
+              echo "tag ${GITHUB_REF_NAME} does not match firmware-rs/device/Cargo.toml version ${version}" >&2; exit 1; }
+          fi
+          echo "label=v${version}" >> "${GITHUB_OUTPUT}"
+      - name: Build
+        run: tools/build-firmware.sh
+      - name: Package
+        run: |
+          # The zip is what the daemon downloads and what "Flash from file…" takes: the three images, the build ID
+          # matching the box's DISPLAY READY BUILD line, the version, and the firmware's own license notices.
+          stage="${RUNNER_TEMP}/firmware"
+          mkdir -p "${stage}"
+          for file in bootloader.bin partition-table.bin vibebuddy-fw.bin build.txt version.txt; do
+            cp "firmware-rs/device/build/${file}" "${stage}/${file}"
+          done
+          cargo install cargo-about --version 0.9.2 --locked --features cli
+          python3 tools/package-licenses.py "${stage}" --firmware
+          (cd "${stage}" && zip -qr "${GITHUB_WORKSPACE}/VibeBuddy-firmware-${{ steps.version.outputs.label }}.zip" .)
+      - uses: actions/upload-artifact@v4
+        with:
+          name: firmware
+          path: VibeBuddy-firmware-${{ steps.version.outputs.label }}.zip
+          retention-days: 7
+
+  publish:
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-latest
+    steps:
+      # Only for docs/releases/<tag>.md, the hand-written notes with the oldest App this firmware runs with.
+      - uses: actions/checkout@v4
+        with:
+          sparse-checkout: docs/releases
+      - uses: actions/download-artifact@v4
+        with:
+          name: firmware
+      - name: Publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          tag="${GITHUB_REF_NAME}"
+          summary="docs/releases/${tag}.md"
+          [[ -f "${summary}" ]] || { echo "missing ${summary}: say what this firmware does and its min_app" >&2; exit 1; }
+          # The front matter is for the update manifest, not for people reading the release page.
+          head -n 1 "${summary}" | grep -qx -- '---' && sed -n '2,/^---$/p' "${summary}" | grep -q '^min_app:' \
+            || { echo "${summary} must start with front matter naming min_app" >&2; exit 1; }
+          awk 'NR == 1 && $0 == "---" { skip = 1; next } skip && $0 == "---" { skip = 0; next } !skip' "${summary}" > notes.md
+          cat >> notes.md <<NOTES
+
+          ## Download
+
+          Vibe Buddy downloads this firmware by itself and offers it on the Device tab. To flash it by hand, pick \`VibeBuddy-firmware-${{ needs.build.outputs.label }}.zip\` with Settings → Device → Flash from file….
+          NOTES
+          # Never "latest": the README's download links point at the latest release, which must stay the App's.
+          gh release create "${tag}" --repo "${GITHUB_REPOSITORY}" \
+            "VibeBuddy-firmware-${{ needs.build.outputs.label }}.zip" \
+            --title "Vibe Buddy firmware ${{ needs.build.outputs.label }}" \
+            --notes-file notes.md \
+            --latest=false
+
+  manifest:
+    # The new firmware goes into the update manifest, next to the latest App.
+    needs: publish
+    uses: ./.github/workflows/update-manifest.yml
+    secrets: inherit

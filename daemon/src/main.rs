@@ -11,6 +11,7 @@ mod serial_transport;
 mod session_titles;
 mod source_opener;
 mod status;
+mod updates;
 mod voice_writer;
 
 use std::convert::Infallible;
@@ -37,11 +38,12 @@ use serde::Serialize;
 use serial_transport::{DeviceMessage, SerialConfig, SerialTransport, Transport, TransportError};
 use session_titles::SessionTitles;
 use status::{DaemonInfo, DeviceState, HooksSeen, Operation, OperationKind, OperationState, Status};
-use tokio::sync::{Mutex, broadcast};
+use tokio::sync::{Mutex, Notify, broadcast};
 use tokio_stream::StreamExt;
 use tokio_stream::wrappers::BroadcastStream;
 use tracing::{info, warn};
 use tracing_subscriber::EnvFilter;
+use updates::Updates;
 
 /// Once the last session hangs there are no more hook events; only a periodic sweep can free the screen.
 const SWEEP_INTERVAL: Duration = Duration::from_secs(60);
@@ -74,6 +76,10 @@ struct AppState {
     app_version: Option<String>,
     /// The real serial worker, which must give up the port while flashing; absent in tests.
     serial: Option<Arc<SerialTransport>>,
+    /// The update manifest and the firmware it offers; with no source, nothing is ever checked.
+    updates: Arc<Mutex<Updates>>,
+    /// "Check for updates" pressed: checks now instead of waiting for the daily one.
+    check_updates: Arc<Notify>,
 }
 
 impl AppState {
@@ -102,7 +108,13 @@ impl AppState {
             status_changed,
             app_version: env::var("VIBEBUDDY_APP_VERSION").ok().filter(|value| !value.is_empty()),
             serial: None,
+            updates: Arc::new(Mutex::new(Updates::new(None, None))),
+            check_updates: Arc::new(Notify::new()),
         }
+    }
+
+    async fn update_checks_enabled(&self) -> bool {
+        self.config.lock().await.check_updates.unwrap_or_else(updates::enabled_by_default)
     }
 
     fn notify_status(&self) {
@@ -110,16 +122,19 @@ impl AppState {
     }
 
     async fn snapshot(&self) -> Status {
+        let device = self.device.lock().await.clone();
+        let updates = self.updates.lock().await.status(&device, self.update_checks_enabled().await);
         Status {
             daemon: DaemonInfo {
                 build: build_identity(self.app_version.as_deref()),
                 app_version: self.app_version.clone(),
             },
-            device: self.device.lock().await.clone(),
+            device,
             today: self.activities.lock().await.today(),
             hooks: self.hooks_seen.lock().await.clone(),
             operation: self.operation.lock().await.clone(),
             config: self.config.lock().await.clone(),
+            updates,
         }
     }
 
@@ -177,11 +192,16 @@ async fn main() {
         config::config_file(),
     );
     state.serial = Some(serial_transport);
+    state.updates = Arc::new(Mutex::new(Updates::new(
+        updates::Source::configured(),
+        config::state_dir().map(|dir| dir.join("updates")),
+    )));
     tokio::spawn(watch_parent());
     tokio::spawn(sweep_expired_activities(state.clone()));
     tokio::spawn(send_heartbeats(state.clone()));
     tokio::spawn(poll_ci(state.clone()));
     tokio::spawn(handle_device_events(state.clone(), device_events));
+    tokio::spawn(check_for_updates(state.clone()));
     // On macOS the app reports a lost link; elsewhere there is no app, so the daemon does it.
     if !cfg!(target_os = "macos") {
         tokio::spawn(link_alert::watch(state.clone()));
@@ -357,6 +377,7 @@ fn app(state: AppState) -> Router {
         .route("/v1/device/screenshot", post(post_screenshot))
         .route("/v1/device/firmware", post(post_firmware))
         .route("/v1/daemon/restart", post(post_restart))
+        .route("/v1/updates/check", post(post_check_updates))
         .with_state(state)
 }
 
@@ -403,6 +424,67 @@ async fn status_stream(
 
 async fn get_config(State(state): State<AppState>) -> Json<Config> {
     Json(state.config.lock().await.clone())
+}
+
+/// At start, once a day, and when asked. The first check waits a little, so the box has reported the firmware
+/// version that goes with the request; being asked doesn't wait.
+async fn check_for_updates(state: AppState) {
+    let mut wait = Duration::from_secs(30);
+    loop {
+        tokio::select! {
+            _ = tokio::time::sleep(wait) => {}
+            _ = state.check_updates.notified() => {}
+        }
+        if state.update_checks_enabled().await {
+            check_once(&state).await;
+        }
+        wait = updates::CHECK_EVERY;
+    }
+}
+
+async fn check_once(state: &AppState) {
+    let Some(source) = state.updates.lock().await.source.clone() else { return };
+    let firmware_version = state.device.lock().await.firmware_version.clone();
+    let fetched = tokio::task::spawn_blocking(move || updates::fetch(&source, env!("CARGO_PKG_VERSION"), firmware_version.as_deref()))
+        .await
+        .unwrap_or_else(|error| Err(error.to_string()));
+    let wanted = match fetched {
+        Ok((text, manifest)) => {
+            let mut updates = state.updates.lock().await;
+            updates.accept(&text, manifest).map(|firmware| (firmware, updates.firmware_root()))
+        }
+        Err(error) => Err(error),
+    };
+    let error = match wanted {
+        Ok((Some(firmware), Some(root))) => {
+            let version = firmware.download.version.clone();
+            let downloaded = tokio::task::spawn_blocking(move || updates::download(&firmware, &root))
+                .await
+                .unwrap_or_else(|error| Err(error.to_string()));
+            match downloaded {
+                Ok(dir) => {
+                    info!(%version, dir = %dir.display(), "downloaded firmware");
+                    None
+                }
+                Err(error) => Some(error),
+            }
+        }
+        Ok(_) => None,
+        Err(error) => Some(error),
+    };
+    if let Some(error) = &error {
+        warn!(%error, "update check failed");
+    }
+    state.updates.lock().await.finish(error);
+    state.notify_status();
+}
+
+async fn post_check_updates(State(state): State<AppState>) -> (StatusCode, Json<ApiResponse>) {
+    if !state.update_checks_enabled().await || state.updates.lock().await.source.is_none() {
+        return (StatusCode::CONFLICT, Json(ApiResponse { accepted: false, message: "update checks are off".to_owned() }));
+    }
+    state.check_updates.notify_one();
+    (StatusCode::ACCEPTED, Json(ApiResponse { accepted: true, message: "checking for updates".to_owned() }))
 }
 
 async fn put_config(State(state): State<AppState>, Json(config): Json<Config>) -> Json<Config> {
@@ -1016,7 +1098,7 @@ mod tests {
             SessionTitles::disabled(),
             Some(path.clone()),
         );
-        let wanted = Config { voice: Some("hsiaochen".to_owned()), notify_link: false };
+        let wanted = Config { voice: Some("hsiaochen".to_owned()), notify_link: false, check_updates: Some(true) };
         let Json(returned) = put_config(State(state.clone()), Json(wanted.clone())).await;
         assert_eq!(returned, wanted);
         assert_eq!(Config::load(&path), wanted);

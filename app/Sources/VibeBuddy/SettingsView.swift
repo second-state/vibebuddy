@@ -23,6 +23,11 @@ struct GeneralView: View {
 
     var body: some View {
         Form {
+            // Nothing stops working; the App just says, every time, that it's too old (ADR-0010).
+            if model.updates?.unsupportedApp == true {
+                Label("This version of Vibe Buddy is no longer supported. Update it to keep getting firmware for the box.", systemImage: "exclamationmark.triangle.fill")
+                    .foregroundStyle(.orange)
+            }
             // The dialog runs after this update rather than as a nested modal loop inside SwiftUI's binding setter.
             Picker(selection: Binding(get: { language }, set: { choice in DispatchQueue.main.async { change(to: choice) } })) {
                 Text("System").tag(AppLanguage.system)
@@ -34,12 +39,32 @@ struct GeneralView: View {
             Toggle("Launch at login", isOn: Binding(get: { model.launchAtLogin }, set: { model.setLaunchAtLogin($0) }))
             Toggle("Notify me when the box disconnects or the daemon fails", isOn: Binding(get: { model.status?.config.notifyLink ?? true }, set: { model.setNotifyLink($0) }))
                 .disabled(model.status == nil)
+            Section("Updates") {
+                Toggle("Check for updates", isOn: Binding(get: { model.status?.config.checkUpdates ?? model.updates?.enabled ?? false }, set: { model.setCheckUpdates($0) }))
+                    .disabled(model.status == nil)
+                HStack {
+                    Text(updateSummary).foregroundStyle(.secondary)
+                    Spacer()
+                    if let app = model.updates?.app, let url = URL(string: app.url) {
+                        Link("Download \(app.version)", destination: url)
+                    }
+                    Button("Check now") { model.checkForUpdates() }.disabled(!(model.updates?.enabled ?? false))
+                }
+            }
             Section {
                 LabeledContent("App", value: Resources.displayVersion)
                 LabeledContent("daemon", value: model.status?.daemon.build ?? String(localized: "Not connected"))
             }
         }
         .formStyle(.grouped)
+    }
+
+    private var updateSummary: String {
+        guard let updates = model.updates, updates.enabled else { return String(localized: "Off") }
+        if let error = updates.error { return String(localized: "Last check failed: \(error)") }
+        if let app = updates.app { return String(localized: "Vibe Buddy \(app.version) is available") }
+        guard let checked = updates.lastCheck else { return String(localized: "Not checked yet") }
+        return String(localized: "Up to date · checked \(checked.formatted(.relative(presentation: .named)))")
     }
 
     /// Saves the choice, then offers to restart and, when the box speaks the other language, to switch its voice too.
@@ -339,15 +364,22 @@ struct DeviceView: View {
                 if model.daemonAlive, !connected, !model.operationRunning, model.operation?.state != .replug {
                     BoxNotFoundHelp()
                 }
-                LabeledContent("Box firmware", value: model.status?.device.firmwareBuild ?? "—")
-                LabeledContent("Bundled with app", value: model.bundledFirmwareBuild ?? String(localized: "This build has no bundled firmware"))
-                if model.firmwareUpdateAvailable {
-                    Button("Update to bundled version") { confirmUpdate() }
+                LabeledContent("Box firmware", value: model.boxFirmware ?? "—")
+                LabeledContent("Latest firmware", value: model.offeredFirmware?.version ?? "—")
+                if model.firmwareUpdateAvailable, let offer = model.offeredFirmware {
+                    Button("Update to \(offer.version)") { confirmUpdate(offer) }
                         .disabled(model.operationRunning || !connected)
-                } else if model.foreignFirmware, model.bundledFirmwareBuild != nil {
+                } else if model.foreignFirmware {
                     Text("The box isn't running Vibe Buddy firmware.").foregroundStyle(.orange)
-                    Button("Flash Vibe Buddy firmware") { FlashConfirm.foreign(then: model.updateFirmware) }
-                        .disabled(model.operationRunning)
+                    if model.firmwareDownloaded {
+                        Button("Flash Vibe Buddy firmware") { FlashConfirm.foreign(then: model.updateFirmware) }
+                            .disabled(model.operationRunning)
+                    } else {
+                        FirmwareUnavailable(model: model)
+                    }
+                } else if model.offeredFirmware?.newerThanBox == true {
+                    // Newer firmware exists but isn't on disk yet.
+                    FirmwareUnavailable(model: model)
                 }
                 if let operation = model.operation, operation.kind == .firmware {
                     OperationRow(operation: operation)
@@ -411,20 +443,51 @@ struct DeviceView: View {
         }
         let alert = NSAlert()
         alert.messageText = String(localized: "Flash this firmware?")
-        let current = model.status?.device.firmwareBuild ?? String(localized: "unknown")
-        alert.informativeText = String(localized: "Firmware package: \(package.build)\nBox now: \(current)\nThe box restarts once; its voice pack and today's stats are kept. Over the UART bridge this takes a few minutes.")
+        let current = model.boxFirmware ?? String(localized: "unknown")
+        let offered = Firmware.label(version: package.version, build: package.build) ?? package.build
+        alert.informativeText = String(localized: "Firmware package: \(offered)\nBox now: \(current)\nThe box restarts once; its voice pack and today's stats are kept. Over the UART bridge this takes a few minutes.")
         alert.addButton(withTitle: String(localized: "Flash"))
         alert.addButton(withTitle: String(localized: "Cancel"))
         if alert.runModal() == .alertFirstButtonReturn { model.flashFirmware(package) }
     }
 
-    private func confirmUpdate() {
+    private func confirmUpdate(_ offer: FirmwareOffer) {
         let alert = NSAlert()
-        alert.messageText = String(localized: "Update the box firmware?")
-        alert.informativeText = String(localized: "The box restarts once; its voice pack and today's stats are kept. Over the UART bridge this takes a few minutes.")
+        alert.messageText = String(localized: "Update the box firmware to \(offer.version)?")
+        var text = String(localized: "The box restarts once; its voice pack and today's stats are kept. Over the UART bridge this takes a few minutes.")
+        if let notes = Firmware.notes(offer.notes, chinese: Resources.uiLanguage == .zh) { text = notes + "\n\n" + text }
+        alert.informativeText = text
         alert.addButton(withTitle: String(localized: "Update"))
         alert.addButton(withTitle: String(localized: "Cancel"))
         if alert.runModal() == .alertFirstButtonReturn { model.updateFirmware() }
+    }
+}
+
+/// Why there's no firmware to flash yet and what to do about it: shared by onboarding and the Device tab.
+/// The daemon downloads firmware from the update manifest; without it, the zip from the releases page still works.
+struct FirmwareUnavailable: View {
+    @ObservedObject var model: AppModel
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            if let updates = model.updates, updates.enabled {
+                if let error = updates.error {
+                    Text("Couldn't get the firmware: \(error)")
+                } else if model.offeredFirmware != nil {
+                    Text("Downloading the firmware…")
+                } else {
+                    Text("Looking for firmware…")
+                }
+                Button("Check again") { model.checkForUpdates() }
+            } else {
+                Text("Update checks are off, so Vibe Buddy can't download firmware.")
+            }
+            HStack(spacing: 4) {
+                Text("Or download the firmware zip yourself and use Flash from file… on the Device tab:")
+                Link("Releases", destination: Resources.releasesPage)
+            }
+        }
+        .font(.caption).foregroundStyle(.secondary)
     }
 }
 
@@ -507,8 +570,8 @@ struct AdvancedView: View {
         let summary = """
         App \(Resources.displayVersion)
         daemon \(model.status?.daemon.build ?? "not connected")
-        firmware \(model.status?.device.firmwareBuild ?? "—")
-        bundled firmware \(model.bundledFirmwareBuild ?? "—")
+        firmware \(model.boxFirmware ?? "—")
+        offered firmware \(model.offeredFirmware?.version ?? "—")
         voice \(model.status?.device.voice ?? "—")
         """
         try? summary.write(to: target.appendingPathComponent("summary.txt"), atomically: true, encoding: .utf8)

@@ -14,16 +14,22 @@ func check(_ condition: Bool, _ message: String, file: String = #file, line: Int
 // 1. Status JSON decoding, with microsecond timestamps and time zones.
 let sample = """
 {"daemon":{"build":"0.3.0 abc1234 2026-09-16 10:50","app_version":"0.3.0"},
- "device":{"connected":true,"port":"/dev/cu.usbmodem1","bridge":true,"mode":"pomodoro","firmware_build":"abc1234-dirty 2026-09-16 13:11","voice":"xiaohe2","volume":65},
+ "device":{"connected":true,"port":"/dev/cu.usbmodem1","bridge":true,"mode":"pomodoro","firmware_build":"abc1234-dirty 2026-09-16 13:11","firmware_version":"0.2.2","voice":"xiaohe2","volume":65},
  "today":{"done":3,"asks":1,"busy_seconds":4980},
  "hooks":{"codex":"2026-09-16T13:31:30.060465+08:00","claude":null},
  "operation":{"kind":"voice_pack","state":"running","progress":0.42,"message":"writing hsiaoyu"},
- "config":{"voice":"xiaohe2","notify_link":true}}
+ "config":{"voice":"xiaohe2","notify_link":true,"check_updates":null},
+ "updates":{"enabled":true,"last_check":"2026-10-07T12:43:11.068011+08:00","error":null,
+  "app":{"version":"0.4.0","url":"https://example/app.dmg","notes":{"en":"- New"}},"unsupported_app":false,
+  "firmware":{"version":"0.4.0","notes":{"en":"- Fix","zh-Hans":"- 修复"},"directory":"/tmp/fw/0.4.0","newer_than_box":true}}}
 """
 do {
     let status = try StatusCoding.decoder().decode(Status.self, from: Data(sample.utf8))
     check(status.device.mode == "pomodoro", "mode decodes")
     check(status.device.volume == 65, "volume decodes")
+    check(status.device.firmwareVersion == "0.2.2", "firmware version decodes")
+    check(Firmware.label(version: "0.2.2", build: "abc 1") == "0.2.2 · abc 1", "version leads the firmware label")
+    check(Firmware.label(version: nil, build: "abc 1") == "abc 1", "firmware without a version shows its build")
     check(status.hooks.codex != nil && status.hooks.claude == nil, "hook timestamps decode")
     check(status.operation?.kind == .voicePack && status.operation?.progress == 0.42, "operation decodes")
     let menu = MenuState.derive(status: status, daemonAlive: true)
@@ -37,13 +43,23 @@ do {
     check(offlineMenu.icon == .offline && offlineMenu.deviceLine == "Box not found", "offline menu")
     let down = MenuState.derive(status: nil, daemonAlive: false)
     check(down.icon == .daemonDown && down.deviceLineIsAction, "daemon-down menu")
-    check(Firmware.updateAvailable(device: status.device.firmwareBuild, bundled: "def5678 2026-09-17 09:00"), "different hash offers an update")
-    check(!Firmware.updateAvailable(device: status.device.firmwareBuild, bundled: "abc1234-dirty 2026-09-16 13:11"), "same hash offers no update")
-    check(!Firmware.updateAvailable(device: nil, bundled: "def5678 x"), "no nagging when the box reports no build")
-    check(Firmware.foreign(connected: true, device: nil, connectedFor: 6), "connected but silent past the grace period: factory firmware")
-    check(!Firmware.foreign(connected: true, device: nil, connectedFor: 1), "just connected, still within the grace period: not foreign")
-    check(!Firmware.foreign(connected: true, device: "abc 1", connectedFor: 60), "a reported build means it is ours")
-    check(!Firmware.foreign(connected: false, device: nil, connectedFor: 60), "not connected: not foreign")
+    check(status.config.checkUpdates == nil, "check_updates null follows the build")
+    check(status.updates?.app?.version == "0.4.0" && status.updates?.lastCheck != nil, "updates decode")
+    check(Firmware.updateAvailable(status.updates), "a downloaded firmware newer than the box is offered")
+    check(Firmware.files(of: status.updates?.firmware)?.app.path == "/tmp/fw/0.4.0/vibebuddy-fw.bin", "flashing uses the downloaded images")
+    var notDownloaded = status.updates
+    notDownloaded?.firmware?.directory = nil
+    check(!Firmware.updateAvailable(notDownloaded), "nothing to flash before the download")
+    var sameAsBox = status.updates
+    sameAsBox?.firmware?.newerThanBox = false
+    check(!Firmware.updateAvailable(sameAsBox), "the box already runs it")
+    check(!Firmware.updateAvailable(nil), "an older daemon offers nothing")
+    check(Firmware.notes(["en": "a", "zh-Hans": "b"], chinese: true) == "b" && Firmware.notes(["en": "a"], chinese: true) == "a", "notes fall back to English")
+    check(!Firmware.foreign(status.device), "an older daemon without the field: not foreign")
+    check(Firmware.foreign(DeviceState(connected: true, foreignFirmware: true)), "the daemon judged it other firmware")
+    check(!Firmware.foreign(DeviceState(connected: true)), "just connected, not judged yet: not foreign")
+    check(!Firmware.foreign(DeviceState(connected: true, firmwareBuild: "abc 1", foreignFirmware: true)), "a reported build means it is ours")
+    check(!Firmware.foreign(DeviceState(connected: false, foreignFirmware: true)), "not connected: not foreign")
 } catch {
     check(false, "status decoding threw: \(error)")
 }
@@ -67,6 +83,10 @@ do {
     try Data("abc1234 2026-09-22 10:00\n".utf8).write(to: nested.appendingPathComponent(FirmwarePackage.buildName))
     let stamped = try FirmwarePackage.inspect(directory: root)
     check(stamped.build == "abc1234 2026-09-22 10:00", "build.txt wins: \(stamped.build)")
+    check(stamped.version == nil, "without version.txt there is no version")
+    try Data("0.3.0\n".utf8).write(to: nested.appendingPathComponent(FirmwarePackage.versionName))
+    let versioned = try FirmwarePackage.inspect(directory: root)
+    check(versioned.version == "0.3.0", "version.txt is read: \(versioned.version ?? "nil")")
     check(stamped.app.lastPathComponent == FirmwarePackage.appName, "finds the app image in a subdirectory")
     try write(FirmwarePackage.partitionTableName, [0x00, 0x00])
     do {

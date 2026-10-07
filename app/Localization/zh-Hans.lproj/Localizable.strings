@@ -42,7 +42,6 @@
 "Vibe Buddy hasn't seen the box for 30 seconds. Check the USB cable." = "Vibe Buddy 已经 30 秒没找到盒子，检查一下 USB 线。";
 "Couldn't change Launch at login: %@" = "登录时启动设置失败：%@";
 "This app has no voice pack for %@" = "App 里没有 %@ 的语音包";
-"This build has no bundled firmware" = "这个构建没有附带固件";
 "Couldn't unzip %@" = "解不开 %@";
 "Couldn't write the hook config: %@" = "写 Hook 配置失败：%@";
 "Volume change was rejected (%lld)" = "音量未被接受（%lld）";
@@ -110,8 +109,6 @@
 /* Settings: Device */
 "Link" = "链路";
 "Box firmware" = "盒子固件";
-"Bundled with app" = "App 附带";
-"Update to bundled version" = "更新到 App 附带版本";
 "The box isn't running Vibe Buddy firmware." = "盒子跑的不是 Vibe Buddy 固件。";
 "Flash Vibe Buddy firmware" = "刷入 Vibe Buddy 固件";
 "Before retrying, hold K0 on the box and replug the cable to put it in download mode." = "重试前可以按住盒子的 K0 再插一次线，让它进入下载模式。";
@@ -132,7 +129,6 @@
 "unknown" = "未知";
 "Firmware package: %@\nBox now: %@\nThe box restarts once; its voice pack and today's stats are kept. Over the UART bridge this takes a few minutes." = "固件包：%1$@\n盒子现在：%2$@\n盒子会重启一次，语音包和当日战绩都保留。UART 桥上大约要几分钟。";
 "Flash" = "刷入";
-"Update the box firmware?" = "更新盒子固件？";
 "The box restarts once; its voice pack and today's stats are kept. Over the UART bridge this takes a few minutes." = "盒子会重启一次，语音包和当日战绩都保留。UART 桥上大约要几分钟。";
 "Update" = "更新";
 "Flash the box with Vibe Buddy?" = "把盒子刷成 Vibe Buddy？";
@@ -164,7 +160,6 @@
 "Hold K0 on the box and replug the cable to put it in download mode, then retry." = "按住盒子的 K0 再插一次线，让它进入下载模式，然后重试。";
 "The box screen stays dark for a few minutes — don't unplug it. It restarts on its own when done, and this page will show it as found." = "盒子屏幕会黑几分钟，别拔线。刷完它自动重启，这里会变成「找到了」。";
 "Found a box (%@), but it isn't running Vibe Buddy firmware." = "找到盒子（%@），但它跑的不是 Vibe Buddy 固件。";
-"This build has no bundled firmware, so it can't flash the box." = "这个构建没有附带固件，没法刷入。";
 "This erases the box's current firmware and data for good. If the native USB port doesn't find the box, use its UART port instead." = "会清掉盒子里现有的固件与数据，无法恢复。原生 USB 口找不到盒子时，改接盒子的 UART 口。";
 "Found it: %@" = "找到了：%@";
 "Make it blink" = "让它眨一下眼";
@@ -211,3 +206,31 @@
 "Nothing" = "不称呼";
 "Chinese" = "中文";
 "English" = "英文";
+
+/* Updates (ADR-0010) */
+"Updates" = "更新";
+"Check for updates" = "检查更新";
+"Check now" = "立即检查";
+"Off" = "已关闭";
+"Last check failed: %@" = "上次检查失败：%@";
+"Vibe Buddy %@ is available" = "Vibe Buddy %@ 已发布";
+"Not checked yet" = "还没检查过";
+"Up to date · checked %@" = "已是最新 · %@检查";
+"Download %@" = "下载 %@";
+"Update check was rejected (%@)" = "检查更新被拒绝（%@）";
+"This version of Vibe Buddy is no longer supported. Update it to keep getting firmware for the box." = "这个版本的 Vibe Buddy 已不再受支持。请更新，才能继续为盒子获取固件。";
+"Latest firmware" = "最新固件";
+"Update to %@" = "更新到 %@";
+"Update the box firmware to %@?" = "把盒子固件更新到 %@？";
+"Box firmware %@ is available" = "盒子固件 %@ 已发布";
+"Open Settings → Device to update the box." = "打开设置 → 设备即可更新盒子。";
+"The firmware hasn't been downloaded yet" = "固件还没下载好";
+"Couldn't get the firmware: %@" = "没能获取固件：%@";
+"Downloading the firmware…" = "正在下载固件…";
+"Looking for firmware…" = "正在查找固件…";
+"Check again" = "再检查一次";
+"Update checks are off, so Vibe Buddy can't download firmware." = "检查更新已关闭，Vibe Buddy 没法下载固件。";
+"Or download the firmware zip yourself and use Flash from file… on the Device tab:" = "也可以自己下载固件 zip，然后在设备页用「从文件刷入…」：";
+"Releases" = "发布页";
+"Up to date" = "已是最新";
+"To upgrade, download the new release and run its install.sh again." = "升级方法：下载新版本，再运行一次它的 install.sh。";

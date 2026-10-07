@@ -160,7 +160,7 @@ impl Board for FakeBoard {
 
 fn booted(flash: MemoryFlash) -> (Firmware, FakeBoard, Vec<String>) {
     let mut board = FakeBoard::new(flash);
-    let mut firmware = Firmware::new(7, board.now_ms(), b"abc1234 2026-09-26 10:00");
+    let mut firmware = Firmware::new(7, board.now_ms(), b"abc1234 2026-09-26 10:00", "1.2.3");
     firmware.boot(&mut board);
     let lines = board.take_lines();
     (firmware, board, lines)
@@ -180,12 +180,13 @@ fn boot_reports_like_the_c_firmware() {
         [
             "TALLY LOADED 0 0S DAY 0",
             "DISPLAY READY BUILD abc1234 2026-09-26 10:00",
+            "FIRMWARE VERSION 1.2.3",
             "VOICES builtin",
             "AUDIO READY",
             "AUDIO CODEC ES8311",
             "VOLUME 65",
             "BUTTONS READY",
-            "READY vibebuddy-fw 0.1.0",
+            "READY vibebuddy-fw 1.2.3",
         ]
     );
     assert!(board.backlight);
@@ -387,7 +388,7 @@ fn echo_reports_length_and_crc() {
 fn hello_repeats_the_static_state() {
     let (mut firmware, mut board, _) = booted(blank_flash());
     let lines = send(&mut firmware, &mut board, r#"{"version":1,"event":"device.hello"}"#);
-    assert_eq!(lines, ["DISPLAY READY BUILD abc1234 2026-09-26 10:00", "MODE DUTY", "VOICES builtin", "VOLUME 65"]);
+    assert_eq!(lines, ["DISPLAY READY BUILD abc1234 2026-09-26 10:00", "FIRMWARE VERSION 1.2.3", "MODE DUTY", "VOICES builtin", "VOLUME 65"]);
 }
 
 #[test]

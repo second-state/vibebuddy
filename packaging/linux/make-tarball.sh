@@ -1,26 +1,20 @@
 #!/usr/bin/env bash
 # Builds the Linux release package, VibeBuddy-<label>-linux-x86_64.tar.gz: the three binaries, the voice packs,
-# the firmware this release ships, the systemd unit, launcher entry and icon, the licenses, and install.sh, which
-# installs from these files without building or downloading anything.
+# the systemd unit, launcher entry and icon, the licenses, and install.sh, which installs from these files without
+# building or downloading anything. Firmware isn't in it: it is released on its own and the daemon downloads it.
 #
 # Usage: packaging/linux/make-tarball.sh <label>   (e.g. v0.3.0)
-# The firmware images must already be in firmware-rs/device/build (tools/build-firmware.sh, or CI's firmware job).
 set -euo pipefail
 
 label="${1:?usage: make-tarball.sh <label>}"
 repo="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-firmware="${repo}/firmware-rs/device/build"
 name="VibeBuddy-${label}-linux-x86_64"
 stage="${repo}/target/package/${name}"
-
-for file in bootloader.bin partition-table.bin vibebuddy-fw.bin build.txt; do
-    [[ -f "${firmware}/${file}" ]] || { echo "missing ${firmware}/${file}; build the firmware first" >&2; exit 1; }
-done
 
 cargo build --release --locked --manifest-path "${repo}/Cargo.toml" -p vibebuddyd -p vibebuddy-hook -p vibebuddy-desktop
 
 rm -rf "${stage}"
-mkdir -p "${stage}/bin" "${stage}/share/voices" "${stage}/share/firmware"
+mkdir -p "${stage}/bin" "${stage}/share/voices"
 for binary in vibebuddyd vibebuddy-hook vibebuddy-desktop; do
     install -m755 "${repo}/target/release/${binary}" "${stage}/bin/${binary}"
 done
@@ -30,11 +24,6 @@ done
 for pack in "${repo}"/characters/*/pack.bin; do
     cp "${pack}" "${stage}/share/voices/$(basename "$(dirname "${pack}")").bin"
 done
-for file in bootloader.bin partition-table.bin vibebuddy-fw.bin build.txt; do
-    install -m644 "${firmware}/${file}" "${stage}/share/firmware/${file}"
-done
-# The script lays licenses out as the Mac bundle does, with a copy beside the firmware; here that is share/firmware,
-# so the installed firmware carries them as the release's firmware zip does.
 python3 "${repo}/tools/package-licenses.py" "${stage}/share" x86_64-unknown-linux-gnu
 mv "${stage}/share/licenses" "${stage}/licenses"
 install -m755 "${repo}/packaging/linux/install.sh" "${stage}/install.sh"
