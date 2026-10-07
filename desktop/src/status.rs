@@ -89,6 +89,8 @@ pub struct Device {
     pub firmware_build: Option<String>,
     pub voice: Option<String>,
     pub volume: Option<u8>,
+    /// Connected but running other firmware, as the daemon judged it (docs/architecture.md, decision 17).
+    pub foreign_firmware: bool,
 }
 
 #[derive(Clone, Debug, Default, Deserialize, PartialEq)]

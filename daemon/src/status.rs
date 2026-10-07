@@ -6,7 +6,7 @@ use serde::Serialize;
 
 use crate::activity::TodaySummary;
 use crate::config::Config;
-use crate::serial_transport::DeviceMessage;
+use crate::serial_transport::{BUILD_MARKER, DeviceMessage};
 
 /// What the device looks like right now, pieced together from diagnostic lines; a device reboot reports it all again.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize)]
@@ -24,6 +24,9 @@ pub struct DeviceState {
     pub volume: Option<u8>,
     /// The connected port's USB serial number, which tells this device from another ESP32-S3.
     pub usb_serial: Option<String>,
+    /// Connected, but running other firmware (a factory unit, or Muse on a box that runs it): it's there, not
+    /// offline, and the daemon writes it nothing until it resets and reports our build.
+    pub foreign_firmware: bool,
 }
 
 impl DeviceState {
@@ -40,6 +43,15 @@ impl DeviceState {
                 // entirely), and the app offers to flash it. Nothing left by the previous device may pass for this one: on
                 // 2026-10-06 a leftover voice made another product look like the box, and it nearly got flashed.
                 self.usb_serial = usb_serial.clone();
+                self.foreign_firmware = false;
+                self.firmware_build = None;
+                self.mode = None;
+                self.voice = None;
+                self.volume = None;
+            }
+            DeviceMessage::ForeignFirmware => {
+                // Over the bridge the port survives a reset into other firmware, so what ours reported must go too.
+                self.foreign_firmware = true;
                 self.firmware_build = None;
                 self.mode = None;
                 self.voice = None;
@@ -48,6 +60,7 @@ impl DeviceState {
             DeviceMessage::Disconnected => {
                 self.connected = false;
                 self.port = None;
+                self.foreign_firmware = false;
             }
             DeviceMessage::Line(line) => {
                 if let Some(mode) = line.strip_prefix("MODE ") {
@@ -55,7 +68,8 @@ impl DeviceState {
                 // Anywhere in the line: a line the box wrote before the port was opened can lose its newline and
                 // arrive glued in front ("LEISURE SKIT DISPLAY READY BUILD …", seen 2026-10-01), and missing the
                 // build hides the firmware update.
-                } else if let Some((_, build)) = line.split_once("DISPLAY READY BUILD ") {
+                } else if let Some((_, build)) = line.split_once(BUILD_MARKER) {
+                    self.foreign_firmware = false;
                     self.firmware_build = Some(build.trim().to_owned());
                 } else if let Some(voice) = line.strip_prefix("VOICES ") {
                     let voice = voice.trim();
@@ -162,6 +176,7 @@ mod tests {
                 voice: Some("builtin".to_owned()),
                 volume: Some(65),
                 usb_serial: None,
+                foreign_firmware: false,
             }
         );
     }
@@ -207,5 +222,25 @@ mod tests {
         let mut state = DeviceState::default();
         assert!(!state.apply(&line("VOICES NO PARTITION")));
         assert_eq!(state.voice, None);
+    }
+
+    #[test]
+    fn a_box_running_other_firmware_is_there_until_it_reports_our_build() {
+        let mut state = DeviceState::default();
+        state.apply(&DeviceMessage::Connected { port: "/dev/cu.x".to_owned(), bridge: true, usb_serial: None });
+        state.apply(&line("DISPLAY READY BUILD abc 2026-09-16 10:23"));
+        state.apply(&line("VOICES xiaohe2"));
+        // Switched to Muse over the bridge: the port stayed open, so what our firmware said is on record.
+        assert!(state.apply(&DeviceMessage::ForeignFirmware));
+        assert!(state.connected, "a box running other firmware is there, not offline");
+        assert!(state.foreign_firmware);
+        assert_eq!((state.firmware_build.as_deref(), state.voice.as_deref()), (None, None));
+        assert_eq!(serde_json::to_value(&state).unwrap()["foreign_firmware"], true, "/v1/status carries it");
+
+        assert!(state.apply(&line("DISPLAY READY BUILD def 2026-10-07 09:00")));
+        assert!(!state.foreign_firmware);
+        state.apply(&DeviceMessage::ForeignFirmware);
+        state.apply(&DeviceMessage::Disconnected);
+        assert!(!state.foreign_firmware, "a box that's gone runs nothing");
     }
 }

@@ -35,9 +35,12 @@ public struct DeviceState: Codable, Equatable {
     public var voice: String?
     /// Speaker volume (20 to 100) as reported by the box; the app is just a remote control.
     public var volume: Int?
-    enum CodingKeys: String, CodingKey { case connected, port, bridge, mode, firmwareBuild = "firmware_build", voice, volume }
-    public init(connected: Bool, port: String? = nil, bridge: Bool = false, mode: String? = nil, firmwareBuild: String? = nil, voice: String? = nil, volume: Int? = nil) {
+    /// Connected but running other firmware, as the daemon judged it; absent from older daemons.
+    public var foreignFirmware: Bool?
+    enum CodingKeys: String, CodingKey { case connected, port, bridge, mode, firmwareBuild = "firmware_build", voice, volume, foreignFirmware = "foreign_firmware" }
+    public init(connected: Bool, port: String? = nil, bridge: Bool = false, mode: String? = nil, firmwareBuild: String? = nil, voice: String? = nil, volume: Int? = nil, foreignFirmware: Bool? = nil) {
         self.connected = connected; self.port = port; self.bridge = bridge; self.mode = mode; self.firmwareBuild = firmwareBuild; self.voice = voice; self.volume = volume
+        self.foreignFirmware = foreignFirmware
     }
 }
 
