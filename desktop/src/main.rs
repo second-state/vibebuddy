@@ -267,8 +267,10 @@ impl App {
                 if let Some(id) = self.settings {
                     return window::gain_focus(id);
                 }
+                // The same as the Mac's: room for the whole Character tab, resizable down to the old size.
                 let (id, open) = window::open(window::Settings {
-                    size: iced::Size::new(620.0, 460.0),
+                    size: iced::Size::new(760.0, 640.0),
+                    min_size: Some(iced::Size::new(640.0, 480.0)),
                     #[cfg(target_os = "linux")]
                     platform_specific: window::settings::PlatformSpecific {
                         application_id: "vibebuddy".to_owned(),
