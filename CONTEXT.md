@@ -164,7 +164,7 @@ The single state snapshot that should currently be shown on the device, aggregat
 _Avoid_: current state, global state, snapshot
 
 **Announcement (播报)**:
-An edge notification that must be consumed exactly once, corresponding to one short voice line. An announcement doesn't change the visible state and isn't deduplicated; the same Turn must never trigger a second announcement.
+An edge notification that must be consumed exactly once, corresponding to one short voice line. An announcement doesn't change the visible state and isn't deduplicated; the same Turn must never trigger a second announcement. Task ends that land close together are merged on the device: within a short window only the first done is spoken and the rest only change the screen; a failure after a done is still spoken, and needs input always is, since it is the only announcement that blocks the user.
 _Avoid_: notification, reminder, voice event
 
 **Occasion (时机)**:
