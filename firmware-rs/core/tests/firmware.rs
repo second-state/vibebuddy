@@ -239,6 +239,49 @@ fn suppressed_and_announced_audio() {
     assert_eq!(lines, ["EVENT agent.idle", "DISPLAY STATE READY", "AUDIO QUEUED FAILED"]);
 }
 
+fn last_audio(firmware: &mut Firmware, board: &mut FakeBoard, line: &str) -> String {
+    send(firmware, board, line).into_iter().filter(|line| line.starts_with("AUDIO")).collect::<Vec<_>>().join(",")
+}
+
+const DONE: &str = r#"{"version":1,"event":"task.done","title":"CC:A","announcement":"done"}"#;
+const FAILED: &str = r#"{"version":1,"event":"task.error","title":"CC:B","announcement":"failed"}"#;
+const INPUT: &str = r#"{"version":1,"event":"agent.input_required","title":"CC:C"}"#;
+
+/// Three tasks finishing within seconds used to read out three lines back to back.
+#[test]
+fn a_burst_of_task_ends_speaks_once() {
+    let (mut firmware, mut board, _) = booted(blank_flash());
+    assert_eq!(last_audio(&mut firmware, &mut board, DONE), "AUDIO QUEUED DONE");
+    board.advance(2000);
+    assert_eq!(last_audio(&mut firmware, &mut board, DONE), "AUDIO MERGED DONE");
+    board.advance(2000);
+    assert_eq!(last_audio(&mut firmware, &mut board, DONE), "AUDIO MERGED DONE");
+    assert_eq!(board.played.len(), 1);
+
+    // The window counts from the last line spoken, not the last end merged.
+    board.advance(11_000);
+    assert_eq!(last_audio(&mut firmware, &mut board, DONE), "AUDIO QUEUED DONE");
+}
+
+#[test]
+fn a_failure_after_a_done_still_speaks_but_not_the_other_way() {
+    let (mut firmware, mut board, _) = booted(blank_flash());
+    assert_eq!(last_audio(&mut firmware, &mut board, DONE), "AUDIO QUEUED DONE");
+    board.advance(1000);
+    assert_eq!(last_audio(&mut firmware, &mut board, FAILED), "AUDIO QUEUED FAILED");
+    board.advance(1000);
+    assert_eq!(last_audio(&mut firmware, &mut board, DONE), "AUDIO MERGED DONE");
+    assert_eq!(last_audio(&mut firmware, &mut board, FAILED), "AUDIO MERGED FAILED");
+}
+
+#[test]
+fn needs_input_always_speaks() {
+    let (mut firmware, mut board, _) = booted(blank_flash());
+    assert_eq!(last_audio(&mut firmware, &mut board, DONE), "AUDIO QUEUED DONE");
+    board.advance(500);
+    assert_eq!(last_audio(&mut firmware, &mut board, INPUT), "AUDIO QUEUED INPUT_REQUIRED");
+}
+
 #[test]
 fn bad_lines_are_reported() {
     let (mut firmware, mut board, _) = booted(blank_flash());

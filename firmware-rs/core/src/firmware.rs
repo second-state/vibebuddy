@@ -32,6 +32,9 @@ const LINK_TIMEOUT_MS: u32 = 15000;
 const DONE_TO_IDLE_MS: u32 = 5000;
 /// voice.begin waits at most this long for the line being played to finish; the longest line is under 7 seconds.
 const AUDIO_DRAIN_MS: u32 = 10000;
+/// Task ends this close together speak once: a burst of three dones read out back to back is noise, and the
+/// screen already shows every card. Longer than the longest line, so the window also covers its playback.
+const MERGE_WINDOW_MS: u32 = 15000;
 
 /// Result of audio init: the codec model (ES8311 or NS4168) on success, or the step it got
 /// stuck at on failure. Either is reported to the Mac as is.
@@ -106,6 +109,8 @@ pub struct Firmware {
     menu: Menu,
     /// voice.begin arrived and we are waiting for playback to stop before erasing the partition: total bytes and when the wait began.
     pending_voice_begin: Option<(u32, u32)>,
+    /// The last task end that was spoken: whether it was a failure, and when.
+    last_end_spoken: Option<(bool, u32)>,
 
     /// The level, backlight state and hour last reported to the Mac; each is reported as a line only when it changes.
     reported_tier: Tier,
@@ -205,6 +210,7 @@ impl Firmware {
             muted: false,
             menu: Menu::new(),
             pending_voice_begin: None,
+            last_end_spoken: None,
             reported_tier: Tier::Alert,
             reported_lights_out: false,
             reported_hour: -1,
@@ -794,8 +800,29 @@ impl Firmware {
             Self::write_value_line(board, "DISPLAY STATE ", state_label.as_bytes());
         }
         if let Some(occasion) = occasion {
-            self.announce(board, occasion);
+            if self.end_speaks(occasion, now) {
+                self.announce(board, occasion);
+            } else {
+                Self::write_value_line(board, "AUDIO MERGED ", occasion_label(occasion).as_bytes());
+            }
         }
+    }
+
+    /// Needs input blocks the user, so it always speaks. A task end within the merge window of one already
+    /// spoken stays on screen only, unless it is a failure following a done: the worse news still gets said.
+    fn end_speaks(&mut self, occasion: Occasion, now: u32) -> bool {
+        let failed = match occasion.fallback().unwrap_or(occasion) {
+            Occasion::Done => false,
+            Occasion::Failed => true,
+            _ => return true,
+        };
+        let merged = self
+            .last_end_spoken
+            .is_some_and(|(spoken_failed, at)| now.wrapping_sub(at) < MERGE_WINDOW_MS && (spoken_failed || !failed));
+        if !merged {
+            self.last_end_spoken = Some((failed, now));
+        }
+        !merged
     }
 
     fn handle_line<B: Board>(&mut self, board: &mut B, line: &[u8]) {

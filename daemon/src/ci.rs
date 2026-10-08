@@ -21,20 +21,34 @@ const FALLBACK_TITLE: &str = "CI";
 pub const POLL_INTERVAL: Duration = Duration::from_secs(30);
 /// Upper bound for one `gh` call, so a stuck network can't hang the poll task forever.
 const COMMAND_TIMEOUT: Duration = Duration::from_secs(20);
+/// How many recent runs to read per repository. One push often starts several workflows at once; reading only the
+/// latest run lost the others, leaving their cards stuck as working and their failures unannounced.
+const RECENT_RUNS: &str = "20";
 
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Run {
     database_id: u64,
+    /// A re-run keeps the run's id and bumps this, so one execution is the pair of both.
+    #[serde(default)]
+    attempt: u32,
     status: String,
     #[serde(default)]
     conclusion: String,
 }
 
+/// What one repository's recent runs looked like the last time we read them.
+#[derive(Default)]
+struct RepoRuns {
+    /// Runs in progress that already hold a card.
+    running: HashSet<u64>,
+    /// Executions whose end has been handled (announced, or recorded as history). Never announced again.
+    ended: HashSet<(u64, u32)>,
+}
+
 #[derive(Default)]
 pub struct CiWatcher {
-    /// Per repository, the run currently in progress that has already been drawn on screen.
-    running: HashMap<String, u64>,
+    repos: HashMap<String, RepoRuns>,
     /// Repositories that already reported an error. A persisting error isn't logged again.
     quiet: HashSet<String>,
     /// Repositories that already got their one log line.
@@ -42,8 +56,8 @@ pub struct CiWatcher {
 }
 
 impl CiWatcher {
-    /// Fetches each repository's latest run. Doesn't hold the aggregator lock, since `gh` may take seconds.
-    pub async fn fetch(&mut self, workspaces: &[PathBuf]) -> Vec<(String, Run)> {
+    /// Fetches each repository's recent runs. Doesn't hold the aggregator lock, since `gh` may take seconds.
+    pub async fn fetch(&mut self, workspaces: &[PathBuf]) -> Vec<(String, Vec<Run>)> {
         let repos = watched_repos(workspaces);
         if repos.is_empty() {
             return Vec::new();
@@ -55,15 +69,12 @@ impl CiWatcher {
             if self.announced.insert(repo.clone()) {
                 info!(%repo, "watching CI");
             }
-            match latest_run(&program, &repo).await {
-                Ok(Some(run)) => {
+            match recent_runs(&program, &repo).await {
+                Ok(runs) => {
                     if self.quiet.remove(&repo) {
                         info!(%repo, "CI status recovered");
                     }
-                    fetched.push((repo, run));
-                }
-                Ok(None) => {
-                    self.quiet.remove(&repo);
+                    fetched.push((repo, runs));
                 }
                 Err(error) => {
                     // A persisting error logged every 30 seconds is thousands of lines a day. Log only the first.
@@ -79,27 +90,52 @@ impl CiWatcher {
     pub fn apply(
         &mut self,
         tracker: &mut ActivityTracker,
-        fetched: Vec<(String, Run)>,
+        fetched: Vec<(String, Vec<Run>)>,
     ) -> Vec<Event> {
-        fetched
-            .into_iter()
-            .filter_map(|(repo, run)| self.apply_one(tracker, &repo, &run))
-            .collect()
+        let mut events = Vec::new();
+        for (repo, runs) in fetched {
+            // The first read of a repository is its history: runs already over are recorded, never announced.
+            // Otherwise every daemon restart would re-announce the repository's past results.
+            let first_read = !self.repos.contains_key(&repo);
+            let state = self.repos.entry(repo.clone()).or_default();
+            let name = repo.rsplit('/').next().unwrap_or(&repo);
+            let title = display_title(PREFIX, name, FALLBACK_TITLE);
+            for run in &runs {
+                let id = ActivityId {
+                    session_id: format!("ci:{repo}"),
+                    key: format!("ci:{repo}:{}", run.database_id),
+                };
+                if let Some(event) = Self::apply_one(state, tracker, &repo, &id, &title, run, first_read) {
+                    events.push(event);
+                }
+            }
+            // A run still marked running but gone from the list was pushed out by newer ones: put its card away.
+            let listed: HashSet<u64> = runs.iter().map(|run| run.database_id).collect();
+            let gone: Vec<u64> = state.running.iter().copied().filter(|id| !listed.contains(id)).collect();
+            for gone in gone {
+                state.running.remove(&gone);
+                let id = ActivityId { session_id: format!("ci:{repo}"), key: format!("ci:{repo}:{gone}") };
+                events.extend(tracker.discard(&id, "ALL QUIET"));
+            }
+            state.ended.retain(|(id, _)| listed.contains(id));
+        }
+        events
     }
 
-    fn apply_one(&mut self, tracker: &mut ActivityTracker, repo: &str, run: &Run) -> Option<Event> {
-        let name = repo.rsplit('/').next().unwrap_or(repo);
-        let title = display_title(PREFIX, name, FALLBACK_TITLE);
-        let id = ActivityId {
-            session_id: format!("ci:{repo}"),
-            key: format!("ci:{repo}:{}", run.database_id),
-        };
-
+    fn apply_one(
+        state: &mut RepoRuns,
+        tracker: &mut ActivityTracker,
+        repo: &str,
+        id: &ActivityId,
+        title: &str,
+        run: &Run,
+        first_read: bool,
+    ) -> Option<Event> {
         if run.status != "completed" {
-            self.running.insert(repo.to_owned(), run.database_id);
-            let event = tracker.observe(&id, &title, ActivityStatus::Working);
+            state.running.insert(run.database_id);
+            let event = tracker.observe(id, title, ActivityStatus::Working);
             tracker.associate_source(
-                &id,
+                id,
                 ActivitySource::GitHubActions {
                     repo: repo.to_owned(),
                     run_id: run.database_id,
@@ -108,16 +144,32 @@ impl CiWatcher {
             return event;
         }
 
-        // Only report runs we actually watched start. Otherwise every daemon restart would re-announce
-        // the repository's latest historical result.
-        if self.running.remove(repo) != Some(run.database_id) {
+        // Each execution ends once. A re-run is a new execution: if it fails again, that is news.
+        if !state.ended.insert((run.database_id, run.attempt)) || first_read {
             return None;
         }
+        let tracked = state.running.remove(&run.database_id);
+        let quiet = matches!(run.conclusion.as_str(), "cancelled" | "skipped" | "neutral");
+        if !tracked {
+            // Started and ended between two polls: nothing to put away if it was cancelled, otherwise still the
+            // user's result, so give it a card for the moment it is announced.
+            if quiet {
+                return None;
+            }
+            tracker.observe(id, title, ActivityStatus::Working);
+            tracker.associate_source(
+                id,
+                ActivitySource::GitHubActions {
+                    repo: repo.to_owned(),
+                    run_id: run.database_id,
+                },
+            );
+        }
         match run.conclusion.as_str() {
-            "success" => tracker.finish(&id, &title),
+            "success" => tracker.finish(id, title),
             // Cancelled and skipped aren't task failures; just put the card away quietly.
-            "cancelled" | "skipped" | "neutral" => tracker.discard(&id, "ALL QUIET"),
-            _ => tracker.fail(&id, &title),
+            _ if quiet => tracker.discard(id, "ALL QUIET"),
+            _ => tracker.fail(id, title),
         }
     }
 }
@@ -196,7 +248,7 @@ fn gh_program() -> String {
     .unwrap_or_else(|| "gh".to_owned())
 }
 
-async fn latest_run(program: &str, repo: &str) -> Result<Option<Run>, String> {
+async fn recent_runs(program: &str, repo: &str) -> Result<Vec<Run>, String> {
     let command = tokio::process::Command::new(program)
         .args([
             "run",
@@ -204,9 +256,9 @@ async fn latest_run(program: &str, repo: &str) -> Result<Option<Run>, String> {
             "--repo",
             repo,
             "--limit",
-            "1",
+            RECENT_RUNS,
             "--json",
-            "databaseId,status,conclusion",
+            "databaseId,attempt,status,conclusion",
         ])
         .output();
 
@@ -218,21 +270,34 @@ async fn latest_run(program: &str, repo: &str) -> Result<Option<Run>, String> {
         return Err(String::from_utf8_lossy(&output.stderr).trim().to_owned());
     }
 
-    let runs: Vec<Run> = serde_json::from_slice(&output.stdout)
-        .map_err(|error| format!("cannot parse gh output: {error}"))?;
-    Ok(runs.into_iter().next())
+    serde_json::from_slice(&output.stdout).map_err(|error| format!("cannot parse gh output: {error}"))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
+    const REPO: &str = "longzhi/vibe-buddy";
+
     fn run(id: u64, status: &str, conclusion: &str) -> Run {
         Run {
             database_id: id,
+            attempt: 1,
             status: status.to_owned(),
             conclusion: conclusion.to_owned(),
         }
+    }
+
+    fn attempt(run: Run, attempt: u32) -> Run {
+        Run { attempt, ..run }
+    }
+
+    fn poll(watcher: &mut CiWatcher, tracker: &mut ActivityTracker, runs: Vec<Run>) -> Vec<Event> {
+        watcher.apply(tracker, vec![(REPO.to_owned(), runs)])
+    }
+
+    fn names(events: &[Event]) -> Vec<&str> {
+        events.iter().map(|event| event.event.as_str()).collect()
     }
 
     #[test]
@@ -277,65 +342,134 @@ mod tests {
         let mut watcher = CiWatcher::default();
         let mut tracker = ActivityTracker::default();
 
-        let events = watcher.apply(
-            &mut tracker,
-            vec![("longzhi/vibe-buddy".to_owned(), run(1, "in_progress", ""))],
-        );
+        let events = poll(&mut watcher, &mut tracker, vec![run(1, "in_progress", "")]);
 
-        assert_eq!(events.len(), 1);
-        assert_eq!(events[0].event, "task.start");
+        assert_eq!(names(&events), ["task.start"]);
         assert_eq!(events[0].title.as_deref(), Some("CI:VIBE-BUDDY"));
     }
 
     #[test]
-    fn a_finished_run_we_never_saw_running_is_not_announced() {
+    fn runs_already_over_on_the_first_read_are_history() {
         let mut watcher = CiWatcher::default();
         let mut tracker = ActivityTracker::default();
 
-        let events = watcher.apply(
+        let events = poll(
+            &mut watcher,
             &mut tracker,
-            vec![(
-                "longzhi/vibe-buddy".to_owned(),
-                run(1, "completed", "success"),
-            )],
+            vec![run(2, "completed", "failure"), run(1, "completed", "success")],
         );
 
         assert!(
             events.is_empty(),
-            "the daemon must not re-announce the latest historical run on every restart"
+            "the daemon must not re-announce past results on every restart"
         );
     }
 
     #[test]
-    fn a_failing_run_reports_an_error() {
+    fn a_failing_run_reports_an_error_once() {
         let mut watcher = CiWatcher::default();
         let mut tracker = ActivityTracker::default();
-        let repo = "longzhi/vibe-buddy".to_owned();
 
-        watcher.apply(
-            &mut tracker,
-            vec![(repo.clone(), run(7, "in_progress", ""))],
-        );
-        let events = watcher.apply(&mut tracker, vec![(repo, run(7, "completed", "failure"))]);
-
-        assert_eq!(events.len(), 1);
-        assert_eq!(events[0].event, "task.error");
+        poll(&mut watcher, &mut tracker, vec![run(7, "in_progress", "")]);
+        let events = poll(&mut watcher, &mut tracker, vec![run(7, "completed", "failure")]);
+        assert_eq!(names(&events), ["task.error"]);
         assert_eq!(events[0].title.as_deref(), Some("CI:VIBE-BUDDY"));
+
+        let again = poll(&mut watcher, &mut tracker, vec![run(7, "completed", "failure")]);
+        assert!(again.is_empty(), "the same failure must not be announced on every poll");
     }
 
     #[test]
     fn a_cancelled_run_does_not_claim_failure() {
         let mut watcher = CiWatcher::default();
         let mut tracker = ActivityTracker::default();
-        let repo = "longzhi/vibe-buddy".to_owned();
 
-        watcher.apply(
+        poll(&mut watcher, &mut tracker, vec![run(9, "in_progress", "")]);
+        let events = poll(&mut watcher, &mut tracker, vec![run(9, "completed", "cancelled")]);
+
+        assert_eq!(names(&events), ["agent.idle"]);
+    }
+
+    /// One push starts several workflows. Reading only the latest run lost the earlier one: its card stayed
+    /// working and its failure was never announced.
+    #[test]
+    fn parallel_workflows_each_report_their_own_end() {
+        let mut watcher = CiWatcher::default();
+        let mut tracker = ActivityTracker::default();
+
+        poll(&mut watcher, &mut tracker, vec![run(11, "in_progress", ""), run(10, "in_progress", "")]);
+        let events = poll(
+            &mut watcher,
             &mut tracker,
-            vec![(repo.clone(), run(9, "in_progress", ""))],
+            vec![run(11, "in_progress", ""), run(10, "completed", "failure")],
         );
-        let events = watcher.apply(&mut tracker, vec![(repo, run(9, "completed", "cancelled"))]);
+        assert_eq!(names(&events), ["task.error"]);
 
-        assert_eq!(events.len(), 1);
-        assert_eq!(events[0].event, "agent.idle");
+        let events = poll(
+            &mut watcher,
+            &mut tracker,
+            vec![run(11, "completed", "success"), run(10, "completed", "failure")],
+        );
+        assert_eq!(names(&events), ["task.done"]);
+    }
+
+    /// A re-run keeps the run id. Its failure is new information, but only once per attempt.
+    #[test]
+    fn a_rerun_that_fails_again_is_announced_once_more() {
+        let mut watcher = CiWatcher::default();
+        let mut tracker = ActivityTracker::default();
+
+        poll(&mut watcher, &mut tracker, vec![run(7, "in_progress", "")]);
+        poll(&mut watcher, &mut tracker, vec![run(7, "completed", "failure")]);
+        poll(&mut watcher, &mut tracker, vec![attempt(run(7, "in_progress", ""), 2)]);
+        let events = poll(&mut watcher, &mut tracker, vec![attempt(run(7, "completed", "failure"), 2)]);
+        assert_eq!(names(&events), ["task.error"]);
+
+        let again = poll(&mut watcher, &mut tracker, vec![attempt(run(7, "completed", "failure"), 2)]);
+        assert!(again.is_empty());
+    }
+
+    /// A run that starts and ends between two polls was never seen running, yet it is still the user's result.
+    #[test]
+    fn a_run_shorter_than_the_poll_interval_is_still_announced() {
+        let mut watcher = CiWatcher::default();
+        let mut tracker = ActivityTracker::default();
+
+        poll(&mut watcher, &mut tracker, vec![run(1, "completed", "success")]);
+        let events = poll(
+            &mut watcher,
+            &mut tracker,
+            vec![run(2, "completed", "failure"), run(1, "completed", "success")],
+        );
+        assert_eq!(names(&events), ["task.error"]);
+
+        let rerun = poll(
+            &mut watcher,
+            &mut tracker,
+            vec![run(2, "completed", "failure"), attempt(run(1, "completed", "failure"), 2)],
+        );
+        assert_eq!(names(&rerun), ["task.error"], "a quick re-run is a new attempt");
+    }
+
+    #[test]
+    fn a_quick_cancelled_run_stays_silent() {
+        let mut watcher = CiWatcher::default();
+        let mut tracker = ActivityTracker::default();
+
+        poll(&mut watcher, &mut tracker, vec![]);
+        let events = poll(&mut watcher, &mut tracker, vec![run(3, "completed", "cancelled")]);
+        assert!(events.is_empty());
+    }
+
+    #[test]
+    fn a_running_card_pushed_out_of_the_list_is_put_away() {
+        let mut watcher = CiWatcher::default();
+        let mut tracker = ActivityTracker::default();
+
+        poll(&mut watcher, &mut tracker, vec![run(1, "in_progress", "")]);
+        let events = poll(&mut watcher, &mut tracker, vec![run(2, "in_progress", "")]);
+
+        let tasks = events.last().and_then(|event| event.extra.get("tasks")).and_then(|tasks| tasks.as_array());
+        assert_eq!(tasks.map(Vec::len), Some(1), "the card for run 1 must not stay forever: {events:?}");
     }
 }
