@@ -12,6 +12,8 @@ final class AppModel: ObservableObject {
     @Published private(set) var screenshot: NSImage?
     @Published private(set) var screenshotBusy = false
     @Published private(set) var hookInstalled: [HookAgent: Bool] = [:]
+    /// nil when Ghostty isn't installed: there is nothing to ask for.
+    @Published private(set) var ghosttyAccess: TerminalAccess.State?
     @Published private(set) var launchAtLogin = LoginItem.isEnabled
     @Published private(set) var previewingVoice: String?
     /// Serial port open but no build ID ever reported: the box isn't running our firmware (a factory box), so offer to flash it.
@@ -353,6 +355,43 @@ final class AppModel: ObservableObject {
     }
 
     func hookPresent(_ agent: HookAgent) -> Bool { HookInstaller.isPresent(agent) }
+
+    // MARK: Terminal tabs
+
+    /// Reads the current answer without prompting.
+    func refreshGhosttyAccess() {
+        guard TerminalAccess.ghosttyURL != nil else {
+            ghosttyAccess = nil
+            return
+        }
+        Task {
+            let state = await Task.detached { TerminalAccess.check(ask: false) }.value
+            ghosttyAccess = state
+        }
+    }
+
+    /// Shows the system prompt. macOS only asks about a running app, so Ghostty is started first if needed.
+    func allowGhosttyAccess() {
+        guard let url = TerminalAccess.ghosttyURL else { return }
+        Task {
+            if !TerminalAccess.ghosttyRunning {
+                let configuration = NSWorkspace.OpenConfiguration()
+                configuration.activates = false
+                _ = try? await NSWorkspace.shared.openApplication(at: url, configuration: configuration)
+                for _ in 0..<50 where !TerminalAccess.ghosttyRunning {
+                    try? await Task.sleep(for: .milliseconds(100))
+                }
+            }
+            let state = await Task.detached { TerminalAccess.check(ask: true) }.value
+            ghosttyAccess = state
+        }
+    }
+
+    func openAutomationSettings() {
+        if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Automation") {
+            NSWorkspace.shared.open(url)
+        }
+    }
     func hookConfigModifiedAt(_ agent: HookAgent) -> Date? { HookInstaller.configModifiedAt(agent) }
 
     /// Returns the diff to confirm; the caller applies it after confirmation.

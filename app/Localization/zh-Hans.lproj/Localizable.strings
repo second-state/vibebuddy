@@ -233,3 +233,11 @@
 "Last check failed" = "上次检查失败";
 "None released yet" = "还没有发布";
 "The original robot, drawn by the box itself" = "原版机器人，由盒子自己绘制";
+"Terminal tabs" = "终端标签页";
+"With access to Ghostty, K2 goes straight to the tab a session runs in, instead of just bringing Ghostty forward." = "允许控制 Ghostty 后，按 K2 会直接回到会话所在的标签页，而不只是把 Ghostty 调到前台。";
+"Open System Settings" = "打开系统设置";
+"Allow…" = "允许…";
+"Allowed" = "已允许";
+"Not allowed yet" = "尚未允许";
+"Denied. Turn Vibe Buddy back on for Ghostty under Privacy & Security → Automation." = "已被拒绝。请在“隐私与安全性 → 自动化”里，重新打开 Vibe Buddy 对 Ghostty 的权限。";
+"Not checked yet: macOS only answers while Ghostty is running" = "尚未检查：Ghostty 运行时 macOS 才会给出结果";
