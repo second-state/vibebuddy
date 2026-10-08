@@ -18,6 +18,8 @@ const CLAUDE_BUNDLE_ID: &str = "com.anthropic.claudefordesktop";
 const GHOSTTY_BUNDLE_ID: &str = "com.mitchellh.ghostty";
 const TERMINAL_BUNDLE_ID: &str = "com.apple.Terminal";
 const ITERM_BUNDLE_ID: &str = "com.googlecode.iterm2";
+/// Warp's channels: `dev.warp.Warp-Stable`, `dev.warp.Warp-Preview`, …
+const WARP_BUNDLE_PREFIX: &str = "dev.warp.Warp";
 /// Turns the tty arguments (`ttys016`) into `targets`, the device paths terminals name.
 const TTY_TARGETS: [&str; 5] = [
     "on run argv",
@@ -107,7 +109,18 @@ pub async fn open(source: ActivitySource) -> Result<String, String> {
     if let Some(Surface::Window { pids }) = surface_of(&source) {
         return focus_window(pids).await;
     }
-    if let Some(Surface::Host { bundle_id, ttys, tmux }) = surface_of(&source) {
+    if let Some(Surface::Host { bundle_id, ttys, tmux, focus_url }) = surface_of(&source) {
+        // Warp hands each session a deeplink back to its pane; it only counts when Warp really is the host,
+        // since the variable is inherited by anything started from a Warp shell.
+        if tmux.is_none()
+            && let Some(url) = focus_url
+            && bundle_id.starts_with(WARP_BUNDLE_PREFIX)
+        {
+            match focus_warp_session(bundle_id, url).await {
+                Ok(link) => return Ok(link),
+                Err(error) => tracing::info!(%error, "cannot open the session's Warp pane, bringing Warp forward"),
+            }
+        }
         // Inside tmux, first switch the user's tmux client to the session's pane; the tab to find is then the
         // one that client runs in.
         let ttys = match tmux {
@@ -246,6 +259,24 @@ async fn focus_terminal_tab(bundle_id: &str, ttys: &[String]) -> Result<String, 
     let args: Vec<&str> = ttys.iter().map(String::as_str).collect();
     let tty = run_osascript(&lines, &args).await?;
     Ok(format!("{bundle_id} tab on {}", tty.trim()))
+}
+
+async fn focus_warp_session(bundle_id: &str, url: &str) -> Result<String, String> {
+    if !valid_bundle_id(bundle_id) || !valid_warp_focus_url(url) {
+        return Err("invalid Warp session link".to_owned());
+    }
+    run("/usr/bin/open", &["-b", bundle_id, url]).await?;
+    Ok(url.to_owned())
+}
+
+/// The same shape the hook checks: `warp://session/<32 hex digits>` under one of Warp's channel schemes.
+fn valid_warp_focus_url(url: &str) -> bool {
+    let Some((scheme, session)) = url.split_once("://session/") else {
+        return false;
+    };
+    ["warp", "warppreview", "warpdev", "warplocal", "warposs"].contains(&scheme)
+        && session.len() == 32
+        && session.bytes().all(|byte| byte.is_ascii_hexdigit())
 }
 
 /// Focuses the Ghostty terminal on the agent's tty. Ghostty doesn't tell which terminal owns which tty, but it
@@ -632,6 +663,14 @@ mod tests {
     }
 
     #[test]
+    fn only_warp_session_links_are_opened() {
+        assert!(valid_warp_focus_url("warp://session/550e8400e29b41d4a716446655440000"));
+        for bogus in ["warp://action/new_tab?path=/", "https://example.com", "warp://session/zz0e8400e29b41d4a716446655440000"] {
+            assert!(!valid_warp_focus_url(bogus), "{bogus}");
+        }
+    }
+
+    #[test]
     fn only_tmux_pane_ids_reach_tmux() {
         assert!(valid_tmux_pane("%3"));
         for bogus in ["", "%", "3", "%3;kill-server", "%-1"] {
@@ -649,12 +688,12 @@ mod tests {
 
     #[test]
     fn a_host_tty_survives_a_state_file_round_trip() {
-        let surface = Surface::Host { bundle_id: GHOSTTY_BUNDLE_ID.to_owned(), ttys: vec!["ttys016".to_owned()], tmux: None };
+        let surface = Surface::Host { bundle_id: GHOSTTY_BUNDLE_ID.to_owned(), ttys: vec!["ttys016".to_owned()], tmux: None, focus_url: None };
         let json = serde_json::to_string(&surface).unwrap();
         assert_eq!(serde_json::from_str::<Surface>(&json).unwrap(), surface);
         // State files from before the tty was reported still load.
         let old: Surface = serde_json::from_str(r#"{"surface":"host","bundle_id":"com.mitchellh.ghostty"}"#).unwrap();
-        assert_eq!(old, Surface::Host { bundle_id: GHOSTTY_BUNDLE_ID.to_owned(), ttys: Vec::new(), tmux: None });
+        assert_eq!(old, Surface::Host { bundle_id: GHOSTTY_BUNDLE_ID.to_owned(), ttys: Vec::new(), tmux: None, focus_url: None });
     }
 
     #[test]
@@ -677,7 +716,7 @@ mod tests {
         let source = ActivitySource::ClaudeCode {
             session_id: "19b63622-e3e0-4cd0-a37e-dc8d71253155".to_owned(),
             cwd: Some("/work/vibe-buddy".to_owned()),
-            surface: Surface::Host { ttys: Vec::new(), tmux: None, bundle_id: "com.mitchellh.ghostty".to_owned() },
+            surface: Surface::Host { ttys: Vec::new(), tmux: None, focus_url: None, bundle_id: "com.mitchellh.ghostty".to_owned() },
         };
 
         assert!(reported_desktop_session(&source).is_none());
@@ -692,7 +731,7 @@ mod tests {
             &ActivitySource::ClaudeCode {
                 session_id: "19b63622-e3e0-4cd0-a37e-dc8d71253155".to_owned(),
                 cwd: Some("/work/vibe-buddy".to_owned()),
-                surface: Surface::Host { ttys: Vec::new(), tmux: None, bundle_id: "com.mitchellh.ghostty".to_owned() },
+                surface: Surface::Host { ttys: Vec::new(), tmux: None, focus_url: None, bundle_id: "com.mitchellh.ghostty".to_owned() },
             },
             None,
         )
@@ -708,7 +747,7 @@ mod tests {
         let spec = command_for(
             &ActivitySource::Codex {
                 thread_id: "019c6e27-e55b-73d1-87d8-4e01f1f75043".to_owned(),
-                surface: Surface::Host { ttys: Vec::new(), tmux: None, bundle_id: "net.example.SomeNewTerminal".to_owned() },
+                surface: Surface::Host { ttys: Vec::new(), tmux: None, focus_url: None, bundle_id: "net.example.SomeNewTerminal".to_owned() },
             },
             None,
         )
@@ -739,7 +778,7 @@ mod tests {
                 command_for(
                     &ActivitySource::Codex {
                         thread_id: "t".to_owned(),
-                        surface: Surface::Host { bundle_id: bogus.to_owned(), ttys: Vec::new(), tmux: None },
+                        surface: Surface::Host { bundle_id: bogus.to_owned(), ttys: Vec::new(), tmux: None, focus_url: None },
                     },
                     None,
                 )
@@ -752,13 +791,13 @@ mod tests {
     #[test]
     fn a_host_without_a_bundle_id_has_nowhere_to_go() {
         // The hook says there's a host but gave no target: skip it, rather than fall back to importing the session into the app.
-        assert_eq!(Surface::from_hook(Some("host"), None, None, None, None, None), Surface::Headless);
+        assert_eq!(Surface::from_hook(Some("host"), None, None, None, None, None, None), Surface::Headless);
     }
 
     #[test]
     fn an_older_hook_keeps_the_desktop_behaviour() {
         // Old hooks and old state files report no surface; back then only the desktop app was supported.
-        assert_eq!(Surface::from_hook(None, None, None, None, None, None), Surface::default());
+        assert_eq!(Surface::from_hook(None, None, None, None, None, None, None), Surface::default());
         assert!(matches!(Surface::default(), Surface::App { .. }));
     }
 

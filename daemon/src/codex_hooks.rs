@@ -40,6 +40,8 @@ pub struct CodexHook {
     #[serde(default)]
     pub tmux_pane: Option<String>,
     #[serde(default)]
+    pub host_focus_url: Option<String>,
+    #[serde(default)]
     pub host_pids: Option<Vec<u32>>,
 }
 
@@ -79,6 +81,7 @@ pub fn apply(
             hook.host_bundle_id.clone(),
             hook.host_ttys.clone(),
             TmuxPane::from_hook(hook.tmux_socket.clone(), hook.tmux_pane.clone()),
+            hook.host_focus_url.clone(),
             hook.host_pids.clone(),
             None,
         ),
@@ -151,6 +154,7 @@ mod tests {
             host_ttys: None,
             tmux_socket: None,
             tmux_pane: None,
+            host_focus_url: None,
             host_pids: None,
         };
         assert!(apply(&mut tracker, &mut titles, ghost).is_none());
@@ -169,6 +173,7 @@ mod tests {
             host_ttys: None,
             tmux_socket: None,
             tmux_pane: None,
+            host_focus_url: None,
             host_pids: None,
         };
         assert!(apply(&mut tracker, &mut titles, fresh).is_some());
@@ -186,6 +191,7 @@ mod tests {
             host_ttys: None,
             tmux_socket: None,
             tmux_pane: None,
+            host_focus_url: None,
             host_pids: None,
         };
         let event = apply(&mut tracker, &mut titles, known).expect("known thread should be visible");
@@ -209,6 +215,7 @@ mod tests {
             host_ttys: None,
             tmux_socket: None,
             tmux_pane: None,
+            host_focus_url: None,
             host_pids: None,
         }
     }

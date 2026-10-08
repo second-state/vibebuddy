@@ -50,6 +50,8 @@ pub enum Surface {
 pub enum Tab {
     /// Nearest first.
     Ttys(Vec<String>),
+    /// Warp can't be asked about its tabs, but it hands each session a deeplink back to its pane.
+    FocusUrl(String),
     Tmux { socket: String, pane: String },
 }
 
@@ -70,10 +72,23 @@ pub fn detect(own_bundle_id: &str) -> Surface {
 fn current_tab() -> Option<Tab> {
     let tmux = std::env::var("TMUX").ok();
     let pane = std::env::var("TMUX_PANE").ok();
-    match (tmux, pane) {
-        (Some(tmux), Some(pane)) => tmux_tab(&tmux, &pane),
-        _ => Some(controlling_ttys()).filter(|ttys| !ttys.is_empty()).map(Tab::Ttys),
+    if let (Some(tmux), Some(pane)) = (tmux, pane) {
+        return tmux_tab(&tmux, &pane);
     }
+    if let Some(url) = std::env::var("WARP_FOCUS_URL").ok().filter(|url| valid_focus_url(url)) {
+        return Some(Tab::FocusUrl(url));
+    }
+    Some(controlling_ttys()).filter(|ttys| !ttys.is_empty()).map(Tab::Ttys)
+}
+
+/// `warp://session/<32 hex digits>`, under any of Warp's channel schemes; anything else is not passed on.
+fn valid_focus_url(url: &str) -> bool {
+    let Some((scheme, session)) = url.split_once("://session/") else {
+        return false;
+    };
+    ["warp", "warppreview", "warpdev", "warplocal", "warposs"].contains(&scheme)
+        && session.len() == 32
+        && session.bytes().all(|byte| byte.is_ascii_hexdigit())
 }
 
 /// `$TMUX` is `<socket>,<server pid>,<session index>`; the socket path itself may hold commas.
@@ -208,6 +223,9 @@ pub fn write_into(payload: &mut Map<String, Value>, surface: &Surface) {
                 Some(Tab::Ttys(ttys)) => {
                     payload.insert("host_ttys".to_owned(), Value::from(ttys.clone()));
                 }
+                Some(Tab::FocusUrl(url)) => {
+                    payload.insert("host_focus_url".to_owned(), Value::String(url.clone()));
+                }
                 Some(Tab::Tmux { socket, pane }) => {
                     payload.insert("tmux_socket".to_owned(), Value::String(socket.clone()));
                     payload.insert("tmux_pane".to_owned(), Value::String(pane.clone()));
@@ -248,6 +266,21 @@ mod tests {
         );
         for (tmux, pane) in [("relative,1,0", "%3"), ("/tmp/default,1,0", "3"), ("/tmp/default,1,0", "%3;x"), ("garbage", "%3")] {
             assert_eq!(tmux_tab(tmux, pane), None, "{tmux} {pane}");
+        }
+    }
+
+    #[test]
+    fn only_warps_own_session_links_are_passed_on() {
+        assert!(valid_focus_url("warp://session/550e8400e29b41d4a716446655440000"));
+        assert!(valid_focus_url("warppreview://session/550e8400e29b41d4a716446655440000"));
+        for bogus in [
+            "",
+            "https://session/550e8400e29b41d4a716446655440000",
+            "warp://session/550e8400",
+            "warp://session/550e8400e29b41d4a716446655440000?x=1",
+            "warp://action/new_tab?path=/",
+        ] {
+            assert!(!valid_focus_url(bogus), "{bogus}");
         }
     }
 
