@@ -137,6 +137,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let settings = NSMenuItem(title: String(localized: "Settings…"), action: #selector(showSettings), keyEquivalent: ",")
         settings.target = self
         menu.addItem(settings)
+        let updates = NSMenuItem(title: String(localized: "Check for Updates…"), action: #selector(checkForUpdates), keyEquivalent: "")
+        updates.target = self
+        menu.addItem(updates)
+        let report = NSMenuItem(title: String(localized: "Report a Problem…"), action: #selector(reportProblem), keyEquivalent: "")
+        report.target = self
+        menu.addItem(report)
         menu.addItem(.separator())
         let quit = NSMenuItem(title: String(localized: "Quit Vibe Buddy (the box goes offline)"), action: #selector(quit), keyEquivalent: "q")
         quit.target = self
@@ -145,6 +151,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     @objc private func restartDaemon() { model.restartDaemon() }
+    @objc private func checkForUpdates() { model.checkForUpdates() }
+    @objc private func reportProblem() { model.reportProblem() }
 
     @objc func showSettings() {
         if settingsWindow == nil {

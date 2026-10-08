@@ -58,6 +58,7 @@ struct GeneralView: View {
             Section {
                 LabeledContent("App", value: Resources.displayVersion)
                 LabeledContent("daemon", value: model.status?.daemon.build ?? String(localized: "Not connected"))
+                Button("Report a Problem…") { model.reportProblem() }
             }
         }
         .formStyle(.grouped)
@@ -644,14 +645,7 @@ struct AdvancedView: View {
         if let config = model.status?.config, let data = try? StatusCoding.encoder().encode(config) {
             try? data.write(to: target.appendingPathComponent("config.json"))
         }
-        let summary = """
-        App \(Resources.displayVersion)
-        daemon \(model.status?.daemon.build ?? "not connected")
-        firmware \(model.boxFirmware ?? "—")
-        offered firmware \(model.offeredFirmware?.version ?? "—")
-        voice \(model.status?.device.voice ?? "—")
-        """
-        try? summary.write(to: target.appendingPathComponent("summary.txt"), atomically: true, encoding: .utf8)
+        try? model.diagnosticsSummary.write(to: target.appendingPathComponent("summary.txt"), atomically: true, encoding: .utf8)
         NSWorkspace.shared.activateFileViewerSelecting([target])
     }
 }

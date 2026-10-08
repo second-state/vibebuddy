@@ -15,6 +15,8 @@ use crate::status::{Icon as FaceIcon, MenuState};
 #[derive(Clone, Copy, Debug)]
 pub enum TrayEvent {
     OpenSettings,
+    CheckForUpdates,
+    ReportProblem,
     Quit,
     /// The shell's tray host is gone (not up yet at login, or restarting) or back; ksni registers again by itself.
     HostGone,
@@ -95,6 +97,8 @@ impl ksni::Tray for Tray {
             line(&self.menu.today_line),
             MenuItem::Separator,
             action(tr("Settings…", &[]), TrayEvent::OpenSettings),
+            action(tr("Check for Updates…", &[]), TrayEvent::CheckForUpdates),
+            action(tr("Report a Problem…", &[]), TrayEvent::ReportProblem),
             // systemd keeps the daemon running, so unlike on the Mac, quitting leaves the box online.
             action(tr("Quit", &[]), TrayEvent::Quit),
         ]

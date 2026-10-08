@@ -285,6 +285,24 @@ final class AppModel: ObservableObject {
         previewingVoice = preview.playingVoice
     }
 
+    /// Both sides' build IDs, the voice and the OS: summary.txt in exported diagnostics, and the
+    /// versions a problem report starts with. No logs and nothing an agent did.
+    var diagnosticsSummary: String {
+        """
+        App \(Resources.displayVersion)
+        daemon \(status?.daemon.build ?? "not connected")
+        firmware \(boxFirmware ?? "—")
+        offered firmware \(offeredFirmware?.version ?? "—")
+        voice \(status?.device.voice ?? "—")
+        macOS \(ProcessInfo.processInfo.operatingSystemVersionString)
+        """
+    }
+
+    /// Opens a new GitHub issue in the browser with the versions already filled in.
+    func reportProblem() {
+        NSWorkspace.shared.open(IssueReport.url(summary: diagnosticsSummary))
+    }
+
     /// The box's firmware as shown in the interface: version and build ID.
     var boxFirmware: String? {
         Firmware.label(version: status?.device.firmwareVersion, build: status?.device.firmwareBuild)

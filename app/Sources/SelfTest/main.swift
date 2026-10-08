@@ -269,6 +269,12 @@ check(VoiceCatalogEntry.switchSuggestion(boxVoice: "hsiaoyu", to: .zh, bundled: 
 check(VoiceCatalogEntry.switchSuggestion(boxVoice: "builtin", to: .zh, bundled: catalog.filter { $0.language == .en }) == nil, "no Chinese pack bundled: nothing to offer")
 check(VoiceCatalogEntry.switchSuggestion(boxVoice: "wanwanxiaohe", to: .en, bundled: catalog.filter { $0.id == "luna" })?.id == "luna", "skip Characters this build doesn't ship")
 
+// "Report a problem" opens a new issue with the versions in its body, "+" and line breaks intact.
+let report = IssueReport.url(summary: "App 0.3.5 (12)\nmacOS 15.1+beta")
+let reportBody = URLComponents(url: report, resolvingAgainstBaseURL: false)?.queryItems?.first { $0.name == "body" }?.value
+check(report.absoluteString.hasPrefix("https://github.com/second-state/vibebuddy/issues/new?body="), "report: a new issue on GitHub")
+check(reportBody?.contains("App 0.3.5 (12)\nmacOS 15.1+beta") == true && !report.absoluteString.contains("+"), "report: the versions survive the URL")
+
 if failures > 0 {
     print("\(failures) failure(s)")
     exit(1)

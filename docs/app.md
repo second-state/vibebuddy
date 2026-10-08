@@ -42,7 +42,9 @@ The icon is the buddy's pixel face: normal while the device is connected, grayed
 2. Current mode: On duty / Pomodoro / Leisure
 3. A read-only line with today's stats
 4. Settings…
-5. Quit Vibe Buddy (the box goes offline)
+5. Check for Updates…: the same as "Check now" in Settings; Sparkle shows its own window for the App
+6. Report a Problem…: opens a new GitHub issue in the browser, its body already holding the versions from `summary.txt` (App, daemon, firmware, voice, OS) and nothing else, no logs
+7. Quit Vibe Buddy (the box goes offline)
 
 Task cards don't go in the menu; the box is where you look at tasks.
 
@@ -54,7 +56,7 @@ macOS notifications appear only when the link breaks: the device has been discon
 
 Five tabs, styled like System Settings: tabs across the top, grouped forms, system font and colors. Branding appears only in onboarding, the About page and the menu bar icon.
 
-**General**: Launch at login, the toggle for link-failure notifications, and Updates: a "Check for updates" switch (on by default in builds CI makes, off when built from source), "Check now", the outcome of the last check and a download link when a newer App is out. Below the manifest's `min_supported_app`, a banner at the top says the App is no longer supported; it can't be dismissed and nothing stops working.
+**General**: Launch at login, the toggle for link-failure notifications, and Updates: a "Check for updates" switch (on by default in builds CI makes, off when built from source), "Check now", the outcome of the last check and a download link when a newer App is out. Next to the versions, "Report a Problem…" does what the menu item does. Below the manifest's `min_supported_app`, a banner at the top says the App is no longer supported; it can't be dismissed and nothing stops working.
 
 **Sound**: At the top is a volume slider (20 to 100, in steps of 5). Its value comes from the box's status, and it's written to the box's NVS only on release, so it survives restarts. The box's own menu can change the volume too; the slider follows the `VOLUME` line it prints. Next to it, "Play a line on the box" has the box play "All done!" at the new volume; previews on the Mac are unrelated to it. There's no mute, and the volume can't go to zero; muting happens only on the box, by long-pressing K2. Below that is a list of announcement voice cards. Each card has a name, an accent or source tag, a one-sentence summary of who the character is (so the user can choose between them), a play button (plays all five lines back to back, about ten seconds; click again to stop), a "Use" button and an "In use" badge. After you click "Use", a progress bar appears on the card and the other cards and the Device tab's actions are disabled; over the bridge this takes up to about three minutes, and the card is marked "In use" only after the write finishes and the box reports its verification result. If the cable is pulled partway through, the firmware sees the partition as empty and automatically falls back to the built-in voice; the app prompts you to write it again. No resumable writes.
 
