@@ -66,6 +66,11 @@ pub async fn put_config(config: Config) -> Result<Config, String> {
     response.json().await.map_err(|error| error.to_string())
 }
 
+/// The box reports its new volume back, and that is when the status stream shows it.
+pub async fn set_volume(level: u8, preview: bool) -> Result<(), String> {
+    post("/v1/device/volume", Some(serde_json::json!({ "level": level, "preview": preview }))).await
+}
+
 /// The daemon accepts the pack and writes it in the background; progress arrives in the status stream.
 pub async fn write_voice_pack(pack: Vec<u8>) -> Result<(), String> {
     let request = reqwest::Client::new()
