@@ -45,12 +45,13 @@ pub enum Surface {
         desktop_session_id: Option<String>,
     },
     /// Running in some other app: a terminal, an editor's integrated terminal, or any host we haven't seen. This
-    /// bundle id is the destination; the daemon doesn't need to know it. The agent's tty, when it has one,
-    /// lets a terminal that can be asked about its tabs go to the session's own tab.
+    /// bundle id is the destination; the daemon doesn't need to know it. The agent's ttys, when it has
+    /// any, let a terminal that can be asked about its tabs go to the session's own tab.
     Host {
         bundle_id: String,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        tty: Option<String>,
+        /// Nearest first: a terminal wrapper adds a pseudo-terminal of its own under the one the terminal names.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        ttys: Vec<String>,
         /// Inside tmux the tty belongs to a pane; the pane is switched to through tmux instead.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         tmux: Option<TmuxPane>,
@@ -87,7 +88,7 @@ impl Surface {
     pub fn from_hook(
         kind: Option<&str>,
         host_bundle_id: Option<String>,
-        host_tty: Option<String>,
+        host_ttys: Option<Vec<String>>,
         tmux: Option<TmuxPane>,
         host_pids: Option<Vec<u32>>,
         desktop_session_id: Option<String>,
@@ -95,7 +96,7 @@ impl Surface {
         match kind {
             // Claims a host but gave no bundle id: nowhere to go, and falling back to App would jump to the wrong place.
             Some("host") => match host_bundle_id {
-                Some(bundle_id) => Self::Host { bundle_id, tty: host_tty, tmux },
+                Some(bundle_id) => Self::Host { bundle_id, ttys: host_ttys.unwrap_or_default(), tmux },
                 None => Self::Headless,
             },
             Some("headless") => Self::Headless,

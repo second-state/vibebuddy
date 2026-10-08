@@ -48,7 +48,8 @@ pub enum Surface {
 /// Where in a terminal host the session sits.
 #[derive(Debug, PartialEq, Eq)]
 pub enum Tab {
-    Tty(String),
+    /// Nearest first.
+    Ttys(Vec<String>),
     Tmux { socket: String, pane: String },
 }
 
@@ -71,7 +72,7 @@ fn current_tab() -> Option<Tab> {
     let pane = std::env::var("TMUX_PANE").ok();
     match (tmux, pane) {
         (Some(tmux), Some(pane)) => tmux_tab(&tmux, &pane),
-        _ => controlling_tty().map(Tab::Tty),
+        _ => Some(controlling_ttys()).filter(|ttys| !ttys.is_empty()).map(Tab::Ttys),
     }
 }
 
@@ -82,37 +83,42 @@ fn tmux_tab(tmux: &str, pane: &str) -> Option<Tab> {
     (socket.starts_with('/') && valid_pane).then(|| Tab::Tmux { socket: socket.to_owned(), pane: pane.to_owned() })
 }
 
-/// The controlling terminal of the nearest process in this chain that has one, as `ttys016`.
+/// The controlling terminals up this process chain, nearest first, as `ttys016`. There can be more than one:
+/// a terminal wrapper such as `kiro-cli-term` or `q term` runs the shell on a pseudo-terminal of its own, so
+/// the agent's tty is not the one the terminal app names for its tab, which is further up.
 #[cfg(target_os = "macos")]
-fn controlling_tty() -> Option<String> {
+fn controlling_ttys() -> Vec<String> {
     const NO_DEVICE: u32 = u32::MAX;
+    let mut ttys: Vec<String> = Vec::new();
     let mut pid = std::process::id() as libc::c_int;
-    for _ in 0..8 {
+    for _ in 0..32 {
         let mut info: libc::proc_bsdinfo = unsafe { std::mem::zeroed() };
         let size = std::mem::size_of::<libc::proc_bsdinfo>() as libc::c_int;
         let read = unsafe { libc::proc_pidinfo(pid, libc::PROC_PIDTBSDINFO, 0, (&raw mut info).cast(), size) };
         if read != size {
-            return None;
+            break;
         }
         if info.e_tdev != NO_DEVICE {
             let name = unsafe { libc::devname(info.e_tdev as libc::dev_t, libc::S_IFCHR) };
-            if name.is_null() {
-                return None;
+            if !name.is_null()
+                && let Ok(name) = unsafe { std::ffi::CStr::from_ptr(name) }.to_str()
+                && name.starts_with("tty")
+                && !ttys.iter().any(|tty| tty == name)
+            {
+                ttys.push(name.to_owned());
             }
-            let name = unsafe { std::ffi::CStr::from_ptr(name) }.to_str().ok()?;
-            return name.starts_with("tty").then(|| name.to_owned());
         }
         pid = info.pbi_ppid as libc::c_int;
         if pid <= 1 {
-            return None;
+            break;
         }
     }
-    None
+    ttys
 }
 
 #[cfg(not(target_os = "macos"))]
-fn controlling_tty() -> Option<String> {
-    None
+fn controlling_ttys() -> Vec<String> {
+    Vec::new()
 }
 
 /// The bundle id of the app launchd started at the top of this process chain, if it is an app.
@@ -199,8 +205,8 @@ pub fn write_into(payload: &mut Map<String, Value>, surface: &Surface) {
         Surface::Host(bundle_id, tab) => {
             payload.insert("host_bundle_id".to_owned(), Value::String(bundle_id.clone()));
             match tab {
-                Some(Tab::Tty(tty)) => {
-                    payload.insert("host_tty".to_owned(), Value::String(tty.clone()));
+                Some(Tab::Ttys(ttys)) => {
+                    payload.insert("host_ttys".to_owned(), Value::from(ttys.clone()));
                 }
                 Some(Tab::Tmux { socket, pane }) => {
                     payload.insert("tmux_socket".to_owned(), Value::String(socket.clone()));
@@ -252,7 +258,7 @@ mod tests {
         write_into(&mut payload, &Surface::Host("com.mitchellh.ghostty".to_owned(), Some(tab)));
         assert_eq!(payload["tmux_socket"], "/tmp/tmux-502/default");
         assert_eq!(payload["tmux_pane"], "%3");
-        assert!(!payload.contains_key("host_tty"));
+        assert!(!payload.contains_key("host_ttys"));
     }
 
     #[cfg(target_os = "macos")]
@@ -262,7 +268,7 @@ mod tests {
         let output = Command::new("/bin/ps").args(["-o", "tty=", "-p", &std::process::id().to_string()]).output().unwrap();
         let reported = String::from_utf8(output.stdout).unwrap().trim().to_owned();
         let expected = (reported != "??").then(|| format!("tty{}", reported.trim_start_matches("tty")));
-        assert_eq!(controlling_tty(), expected);
+        assert_eq!(controlling_ttys().first(), expected.as_ref());
     }
 
     #[test]
@@ -353,10 +359,10 @@ mod tests {
     #[test]
     fn the_payload_carries_the_landing_spot_only_for_a_host() {
         let mut payload = Map::new();
-        write_into(&mut payload, &Surface::Host("com.mitchellh.ghostty".to_owned(), Some(Tab::Tty("ttys016".to_owned()))));
+        write_into(&mut payload, &Surface::Host("com.mitchellh.ghostty".to_owned(), Some(Tab::Ttys(vec!["ttys041".to_owned(), "ttys040".to_owned()]))));
         assert_eq!(payload["surface"], "host");
         assert_eq!(payload["host_bundle_id"], "com.mitchellh.ghostty");
-        assert_eq!(payload["host_tty"], "ttys016");
+        assert_eq!(payload["host_ttys"], serde_json::json!(["ttys041", "ttys040"]));
 
         let mut payload = Map::new();
         write_into(&mut payload, &Surface::App);

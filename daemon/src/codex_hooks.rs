@@ -34,7 +34,7 @@ pub struct CodexHook {
     #[serde(default)]
     pub host_bundle_id: Option<String>,
     #[serde(default)]
-    pub host_tty: Option<String>,
+    pub host_ttys: Option<Vec<String>>,
     #[serde(default)]
     pub tmux_socket: Option<String>,
     #[serde(default)]
@@ -77,7 +77,7 @@ pub fn apply(
         surface: Surface::from_hook(
             hook.surface.as_deref(),
             hook.host_bundle_id.clone(),
-            hook.host_tty.clone(),
+            hook.host_ttys.clone(),
             TmuxPane::from_hook(hook.tmux_socket.clone(), hook.tmux_pane.clone()),
             hook.host_pids.clone(),
             None,
@@ -148,7 +148,7 @@ mod tests {
             response_kind: None,
             surface: None,
             host_bundle_id: None,
-            host_tty: None,
+            host_ttys: None,
             tmux_socket: None,
             tmux_pane: None,
             host_pids: None,
@@ -166,7 +166,7 @@ mod tests {
             response_kind: None,
             surface: None,
             host_bundle_id: None,
-            host_tty: None,
+            host_ttys: None,
             tmux_socket: None,
             tmux_pane: None,
             host_pids: None,
@@ -183,7 +183,7 @@ mod tests {
             response_kind: None,
             surface: None,
             host_bundle_id: None,
-            host_tty: None,
+            host_ttys: None,
             tmux_socket: None,
             tmux_pane: None,
             host_pids: None,
@@ -206,7 +206,7 @@ mod tests {
             response_kind: None,
             surface: None,
             host_bundle_id: None,
-            host_tty: None,
+            host_ttys: None,
             tmux_socket: None,
             tmux_pane: None,
             host_pids: None,
