@@ -18,9 +18,15 @@
 #include "freertos/task.h"
 
 #define AUDIO_SAMPLE_RATE 24000
+#ifdef AGENT_BOARD_BREADBOARD
+#define AUDIO_I2S_BCLK GPIO_NUM_5
+#define AUDIO_I2S_WS GPIO_NUM_6
+#define AUDIO_I2S_DOUT GPIO_NUM_7
+#else
 #define AUDIO_I2S_BCLK GPIO_NUM_21
 #define AUDIO_I2S_WS GPIO_NUM_13
 #define AUDIO_I2S_DOUT GPIO_NUM_14
+#endif
 
 #define ES8311_ADDRESS 0x18
 #define XL9555_ADDRESS 0x20
@@ -34,13 +40,16 @@
 static const char *TAG = "agent_audio";
 static i2s_chan_handle_t tx_handle;
 /// 只有 ES8311 版本才有；NS4168 版本没有音量可调。
+#ifndef AGENT_BOARD_BREADBOARD
 static esp_codec_dev_handle_t codec_device;
+#endif
 static unsigned volume = AGENT_AUDIO_VOLUME_DEFAULT;
 static QueueHandle_t prompt_queue;
 static bool audio_ready;
 static volatile bool playing;
 static const char *audio_status = "NOT INITIALIZED";
 
+#ifndef AGENT_BOARD_BREADBOARD
 static esp_err_t xl9555_read(i2c_master_dev_handle_t handle, uint8_t reg,
                              uint8_t *value) {
   return i2c_master_transmit_receive(handle, &reg, 1, value, 1,
@@ -78,6 +87,8 @@ static esp_err_t enable_speaker(i2c_master_bus_handle_t i2c_bus) {
   output |= XL9555_SPEAKER_MASK;
   return xl9555_write(handle, XL9555_OUTPUT_PORT0, output);
 }
+
+#endif
 
 static unsigned clamp_volume(unsigned level) {
   if (level < AGENT_AUDIO_VOLUME_MIN) {
@@ -140,6 +151,7 @@ static esp_err_t init_i2s(void) {
   return i2s_channel_enable(tx_handle);
 }
 
+#ifndef AGENT_BOARD_BREADBOARD
 static esp_err_t init_es8311(i2c_master_bus_handle_t i2c_bus) {
   audio_codec_i2c_cfg_t i2c_config = {
       .port = I2C_NUM_0,
@@ -215,6 +227,8 @@ static esp_err_t init_es8311(i2c_master_bus_handle_t i2c_bus) {
   return ESP_OK;
 }
 
+#endif
+
 static void audio_task(void *argument) {
   (void)argument;
   while (true) {
@@ -232,8 +246,30 @@ static void audio_task(void *argument) {
     const uint8_t *end = start + length;
 
     size_t bytes_written = 0;
+#ifdef AGENT_BOARD_BREADBOARD
+    // 当前 3V3 面包板只验证过低音量；最大档限制为原 PCM 振幅的 1/16。
+    // 解码字节避免依赖语音包映射地址的对齐方式。
+    int16_t samples[512];
+    const unsigned level = volume;
+    esp_err_t result = ESP_OK;
+    while (bytes_written < length) {
+      size_t chunk = length - bytes_written;
+      if (chunk > sizeof(samples)) chunk = sizeof(samples);
+      if (chunk % 4 != 0) { result = ESP_ERR_INVALID_SIZE; break; }
+      for (size_t i = 0; i < chunk / 2; ++i) {
+        const uint8_t *p = start + bytes_written + i * 2;
+        int16_t sample = (int16_t)((unsigned)p[0] | ((unsigned)p[1] << 8));
+        samples[i] = (int16_t)((int32_t)sample * (int)level / 1600);
+      }
+      size_t written = 0;
+      result = i2s_channel_write(tx_handle, samples, chunk, &written, 1000);
+      bytes_written += written;
+      if (result != ESP_OK || written != chunk) break;
+    }
+#else
     esp_err_t result = i2s_channel_write(tx_handle, start, end - start,
                                          &bytes_written, portMAX_DELAY);
+#endif
     playing = false;
     if (result != ESP_OK || bytes_written != (size_t)(end - start)) {
       ESP_LOGE(TAG, "语音播放失败: %s, %u/%u bytes", esp_err_to_name(result),
@@ -244,6 +280,14 @@ static void audio_task(void *argument) {
 
 esp_err_t agent_audio_init(void) {
   load_volume();
+#ifdef AGENT_BOARD_BREADBOARD
+  esp_err_t result = init_i2s();
+  if (result != ESP_OK) {
+    audio_status = "I2S";
+    return result;
+  }
+  audio_status = "MAX98357A";
+#else
   i2c_master_bus_handle_t i2c_bus;
   esp_err_t result = i2c_master_get_bus_handle(I2C_NUM_0, &i2c_bus);
   if (result != ESP_OK) {
@@ -278,6 +322,7 @@ esp_err_t agent_audio_init(void) {
     audio_status = "SPEAKER ENABLE";
     return result;
   }
+#endif
   prompt_queue = xQueueCreate(8, sizeof(agent_audio_prompt_t));
   if (prompt_queue == NULL) {
     audio_status = "AUDIO QUEUE";
@@ -302,6 +347,7 @@ esp_err_t agent_audio_play(agent_audio_prompt_t prompt) {
 const char *agent_audio_status(void) { return audio_status; }
 
 esp_err_t agent_audio_set_volume(unsigned level) {
+#ifndef AGENT_BOARD_BREADBOARD
   if (codec_device == NULL) {
     return ESP_ERR_NOT_SUPPORTED;
   }
@@ -310,6 +356,9 @@ esp_err_t agent_audio_set_volume(unsigned level) {
       ESP_CODEC_DEV_OK) {
     return ESP_FAIL;
   }
+#else
+  level = clamp_volume(level);
+#endif
   volume = level;
   return save_volume();
 }

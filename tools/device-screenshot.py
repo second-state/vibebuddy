@@ -15,9 +15,6 @@ import zlib
 
 import serial
 
-WIDTH, HEIGHT = 320, 240
-
-
 def rgb565_to_rgb(color: int) -> bytes:
     red = (color >> 11) & 0x1F
     green = (color >> 5) & 0x3F
@@ -25,17 +22,17 @@ def rgb565_to_rgb(color: int) -> bytes:
     return bytes((red * 255 // 31, green * 255 // 63, blue * 255 // 31))
 
 
-def write_png(path: str, pixels: list[bytes], scale: int) -> None:
+def write_png(path: str, pixels: list[bytes], scale: int, width: int, height: int) -> None:
     def chunk(kind: bytes, payload: bytes) -> bytes:
         body = kind + payload
         return struct.pack(">I", len(payload)) + body + struct.pack(">I", zlib.crc32(body) & 0xFFFFFFFF)
 
     raw = bytearray()
-    for y in range(HEIGHT):
-        row = b"".join(pixels[y * WIDTH + x] * scale for x in range(WIDTH))
+    for y in range(height):
+        row = b"".join(pixels[y * width + x] * scale for x in range(width))
         for _ in range(scale):
             raw += b"\x00" + row
-    header = struct.pack(">IIBBBBB", WIDTH * scale, HEIGHT * scale, 8, 2, 0, 0, 0)
+    header = struct.pack(">IIBBBBB", width * scale, height * scale, 8, 2, 0, 0, 0)
     with open(path, "wb") as output:
         output.write(b"\x89PNG\r\n\x1a\n")
         output.write(chunk(b"IHDR", header))
@@ -57,11 +54,16 @@ def main(argv: list[str]) -> int:
     backlight_on = True
     deadline = time.time() + 60
     started = False
+    width, height = 0, 0
     while time.time() < deadline:
         line = port.readline().decode("utf-8", "replace").strip()
         if not line:
             continue
         if line.startswith("SHOT BEGIN"):
+            width, height = map(int, line.split()[2].split("x"))
+            if (width, height) not in ((320, 240), (240, 240)):
+                raise ValueError("未知屏幕尺寸")
+            pixels.clear()
             started = True
             backlight_on = "BACKLIGHT OFF" not in line
             continue
@@ -74,13 +76,13 @@ def main(argv: list[str]) -> int:
             pixels.extend([rgb565_to_rgb(int(color, 16))] * int(count))
     port.close()
 
-    if len(pixels) != WIDTH * HEIGHT:
-        print(f"帧不完整：收到 {len(pixels)} 像素，应为 {WIDTH * HEIGHT}", file=sys.stderr)
+    if not started or len(pixels) != width * height:
+        print(f"帧不完整：收到 {len(pixels)} 像素，应为 {width * height}", file=sys.stderr)
         return 1
     if not backlight_on:
         # 背光关着，人眼看到的就是一块黑屏；把画面压暗到几乎不可见。
         pixels = [bytes(channel // 8 for channel in pixel) for pixel in pixels]
-    write_png(output_path, pixels, scale)
+    write_png(output_path, pixels, scale, width, height)
     print(f"{output_path} 背光{'开' if backlight_on else '关'}")
     return 0
 

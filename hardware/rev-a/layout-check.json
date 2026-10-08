@@ -1,0 +1,12 @@
+{
+  "components": 105,
+  "mounting_holes": 4,
+  "nets": 100,
+  "tracks": 0,
+  "board_mm": [
+    90,
+    80
+  ],
+  "pin_number_check": "通过",
+  "fixed_courtyard_overlaps": []
+}

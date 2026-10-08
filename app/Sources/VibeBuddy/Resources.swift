@@ -26,17 +26,21 @@ enum Resources {
         Bundle.main.resourceURL ?? macOSDirectory
     }
 
-    static var firmwareDirectory: URL { resourcesDirectory.appendingPathComponent("firmware") }
+    static func firmwareDirectory(board: String?) -> URL {
+        let root = resourcesDirectory.appendingPathComponent("firmware")
+        return board == "goouuu-s3-spi" ? root.appendingPathComponent("breadboard") : root
+    }
 
     /// 附带固件的构建标识（打包脚本写的），没有附带固件时为 nil。
-    static var bundledFirmwareBuild: String? {
-        let url = firmwareDirectory.appendingPathComponent("build.txt")
+    static func bundledFirmwareBuild(board: String?) -> String? {
+        let url = firmwareDirectory(board: board).appendingPathComponent("build.txt")
         guard let text = try? String(contentsOf: url, encoding: .utf8) else { return nil }
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         return trimmed.isEmpty ? nil : trimmed
     }
 
-    static var firmwareFiles: (bootloader: URL, partitionTable: URL, app: URL)? {
+    static func firmwareFiles(board: String?) -> (bootloader: URL, partitionTable: URL, app: URL)? {
+        let firmwareDirectory = firmwareDirectory(board: board)
         let bootloader = firmwareDirectory.appendingPathComponent("bootloader.bin")
         let table = firmwareDirectory.appendingPathComponent("partition-table.bin")
         let app = firmwareDirectory.appendingPathComponent("vibebuddy-fw.bin")

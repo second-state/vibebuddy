@@ -5,6 +5,9 @@
 #include <string.h>
 
 #include "agent_audio.h"
+#ifdef AGENT_BOARD_BREADBOARD
+#include "agent_mic.h"
+#endif
 #include "agent_build_stamp.h"
 #include "agent_buttons.h"
 #include "agent_display.h"
@@ -521,6 +524,13 @@ static void handle_line(char *line, size_t length) {
     cJSON_Delete(message);
     return;
   }
+#ifdef AGENT_BOARD_BREADBOARD
+  if (strcmp(event->valuestring, "device.mic.capture") == 0) {
+    agent_mic_capture(write_shot_line);
+    cJSON_Delete(message);
+    return;
+  }
+#endif
   if (strncmp(event->valuestring, "voice.", 6) == 0) {
     handle_voice_event(message, event->valuestring);
     cJSON_Delete(message);
@@ -568,6 +578,11 @@ static char announced_build[48];
 /// 把设备的静态状态整个报一遍：固件构建号、模式、音色、音量。开机与 hello
 /// 都走这里。
 static void announce_state(void) {
+#ifdef AGENT_BOARD_BREADBOARD
+  transport_write_literal("BOARD goouuu-s3-spi\n");
+#else
+  transport_write_literal("BOARD alientek-box\n");
+#endif
   transport_write_value_line("DISPLAY READY BUILD ", announced_build);
   transport_write_value_line("MODE ", mode_name(agent_display_mode()));
   transport_write_value_line("VOICES ", agent_voices_current_id());
@@ -695,7 +710,11 @@ void app_main(void) {
     transport_write_value_line("AUDIO ERROR ", agent_audio_status());
   }
   if (agent_buttons_init(on_button) == ESP_OK) {
+#ifdef AGENT_BOARD_BREADBOARD
+    transport_write_literal("BUTTONS NOT FITTED\n");
+#else
     transport_write_literal("BUTTONS READY\n");
+#endif
   } else {
     transport_write_literal("BUTTONS ERROR\n");
   }

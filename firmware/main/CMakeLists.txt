@@ -1,9 +1,23 @@
+if(NOT DEFINED VIBE_BOARD)
+    set(VIBE_BOARD "alientek")
+endif()
+if(VIBE_BOARD STREQUAL "breadboard")
+    set(button_source "agent_buttons_none.c")
+    set(mic_source "agent_mic.c")
+elseif(VIBE_BOARD STREQUAL "alientek")
+    set(button_source "agent_buttons.c")
+else()
+    message(FATAL_ERROR "未知板型: ${VIBE_BOARD}")
+endif()
 idf_component_register(
-    SRCS "vibebuddy_fw.c" "agent_audio.c" "agent_buttons.c" "agent_display.c" "agent_leisure.c" "agent_pomodoro.c" "agent_tally.c" "agent_voice_pack.c" "agent_voices.c"
-    PRIV_REQUIRES json esp_app_format esp_driver_gpio esp_driver_i2c esp_driver_i2s esp_driver_uart esp_driver_usb_serial_jtag esp_codec_dev esp_hw_support esp_lcd esp_partition mbedtls nvs_flash spi_flash
+    SRCS "vibebuddy_fw.c" "agent_audio.c" "${button_source}" ${mic_source} "agent_display.c" "agent_leisure.c" "agent_pomodoro.c" "agent_tally.c" "agent_voice_pack.c" "agent_voices.c"
+    PRIV_REQUIRES json esp_app_format esp_driver_gpio esp_driver_i2c esp_driver_i2s esp_driver_spi esp_driver_uart esp_driver_usb_serial_jtag esp_codec_dev esp_hw_support esp_lcd esp_partition mbedtls nvs_flash spi_flash
     INCLUDE_DIRS "."
     EMBED_FILES "assets/input_required.pcm" "assets/done.pcm" "assets/failed.pcm" "assets/focus_done.pcm" "assets/break_done.pcm"
 )
+if(VIBE_BOARD STREQUAL "breadboard")
+    target_compile_definitions(${COMPONENT_LIB} PRIVATE AGENT_BOARD_BREADBOARD=1)
+endif()
 
 # 页脚里的编译时刻由这里每次构建重新生成。esp_app_desc.c 里的 __TIME__ 只在
 # 它自己被重编时更新，增量构建之后会停在上一次全量构建的时刻。第二个 OUTPUT

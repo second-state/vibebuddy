@@ -62,9 +62,9 @@ struct DaemonClient {
         guard code == 202 else { throw DaemonError(message: DaemonClient.message(in: data) ?? "写入未被接受（\(code)）") }
     }
 
-    func flashFirmware(bootloader: URL, partitionTable: URL, app: URL) async throws {
+    func flashFirmware(bootloader: URL, partitionTable: URL, app: URL, board: String) async throws {
         let body = try JSONSerialization.data(withJSONObject: [
-            "bootloader": bootloader.path, "partition_table": partitionTable.path, "app": app.path,
+            "bootloader": bootloader.path, "partition_table": partitionTable.path, "app": app.path, "board": board,
         ])
         let (code, data) = try await post("/v1/device/firmware", body: body, contentType: "application/json")
         guard code == 202 else { throw DaemonError(message: DaemonClient.message(in: data) ?? "烧录未被接受（\(code)）") }

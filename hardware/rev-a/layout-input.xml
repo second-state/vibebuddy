@@ -1,0 +1,4305 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<export version="E">
+  <design>
+    <source>/Users/dragon/.codex/worktrees/e5fc/vibe-buddy/hardware/rev-a/vibe-buddy-rev-a.kicad_sch</source>
+    <date>2026-09-18T18:11:23</date>
+    <tool>Eeschema 10.0.6</tool>
+    <sheet number="1" name="/" tstamps="/">
+      <title_block>
+        <title>Vibe Buddy Rev A — 原理图草稿</title>
+        <company/>
+        <rev>A-工程草稿</rev>
+        <date/>
+        <source>vibe-buddy-rev-a.kicad_sch</source>
+        <comment number="1" value="尚未完成生产审核，禁止直接下单"/>
+        <comment number="2" value=""/>
+        <comment number="3" value=""/>
+        <comment number="4" value=""/>
+        <comment number="5" value=""/>
+        <comment number="6" value=""/>
+        <comment number="7" value=""/>
+        <comment number="8" value=""/>
+        <comment number="9" value=""/>
+      </title_block>
+    </sheet>
+    <sheet number="2" name="/主控与恢复/" tstamps="/743b374c-9f24-5277-8136-eb6bd3cdf0e9/">
+      <title_block>
+        <title>主控与恢复</title>
+        <company/>
+        <rev>A-工程草稿</rev>
+        <date/>
+        <source>controller.kicad_sch</source>
+        <comment number="1" value="尚未完成生产审核，禁止直接下单"/>
+        <comment number="2" value=""/>
+        <comment number="3" value=""/>
+        <comment number="4" value=""/>
+        <comment number="5" value=""/>
+        <comment number="6" value=""/>
+        <comment number="7" value=""/>
+        <comment number="8" value=""/>
+        <comment number="9" value=""/>
+      </title_block>
+    </sheet>
+    <sheet number="3" name="/USB 与主电源/" tstamps="/e891095e-c17d-57a7-9580-3757d6426a36/">
+      <title_block>
+        <title>USB 与主电源</title>
+        <company/>
+        <rev>A-工程草稿</rev>
+        <date/>
+        <source>power-usb.kicad_sch</source>
+        <comment number="1" value="尚未完成生产审核，禁止直接下单"/>
+        <comment number="2" value=""/>
+        <comment number="3" value=""/>
+        <comment number="4" value=""/>
+        <comment number="5" value=""/>
+        <comment number="6" value=""/>
+        <comment number="7" value=""/>
+        <comment number="8" value=""/>
+        <comment number="9" value=""/>
+      </title_block>
+    </sheet>
+    <sheet number="4" name="/稳压与电源分配/" tstamps="/d2811dcd-5bc7-5795-8a57-26240e35bf75/">
+      <title_block>
+        <title>稳压与电源分配</title>
+        <company/>
+        <rev>A-工程草稿</rev>
+        <date/>
+        <source>regulators.kicad_sch</source>
+        <comment number="1" value="尚未完成生产审核，禁止直接下单"/>
+        <comment number="2" value=""/>
+        <comment number="3" value=""/>
+        <comment number="4" value=""/>
+        <comment number="5" value=""/>
+        <comment number="6" value=""/>
+        <comment number="7" value=""/>
+        <comment number="8" value=""/>
+        <comment number="9" value=""/>
+      </title_block>
+    </sheet>
+    <sheet number="5" name="/三个业务按键与复位/" tstamps="/de89abb4-d049-5dc1-bd82-a394d72fac99/">
+      <title_block>
+        <title>三个业务按键与复位</title>
+        <company/>
+        <rev>A-工程草稿</rev>
+        <date/>
+        <source>buttons.kicad_sch</source>
+        <comment number="1" value="尚未完成生产审核，禁止直接下单"/>
+        <comment number="2" value=""/>
+        <comment number="3" value=""/>
+        <comment number="4" value=""/>
+        <comment number="5" value=""/>
+        <comment number="6" value=""/>
+        <comment number="7" value=""/>
+        <comment number="8" value=""/>
+        <comment number="9" value=""/>
+      </title_block>
+    </sheet>
+    <sheet number="6" name="/BOX3 裸屏参考接口/" tstamps="/deb8a2a4-71e2-5c6a-be35-6e8b7b9f80f8/">
+      <title_block>
+        <title>BOX3 裸屏参考接口</title>
+        <company/>
+        <rev>A-工程草稿</rev>
+        <date/>
+        <source>display.kicad_sch</source>
+        <comment number="1" value="尚未完成生产审核，禁止直接下单"/>
+        <comment number="2" value=""/>
+        <comment number="3" value=""/>
+        <comment number="4" value=""/>
+        <comment number="5" value=""/>
+        <comment number="6" value=""/>
+        <comment number="7" value=""/>
+        <comment number="8" value=""/>
+        <comment number="9" value=""/>
+      </title_block>
+    </sheet>
+    <sheet number="7" name="/音频采集：ES7210/" tstamps="/22ccec06-bb98-5cc1-8a0f-0f2e9ec2307a/">
+      <title_block>
+        <title>音频采集：ES7210</title>
+        <company/>
+        <rev>A-工程草稿</rev>
+        <date/>
+        <source>audio.kicad_sch</source>
+        <comment number="1" value="尚未完成生产审核，禁止直接下单"/>
+        <comment number="2" value=""/>
+        <comment number="3" value=""/>
+        <comment number="4" value=""/>
+        <comment number="5" value=""/>
+        <comment number="6" value=""/>
+        <comment number="7" value=""/>
+        <comment number="8" value=""/>
+        <comment number="9" value=""/>
+      </title_block>
+    </sheet>
+    <sheet number="8" name="/音频电源与去耦/" tstamps="/10ee17e6-ac08-5740-b9b9-0ee6306fddc3/">
+      <title_block>
+        <title>音频电源与去耦</title>
+        <company/>
+        <rev>A-工程草稿</rev>
+        <date/>
+        <source>audio-power.kicad_sch</source>
+        <comment number="1" value="尚未完成生产审核，禁止直接下单"/>
+        <comment number="2" value=""/>
+        <comment number="3" value=""/>
+        <comment number="4" value=""/>
+        <comment number="5" value=""/>
+        <comment number="6" value=""/>
+        <comment number="7" value=""/>
+        <comment number="8" value=""/>
+        <comment number="9" value=""/>
+      </title_block>
+    </sheet>
+    <sheet number="9" name="/音频播放与功放/" tstamps="/c7630ae3-21ec-5452-b8e7-5a6f48916d73/">
+      <title_block>
+        <title>音频播放与功放</title>
+        <company/>
+        <rev>A-工程草稿</rev>
+        <date/>
+        <source>audio-playback.kicad_sch</source>
+        <comment number="1" value="尚未完成生产审核，禁止直接下单"/>
+        <comment number="2" value=""/>
+        <comment number="3" value=""/>
+        <comment number="4" value=""/>
+        <comment number="5" value=""/>
+        <comment number="6" value=""/>
+        <comment number="7" value=""/>
+        <comment number="8" value=""/>
+        <comment number="9" value=""/>
+      </title_block>
+    </sheet>
+  </design>
+  <components>
+    <comp ref="C30">
+      <value>1u/10V</value>
+      <footprint>Capacitor_SMD:C_0603_1608Metric</footprint>
+      <fields>
+        <field name="MPN"/>
+        <field name="Source"/>
+        <field name="Footprint">Capacitor_SMD:C_0603_1608Metric</field>
+        <field name="Datasheet"/>
+        <field name="Description"/>
+      </fields>
+      <libsource lib="Device" part="C" description="Unpolarized capacitor"/>
+      <property name="MPN" value=""/>
+      <property name="Source" value=""/>
+      <property name="Sheetname" value="主控与恢复"/>
+      <property name="Sheetfile" value="controller.kicad_sch"/>
+      <property name="ki_keywords" value="cap capacitor"/>
+      <property name="ki_fp_filters" value="C_*"/>
+      <sheetpath names="/主控与恢复/" tstamps="/743b374c-9f24-5277-8136-eb6bd3cdf0e9/"/>
+      <tstamps>25121982-a9f6-51cd-9510-d888e5a87806</tstamps>
+      <units>
+        <unit name="A">
+          <pins>
+            <pin num="1"/>
+            <pin num="2"/>
+          </pins>
+        </unit>
+      </units>
+    </comp>
+    <comp ref="C31">
+      <value>10u/10V</value>
+      <footprint>Capacitor_SMD:C_0805_2012Metric</footprint>
+      <fields>
+        <field name="MPN"/>
+        <field name="Source"/>
+        <field name="Footprint">Capacitor_SMD:C_0805_2012Metric</field>
+        <field name="Datasheet"/>
+        <field name="Description"/>
+      </fields>
+      <libsource lib="Device" part="C" description="Unpolarized capacitor"/>
+      <property name="MPN" value=""/>
+      <property name="Source" value=""/>
+      <property name="Sheetname" value="主控与恢复"/>
+      <property name="Sheetfile" value="controller.kicad_sch"/>
+      <property name="ki_keywords" value="cap capacitor"/>
+      <property name="ki_fp_filters" value="C_*"/>
+      <sheetpath names="/主控与恢复/" tstamps="/743b374c-9f24-5277-8136-eb6bd3cdf0e9/"/>
+      <tstamps>dcfcb9ae-f2fa-517b-9067-5636678ead97</tstamps>
+      <units>
+        <unit name="A">
+          <pins>
+            <pin num="1"/>
+            <pin num="2"/>
+          </pins>
+        </unit>
+      </units>
+    </comp>
+    <comp ref="C32">
+      <value>100n/16V</value>
+      <footprint>Capacitor_SMD:C_0603_1608Metric</footprint>
+      <fields>
+        <field name="MPN"/>
+        <field name="Source"/>
+        <field name="Footprint">Capacitor_SMD:C_0603_1608Metric</field>
+        <field name="Datasheet"/>
+        <field name="Description"/>
+      </fields>
+      <libsource lib="Device" part="C" description="Unpolarized capacitor"/>
+      <property name="MPN" value=""/>
+      <property name="Source" value=""/>
+      <property name="Sheetname" value="主控与恢复"/>
+      <property name="Sheetfile" value="controller.kicad_sch"/>
+      <property name="ki_keywords" value="cap capacitor"/>
+      <property name="ki_fp_filters" value="C_*"/>
+      <sheetpath names="/主控与恢复/" tstamps="/743b374c-9f24-5277-8136-eb6bd3cdf0e9/"/>
+      <tstamps>2454fb40-6306-54e8-b1bf-4907a5c7a6b7</tstamps>
+      <units>
+        <unit name="A">
+          <pins>
+            <pin num="1"/>
+            <pin num="2"/>
+          </pins>
+        </unit>
+      </units>
+    </comp>
+    <comp ref="R30">
+      <value>10k</value>
+      <footprint>Resistor_SMD:R_0603_1608Metric</footprint>
+      <fields>
+        <field name="MPN"/>
+        <field name="Source"/>
+        <field name="Footprint">Resistor_SMD:R_0603_1608Metric</field>
+        <field name="Datasheet"/>
+        <field name="Description"/>
+      </fields>
+      <libsource lib="Device" part="R" description="Resistor"/>
+      <property name="MPN" value=""/>
+      <property name="Source" value=""/>
+      <property name="Sheetname" value="主控与恢复"/>
+      <property name="Sheetfile" value="controller.kicad_sch"/>
+      <property name="ki_keywords" value="R res resistor"/>
+      <property name="ki_fp_filters" value="R_*"/>
+      <sheetpath names="/主控与恢复/" tstamps="/743b374c-9f24-5277-8136-eb6bd3cdf0e9/"/>
+      <tstamps>bcefc314-8897-5714-a556-5b4f88b21a34</tstamps>
+      <units>
+        <unit name="A">
+          <pins>
+            <pin num="1"/>
+            <pin num="2"/>
+          </pins>
+        </unit>
+      </units>
+    </comp>
+    <comp ref="R31">
+      <value>10k</value>
+      <footprint>Resistor_SMD:R_0603_1608Metric</footprint>
+      <fields>
+        <field name="MPN"/>
+        <field name="Source"/>
+        <field name="Footprint">Resistor_SMD:R_0603_1608Metric</field>
+        <field name="Datasheet"/>
+        <field name="Description"/>
+      </fields>
+      <libsource lib="Device" part="R" description="Resistor"/>
+      <property name="MPN" value=""/>
+      <property name="Source" value=""/>
+      <property name="Sheetname" value="主控与恢复"/>
+      <property name="Sheetfile" value="controller.kicad_sch"/>
+      <property name="ki_keywords" value="R res resistor"/>
+      <property name="ki_fp_filters" value="R_*"/>
+      <sheetpath names="/主控与恢复/" tstamps="/743b374c-9f24-5277-8136-eb6bd3cdf0e9/"/>
+      <tstamps>c9c50ccc-5164-5d42-97d1-69b2fb0b9fee</tstamps>
+      <units>
+        <unit name="A">
+          <pins>
+            <pin num="1"/>
+            <pin num="2"/>
+          </pins>
+        </unit>
+      </units>
+    </comp>
+    <comp ref="R32">
+      <value>4.7k</value>
+      <footprint>Resistor_SMD:R_0603_1608Metric</footprint>
+      <fields>
+        <field name="MPN"/>
+        <field name="Source"/>
+        <field name="Footprint">Resistor_SMD:R_0603_1608Metric</field>
+        <field name="Datasheet"/>
+        <field name="Description"/>
+      </fields>
+      <libsource lib="Device" part="R" description="Resistor"/>
+      <property name="MPN" value=""/>
+      <property name="Source" value=""/>
+      <property name="Sheetname" value="主控与恢复"/>
+      <property name="Sheetfile" value="controller.kicad_sch"/>
+      <property name="ki_keywords" value="R res resistor"/>
+      <property name="ki_fp_filters" value="R_*"/>
+      <sheetpath names="/主控与恢复/" tstamps="/743b374c-9f24-5277-8136-eb6bd3cdf0e9/"/>
+      <tstamps>92ba50c0-c98c-5dc4-be74-5a1894c91209</tstamps>
+      <units>
+        <unit name="A">
+          <pins>
+            <pin num="1"/>
+            <pin num="2"/>
+          </pins>
+        </unit>
+      </units>
+    </comp>
+    <comp ref="R33">
+      <value>4.7k</value>
+      <footprint>Resistor_SMD:R_0603_1608Metric</footprint>
+      <fields>
+        <field name="MPN"/>
+        <field name="Source"/>
+        <field name="Footprint">Resistor_SMD:R_0603_1608Metric</field>
+        <field name="Datasheet"/>
+        <field name="Description"/>
+      </fields>
+      <libsource lib="Device" part="R" description="Resistor"/>
+      <property name="MPN" value=""/>
+      <property name="Source" value=""/>
+      <property name="Sheetname" value="主控与恢复"/>
+      <property name="Sheetfile" value="controller.kicad_sch"/>
+      <property name="ki_keywords" value="R res resistor"/>
+      <property name="ki_fp_filters" value="R_*"/>
+      <sheetpath names="/主控与恢复/" tstamps="/743b374c-9f24-5277-8136-eb6bd3cdf0e9/"/>
+      <tstamps>aec918dc-9de9-5dd7-b735-c18d566cb89f</tstamps>
+      <units>
+        <unit name="A">
+          <pins>
+            <pin num="1"/>
+            <pin num="2"/>
+          </pins>
+        </unit>
+      </units>
+    </comp>
+    <comp ref="R34">
+      <value>33R</value>
+      <footprint>Resistor_SMD:R_0603_1608Metric</footprint>
+      <fields>
+        <field name="MPN"/>
+        <field name="Source"/>
+        <field name="Footprint">Resistor_SMD:R_0603_1608Metric</field>
+        <field name="Datasheet"/>
+        <field name="Description"/>
+      </fields>
+      <libsource lib="Device" part="R" description="Resistor"/>
+      <property name="MPN" value=""/>
+      <property name="Source" value=""/>
+      <property name="Sheetname" value="主控与恢复"/>
+      <property name="Sheetfile" value="controller.kicad_sch"/>
+      <property name="ki_keywords" value="R res resistor"/>
+      <property name="ki_fp_filters" value="R_*"/>
+      <sheetpath names="/主控与恢复/" tstamps="/743b374c-9f24-5277-8136-eb6bd3cdf0e9/"/>
+      <tstamps>33aca2eb-9aa0-5bd2-93de-bcbd89317f08</tstamps>
+      <units>
+        <unit name="A">
+          <pins>
+            <pin num="1"/>
+            <pin num="2"/>
+          </pins>
+        </unit>
+      </units>
+    </comp>
+    <comp ref="R35">
+      <value>33R</value>
+      <footprint>Resistor_SMD:R_0603_1608Metric</footprint>
+      <fields>
+        <field name="MPN"/>
+        <field name="Source"/>
+        <field name="Footprint">Resistor_SMD:R_0603_1608Metric</field>
+        <field name="Datasheet"/>
+        <field name="Description"/>
+      </fields>
+      <libsource lib="Device" part="R" description="Resistor"/>
+      <property name="MPN" value=""/>
+      <property name="Source" value=""/>
+      <property name="Sheetname" value="主控与恢复"/>
+      <property name="Sheetfile" value="controller.kicad_sch"/>
+      <property name="ki_keywords" value="R res resistor"/>
+      <property name="ki_fp_filters" value="R_*"/>
+      <sheetpath names="/主控与恢复/" tstamps="/743b374c-9f24-5277-8136-eb6bd3cdf0e9/"/>
+      <tstamps>13eed798-781e-5dd5-a043-905de9a86f3a</tstamps>
+      <units>
+        <unit name="A">
+          <pins>
+            <pin num="1"/>
+            <pin num="2"/>
+          </pins>
+        </unit>
+      </units>
+    </comp>
+    <comp ref="R36">
+      <value>33R</value>
+      <footprint>Resistor_SMD:R_0603_1608Metric</footprint>
+      <fields>
+        <field name="MPN"/>
+        <field name="Source"/>
+        <field name="Footprint">Resistor_SMD:R_0603_1608Metric</field>
+        <field name="Datasheet"/>
+        <field name="Description"/>
+      </fields>
+      <libsource lib="Device" part="R" description="Resistor"/>
+      <property name="MPN" value=""/>
+      <property name="Source" value=""/>
+      <property name="Sheetname" value="主控与恢复"/>
+      <property name="Sheetfile" value="controller.kicad_sch"/>
+      <property name="ki_keywords" value="R res resistor"/>
+      <property name="ki_fp_filters" value="R_*"/>
+      <sheetpath names="/主控与恢复/" tstamps="/743b374c-9f24-5277-8136-eb6bd3cdf0e9/"/>
+      <tstamps>187724cd-2c15-5b45-a20e-1a88cc9e6f8b</tstamps>
+      <units>
+        <unit name="A">
+          <pins>
+            <pin num="1"/>
+            <pin num="2"/>
+          </pins>
+        </unit>
+      </units>
+    </comp>
+    <comp ref="TP1">
+      <value>BOOT0</value>
+      <footprint>TestPoint:TestPoint_Pad_D1.5mm</footprint>
+      <fields>
+        <field name="MPN"/>
+        <field name="Source"/>
+        <field name="Footprint">TestPoint:TestPoint_Pad_D1.5mm</field>
+        <field name="Datasheet"/>
+        <field name="Description"/>
+      </fields>
+      <libsource lib="Connector" part="TestPoint" description="test point"/>
+      <property name="MPN" value=""/>
+      <property name="Source" value=""/>
+      <property name="Sheetname" value="主控与恢复"/>
+      <property name="Sheetfile" value="controller.kicad_sch"/>
+      <property name="ki_keywords" value="test point tp"/>
+      <property name="ki_fp_filters" value="Pin* Test*"/>
+      <sheetpath names="/主控与恢复/" tstamps="/743b374c-9f24-5277-8136-eb6bd3cdf0e9/"/>
+      <tstamps>77e65c2c-864d-5c75-9c9a-5fc1e9c8c698</tstamps>
+      <units>
+        <unit name="A">
+          <pins>
+            <pin num="1"/>
+          </pins>
+        </unit>
+      </units>
+    </comp>
+    <comp ref="TP2">
+      <value>MCU_EN</value>
+      <footprint>TestPoint:TestPoint_Pad_D1.5mm</footprint>
+      <fields>
+        <field name="MPN"/>
+        <field name="Source"/>
+        <field name="Footprint">TestPoint:TestPoint_Pad_D1.5mm</field>
+        <field name="Datasheet"/>
+        <field name="Description"/>
+      </fields>
+      <libsource lib="Connector" part="TestPoint" description="test point"/>
+      <property name="MPN" value=""/>
+      <property name="Source" value=""/>
+      <property name="Sheetname" value="主控与恢复"/>
+      <property name="Sheetfile" value="controller.kicad_sch"/>
+      <property name="ki_keywords" value="test point tp"/>
+      <property name="ki_fp_filters" value="Pin* Test*"/>
+      <sheetpath names="/主控与恢复/" tstamps="/743b374c-9f24-5277-8136-eb6bd3cdf0e9/"/>
+      <tstamps>42fe0cb1-2b19-5d64-b11c-e7c30087b58d</tstamps>
+      <units>
+        <unit name="A">
+          <pins>
+            <pin num="1"/>
+          </pins>
+        </unit>
+      </units>
+    </comp>
+    <comp ref="TP3">
+      <value>GND</value>
+      <footprint>TestPoint:TestPoint_Pad_D1.5mm</footprint>
+      <fields>
+        <field name="MPN"/>
+        <field name="Source"/>
+        <field name="Footprint">TestPoint:TestPoint_Pad_D1.5mm</field>
+        <field name="Datasheet"/>
+        <field name="Description"/>
+      </fields>
+      <libsource lib="Connector" part="TestPoint" description="test point"/>
+      <property name="MPN" value=""/>
+      <property name="Source" value=""/>
+      <property name="Sheetname" value="主控与恢复"/>
+      <property name="Sheetfile" value="controller.kicad_sch"/>
+      <property name="ki_keywords" value="test point tp"/>
+      <property name="ki_fp_filters" value="Pin* Test*"/>
+      <sheetpath names="/主控与恢复/" tstamps="/743b374c-9f24-5277-8136-eb6bd3cdf0e9/"/>
+      <tstamps>70a68e28-8941-5145-a3d3-6bbb124aa42d</tstamps>
+      <units>
+        <unit name="A">
+          <pins>
+            <pin num="1"/>
+          </pins>
+        </unit>
+      </units>
+    </comp>
+    <comp ref="TP4">
+      <value>UART_TX</value>
+      <footprint>TestPoint:TestPoint_Pad_D1.5mm</footprint>
+      <fields>
+        <field name="MPN"/>
+        <field name="Source"/>
+        <field name="Footprint">TestPoint:TestPoint_Pad_D1.5mm</field>
+        <field name="Datasheet"/>
+        <field name="Description"/>
+      </fields>
+      <libsource lib="Connector" part="TestPoint" description="test point"/>
+      <property name="MPN" value=""/>
+      <property name="Source" value=""/>
+      <property name="Sheetname" value="主控与恢复"/>
+      <property name="Sheetfile" value="controller.kicad_sch"/>
+      <property name="ki_keywords" value="test point tp"/>
+      <property name="ki_fp_filters" value="Pin* Test*"/>
+      <sheetpath names="/主控与恢复/" tstamps="/743b374c-9f24-5277-8136-eb6bd3cdf0e9/"/>
+      <tstamps>a46710e8-a076-5c35-a1ed-224cc248cca4</tstamps>
+      <units>
+        <unit name="A">
+          <pins>
+            <pin num="1"/>
+          </pins>
+        </unit>
+      </units>
+    </comp>
+    <comp ref="TP5">
+      <value>UART_RX</value>
+      <footprint>TestPoint:TestPoint_Pad_D1.5mm</footprint>
+      <fields>
+        <field name="MPN"/>
+        <field name="Source"/>
+        <field name="Footprint">TestPoint:TestPoint_Pad_D1.5mm</field>
+        <field name="Datasheet"/>
+        <field name="Description"/>
+      </fields>
+      <libsource lib="Connector" part="TestPoint" description="test point"/>
+      <property name="MPN" value=""/>
+      <property name="Source" value=""/>
+      <property name="Sheetname" value="主控与恢复"/>
+      <property name="Sheetfile" value="controller.kicad_sch"/>
+      <property name="ki_keywords" value="test point tp"/>
+      <property name="ki_fp_filters" value="Pin* Test*"/>
+      <sheetpath names="/主控与恢复/" tstamps="/743b374c-9f24-5277-8136-eb6bd3cdf0e9/"/>
+      <tstamps>22f8730f-25b9-5e3f-8146-260965f3c45d</tstamps>
+      <units>
+        <unit name="A">
+          <pins>
+            <pin num="1"/>
+          </pins>
+        </unit>
+      </units>
+    </comp>
+    <comp ref="TP6">
+      <value>3V3</value>
+      <footprint>TestPoint:TestPoint_Pad_D1.5mm</footprint>
+      <fields>
+        <field name="MPN"/>
+        <field name="Source"/>
+        <field name="Footprint">TestPoint:TestPoint_Pad_D1.5mm</field>
+        <field name="Datasheet"/>
+        <field name="Description"/>
+      </fields>
+      <libsource lib="Connector" part="TestPoint" description="test point"/>
+      <property name="MPN" value=""/>
+      <property name="Source" value=""/>
+      <property name="Sheetname" value="主控与恢复"/>
+      <property name="Sheetfile" value="controller.kicad_sch"/>
+      <property name="ki_keywords" value="test point tp"/>
+      <property name="ki_fp_filters" value="Pin* Test*"/>
+      <sheetpath names="/主控与恢复/" tstamps="/743b374c-9f24-5277-8136-eb6bd3cdf0e9/"/>
+      <tstamps>5fad99ba-dd58-5b2f-bcd1-7df6eb06a4b0</tstamps>
+      <units>
+        <unit name="A">
+          <pins>
+            <pin num="1"/>
+          </pins>
+        </unit>
+      </units>
+    </comp>
+    <comp ref="U1">
+      <value>ESP32-S3-WROOM-1-N16R8</value>
+      <footprint>RF_Module:ESP32-S3-WROOM-1</footprint>
+      <fields>
+        <field name="MPN">ESP32-S3-WROOM-1-N16R8</field>
+        <field name="Source">https://www.espressif.com/sites/default/files/documentation/esp32-s3-wroom-1_wroom-1u_datasheet_en.pdf</field>
+        <field name="Footprint">RF_Module:ESP32-S3-WROOM-1</field>
+        <field name="Datasheet"/>
+        <field name="Description"/>
+      </fields>
+      <libsource lib="RF_Module" part="ESP32-S3-WROOM-1" description="RF Module, ESP32-S3 SoC, Wi-Fi 802.11b/g/n, Bluetooth, BLE, 32-bit, 3.3V, onboard antenna, SMD"/>
+      <property name="MPN" value="ESP32-S3-WROOM-1-N16R8"/>
+      <property name="Source" value="https://www.espressif.com/sites/default/files/documentation/esp32-s3-wroom-1_wroom-1u_datasheet_en.pdf"/>
+      <property name="Sheetname" value="主控与恢复"/>
+      <property name="Sheetfile" value="controller.kicad_sch"/>
+      <property name="ki_keywords" value="RF Radio BT ESP ESP32-S3 Espressif onboard PCB antenna"/>
+      <property name="ki_fp_filters" value="ESP32?S3?WROOM?1*"/>
+      <sheetpath names="/主控与恢复/" tstamps="/743b374c-9f24-5277-8136-eb6bd3cdf0e9/"/>
+      <tstamps>eeefc74e-ac37-57cf-9954-51e80e0721a7</tstamps>
+      <units>
+        <unit name="A">
+          <pins>
+            <pin num="3"/>
+            <pin num="27"/>
+            <pin num="39"/>
+            <pin num="38"/>
+            <pin num="15"/>
+            <pin num="4"/>
+            <pin num="5"/>
+            <pin num="6"/>
+            <pin num="7"/>
+            <pin num="12"/>
+            <pin num="17"/>
+            <pin num="18"/>
+            <pin num="19"/>
+            <pin num="20"/>
+            <pin num="21"/>
+            <pin num="22"/>
+            <pin num="8"/>
+            <pin num="9"/>
+            <pin num="2"/>
+            <pin num="1"/>
+            <pin num="40"/>
+            <pin num="41"/>
+            <pin num="37"/>
+            <pin num="36"/>
+            <pin num="10"/>
+            <pin num="11"/>
+            <pin num="13"/>
+            <pin num="14"/>
+            <pin num="23"/>
+            <pin num="28"/>
+            <pin num="29"/>
+            <pin num="30"/>
+            <pin num="31"/>
+            <pin num="32"/>
+            <pin num="33"/>
+            <pin num="34"/>
+            <pin num="35"/>
+            <pin num="26"/>
+            <pin num="16"/>
+            <pin num="24"/>
+            <pin num="25"/>
+          </pins>
+        </unit>
+      </units>
+    </comp>
+    <comp ref="C10">
+      <value>4.7u/10V</value>
+      <footprint>Capacitor_SMD:C_0603_1608Metric</footprint>
+      <fields>
+        <field name="MPN"/>
+        <field name="Source"/>
+        <field name="Footprint">Capacitor_SMD:C_0603_1608Metric</field>
+        <field name="Datasheet"/>
+        <field name="Description"/>
+      </fields>
+      <libsource lib="Device" part="C" description="Unpolarized capacitor"/>
+      <property name="MPN" value=""/>
+      <property name="Source" value=""/>
+      <property name="Sheetname" value="USB 与主电源"/>
+      <property name="Sheetfile" value="power-usb.kicad_sch"/>
+      <property name="ki_keywords" value="cap capacitor"/>
+      <property name="ki_fp_filters" value="C_*"/>
+      <sheetpath names="/USB 与主电源/" tstamps="/e891095e-c17d-57a7-9580-3757d6426a36/"/>
+      <tstamps>ff055914-8c2c-575e-9edd-47c885f8904a</tstamps>
+      <units>
+        <unit name="A">
+          <pins>
+            <pin num="1"/>
+            <pin num="2"/>
+          </pins>
+        </unit>
+      </units>
+    </comp>
+    <comp ref="C11">
+      <value>100n/16V</value>
+      <footprint>Capacitor_SMD:C_0603_1608Metric</footprint>
+      <fields>
+        <field name="MPN"/>
+        <field name="Source"/>
+        <field name="Footprint">Capacitor_SMD:C_0603_1608Metric</field>
+        <field name="Datasheet"/>
+        <field name="Description"/>
+      </fields>
+      <libsource lib="Device" part="C" description="Unpolarized capacitor"/>
+      <property name="MPN" value=""/>
+      <property name="Source" value=""/>
+      <property name="Sheetname" value="USB 与主电源"/>
+      <property name="Sheetfile" value="power-usb.kicad_sch"/>
+      <property name="ki_keywords" value="cap capacitor"/>
+      <property name="ki_fp_filters" value="C_*"/>
+      <sheetpath names="/USB 与主电源/" tstamps="/e891095e-c17d-57a7-9580-3757d6426a36/"/>
+      <tstamps>3c049d30-0bf5-57b4-b6d5-276b1de80466</tstamps>
+      <units>
+        <unit name="A">
+          <pins>
+            <pin num="1"/>
+            <pin num="2"/>
+          </pins>
+        </unit>
+      </units>
+    </comp>
+    <comp ref="C12">
+      <value>100n/16V</value>
+      <footprint>Capacitor_SMD:C_0603_1608Metric</footprint>
+      <fields>
+        <field name="MPN"/>
+        <field name="Source"/>
+        <field name="Footprint">Capacitor_SMD:C_0603_1608Metric</field>
+        <field name="Datasheet"/>
+        <field name="Description"/>
+      </fields>
+      <libsource lib="Device" part="C" description="Unpolarized capacitor"/>
+      <property name="MPN" value=""/>
+      <property name="Source" value=""/>
+      <property name="Sheetname" value="USB 与主电源"/>
+      <property name="Sheetfile" value="power-usb.kicad_sch"/>
+      <property name="ki_keywords" value="cap capacitor"/>
+      <property name="ki_fp_filters" value="C_*"/>
+      <sheetpath names="/USB 与主电源/" tstamps="/e891095e-c17d-57a7-9580-3757d6426a36/"/>
+      <tstamps>2ffde9dc-adc0-5969-9651-3194fbc71ddf</tstamps>
+      <units>
+        <unit name="A">
+          <pins>
+            <pin num="1"/>
+            <pin num="2"/>
+          </pins>
+        </unit>
+      </units>
+    </comp>
+    <comp ref="J1">
+      <value>USB4105-GF-A</value>
+      <footprint>Connector_USB:USB_C_Receptacle_GCT_USB4105-xx-A_16P_TopMnt_Horizontal</footprint>
+      <fields>
+        <field name="MPN">USB4105-GF-A</field>
+        <field name="Source"/>
+        <field name="Footprint">Connector_USB:USB_C_Receptacle_GCT_USB4105-xx-A_16P_TopMnt_Horizontal</field>
+        <field name="Datasheet"/>
+        <field name="Description"/>
+      </fields>
+      <libsource lib="Connector" part="USB_C_Receptacle_USB2.0_16P" description="USB 2.0-only 16P Type-C Receptacle connector"/>
+      <property name="MPN" value="USB4105-GF-A"/>
+      <property name="Source" value=""/>
+      <property name="Sheetname" value="USB 与主电源"/>
+      <property name="Sheetfile" value="power-usb.kicad_sch"/>
+      <property name="ki_keywords" value="usb universal serial bus type-C USB2.0"/>
+      <property name="ki_fp_filters" value="USB*C*Receptacle*"/>
+      <sheetpath names="/USB 与主电源/" tstamps="/e891095e-c17d-57a7-9580-3757d6426a36/"/>
+      <tstamps>e6771ce4-8e0d-584e-85d6-2d259af33e37</tstamps>
+      <units>
+        <unit name="A">
+          <pins>
+            <pin num="SH"/>
+            <pin num="A1"/>
+            <pin num="A12"/>
+            <pin num="B1"/>
+            <pin num="B12"/>
+            <pin num="A4"/>
+            <pin num="A9"/>
+            <pin num="B4"/>
+            <pin num="B9"/>
+            <pin num="A5"/>
+            <pin num="B5"/>
+            <pin num="A7"/>
+            <pin num="B7"/>
+            <pin num="A6"/>
+            <pin num="B6"/>
+            <pin num="A8"/>
+            <pin num="B8"/>
+          </pins>
+        </unit>
+      </units>
+    </comp>
+    <comp ref="R10">
+      <value>5.1k 1%</value>
+      <footprint>Resistor_SMD:R_0603_1608Metric</footprint>
+      <fields>
+        <field name="MPN"/>
+        <field name="Source"/>
+        <field name="Footprint">Resistor_SMD:R_0603_1608Metric</field>
+        <field name="Datasheet"/>
+        <field name="Description"/>
+      </fields>
+      <libsource lib="Device" part="R" description="Resistor"/>
+      <property name="MPN" value=""/>
+      <property name="Source" value=""/>
+      <property name="Sheetname" value="USB 与主电源"/>
+      <property name="Sheetfile" value="power-usb.kicad_sch"/>
+      <property name="ki_keywords" value="R res resistor"/>
+      <property name="ki_fp_filters" value="R_*"/>
+      <sheetpath names="/USB 与主电源/" tstamps="/e891095e-c17d-57a7-9580-3757d6426a36/"/>
+      <tstamps>435f45ed-e66a-541a-bb2f-3c64cf0c75c1</tstamps>
+      <units>
+        <unit name="A">
+          <pins>
+            <pin num="1"/>
+            <pin num="2"/>
+          </pins>
+        </unit>
+      </units>
+    </comp>
+    <comp ref="R11">
+      <value>5.1k 1%</value>
+      <footprint>Resistor_SMD:R_0603_1608Metric</footprint>
+      <fields>
+        <field name="MPN"/>
+        <field name="Source"/>
+        <field name="Footprint">Resistor_SMD:R_0603_1608Metric</field>
+        <field name="Datasheet"/>
+        <field name="Description"/>
+      </fields>
+      <libsource lib="Device" part="R" description="Resistor"/>
+      <property name="MPN" value=""/>
+      <property name="Source" value=""/>
+      <property name="Sheetname" value="USB 与主电源"/>
+      <property name="Sheetfile" value="power-usb.kicad_sch"/>
+      <property name="ki_keywords" value="R res resistor"/>
+      <property name="ki_fp_filters" value="R_*"/>
+      <sheetpath names="/USB 与主电源/" tstamps="/e891095e-c17d-57a7-9580-3757d6426a36/"/>
+      <tstamps>81543865-a97a-5b8c-bb63-4679814e2eb2</tstamps>
+      <units>
+        <unit name="A">
+          <pins>
+            <pin num="1"/>
+            <pin num="2"/>
+          </pins>
+        </unit>
+      </units>
+    </comp>
+    <comp ref="R12">
+      <value>22R</value>
+      <footprint>Resistor_SMD:R_0603_1608Metric</footprint>
+      <fields>
+        <field name="MPN"/>
+        <field name="Source"/>
+        <field name="Footprint">Resistor_SMD:R_0603_1608Metric</field>
+        <field name="Datasheet"/>
+        <field name="Description"/>
+      </fields>
+      <libsource lib="Device" part="R" description="Resistor"/>
+      <property name="MPN" value=""/>
+      <property name="Source" value=""/>
+      <property name="Sheetname" value="USB 与主电源"/>
+      <property name="Sheetfile" value="power-usb.kicad_sch"/>
+      <property name="ki_keywords" value="R res resistor"/>
+      <property name="ki_fp_filters" value="R_*"/>
+      <sheetpath names="/USB 与主电源/" tstamps="/e891095e-c17d-57a7-9580-3757d6426a36/"/>
+      <tstamps>05351805-b312-583d-8946-8e39aac73e56</tstamps>
+      <units>
+        <unit name="A">
+          <pins>
+            <pin num="1"/>
+            <pin num="2"/>
+          </pins>
+        </unit>
+      </units>
+    </comp>
+    <comp ref="R13">
+      <value>22R</value>
+      <footprint>Resistor_SMD:R_0603_1608Metric</footprint>
+      <fields>
+        <field name="MPN"/>
+        <field name="Source"/>
+        <field name="Footprint">Resistor_SMD:R_0603_1608Metric</field>
+        <field name="Datasheet"/>
+        <field name="Description"/>
+      </fields>
+      <libsource lib="Device" part="R" description="Resistor"/>
+      <property name="MPN" value=""/>
+      <property name="Source" value=""/>
+      <property name="Sheetname" value="USB 与主电源"/>
+      <property name="Sheetfile" value="power-usb.kicad_sch"/>
+      <property name="ki_keywords" value="R res resistor"/>
+      <property name="ki_fp_filters" value="R_*"/>
+      <sheetpath names="/USB 与主电源/" tstamps="/e891095e-c17d-57a7-9580-3757d6426a36/"/>
+      <tstamps>27c87fd2-a76e-5193-a78e-b25ed3c99628</tstamps>
+      <units>
+        <unit name="A">
+          <pins>
+            <pin num="1"/>
+            <pin num="2"/>
+          </pins>
+        </unit>
+      </units>
+    </comp>
+    <comp ref="R14">
+      <value>100k 1%</value>
+      <footprint>Resistor_SMD:R_0603_1608Metric</footprint>
+      <fields>
+        <field name="MPN"/>
+        <field name="Source"/>
+        <field name="Footprint">Resistor_SMD:R_0603_1608Metric</field>
+        <field name="Datasheet"/>
+        <field name="Description"/>
+      </fields>
+      <libsource lib="Device" part="R" description="Resistor"/>
+      <property name="MPN" value=""/>
+      <property name="Source" value=""/>
+      <property name="Sheetname" value="USB 与主电源"/>
+      <property name="Sheetfile" value="power-usb.kicad_sch"/>
+      <property name="ki_keywords" value="R res resistor"/>
+      <property name="ki_fp_filters" value="R_*"/>
+      <sheetpath names="/USB 与主电源/" tstamps="/e891095e-c17d-57a7-9580-3757d6426a36/"/>
+      <tstamps>e68b77e4-f060-50b0-a828-88574b1ffbb3</tstamps>
+      <units>
+        <unit name="A">
+          <pins>
+            <pin num="1"/>
+            <pin num="2"/>
+          </pins>
+        </unit>
+      </units>
+    </comp>
+    <comp ref="R15">
+      <value>100k 1%</value>
+      <footprint>Resistor_SMD:R_0603_1608Metric</footprint>
+      <fields>
+        <field name="MPN"/>
+        <field name="Source"/>
+        <field name="Footprint">Resistor_SMD:R_0603_1608Metric</field>
+        <field name="Datasheet"/>
+        <field name="Description"/>
+      </fields>
+      <libsource lib="Device" part="R" description="Resistor"/>
+      <property name="MPN" value=""/>
+      <property name="Source" value=""/>
+      <property name="Sheetname" value="USB 与主电源"/>
+      <property name="Sheetfile" value="power-usb.kicad_sch"/>
+      <property name="ki_keywords" value="R res resistor"/>
+      <property name="ki_fp_filters" value="R_*"/>
+      <sheetpath names="/USB 与主电源/" tstamps="/e891095e-c17d-57a7-9580-3757d6426a36/"/>
+      <tstamps>a4e3a56c-eb23-5a94-9873-a8cb48801e03</tstamps>
+      <units>
+        <unit name="A">
+          <pins>
+            <pin num="1"/>
+            <pin num="2"/>
+          </pins>
+        </unit>
+      </units>
+    </comp>
+    <comp ref="R16">
+      <value>100k 1%</value>
+      <footprint>Resistor_SMD:R_0603_1608Metric</footprint>
+      <fields>
+        <field name="MPN"/>
+        <field name="Source"/>
+        <field name="Footprint">Resistor_SMD:R_0603_1608Metric</field>
+        <field name="Datasheet"/>
+        <field name="Description"/>
+      </fields>
+      <libsource lib="Device" part="R" description="Resistor"/>
+      <property name="MPN" value=""/>
+      <property name="Source" value=""/>
+      <property name="Sheetname" value="USB 与主电源"/>
+      <property name="Sheetfile" value="power-usb.kicad_sch"/>
+      <property name="ki_keywords" value="R res resistor"/>
+      <property name="ki_fp_filters" value="R_*"/>
+      <sheetpath names="/USB 与主电源/" tstamps="/e891095e-c17d-57a7-9580-3757d6426a36/"/>
+      <tstamps>46b3c248-6fe7-53de-9fb0-c14c1fa53407</tstamps>
+      <units>
+        <unit name="A">
+          <pins>
+            <pin num="1"/>
+            <pin num="2"/>
+          </pins>
+        </unit>
+      </units>
+    </comp>
+    <comp ref="R17">
+      <value>100k 1%</value>
+      <footprint>Resistor_SMD:R_0603_1608Metric</footprint>
+      <fields>
+        <field name="MPN"/>
+        <field name="Source"/>
+        <field name="Footprint">Resistor_SMD:R_0603_1608Metric</field>
+        <field name="Datasheet"/>
+        <field name="Description"/>
+      </fields>
+      <libsource lib="Device" part="R" description="Resistor"/>
+      <property name="MPN" value=""/>
+      <property name="Source" value=""/>
+      <property name="Sheetname" value="USB 与主电源"/>
+      <property name="Sheetfile" value="power-usb.kicad_sch"/>
+      <property name="ki_keywords" value="R res resistor"/>
+      <property name="ki_fp_filters" value="R_*"/>
+      <sheetpath names="/USB 与主电源/" tstamps="/e891095e-c17d-57a7-9580-3757d6426a36/"/>
+      <tstamps>2148bb30-32f6-59af-a47f-a4583839273a</tstamps>
+      <units>
+        <unit name="A">
+          <pins>
+            <pin num="1"/>
+            <pin num="2"/>
+          </pins>
+        </unit>
+      </units>
+    </comp>
+    <comp ref="TP7">
+      <value>VBUS</value>
+      <footprint>TestPoint:TestPoint_Pad_D1.5mm</footprint>
+      <fields>
+        <field name="MPN"/>
+        <field name="Source"/>
+        <field name="Footprint">TestPoint:TestPoint_Pad_D1.5mm</field>
+        <field name="Datasheet"/>
+        <field name="Description"/>
+      </fields>
+      <libsource lib="Connector" part="TestPoint" description="test point"/>
+      <property name="MPN" value=""/>
+      <property name="Source" value=""/>
+      <property name="Sheetname" value="USB 与主电源"/>
+      <property name="Sheetfile" value="power-usb.kicad_sch"/>
+      <property name="ki_keywords" value="test point tp"/>
+      <property name="ki_fp_filters" value="Pin* Test*"/>
+      <sheetpath names="/USB 与主电源/" tstamps="/e891095e-c17d-57a7-9580-3757d6426a36/"/>
+      <tstamps>1475b8d4-eaf1-5f09-8370-874db7c9fb7c</tstamps>
+      <units>
+        <unit name="A">
+          <pins>
+            <pin num="1"/>
+          </pins>
+        </unit>
+      </units>
+    </comp>
+    <comp ref="U2">
+      <value>USBLC6-2SC6</value>
+      <footprint>Package_TO_SOT_SMD:SOT-23-6</footprint>
+      <fields>
+        <field name="MPN">USBLC6-2SC6</field>
+        <field name="Source"/>
+        <field name="Footprint">Package_TO_SOT_SMD:SOT-23-6</field>
+        <field name="Datasheet"/>
+        <field name="Description"/>
+      </fields>
+      <libsource lib="Power_Protection" part="USBLC6-2SC6" description="Very low capacitance ESD protection diode, 2 data-line, SOT-23-6"/>
+      <property name="MPN" value="USBLC6-2SC6"/>
+      <property name="Source" value=""/>
+      <property name="Sheetname" value="USB 与主电源"/>
+      <property name="Sheetfile" value="power-usb.kicad_sch"/>
+      <property name="ki_keywords" value="usb ethernet video"/>
+      <property name="ki_fp_filters" value="SOT?23*"/>
+      <sheetpath names="/USB 与主电源/" tstamps="/e891095e-c17d-57a7-9580-3757d6426a36/"/>
+      <tstamps>c7b87a63-7edd-591b-b54e-dd7688372372</tstamps>
+      <units>
+        <unit name="A">
+          <pins>
+            <pin num="1"/>
+            <pin num="3"/>
+            <pin num="5"/>
+            <pin num="2"/>
+            <pin num="6"/>
+            <pin num="4"/>
+          </pins>
+        </unit>
+      </units>
+    </comp>
+    <comp ref="C13">
+      <value>100n/16V</value>
+      <footprint>Capacitor_SMD:C_0603_1608Metric</footprint>
+      <fields>
+        <field name="MPN"/>
+        <field name="Source"/>
+        <field name="Footprint">Capacitor_SMD:C_0603_1608Metric</field>
+        <field name="Datasheet"/>
+        <field name="Description"/>
+      </fields>
+      <libsource lib="Device" part="C" description="Unpolarized capacitor"/>
+      <property name="MPN" value=""/>
+      <property name="Source" value=""/>
+      <property name="Sheetname" value="稳压与电源分配"/>
+      <property name="Sheetfile" value="regulators.kicad_sch"/>
+      <property name="ki_keywords" value="cap capacitor"/>
+      <property name="ki_fp_filters" value="C_*"/>
+      <sheetpath names="/稳压与电源分配/" tstamps="/d2811dcd-5bc7-5795-8a57-26240e35bf75/"/>
+      <tstamps>4e7321cc-1ef6-5e15-82f5-3cd3eb79a9a5</tstamps>
+      <units>
+        <unit name="A">
+          <pins>
+            <pin num="1"/>
+            <pin num="2"/>
+          </pins>
+        </unit>
+      </units>
+    </comp>
+    <comp ref="C14">
+      <value>10u/10V</value>
+      <footprint>Capacitor_SMD:C_0805_2012Metric</footprint>
+      <fields>
+        <field name="MPN"/>
+        <field name="Source"/>
+        <field name="Footprint">Capacitor_SMD:C_0805_2012Metric</field>
+        <field name="Datasheet"/>
+        <field name="Description"/>
+      </fields>
+      <libsource lib="Device" part="C" description="Unpolarized capacitor"/>
+      <property name="MPN" value=""/>
+      <property name="Source" value=""/>
+      <property name="Sheetname" value="稳压与电源分配"/>
+      <property name="Sheetfile" value="regulators.kicad_sch"/>
+      <property name="ki_keywords" value="cap capacitor"/>
+      <property name="ki_fp_filters" value="C_*"/>
+      <sheetpath names="/稳压与电源分配/" tstamps="/d2811dcd-5bc7-5795-8a57-26240e35bf75/"/>
+      <tstamps>de0a0f79-2729-56e7-ab8a-ac851e9afe23</tstamps>
+      <units>
+        <unit name="A">
+          <pins>
+            <pin num="1"/>
+            <pin num="2"/>
+          </pins>
+        </unit>
+      </units>
+    </comp>
+    <comp ref="C15">
+      <value>22u/10V</value>
+      <footprint>Capacitor_SMD:C_0805_2012Metric</footprint>
+      <fields>
+        <field name="MPN"/>
+        <field name="Source"/>
+        <field name="Footprint">Capacitor_SMD:C_0805_2012Metric</field>
+        <field name="Datasheet"/>
+        <field name="Description"/>
+      </fields>
+      <libsource lib="Device" part="C" description="Unpolarized capacitor"/>
+      <property name="MPN" value=""/>
+      <property name="Source" value=""/>
+      <property name="Sheetname" value="稳压与电源分配"/>
+      <property name="Sheetfile" value="regulators.kicad_sch"/>
+      <property name="ki_keywords" value="cap capacitor"/>
+      <property name="ki_fp_filters" value="C_*"/>
+      <sheetpath names="/稳压与电源分配/" tstamps="/d2811dcd-5bc7-5795-8a57-26240e35bf75/"/>
+      <tstamps>bf3a4c75-667e-5e4a-bc99-6eb3bcc1c0ff</tstamps>
+      <units>
+        <unit name="A">
+          <pins>
+            <pin num="1"/>
+            <pin num="2"/>
+          </pins>
+        </unit>
+      </units>
+    </comp>
+    <comp ref="C16">
+      <value>22u/10V</value>
+      <footprint>Capacitor_SMD:C_0805_2012Metric</footprint>
+      <fields>
+        <field name="MPN"/>
+        <field name="Source"/>
+        <field name="Footprint">Capacitor_SMD:C_0805_2012Metric</field>
+        <field name="Datasheet"/>
+        <field name="Description"/>
+      </fields>
+      <libsource lib="Device" part="C" description="Unpolarized capacitor"/>
+      <property name="MPN" value=""/>
+      <property name="Source" value=""/>
+      <property name="Sheetname" value="稳压与电源分配"/>
+      <property name="Sheetfile" value="regulators.kicad_sch"/>
+      <property name="ki_keywords" value="cap capacitor"/>
+      <property name="ki_fp_filters" value="C_*"/>
+      <sheetpath names="/稳压与电源分配/" tstamps="/d2811dcd-5bc7-5795-8a57-26240e35bf75/"/>
+      <tstamps>6ec74741-f7ac-5c04-9659-f5170da1ead5</tstamps>
+      <units>
+        <unit name="A">
+          <pins>
+            <pin num="1"/>
+            <pin num="2"/>
+          </pins>
+        </unit>
+      </units>
+    </comp>
+    <comp ref="C17">
+      <value>1u/10V</value>
+      <footprint>Capacitor_SMD:C_0603_1608Metric</footprint>
+      <fields>
+        <field name="MPN"/>
+        <field name="Source"/>
+        <field name="Footprint">Capacitor_SMD:C_0603_1608Metric</field>
+        <field name="Datasheet"/>
+        <field name="Description"/>
+      </fields>
+      <libsource lib="Device" part="C" description="Unpolarized capacitor"/>
+      <property name="MPN" value=""/>
+      <property name="Source" value=""/>
+      <property name="Sheetname" value="稳压与电源分配"/>
+      <property name="Sheetfile" value="regulators.kicad_sch"/>
+      <property name="ki_keywords" value="cap capacitor"/>
+      <property name="ki_fp_filters" value="C_*"/>
+      <sheetpath names="/稳压与电源分配/" tstamps="/d2811dcd-5bc7-5795-8a57-26240e35bf75/"/>
+      <tstamps>32048c76-61b2-57ec-a7b3-106035d02e21</tstamps>
+      <units>
+        <unit name="A">
+          <pins>
+            <pin num="1"/>
+            <pin num="2"/>
+          </pins>
+        </unit>
+      </units>
+    </comp>
+    <comp ref="C18">
+      <value>10u/10V</value>
+      <footprint>Capacitor_SMD:C_0805_2012Metric</footprint>
+      <fields>
+        <field name="MPN"/>
+        <field name="Source"/>
+        <field name="Footprint">Capacitor_SMD:C_0805_2012Metric</field>
+        <field name="Datasheet"/>
+        <field name="Description"/>
+      </fields>
+      <libsource lib="Device" part="C" description="Unpolarized capacitor"/>
+      <property name="MPN" value=""/>
+      <property name="Source" value=""/>
+      <property name="Sheetname" value="稳压与电源分配"/>
+      <property name="Sheetfile" value="regulators.kicad_sch"/>
+      <property name="ki_keywords" value="cap capacitor"/>
+      <property name="ki_fp_filters" value="C_*"/>
+      <sheetpath names="/稳压与电源分配/" tstamps="/d2811dcd-5bc7-5795-8a57-26240e35bf75/"/>
+      <tstamps>16283732-0e51-510c-8bfc-943ea7e22b5e</tstamps>
+      <units>
+        <unit name="A">
+          <pins>
+            <pin num="1"/>
+            <pin num="2"/>
+          </pins>
+        </unit>
+      </units>
+    </comp>
+    <comp ref="C19">
+      <value>10n/16V</value>
+      <footprint>Capacitor_SMD:C_0603_1608Metric</footprint>
+      <fields>
+        <field name="MPN"/>
+        <field name="Source"/>
+        <field name="Footprint">Capacitor_SMD:C_0603_1608Metric</field>
+        <field name="Datasheet"/>
+        <field name="Description"/>
+      </fields>
+      <libsource lib="Device" part="C" description="Unpolarized capacitor"/>
+      <property name="MPN" value=""/>
+      <property name="Source" value=""/>
+      <property name="Sheetname" value="稳压与电源分配"/>
+      <property name="Sheetfile" value="regulators.kicad_sch"/>
+      <property name="ki_keywords" value="cap capacitor"/>
+      <property name="ki_fp_filters" value="C_*"/>
+      <sheetpath names="/稳压与电源分配/" tstamps="/d2811dcd-5bc7-5795-8a57-26240e35bf75/"/>
+      <tstamps>5569aa27-36a5-541d-9229-33f888fb74a7</tstamps>
+      <units>
+        <unit name="A">
+          <pins>
+            <pin num="1"/>
+            <pin num="2"/>
+          </pins>
+        </unit>
+      </units>
+    </comp>
+    <comp ref="L1">
+      <value>4.7uH/4.6A</value>
+      <footprint>Inductor_SMD:L_Bourns_SRP5030T</footprint>
+      <fields>
+        <field name="MPN">SRP5030T-4R7M</field>
+        <field name="Source">https://www.bourns.com/docs/product-datasheets/srp5030t.pdf</field>
+        <field name="Footprint">Inductor_SMD:L_Bourns_SRP5030T</field>
+        <field name="Datasheet"/>
+        <field name="Description"/>
+      </fields>
+      <libsource lib="Device" part="L" description="Inductor"/>
+      <property name="MPN" value="SRP5030T-4R7M"/>
+      <property name="Source" value="https://www.bourns.com/docs/product-datasheets/srp5030t.pdf"/>
+      <property name="Sheetname" value="稳压与电源分配"/>
+      <property name="Sheetfile" value="regulators.kicad_sch"/>
+      <property name="ki_keywords" value="inductor choke coil reactor magnetic"/>
+      <property name="ki_fp_filters" value="Choke_* *Coil* Inductor_* L_*"/>
+      <sheetpath names="/稳压与电源分配/" tstamps="/d2811dcd-5bc7-5795-8a57-26240e35bf75/"/>
+      <tstamps>faa5651f-1248-58bc-9768-2689eeab9f96</tstamps>
+      <units>
+        <unit name="A">
+          <pins>
+            <pin num="1"/>
+            <pin num="2"/>
+          </pins>
+        </unit>
+      </units>
+    </comp>
+    <comp ref="U3">
+      <value>AP63203WU-7</value>
+      <footprint>Package_TO_SOT_SMD:TSOT-23-6</footprint>
+      <fields>
+        <field name="MPN">AP63203WU-7</field>
+        <field name="Source">https://www.diodes.com/assets/Datasheets/AP63200-AP63201-AP63203-AP63205.pdf</field>
+        <field name="Footprint">Package_TO_SOT_SMD:TSOT-23-6</field>
+        <field name="Datasheet"/>
+        <field name="Description"/>
+      </fields>
+      <libsource lib="Regulator_Switching" part="AP63203WU" description="2A, 1.1MHz Buck DC/DC Converter, fixed 3.3V output voltage, TSOT-23-6"/>
+      <property name="MPN" value="AP63203WU-7"/>
+      <property name="Source" value="https://www.diodes.com/assets/Datasheets/AP63200-AP63201-AP63203-AP63205.pdf"/>
+      <property name="Sheetname" value="稳压与电源分配"/>
+      <property name="Sheetfile" value="regulators.kicad_sch"/>
+      <property name="ki_keywords" value="2A Buck DC/DC"/>
+      <property name="ki_fp_filters" value="TSOT?23*"/>
+      <sheetpath names="/稳压与电源分配/" tstamps="/d2811dcd-5bc7-5795-8a57-26240e35bf75/"/>
+      <tstamps>5b9a3991-375d-50f7-a8ac-16830b36c6a2</tstamps>
+      <units>
+        <unit name="A">
+          <pins>
+            <pin num="3"/>
+            <pin num="2"/>
+            <pin num="4"/>
+            <pin num="5"/>
+            <pin num="6"/>
+            <pin num="1"/>
+          </pins>
+        </unit>
+      </units>
+    </comp>
+    <comp ref="U4">
+      <value>AP2112K-3.3TRG1</value>
+      <footprint>Package_TO_SOT_SMD:SOT-23-5</footprint>
+      <fields>
+        <field name="MPN">AP2112K-3.3TRG1</field>
+        <field name="Source"/>
+        <field name="Footprint">Package_TO_SOT_SMD:SOT-23-5</field>
+        <field name="Datasheet"/>
+        <field name="Description"/>
+      </fields>
+      <libsource lib="Regulator_Linear" part="AP2112K-3.3" description="600mA low dropout linear regulator, with enable pin, 3.8V-6V input voltage range, 3.3V fixed positive output, SOT-23-5"/>
+      <property name="MPN" value="AP2112K-3.3TRG1"/>
+      <property name="Source" value=""/>
+      <property name="Sheetname" value="稳压与电源分配"/>
+      <property name="Sheetfile" value="regulators.kicad_sch"/>
+      <property name="ki_keywords" value="linear regulator ldo fixed positive"/>
+      <property name="ki_fp_filters" value="SOT?23?5*"/>
+      <sheetpath names="/稳压与电源分配/" tstamps="/d2811dcd-5bc7-5795-8a57-26240e35bf75/"/>
+      <tstamps>141c7891-c14e-5e6c-9869-91da7ebbbe5d</tstamps>
+      <units>
+        <unit name="A">
+          <pins>
+            <pin num="1"/>
+            <pin num="3"/>
+            <pin num="2"/>
+            <pin num="4"/>
+            <pin num="5"/>
+          </pins>
+        </unit>
+      </units>
+    </comp>
+    <comp ref="U8">
+      <value>TPS22918DBVR</value>
+      <footprint>Package_TO_SOT_SMD:SOT-23-6</footprint>
+      <fields>
+        <field name="MPN">TPS22918DBVR</field>
+        <field name="Source">https://www.ti.com/lit/ds/symlink/tps22918.pdf</field>
+        <field name="Footprint">Package_TO_SOT_SMD:SOT-23-6</field>
+        <field name="Datasheet"/>
+        <field name="Description"/>
+      </fields>
+      <libsource lib="VB" part="TPS22918" description=""/>
+      <property name="MPN" value="TPS22918DBVR"/>
+      <property name="Source" value="https://www.ti.com/lit/ds/symlink/tps22918.pdf"/>
+      <property name="Sheetname" value="稳压与电源分配"/>
+      <property name="Sheetfile" value="regulators.kicad_sch"/>
+      <sheetpath names="/稳压与电源分配/" tstamps="/d2811dcd-5bc7-5795-8a57-26240e35bf75/"/>
+      <tstamps>e1f9aee3-1a02-52ad-ae3c-ea7213533b57</tstamps>
+      <units>
+        <unit name="A">
+          <pins>
+            <pin num="1"/>
+            <pin num="2"/>
+            <pin num="3"/>
+            <pin num="4"/>
+            <pin num="5"/>
+            <pin num="6"/>
+          </pins>
+        </unit>
+      </units>
+    </comp>
+    <comp ref="R1">
+      <value>10k</value>
+      <footprint>Resistor_SMD:R_0603_1608Metric</footprint>
+      <fields>
+        <field name="MPN"/>
+        <field name="Source"/>
+        <field name="Footprint">Resistor_SMD:R_0603_1608Metric</field>
+        <field name="Datasheet"/>
+        <field name="Description"/>
+      </fields>
+      <libsource lib="Device" part="R" description="Resistor"/>
+      <property name="MPN" value=""/>
+      <property name="Source" value=""/>
+      <property name="Sheetname" value="三个业务按键与复位"/>
+      <property name="Sheetfile" value="buttons.kicad_sch"/>
+      <property name="ki_keywords" value="R res resistor"/>
+      <property name="ki_fp_filters" value="R_*"/>
+      <sheetpath names="/三个业务按键与复位/" tstamps="/de89abb4-d049-5dc1-bd82-a394d72fac99/"/>
+      <tstamps>42ba1de1-10ba-5230-90e7-a0b3abce275c</tstamps>
+      <units>
+        <unit name="A">
+          <pins>
+            <pin num="1"/>
+            <pin num="2"/>
+          </pins>
+        </unit>
+      </units>
+    </comp>
+    <comp ref="R2">
+      <value>10k</value>
+      <footprint>Resistor_SMD:R_0603_1608Metric</footprint>
+      <fields>
+        <field name="MPN"/>
+        <field name="Source"/>
+        <field name="Footprint">Resistor_SMD:R_0603_1608Metric</field>
+        <field name="Datasheet"/>
+        <field name="Description"/>
+      </fields>
+      <libsource lib="Device" part="R" description="Resistor"/>
+      <property name="MPN" value=""/>
+      <property name="Source" value=""/>
+      <property name="Sheetname" value="三个业务按键与复位"/>
+      <property name="Sheetfile" value="buttons.kicad_sch"/>
+      <property name="ki_keywords" value="R res resistor"/>
+      <property name="ki_fp_filters" value="R_*"/>
+      <sheetpath names="/三个业务按键与复位/" tstamps="/de89abb4-d049-5dc1-bd82-a394d72fac99/"/>
+      <tstamps>bd5ffb88-acae-5e29-bd18-6313c1ae204a</tstamps>
+      <units>
+        <unit name="A">
+          <pins>
+            <pin num="1"/>
+            <pin num="2"/>
+          </pins>
+        </unit>
+      </units>
+    </comp>
+    <comp ref="R3">
+      <value>10k</value>
+      <footprint>Resistor_SMD:R_0603_1608Metric</footprint>
+      <fields>
+        <field name="MPN"/>
+        <field name="Source"/>
+        <field name="Footprint">Resistor_SMD:R_0603_1608Metric</field>
+        <field name="Datasheet"/>
+        <field name="Description"/>
+      </fields>
+      <libsource lib="Device" part="R" description="Resistor"/>
+      <property name="MPN" value=""/>
+      <property name="Source" value=""/>
+      <property name="Sheetname" value="三个业务按键与复位"/>
+      <property name="Sheetfile" value="buttons.kicad_sch"/>
+      <property name="ki_keywords" value="R res resistor"/>
+      <property name="ki_fp_filters" value="R_*"/>
+      <sheetpath names="/三个业务按键与复位/" tstamps="/de89abb4-d049-5dc1-bd82-a394d72fac99/"/>
+      <tstamps>9a69655e-dd38-563d-904a-d737c3b61163</tstamps>
+      <units>
+        <unit name="A">
+          <pins>
+            <pin num="1"/>
+            <pin num="2"/>
+          </pins>
+        </unit>
+      </units>
+    </comp>
+    <comp ref="SW1">
+      <value>业务键 1</value>
+      <footprint>Button_Switch_SMD:SW_SPST_TL3305A</footprint>
+      <fields>
+        <field name="MPN">TL3305AF160QG</field>
+        <field name="Source"/>
+        <field name="Footprint">Button_Switch_SMD:SW_SPST_TL3305A</field>
+        <field name="Datasheet"/>
+        <field name="Description"/>
+      </fields>
+      <libsource lib="Switch" part="SW_Push" description="Push button switch, generic, two pins"/>
+      <property name="MPN" value="TL3305AF160QG"/>
+      <property name="Source" value=""/>
+      <property name="Sheetname" value="三个业务按键与复位"/>
+      <property name="Sheetfile" value="buttons.kicad_sch"/>
+      <property name="ki_keywords" value="switch normally-open pushbutton push-button"/>
+      <sheetpath names="/三个业务按键与复位/" tstamps="/de89abb4-d049-5dc1-bd82-a394d72fac99/"/>
+      <tstamps>d818724a-69ad-56c5-bfb8-d52a4d540faf</tstamps>
+      <units>
+        <unit name="A">
+          <pins>
+            <pin num="1"/>
+            <pin num="2"/>
+          </pins>
+        </unit>
+      </units>
+    </comp>
+    <comp ref="SW2">
+      <value>业务键 2</value>
+      <footprint>Button_Switch_SMD:SW_SPST_TL3305A</footprint>
+      <fields>
+        <field name="MPN">TL3305AF160QG</field>
+        <field name="Source"/>
+        <field name="Footprint">Button_Switch_SMD:SW_SPST_TL3305A</field>
+        <field name="Datasheet"/>
+        <field name="Description"/>
+      </fields>
+      <libsource lib="Switch" part="SW_Push" description="Push button switch, generic, two pins"/>
+      <property name="MPN" value="TL3305AF160QG"/>
+      <property name="Source" value=""/>
+      <property name="Sheetname" value="三个业务按键与复位"/>
+      <property name="Sheetfile" value="buttons.kicad_sch"/>
+      <property name="ki_keywords" value="switch normally-open pushbutton push-button"/>
+      <sheetpath names="/三个业务按键与复位/" tstamps="/de89abb4-d049-5dc1-bd82-a394d72fac99/"/>
+      <tstamps>92a305d8-8b55-5f0a-8f28-1100e1ffbff3</tstamps>
+      <units>
+        <unit name="A">
+          <pins>
+            <pin num="1"/>
+            <pin num="2"/>
+          </pins>
+        </unit>
+      </units>
+    </comp>
+    <comp ref="SW3">
+      <value>业务键 3</value>
+      <footprint>Button_Switch_SMD:SW_SPST_TL3305A</footprint>
+      <fields>
+        <field name="MPN">TL3305AF160QG</field>
+        <field name="Source"/>
+        <field name="Footprint">Button_Switch_SMD:SW_SPST_TL3305A</field>
+        <field name="Datasheet"/>
+        <field name="Description"/>
+      </fields>
+      <libsource lib="Switch" part="SW_Push" description="Push button switch, generic, two pins"/>
+      <property name="MPN" value="TL3305AF160QG"/>
+      <property name="Source" value=""/>
+      <property name="Sheetname" value="三个业务按键与复位"/>
+      <property name="Sheetfile" value="buttons.kicad_sch"/>
+      <property name="ki_keywords" value="switch normally-open pushbutton push-button"/>
+      <sheetpath names="/三个业务按键与复位/" tstamps="/de89abb4-d049-5dc1-bd82-a394d72fac99/"/>
+      <tstamps>c4f3fa19-63be-5c9d-9b3e-33540088d0b4</tstamps>
+      <units>
+        <unit name="A">
+          <pins>
+            <pin num="1"/>
+            <pin num="2"/>
+          </pins>
+        </unit>
+      </units>
+    </comp>
+    <comp ref="SW4">
+      <value>复位</value>
+      <footprint>Button_Switch_SMD:SW_SPST_TL3305A</footprint>
+      <fields>
+        <field name="MPN">TL3305AF160QG</field>
+        <field name="Source"/>
+        <field name="Footprint">Button_Switch_SMD:SW_SPST_TL3305A</field>
+        <field name="Datasheet"/>
+        <field name="Description"/>
+      </fields>
+      <libsource lib="Switch" part="SW_Push" description="Push button switch, generic, two pins"/>
+      <property name="MPN" value="TL3305AF160QG"/>
+      <property name="Source" value=""/>
+      <property name="Sheetname" value="三个业务按键与复位"/>
+      <property name="Sheetfile" value="buttons.kicad_sch"/>
+      <property name="ki_keywords" value="switch normally-open pushbutton push-button"/>
+      <sheetpath names="/三个业务按键与复位/" tstamps="/de89abb4-d049-5dc1-bd82-a394d72fac99/"/>
+      <tstamps>b0a068dc-e385-5910-891f-8e580b9e12c8</tstamps>
+      <units>
+        <unit name="A">
+          <pins>
+            <pin num="1"/>
+            <pin num="2"/>
+          </pins>
+        </unit>
+      </units>
+    </comp>
+    <comp ref="C40">
+      <value>10u/10V</value>
+      <footprint>Capacitor_SMD:C_0805_2012Metric</footprint>
+      <fields>
+        <field name="MPN"/>
+        <field name="Source"/>
+        <field name="Footprint">Capacitor_SMD:C_0805_2012Metric</field>
+        <field name="Datasheet"/>
+        <field name="Description"/>
+      </fields>
+      <libsource lib="Device" part="C" description="Unpolarized capacitor"/>
+      <property name="MPN" value=""/>
+      <property name="Source" value=""/>
+      <property name="Sheetname" value="BOX3 裸屏参考接口"/>
+      <property name="Sheetfile" value="display.kicad_sch"/>
+      <property name="ki_keywords" value="cap capacitor"/>
+      <property name="ki_fp_filters" value="C_*"/>
+      <sheetpath names="/BOX3 裸屏参考接口/" tstamps="/deb8a2a4-71e2-5c6a-be35-6e8b7b9f80f8/"/>
+      <tstamps>2737bec2-61a0-56ec-8244-e839101252a5</tstamps>
+      <units>
+        <unit name="A">
+          <pins>
+            <pin num="1"/>
+            <pin num="2"/>
+          </pins>
+        </unit>
+      </units>
+    </comp>
+    <comp ref="C41">
+      <value>100n/16V</value>
+      <footprint>Capacitor_SMD:C_0603_1608Metric</footprint>
+      <fields>
+        <field name="MPN"/>
+        <field name="Source"/>
+        <field name="Footprint">Capacitor_SMD:C_0603_1608Metric</field>
+        <field name="Datasheet"/>
+        <field name="Description"/>
+      </fields>
+      <libsource lib="Device" part="C" description="Unpolarized capacitor"/>
+      <property name="MPN" value=""/>
+      <property name="Source" value=""/>
+      <property name="Sheetname" value="BOX3 裸屏参考接口"/>
+      <property name="Sheetfile" value="display.kicad_sch"/>
+      <property name="ki_keywords" value="cap capacitor"/>
+      <property name="ki_fp_filters" value="C_*"/>
+      <sheetpath names="/BOX3 裸屏参考接口/" tstamps="/deb8a2a4-71e2-5c6a-be35-6e8b7b9f80f8/"/>
+      <tstamps>d3de7442-939f-5f1b-b071-cd7b5d6f0c72</tstamps>
+      <units>
+        <unit name="A">
+          <pins>
+            <pin num="1"/>
+            <pin num="2"/>
+          </pins>
+        </unit>
+      </units>
+    </comp>
+    <comp ref="J2">
+      <value>TFT024B579-B0 接口（待核实）</value>
+      <footprint>Connector_FFC-FPC:Hirose_FH12-30S-0.5SH_1x30-1MP_P0.50mm_Horizontal</footprint>
+      <fields>
+        <field name="MPN">FH12-30S-0.5SH(55)</field>
+        <field name="Source">https://github.com/openedv/openedv-wiki-boards-dnesp32s3b3/blob/c6f9797b64aef2666547206b4b274017d6d28a3d/example-idf/img/19.png</field>
+        <field name="Footprint">Connector_FFC-FPC:Hirose_FH12-30S-0.5SH_1x30-1MP_P0.50mm_Horizontal</field>
+        <field name="Datasheet"/>
+        <field name="Description"/>
+      </fields>
+      <libsource lib="Connector_Generic" part="Conn_01x30" description="Generic connector, single row, 01x30, script generated (kicad-library-utils/schlib/autogen/connector/)"/>
+      <property name="MPN" value="FH12-30S-0.5SH(55)"/>
+      <property name="Source" value="https://github.com/openedv/openedv-wiki-boards-dnesp32s3b3/blob/c6f9797b64aef2666547206b4b274017d6d28a3d/example-idf/img/19.png"/>
+      <property name="Sheetname" value="BOX3 裸屏参考接口"/>
+      <property name="Sheetfile" value="display.kicad_sch"/>
+      <property name="ki_keywords" value="connector"/>
+      <property name="ki_fp_filters" value="Connector*:*_1x??_*"/>
+      <sheetpath names="/BOX3 裸屏参考接口/" tstamps="/deb8a2a4-71e2-5c6a-be35-6e8b7b9f80f8/"/>
+      <tstamps>ff848c91-a1a0-5944-b367-62a3a8e657aa</tstamps>
+      <units>
+        <unit name="A">
+          <pins>
+            <pin num="1"/>
+            <pin num="2"/>
+            <pin num="3"/>
+            <pin num="4"/>
+            <pin num="5"/>
+            <pin num="6"/>
+            <pin num="7"/>
+            <pin num="8"/>
+            <pin num="9"/>
+            <pin num="10"/>
+            <pin num="11"/>
+            <pin num="12"/>
+            <pin num="13"/>
+            <pin num="14"/>
+            <pin num="15"/>
+            <pin num="16"/>
+            <pin num="17"/>
+            <pin num="18"/>
+            <pin num="19"/>
+            <pin num="20"/>
+            <pin num="21"/>
+            <pin num="22"/>
+            <pin num="23"/>
+            <pin num="24"/>
+            <pin num="25"/>
+            <pin num="26"/>
+            <pin num="27"/>
+            <pin num="28"/>
+            <pin num="29"/>
+            <pin num="30"/>
+          </pins>
+        </unit>
+      </units>
+    </comp>
+    <comp ref="Q1">
+      <value>MMBT3906</value>
+      <footprint>Package_TO_SOT_SMD:SOT-23</footprint>
+      <fields>
+        <field name="MPN">MMBT3906</field>
+        <field name="Source"/>
+        <field name="Footprint">Package_TO_SOT_SMD:SOT-23</field>
+        <field name="Datasheet"/>
+        <field name="Description"/>
+      </fields>
+      <libsource lib="Transistor_BJT" part="MMBT3906" description="-0.2A Ic, -40V Vce, Small Signal PNP Transistor, SOT-23"/>
+      <property name="MPN" value="MMBT3906"/>
+      <property name="Source" value=""/>
+      <property name="Sheetname" value="BOX3 裸屏参考接口"/>
+      <property name="Sheetfile" value="display.kicad_sch"/>
+      <property name="ki_keywords" value="PNP Transistor"/>
+      <property name="ki_fp_filters" value="SOT?23*"/>
+      <sheetpath names="/BOX3 裸屏参考接口/" tstamps="/deb8a2a4-71e2-5c6a-be35-6e8b7b9f80f8/"/>
+      <tstamps>9a7561ed-93e0-5278-a7fe-450bd7da2e90</tstamps>
+      <units>
+        <unit name="A">
+          <pins>
+            <pin num="1"/>
+            <pin num="3"/>
+            <pin num="2"/>
+          </pins>
+        </unit>
+      </units>
+    </comp>
+    <comp ref="R40">
+      <value>10R/0.125W</value>
+      <footprint>Resistor_SMD:R_0603_1608Metric</footprint>
+      <fields>
+        <field name="MPN"/>
+        <field name="Source"/>
+        <field name="Footprint">Resistor_SMD:R_0603_1608Metric</field>
+        <field name="Datasheet"/>
+        <field name="Description"/>
+      </fields>
+      <libsource lib="Device" part="R" description="Resistor"/>
+      <property name="MPN" value=""/>
+      <property name="Source" value=""/>
+      <property name="Sheetname" value="BOX3 裸屏参考接口"/>
+      <property name="Sheetfile" value="display.kicad_sch"/>
+      <property name="ki_keywords" value="R res resistor"/>
+      <property name="ki_fp_filters" value="R_*"/>
+      <sheetpath names="/BOX3 裸屏参考接口/" tstamps="/deb8a2a4-71e2-5c6a-be35-6e8b7b9f80f8/"/>
+      <tstamps>a93d5649-7fd6-5ada-8b88-63460b895c1e</tstamps>
+      <units>
+        <unit name="A">
+          <pins>
+            <pin num="1"/>
+            <pin num="2"/>
+          </pins>
+        </unit>
+      </units>
+    </comp>
+    <comp ref="R41">
+      <value>4.7k</value>
+      <footprint>Resistor_SMD:R_0603_1608Metric</footprint>
+      <fields>
+        <field name="MPN"/>
+        <field name="Source"/>
+        <field name="Footprint">Resistor_SMD:R_0603_1608Metric</field>
+        <field name="Datasheet"/>
+        <field name="Description"/>
+      </fields>
+      <libsource lib="Device" part="R" description="Resistor"/>
+      <property name="MPN" value=""/>
+      <property name="Source" value=""/>
+      <property name="Sheetname" value="BOX3 裸屏参考接口"/>
+      <property name="Sheetfile" value="display.kicad_sch"/>
+      <property name="ki_keywords" value="R res resistor"/>
+      <property name="ki_fp_filters" value="R_*"/>
+      <sheetpath names="/BOX3 裸屏参考接口/" tstamps="/deb8a2a4-71e2-5c6a-be35-6e8b7b9f80f8/"/>
+      <tstamps>0497e83b-00e5-59d5-b23f-084d7f41b131</tstamps>
+      <units>
+        <unit name="A">
+          <pins>
+            <pin num="1"/>
+            <pin num="2"/>
+          </pins>
+        </unit>
+      </units>
+    </comp>
+    <comp ref="R42">
+      <value>1k</value>
+      <footprint>Resistor_SMD:R_0603_1608Metric</footprint>
+      <fields>
+        <field name="MPN"/>
+        <field name="Source"/>
+        <field name="Footprint">Resistor_SMD:R_0603_1608Metric</field>
+        <field name="Datasheet"/>
+        <field name="Description"/>
+      </fields>
+      <libsource lib="Device" part="R" description="Resistor"/>
+      <property name="MPN" value=""/>
+      <property name="Source" value=""/>
+      <property name="Sheetname" value="BOX3 裸屏参考接口"/>
+      <property name="Sheetfile" value="display.kicad_sch"/>
+      <property name="ki_keywords" value="R res resistor"/>
+      <property name="ki_fp_filters" value="R_*"/>
+      <sheetpath names="/BOX3 裸屏参考接口/" tstamps="/deb8a2a4-71e2-5c6a-be35-6e8b7b9f80f8/"/>
+      <tstamps>a1b40fa1-14bc-5ecb-bd4b-41e0c47163d7</tstamps>
+      <units>
+        <unit name="A">
+          <pins>
+            <pin num="1"/>
+            <pin num="2"/>
+          </pins>
+        </unit>
+      </units>
+    </comp>
+    <comp ref="R43">
+      <value>10k</value>
+      <footprint>Resistor_SMD:R_0603_1608Metric</footprint>
+      <fields>
+        <field name="MPN"/>
+        <field name="Source"/>
+        <field name="Footprint">Resistor_SMD:R_0603_1608Metric</field>
+        <field name="Datasheet"/>
+        <field name="Description"/>
+      </fields>
+      <libsource lib="Device" part="R" description="Resistor"/>
+      <property name="MPN" value=""/>
+      <property name="Source" value=""/>
+      <property name="Sheetname" value="BOX3 裸屏参考接口"/>
+      <property name="Sheetfile" value="display.kicad_sch"/>
+      <property name="ki_keywords" value="R res resistor"/>
+      <property name="ki_fp_filters" value="R_*"/>
+      <sheetpath names="/BOX3 裸屏参考接口/" tstamps="/deb8a2a4-71e2-5c6a-be35-6e8b7b9f80f8/"/>
+      <tstamps>e961c5dd-2d33-5447-bdb1-a34fe6fd89ef</tstamps>
+      <units>
+        <unit name="A">
+          <pins>
+            <pin num="1"/>
+            <pin num="2"/>
+          </pins>
+        </unit>
+      </units>
+    </comp>
+    <comp ref="C50">
+      <value>1u/10V</value>
+      <footprint>Capacitor_SMD:C_0603_1608Metric</footprint>
+      <fields>
+        <field name="MPN"/>
+        <field name="Source"/>
+        <field name="Footprint">Capacitor_SMD:C_0603_1608Metric</field>
+        <field name="Datasheet"/>
+        <field name="Description"/>
+      </fields>
+      <libsource lib="Device" part="C" description="Unpolarized capacitor"/>
+      <property name="MPN" value=""/>
+      <property name="Source" value=""/>
+      <property name="Sheetname" value="音频采集：ES7210"/>
+      <property name="Sheetfile" value="audio.kicad_sch"/>
+      <property name="ki_keywords" value="cap capacitor"/>
+      <property name="ki_fp_filters" value="C_*"/>
+      <sheetpath names="/音频采集：ES7210/" tstamps="/22ccec06-bb98-5cc1-8a0f-0f2e9ec2307a/"/>
+      <tstamps>bfc0fa9d-0775-5c83-8ac3-673a22ae9639</tstamps>
+      <units>
+        <unit name="A">
+          <pins>
+            <pin num="1"/>
+            <pin num="2"/>
+          </pins>
+        </unit>
+      </units>
+    </comp>
+    <comp ref="C51">
+      <value>1u/10V</value>
+      <footprint>Capacitor_SMD:C_0603_1608Metric</footprint>
+      <fields>
+        <field name="MPN"/>
+        <field name="Source"/>
+        <field name="Footprint">Capacitor_SMD:C_0603_1608Metric</field>
+        <field name="Datasheet"/>
+        <field name="Description"/>
+      </fields>
+      <libsource lib="Device" part="C" description="Unpolarized capacitor"/>
+      <property name="MPN" value=""/>
+      <property name="Source" value=""/>
+      <property name="Sheetname" value="音频采集：ES7210"/>
+      <property name="Sheetfile" value="audio.kicad_sch"/>
+      <property name="ki_keywords" value="cap capacitor"/>
+      <property name="ki_fp_filters" value="C_*"/>
+      <sheetpath names="/音频采集：ES7210/" tstamps="/22ccec06-bb98-5cc1-8a0f-0f2e9ec2307a/"/>
+      <tstamps>082a07bd-2668-5fba-ae24-5cf7fbb91539</tstamps>
+      <units>
+        <unit name="A">
+          <pins>
+            <pin num="1"/>
+            <pin num="2"/>
+          </pins>
+        </unit>
+      </units>
+    </comp>
+    <comp ref="C52">
+      <value>1u/10V</value>
+      <footprint>Capacitor_SMD:C_0603_1608Metric</footprint>
+      <fields>
+        <field name="MPN"/>
+        <field name="Source"/>
+        <field name="Footprint">Capacitor_SMD:C_0603_1608Metric</field>
+        <field name="Datasheet"/>
+        <field name="Description"/>
+      </fields>
+      <libsource lib="Device" part="C" description="Unpolarized capacitor"/>
+      <property name="MPN" value=""/>
+      <property name="Source" value=""/>
+      <property name="Sheetname" value="音频采集：ES7210"/>
+      <property name="Sheetfile" value="audio.kicad_sch"/>
+      <property name="ki_keywords" value="cap capacitor"/>
+      <property name="ki_fp_filters" value="C_*"/>
+      <sheetpath names="/音频采集：ES7210/" tstamps="/22ccec06-bb98-5cc1-8a0f-0f2e9ec2307a/"/>
+      <tstamps>e8267f4f-b36e-5ae3-880d-d86e2551e2f5</tstamps>
+      <units>
+        <unit name="A">
+          <pins>
+            <pin num="1"/>
+            <pin num="2"/>
+          </pins>
+        </unit>
+      </units>
+    </comp>
+    <comp ref="C53">
+      <value>1u/10V</value>
+      <footprint>Capacitor_SMD:C_0603_1608Metric</footprint>
+      <fields>
+        <field name="MPN"/>
+        <field name="Source"/>
+        <field name="Footprint">Capacitor_SMD:C_0603_1608Metric</field>
+        <field name="Datasheet"/>
+        <field name="Description"/>
+      </fields>
+      <libsource lib="Device" part="C" description="Unpolarized capacitor"/>
+      <property name="MPN" value=""/>
+      <property name="Source" value=""/>
+      <property name="Sheetname" value="音频采集：ES7210"/>
+      <property name="Sheetfile" value="audio.kicad_sch"/>
+      <property name="ki_keywords" value="cap capacitor"/>
+      <property name="ki_fp_filters" value="C_*"/>
+      <sheetpath names="/音频采集：ES7210/" tstamps="/22ccec06-bb98-5cc1-8a0f-0f2e9ec2307a/"/>
+      <tstamps>40ac666f-b427-5eff-a6bf-0684f3b81770</tstamps>
+      <units>
+        <unit name="A">
+          <pins>
+            <pin num="1"/>
+            <pin num="2"/>
+          </pins>
+        </unit>
+      </units>
+    </comp>
+    <comp ref="C54">
+      <value>1u/10V</value>
+      <footprint>Capacitor_SMD:C_0603_1608Metric</footprint>
+      <fields>
+        <field name="MPN"/>
+        <field name="Source"/>
+        <field name="Footprint">Capacitor_SMD:C_0603_1608Metric</field>
+        <field name="Datasheet"/>
+        <field name="Description"/>
+      </fields>
+      <libsource lib="Device" part="C" description="Unpolarized capacitor"/>
+      <property name="MPN" value=""/>
+      <property name="Source" value=""/>
+      <property name="Sheetname" value="音频采集：ES7210"/>
+      <property name="Sheetfile" value="audio.kicad_sch"/>
+      <property name="ki_keywords" value="cap capacitor"/>
+      <property name="ki_fp_filters" value="C_*"/>
+      <sheetpath names="/音频采集：ES7210/" tstamps="/22ccec06-bb98-5cc1-8a0f-0f2e9ec2307a/"/>
+      <tstamps>461fc48a-047d-5bbe-af15-5b3a94476a1a</tstamps>
+      <units>
+        <unit name="A">
+          <pins>
+            <pin num="1"/>
+            <pin num="2"/>
+          </pins>
+        </unit>
+      </units>
+    </comp>
+    <comp ref="C55">
+      <value>1u/10V</value>
+      <footprint>Capacitor_SMD:C_0603_1608Metric</footprint>
+      <fields>
+        <field name="MPN"/>
+        <field name="Source"/>
+        <field name="Footprint">Capacitor_SMD:C_0603_1608Metric</field>
+        <field name="Datasheet"/>
+        <field name="Description"/>
+      </fields>
+      <libsource lib="Device" part="C" description="Unpolarized capacitor"/>
+      <property name="MPN" value=""/>
+      <property name="Source" value=""/>
+      <property name="Sheetname" value="音频采集：ES7210"/>
+      <property name="Sheetfile" value="audio.kicad_sch"/>
+      <property name="ki_keywords" value="cap capacitor"/>
+      <property name="ki_fp_filters" value="C_*"/>
+      <sheetpath names="/音频采集：ES7210/" tstamps="/22ccec06-bb98-5cc1-8a0f-0f2e9ec2307a/"/>
+      <tstamps>3466a3f4-b6aa-5d6f-8476-13b2e82969de</tstamps>
+      <units>
+        <unit name="A">
+          <pins>
+            <pin num="1"/>
+            <pin num="2"/>
+          </pins>
+        </unit>
+      </units>
+    </comp>
+    <comp ref="C56">
+      <value>1u/10V</value>
+      <footprint>Capacitor_SMD:C_0603_1608Metric</footprint>
+      <fields>
+        <field name="MPN"/>
+        <field name="Source"/>
+        <field name="Footprint">Capacitor_SMD:C_0603_1608Metric</field>
+        <field name="Datasheet"/>
+        <field name="Description"/>
+      </fields>
+      <libsource lib="Device" part="C" description="Unpolarized capacitor"/>
+      <property name="MPN" value=""/>
+      <property name="Source" value=""/>
+      <property name="Sheetname" value="音频采集：ES7210"/>
+      <property name="Sheetfile" value="audio.kicad_sch"/>
+      <property name="ki_keywords" value="cap capacitor"/>
+      <property name="ki_fp_filters" value="C_*"/>
+      <sheetpath names="/音频采集：ES7210/" tstamps="/22ccec06-bb98-5cc1-8a0f-0f2e9ec2307a/"/>
+      <tstamps>abb42ba4-56e1-5425-b2c1-f69472922d88</tstamps>
+      <units>
+        <unit name="A">
+          <pins>
+            <pin num="1"/>
+            <pin num="2"/>
+          </pins>
+        </unit>
+      </units>
+    </comp>
+    <comp ref="C57">
+      <value>1u/10V</value>
+      <footprint>Capacitor_SMD:C_0603_1608Metric</footprint>
+      <fields>
+        <field name="MPN"/>
+        <field name="Source"/>
+        <field name="Footprint">Capacitor_SMD:C_0603_1608Metric</field>
+        <field name="Datasheet"/>
+        <field name="Description"/>
+      </fields>
+      <libsource lib="Device" part="C" description="Unpolarized capacitor"/>
+      <property name="MPN" value=""/>
+      <property name="Source" value=""/>
+      <property name="Sheetname" value="音频采集：ES7210"/>
+      <property name="Sheetfile" value="audio.kicad_sch"/>
+      <property name="ki_keywords" value="cap capacitor"/>
+      <property name="ki_fp_filters" value="C_*"/>
+      <sheetpath names="/音频采集：ES7210/" tstamps="/22ccec06-bb98-5cc1-8a0f-0f2e9ec2307a/"/>
+      <tstamps>6f9b947a-e4d6-5d60-8f3d-91a9df405695</tstamps>
+      <units>
+        <unit name="A">
+          <pins>
+            <pin num="1"/>
+            <pin num="2"/>
+          </pins>
+        </unit>
+      </units>
+    </comp>
+    <comp ref="C58">
+      <value>1u/10V</value>
+      <footprint>Capacitor_SMD:C_0603_1608Metric</footprint>
+      <fields>
+        <field name="MPN"/>
+        <field name="Source"/>
+        <field name="Footprint">Capacitor_SMD:C_0603_1608Metric</field>
+        <field name="Datasheet"/>
+        <field name="Description"/>
+      </fields>
+      <libsource lib="Device" part="C" description="Unpolarized capacitor"/>
+      <property name="MPN" value=""/>
+      <property name="Source" value=""/>
+      <property name="Sheetname" value="音频采集：ES7210"/>
+      <property name="Sheetfile" value="audio.kicad_sch"/>
+      <property name="ki_keywords" value="cap capacitor"/>
+      <property name="ki_fp_filters" value="C_*"/>
+      <sheetpath names="/音频采集：ES7210/" tstamps="/22ccec06-bb98-5cc1-8a0f-0f2e9ec2307a/"/>
+      <tstamps>52c2150b-69e1-5c2b-9d95-69c5ca3caa5b</tstamps>
+      <units>
+        <unit name="A">
+          <pins>
+            <pin num="1"/>
+            <pin num="2"/>
+          </pins>
+        </unit>
+      </units>
+    </comp>
+    <comp ref="C59">
+      <value>1u/10V</value>
+      <footprint>Capacitor_SMD:C_0603_1608Metric</footprint>
+      <fields>
+        <field name="MPN"/>
+        <field name="Source"/>
+        <field name="Footprint">Capacitor_SMD:C_0603_1608Metric</field>
+        <field name="Datasheet"/>
+        <field name="Description"/>
+      </fields>
+      <libsource lib="Device" part="C" description="Unpolarized capacitor"/>
+      <property name="MPN" value=""/>
+      <property name="Source" value=""/>
+      <property name="Sheetname" value="音频采集：ES7210"/>
+      <property name="Sheetfile" value="audio.kicad_sch"/>
+      <property name="ki_keywords" value="cap capacitor"/>
+      <property name="ki_fp_filters" value="C_*"/>
+      <sheetpath names="/音频采集：ES7210/" tstamps="/22ccec06-bb98-5cc1-8a0f-0f2e9ec2307a/"/>
+      <tstamps>8325a87c-6f84-59b0-82a2-20ddd375211f</tstamps>
+      <units>
+        <unit name="A">
+          <pins>
+            <pin num="1"/>
+            <pin num="2"/>
+          </pins>
+        </unit>
+      </units>
+    </comp>
+    <comp ref="C60">
+      <value>2.2u/10V</value>
+      <footprint>Capacitor_SMD:C_0603_1608Metric</footprint>
+      <fields>
+        <field name="MPN"/>
+        <field name="Source"/>
+        <field name="Footprint">Capacitor_SMD:C_0603_1608Metric</field>
+        <field name="Datasheet"/>
+        <field name="Description"/>
+      </fields>
+      <libsource lib="Device" part="C" description="Unpolarized capacitor"/>
+      <property name="MPN" value=""/>
+      <property name="Source" value=""/>
+      <property name="Sheetname" value="音频采集：ES7210"/>
+      <property name="Sheetfile" value="audio.kicad_sch"/>
+      <property name="ki_keywords" value="cap capacitor"/>
+      <property name="ki_fp_filters" value="C_*"/>
+      <sheetpath names="/音频采集：ES7210/" tstamps="/22ccec06-bb98-5cc1-8a0f-0f2e9ec2307a/"/>
+      <tstamps>465b1ac4-6ffc-5a5c-842e-cfe1658b4ae2</tstamps>
+      <units>
+        <unit name="A">
+          <pins>
+            <pin num="1"/>
+            <pin num="2"/>
+          </pins>
+        </unit>
+      </units>
+    </comp>
+    <comp ref="C61">
+      <value>1u/10V</value>
+      <footprint>Capacitor_SMD:C_0603_1608Metric</footprint>
+      <fields>
+        <field name="MPN"/>
+        <field name="Source"/>
+        <field name="Footprint">Capacitor_SMD:C_0603_1608Metric</field>
+        <field name="Datasheet"/>
+        <field name="Description"/>
+      </fields>
+      <libsource lib="Device" part="C" description="Unpolarized capacitor"/>
+      <property name="MPN" value=""/>
+      <property name="Source" value=""/>
+      <property name="Sheetname" value="音频采集：ES7210"/>
+      <property name="Sheetfile" value="audio.kicad_sch"/>
+      <property name="ki_keywords" value="cap capacitor"/>
+      <property name="ki_fp_filters" value="C_*"/>
+      <sheetpath names="/音频采集：ES7210/" tstamps="/22ccec06-bb98-5cc1-8a0f-0f2e9ec2307a/"/>
+      <tstamps>358b7663-4877-5858-a7ef-7dca0fb3d2f5</tstamps>
+      <units>
+        <unit name="A">
+          <pins>
+            <pin num="1"/>
+            <pin num="2"/>
+          </pins>
+        </unit>
+      </units>
+    </comp>
+    <comp ref="C62">
+      <value>1u/10V</value>
+      <footprint>Capacitor_SMD:C_0603_1608Metric</footprint>
+      <fields>
+        <field name="MPN"/>
+        <field name="Source"/>
+        <field name="Footprint">Capacitor_SMD:C_0603_1608Metric</field>
+        <field name="Datasheet"/>
+        <field name="Description"/>
+      </fields>
+      <libsource lib="Device" part="C" description="Unpolarized capacitor"/>
+      <property name="MPN" value=""/>
+      <property name="Source" value=""/>
+      <property name="Sheetname" value="音频采集：ES7210"/>
+      <property name="Sheetfile" value="audio.kicad_sch"/>
+      <property name="ki_keywords" value="cap capacitor"/>
+      <property name="ki_fp_filters" value="C_*"/>
+      <sheetpath names="/音频采集：ES7210/" tstamps="/22ccec06-bb98-5cc1-8a0f-0f2e9ec2307a/"/>
+      <tstamps>8d1562c9-86ac-5f93-a300-e1f6cdf264fe</tstamps>
+      <units>
+        <unit name="A">
+          <pins>
+            <pin num="1"/>
+            <pin num="2"/>
+          </pins>
+        </unit>
+      </units>
+    </comp>
+    <comp ref="C63">
+      <value>1u/10V</value>
+      <footprint>Capacitor_SMD:C_0603_1608Metric</footprint>
+      <fields>
+        <field name="MPN"/>
+        <field name="Source"/>
+        <field name="Footprint">Capacitor_SMD:C_0603_1608Metric</field>
+        <field name="Datasheet"/>
+        <field name="Description"/>
+      </fields>
+      <libsource lib="Device" part="C" description="Unpolarized capacitor"/>
+      <property name="MPN" value=""/>
+      <property name="Source" value=""/>
+      <property name="Sheetname" value="音频采集：ES7210"/>
+      <property name="Sheetfile" value="audio.kicad_sch"/>
+      <property name="ki_keywords" value="cap capacitor"/>
+      <property name="ki_fp_filters" value="C_*"/>
+      <sheetpath names="/音频采集：ES7210/" tstamps="/22ccec06-bb98-5cc1-8a0f-0f2e9ec2307a/"/>
+      <tstamps>f74bbb28-a34c-5c02-8c4a-3489f34620ea</tstamps>
+      <units>
+        <unit name="A">
+          <pins>
+            <pin num="1"/>
+            <pin num="2"/>
+          </pins>
+        </unit>
+      </units>
+    </comp>
+    <comp ref="C64">
+      <value>1u/10V</value>
+      <footprint>Capacitor_SMD:C_0603_1608Metric</footprint>
+      <fields>
+        <field name="MPN"/>
+        <field name="Source"/>
+        <field name="Footprint">Capacitor_SMD:C_0603_1608Metric</field>
+        <field name="Datasheet"/>
+        <field name="Description"/>
+      </fields>
+      <libsource lib="Device" part="C" description="Unpolarized capacitor"/>
+      <property name="MPN" value=""/>
+      <property name="Source" value=""/>
+      <property name="Sheetname" value="音频采集：ES7210"/>
+      <property name="Sheetfile" value="audio.kicad_sch"/>
+      <property name="ki_keywords" value="cap capacitor"/>
+      <property name="ki_fp_filters" value="C_*"/>
+      <sheetpath names="/音频采集：ES7210/" tstamps="/22ccec06-bb98-5cc1-8a0f-0f2e9ec2307a/"/>
+      <tstamps>d75773ee-c08a-573f-810b-aff2ea85fb00</tstamps>
+      <units>
+        <unit name="A">
+          <pins>
+            <pin num="1"/>
+            <pin num="2"/>
+          </pins>
+        </unit>
+      </units>
+    </comp>
+    <comp ref="MK1">
+      <value>CMC-4015-40P</value>
+      <footprint>VB:CMC-4015-40P</footprint>
+      <fields>
+        <field name="MPN">CMC-4015-40P</field>
+        <field name="Source">https://www.sameskydevices.com/product/resource/cmc-4015-40p.pdf</field>
+        <field name="Footprint">VB:CMC-4015-40P</field>
+        <field name="Datasheet"/>
+        <field name="Description"/>
+      </fields>
+      <libsource lib="VB" part="CMC-4015-40P" description=""/>
+      <property name="MPN" value="CMC-4015-40P"/>
+      <property name="Source" value="https://www.sameskydevices.com/product/resource/cmc-4015-40p.pdf"/>
+      <property name="Sheetname" value="音频采集：ES7210"/>
+      <property name="Sheetfile" value="audio.kicad_sch"/>
+      <sheetpath names="/音频采集：ES7210/" tstamps="/22ccec06-bb98-5cc1-8a0f-0f2e9ec2307a/"/>
+      <tstamps>094233f9-317a-57ac-a502-21c67580d48a</tstamps>
+      <units>
+        <unit name="A">
+          <pins>
+            <pin num="1"/>
+            <pin num="2"/>
+          </pins>
+        </unit>
+      </units>
+    </comp>
+    <comp ref="R60">
+      <value>2.2k</value>
+      <footprint>Resistor_SMD:R_0603_1608Metric</footprint>
+      <fields>
+        <field name="MPN"/>
+        <field name="Source"/>
+        <field name="Footprint">Resistor_SMD:R_0603_1608Metric</field>
+        <field name="Datasheet"/>
+        <field name="Description"/>
+      </fields>
+      <libsource lib="Device" part="R" description="Resistor"/>
+      <property name="MPN" value=""/>
+      <property name="Source" value=""/>
+      <property name="Sheetname" value="音频采集：ES7210"/>
+      <property name="Sheetfile" value="audio.kicad_sch"/>
+      <property name="ki_keywords" value="R res resistor"/>
+      <property name="ki_fp_filters" value="R_*"/>
+      <sheetpath names="/音频采集：ES7210/" tstamps="/22ccec06-bb98-5cc1-8a0f-0f2e9ec2307a/"/>
+      <tstamps>8d586f57-943b-5c38-8c13-3c8e67bbcc07</tstamps>
+      <units>
+        <unit name="A">
+          <pins>
+            <pin num="1"/>
+            <pin num="2"/>
+          </pins>
+        </unit>
+      </units>
+    </comp>
+    <comp ref="U5">
+      <value>ES7210</value>
+      <footprint>Package_DFN_QFN:VQFN-32-1EP_4x4mm_P0.4mm_EP2.8x2.8mm</footprint>
+      <fields>
+        <field name="MPN">ES7210</field>
+        <field name="Source">ES7210 Rev22 / audio-component-evidence.md</field>
+        <field name="Footprint">Package_DFN_QFN:VQFN-32-1EP_4x4mm_P0.4mm_EP2.8x2.8mm</field>
+        <field name="Datasheet"/>
+        <field name="Description"/>
+      </fields>
+      <libsource lib="VB" part="ES7210" description=""/>
+      <property name="MPN" value="ES7210"/>
+      <property name="Source" value="ES7210 Rev22 / audio-component-evidence.md"/>
+      <property name="Sheetname" value="音频采集：ES7210"/>
+      <property name="Sheetfile" value="audio.kicad_sch"/>
+      <sheetpath names="/音频采集：ES7210/" tstamps="/22ccec06-bb98-5cc1-8a0f-0f2e9ec2307a/"/>
+      <tstamps>6e07a781-7999-585d-a2b4-414f9c2d79f9</tstamps>
+      <units>
+        <unit name="A">
+          <pins>
+            <pin num="1"/>
+            <pin num="2"/>
+            <pin num="3"/>
+            <pin num="4"/>
+            <pin num="5"/>
+            <pin num="6"/>
+            <pin num="7"/>
+            <pin num="8"/>
+            <pin num="9"/>
+            <pin num="10"/>
+            <pin num="11"/>
+            <pin num="12"/>
+            <pin num="13"/>
+            <pin num="14"/>
+            <pin num="15"/>
+            <pin num="16"/>
+            <pin num="17"/>
+            <pin num="18"/>
+            <pin num="19"/>
+            <pin num="20"/>
+            <pin num="21"/>
+            <pin num="22"/>
+            <pin num="23"/>
+            <pin num="24"/>
+            <pin num="25"/>
+            <pin num="26"/>
+            <pin num="27"/>
+            <pin num="28"/>
+            <pin num="29"/>
+            <pin num="30"/>
+            <pin num="31"/>
+            <pin num="32"/>
+            <pin num="33"/>
+          </pins>
+        </unit>
+      </units>
+    </comp>
+    <comp ref="C70">
+      <value>10u/10V</value>
+      <footprint>Capacitor_SMD:C_0805_2012Metric</footprint>
+      <fields>
+        <field name="MPN"/>
+        <field name="Source"/>
+        <field name="Footprint">Capacitor_SMD:C_0805_2012Metric</field>
+        <field name="Datasheet"/>
+        <field name="Description"/>
+      </fields>
+      <libsource lib="Device" part="C" description="Unpolarized capacitor"/>
+      <property name="MPN" value=""/>
+      <property name="Source" value=""/>
+      <property name="Sheetname" value="音频电源与去耦"/>
+      <property name="Sheetfile" value="audio-power.kicad_sch"/>
+      <property name="ki_keywords" value="cap capacitor"/>
+      <property name="ki_fp_filters" value="C_*"/>
+      <sheetpath names="/音频电源与去耦/" tstamps="/10ee17e6-ac08-5740-b9b9-0ee6306fddc3/"/>
+      <tstamps>68f9da24-b326-59c2-95a0-6d97d662d100</tstamps>
+      <units>
+        <unit name="A">
+          <pins>
+            <pin num="1"/>
+            <pin num="2"/>
+          </pins>
+        </unit>
+      </units>
+    </comp>
+    <comp ref="C71">
+      <value>100n/16V</value>
+      <footprint>Capacitor_SMD:C_0603_1608Metric</footprint>
+      <fields>
+        <field name="MPN"/>
+        <field name="Source"/>
+        <field name="Footprint">Capacitor_SMD:C_0603_1608Metric</field>
+        <field name="Datasheet"/>
+        <field name="Description"/>
+      </fields>
+      <libsource lib="Device" part="C" description="Unpolarized capacitor"/>
+      <property name="MPN" value=""/>
+      <property name="Source" value=""/>
+      <property name="Sheetname" value="音频电源与去耦"/>
+      <property name="Sheetfile" value="audio-power.kicad_sch"/>
+      <property name="ki_keywords" value="cap capacitor"/>
+      <property name="ki_fp_filters" value="C_*"/>
+      <sheetpath names="/音频电源与去耦/" tstamps="/10ee17e6-ac08-5740-b9b9-0ee6306fddc3/"/>
+      <tstamps>280b9742-fc2f-5b0b-8e34-6cd73b772a3f</tstamps>
+      <units>
+        <unit name="A">
+          <pins>
+            <pin num="1"/>
+            <pin num="2"/>
+          </pins>
+        </unit>
+      </units>
+    </comp>
+    <comp ref="C72">
+      <value>100n/16V</value>
+      <footprint>Capacitor_SMD:C_0603_1608Metric</footprint>
+      <fields>
+        <field name="MPN"/>
+        <field name="Source"/>
+        <field name="Footprint">Capacitor_SMD:C_0603_1608Metric</field>
+        <field name="Datasheet"/>
+        <field name="Description"/>
+      </fields>
+      <libsource lib="Device" part="C" description="Unpolarized capacitor"/>
+      <property name="MPN" value=""/>
+      <property name="Source" value=""/>
+      <property name="Sheetname" value="音频电源与去耦"/>
+      <property name="Sheetfile" value="audio-power.kicad_sch"/>
+      <property name="ki_keywords" value="cap capacitor"/>
+      <property name="ki_fp_filters" value="C_*"/>
+      <sheetpath names="/音频电源与去耦/" tstamps="/10ee17e6-ac08-5740-b9b9-0ee6306fddc3/"/>
+      <tstamps>c10e551b-f331-5466-b2dd-e9aa8586e5b8</tstamps>
+      <units>
+        <unit name="A">
+          <pins>
+            <pin num="1"/>
+            <pin num="2"/>
+          </pins>
+        </unit>
+      </units>
+    </comp>
+    <comp ref="C73">
+      <value>10u/10V</value>
+      <footprint>Capacitor_SMD:C_0805_2012Metric</footprint>
+      <fields>
+        <field name="MPN"/>
+        <field name="Source"/>
+        <field name="Footprint">Capacitor_SMD:C_0805_2012Metric</field>
+        <field name="Datasheet"/>
+        <field name="Description"/>
+      </fields>
+      <libsource lib="Device" part="C" description="Unpolarized capacitor"/>
+      <property name="MPN" value=""/>
+      <property name="Source" value=""/>
+      <property name="Sheetname" value="音频电源与去耦"/>
+      <property name="Sheetfile" value="audio-power.kicad_sch"/>
+      <property name="ki_keywords" value="cap capacitor"/>
+      <property name="ki_fp_filters" value="C_*"/>
+      <sheetpath names="/音频电源与去耦/" tstamps="/10ee17e6-ac08-5740-b9b9-0ee6306fddc3/"/>
+      <tstamps>4fb9742b-e8cf-5afe-8210-223c088cfdee</tstamps>
+      <units>
+        <unit name="A">
+          <pins>
+            <pin num="1"/>
+            <pin num="2"/>
+          </pins>
+        </unit>
+      </units>
+    </comp>
+    <comp ref="C74">
+      <value>100n/16V</value>
+      <footprint>Capacitor_SMD:C_0603_1608Metric</footprint>
+      <fields>
+        <field name="MPN"/>
+        <field name="Source"/>
+        <field name="Footprint">Capacitor_SMD:C_0603_1608Metric</field>
+        <field name="Datasheet"/>
+        <field name="Description"/>
+      </fields>
+      <libsource lib="Device" part="C" description="Unpolarized capacitor"/>
+      <property name="MPN" value=""/>
+      <property name="Source" value=""/>
+      <property name="Sheetname" value="音频电源与去耦"/>
+      <property name="Sheetfile" value="audio-power.kicad_sch"/>
+      <property name="ki_keywords" value="cap capacitor"/>
+      <property name="ki_fp_filters" value="C_*"/>
+      <sheetpath names="/音频电源与去耦/" tstamps="/10ee17e6-ac08-5740-b9b9-0ee6306fddc3/"/>
+      <tstamps>727da876-8df0-561d-8b97-48f52a2eed6b</tstamps>
+      <units>
+        <unit name="A">
+          <pins>
+            <pin num="1"/>
+            <pin num="2"/>
+          </pins>
+        </unit>
+      </units>
+    </comp>
+    <comp ref="C75">
+      <value>100n/16V</value>
+      <footprint>Capacitor_SMD:C_0603_1608Metric</footprint>
+      <fields>
+        <field name="MPN"/>
+        <field name="Source"/>
+        <field name="Footprint">Capacitor_SMD:C_0603_1608Metric</field>
+        <field name="Datasheet"/>
+        <field name="Description"/>
+      </fields>
+      <libsource lib="Device" part="C" description="Unpolarized capacitor"/>
+      <property name="MPN" value=""/>
+      <property name="Source" value=""/>
+      <property name="Sheetname" value="音频电源与去耦"/>
+      <property name="Sheetfile" value="audio-power.kicad_sch"/>
+      <property name="ki_keywords" value="cap capacitor"/>
+      <property name="ki_fp_filters" value="C_*"/>
+      <sheetpath names="/音频电源与去耦/" tstamps="/10ee17e6-ac08-5740-b9b9-0ee6306fddc3/"/>
+      <tstamps>7a825c38-9a91-5645-b6e0-849c335e3dc7</tstamps>
+      <units>
+        <unit name="A">
+          <pins>
+            <pin num="1"/>
+            <pin num="2"/>
+          </pins>
+        </unit>
+      </units>
+    </comp>
+    <comp ref="C76">
+      <value>10u/10V</value>
+      <footprint>Capacitor_SMD:C_0805_2012Metric</footprint>
+      <fields>
+        <field name="MPN"/>
+        <field name="Source"/>
+        <field name="Footprint">Capacitor_SMD:C_0805_2012Metric</field>
+        <field name="Datasheet"/>
+        <field name="Description"/>
+      </fields>
+      <libsource lib="Device" part="C" description="Unpolarized capacitor"/>
+      <property name="MPN" value=""/>
+      <property name="Source" value=""/>
+      <property name="Sheetname" value="音频电源与去耦"/>
+      <property name="Sheetfile" value="audio-power.kicad_sch"/>
+      <property name="ki_keywords" value="cap capacitor"/>
+      <property name="ki_fp_filters" value="C_*"/>
+      <sheetpath names="/音频电源与去耦/" tstamps="/10ee17e6-ac08-5740-b9b9-0ee6306fddc3/"/>
+      <tstamps>3a62b508-7027-5c35-b82b-8c89d18c7eb9</tstamps>
+      <units>
+        <unit name="A">
+          <pins>
+            <pin num="1"/>
+            <pin num="2"/>
+          </pins>
+        </unit>
+      </units>
+    </comp>
+    <comp ref="C77">
+      <value>100n/16V</value>
+      <footprint>Capacitor_SMD:C_0603_1608Metric</footprint>
+      <fields>
+        <field name="MPN"/>
+        <field name="Source"/>
+        <field name="Footprint">Capacitor_SMD:C_0603_1608Metric</field>
+        <field name="Datasheet"/>
+        <field name="Description"/>
+      </fields>
+      <libsource lib="Device" part="C" description="Unpolarized capacitor"/>
+      <property name="MPN" value=""/>
+      <property name="Source" value=""/>
+      <property name="Sheetname" value="音频电源与去耦"/>
+      <property name="Sheetfile" value="audio-power.kicad_sch"/>
+      <property name="ki_keywords" value="cap capacitor"/>
+      <property name="ki_fp_filters" value="C_*"/>
+      <sheetpath names="/音频电源与去耦/" tstamps="/10ee17e6-ac08-5740-b9b9-0ee6306fddc3/"/>
+      <tstamps>03690847-84d6-5b56-bc4d-95206778f229</tstamps>
+      <units>
+        <unit name="A">
+          <pins>
+            <pin num="1"/>
+            <pin num="2"/>
+          </pins>
+        </unit>
+      </units>
+    </comp>
+    <comp ref="C78">
+      <value>100n/16V</value>
+      <footprint>Capacitor_SMD:C_0603_1608Metric</footprint>
+      <fields>
+        <field name="MPN"/>
+        <field name="Source"/>
+        <field name="Footprint">Capacitor_SMD:C_0603_1608Metric</field>
+        <field name="Datasheet"/>
+        <field name="Description"/>
+      </fields>
+      <libsource lib="Device" part="C" description="Unpolarized capacitor"/>
+      <property name="MPN" value=""/>
+      <property name="Source" value=""/>
+      <property name="Sheetname" value="音频电源与去耦"/>
+      <property name="Sheetfile" value="audio-power.kicad_sch"/>
+      <property name="ki_keywords" value="cap capacitor"/>
+      <property name="ki_fp_filters" value="C_*"/>
+      <sheetpath names="/音频电源与去耦/" tstamps="/10ee17e6-ac08-5740-b9b9-0ee6306fddc3/"/>
+      <tstamps>95346e13-0b51-521d-8cf6-46b35e4147f7</tstamps>
+      <units>
+        <unit name="A">
+          <pins>
+            <pin num="1"/>
+            <pin num="2"/>
+          </pins>
+        </unit>
+      </units>
+    </comp>
+    <comp ref="C79">
+      <value>10u/10V</value>
+      <footprint>Capacitor_SMD:C_0805_2012Metric</footprint>
+      <fields>
+        <field name="MPN"/>
+        <field name="Source"/>
+        <field name="Footprint">Capacitor_SMD:C_0805_2012Metric</field>
+        <field name="Datasheet"/>
+        <field name="Description"/>
+      </fields>
+      <libsource lib="Device" part="C" description="Unpolarized capacitor"/>
+      <property name="MPN" value=""/>
+      <property name="Source" value=""/>
+      <property name="Sheetname" value="音频电源与去耦"/>
+      <property name="Sheetfile" value="audio-power.kicad_sch"/>
+      <property name="ki_keywords" value="cap capacitor"/>
+      <property name="ki_fp_filters" value="C_*"/>
+      <sheetpath names="/音频电源与去耦/" tstamps="/10ee17e6-ac08-5740-b9b9-0ee6306fddc3/"/>
+      <tstamps>b815b14f-3f20-5a09-8d76-8a4df3e0d7a1</tstamps>
+      <units>
+        <unit name="A">
+          <pins>
+            <pin num="1"/>
+            <pin num="2"/>
+          </pins>
+        </unit>
+      </units>
+    </comp>
+    <comp ref="C80">
+      <value>100n/16V</value>
+      <footprint>Capacitor_SMD:C_0603_1608Metric</footprint>
+      <fields>
+        <field name="MPN"/>
+        <field name="Source"/>
+        <field name="Footprint">Capacitor_SMD:C_0603_1608Metric</field>
+        <field name="Datasheet"/>
+        <field name="Description"/>
+      </fields>
+      <libsource lib="Device" part="C" description="Unpolarized capacitor"/>
+      <property name="MPN" value=""/>
+      <property name="Source" value=""/>
+      <property name="Sheetname" value="音频电源与去耦"/>
+      <property name="Sheetfile" value="audio-power.kicad_sch"/>
+      <property name="ki_keywords" value="cap capacitor"/>
+      <property name="ki_fp_filters" value="C_*"/>
+      <sheetpath names="/音频电源与去耦/" tstamps="/10ee17e6-ac08-5740-b9b9-0ee6306fddc3/"/>
+      <tstamps>95291d5a-9365-5266-887d-07836698f08f</tstamps>
+      <units>
+        <unit name="A">
+          <pins>
+            <pin num="1"/>
+            <pin num="2"/>
+          </pins>
+        </unit>
+      </units>
+    </comp>
+    <comp ref="FB1">
+      <value>120R@100MHz</value>
+      <footprint>Inductor_SMD:L_0603_1608Metric</footprint>
+      <fields>
+        <field name="MPN">BLM18PG121SN1D</field>
+        <field name="Source"/>
+        <field name="Footprint">Inductor_SMD:L_0603_1608Metric</field>
+        <field name="Datasheet"/>
+        <field name="Description"/>
+      </fields>
+      <libsource lib="Device" part="FerriteBead" description="Ferrite bead"/>
+      <property name="MPN" value="BLM18PG121SN1D"/>
+      <property name="Source" value=""/>
+      <property name="Sheetname" value="音频电源与去耦"/>
+      <property name="Sheetfile" value="audio-power.kicad_sch"/>
+      <property name="ki_keywords" value="L ferrite bead inductor filter"/>
+      <property name="ki_fp_filters" value="Inductor_* L_* *Ferrite*"/>
+      <sheetpath names="/音频电源与去耦/" tstamps="/10ee17e6-ac08-5740-b9b9-0ee6306fddc3/"/>
+      <tstamps>5a55b7e7-3218-592c-910b-5fe2993792f7</tstamps>
+      <units>
+        <unit name="A">
+          <pins>
+            <pin num="1"/>
+            <pin num="2"/>
+          </pins>
+        </unit>
+      </units>
+    </comp>
+    <comp ref="FB2">
+      <value>120R@100MHz</value>
+      <footprint>Inductor_SMD:L_0603_1608Metric</footprint>
+      <fields>
+        <field name="MPN">BLM18PG121SN1D</field>
+        <field name="Source"/>
+        <field name="Footprint">Inductor_SMD:L_0603_1608Metric</field>
+        <field name="Datasheet"/>
+        <field name="Description"/>
+      </fields>
+      <libsource lib="Device" part="FerriteBead" description="Ferrite bead"/>
+      <property name="MPN" value="BLM18PG121SN1D"/>
+      <property name="Source" value=""/>
+      <property name="Sheetname" value="音频电源与去耦"/>
+      <property name="Sheetfile" value="audio-power.kicad_sch"/>
+      <property name="ki_keywords" value="L ferrite bead inductor filter"/>
+      <property name="ki_fp_filters" value="Inductor_* L_* *Ferrite*"/>
+      <sheetpath names="/音频电源与去耦/" tstamps="/10ee17e6-ac08-5740-b9b9-0ee6306fddc3/"/>
+      <tstamps>61131a7b-f49f-54bc-b428-8f544aa777a0</tstamps>
+      <units>
+        <unit name="A">
+          <pins>
+            <pin num="1"/>
+            <pin num="2"/>
+          </pins>
+        </unit>
+      </units>
+    </comp>
+    <comp ref="FB3">
+      <value>120R@100MHz</value>
+      <footprint>Inductor_SMD:L_0603_1608Metric</footprint>
+      <fields>
+        <field name="MPN">BLM18PG121SN1D</field>
+        <field name="Source"/>
+        <field name="Footprint">Inductor_SMD:L_0603_1608Metric</field>
+        <field name="Datasheet"/>
+        <field name="Description"/>
+      </fields>
+      <libsource lib="Device" part="FerriteBead" description="Ferrite bead"/>
+      <property name="MPN" value="BLM18PG121SN1D"/>
+      <property name="Source" value=""/>
+      <property name="Sheetname" value="音频电源与去耦"/>
+      <property name="Sheetfile" value="audio-power.kicad_sch"/>
+      <property name="ki_keywords" value="L ferrite bead inductor filter"/>
+      <property name="ki_fp_filters" value="Inductor_* L_* *Ferrite*"/>
+      <sheetpath names="/音频电源与去耦/" tstamps="/10ee17e6-ac08-5740-b9b9-0ee6306fddc3/"/>
+      <tstamps>0e575e77-4182-500b-aa0d-06a8440c4da2</tstamps>
+      <units>
+        <unit name="A">
+          <pins>
+            <pin num="1"/>
+            <pin num="2"/>
+          </pins>
+        </unit>
+      </units>
+    </comp>
+    <comp ref="FB4">
+      <value>120R@100MHz</value>
+      <footprint>Inductor_SMD:L_0603_1608Metric</footprint>
+      <fields>
+        <field name="MPN">BLM18PG121SN1D</field>
+        <field name="Source"/>
+        <field name="Footprint">Inductor_SMD:L_0603_1608Metric</field>
+        <field name="Datasheet"/>
+        <field name="Description"/>
+      </fields>
+      <libsource lib="Device" part="FerriteBead" description="Ferrite bead"/>
+      <property name="MPN" value="BLM18PG121SN1D"/>
+      <property name="Source" value=""/>
+      <property name="Sheetname" value="音频电源与去耦"/>
+      <property name="Sheetfile" value="audio-power.kicad_sch"/>
+      <property name="ki_keywords" value="L ferrite bead inductor filter"/>
+      <property name="ki_fp_filters" value="Inductor_* L_* *Ferrite*"/>
+      <sheetpath names="/音频电源与去耦/" tstamps="/10ee17e6-ac08-5740-b9b9-0ee6306fddc3/"/>
+      <tstamps>8c58e53c-b9bb-543e-9388-0ff2da84dc7f</tstamps>
+      <units>
+        <unit name="A">
+          <pins>
+            <pin num="1"/>
+            <pin num="2"/>
+          </pins>
+        </unit>
+      </units>
+    </comp>
+    <comp ref="C90">
+      <value>2.2u/10V</value>
+      <footprint>Capacitor_SMD:C_0603_1608Metric</footprint>
+      <fields>
+        <field name="MPN"/>
+        <field name="Source"/>
+        <field name="Footprint">Capacitor_SMD:C_0603_1608Metric</field>
+        <field name="Datasheet"/>
+        <field name="Description"/>
+      </fields>
+      <libsource lib="Device" part="C" description="Unpolarized capacitor"/>
+      <property name="MPN" value=""/>
+      <property name="Source" value=""/>
+      <property name="Sheetname" value="音频播放与功放"/>
+      <property name="Sheetfile" value="audio-playback.kicad_sch"/>
+      <property name="ki_keywords" value="cap capacitor"/>
+      <property name="ki_fp_filters" value="C_*"/>
+      <sheetpath names="/音频播放与功放/" tstamps="/c7630ae3-21ec-5452-b8e7-5a6f48916d73/"/>
+      <tstamps>5e4a22fa-052b-5d5d-9cbc-01b3b4f58f01</tstamps>
+      <units>
+        <unit name="A">
+          <pins>
+            <pin num="1"/>
+            <pin num="2"/>
+          </pins>
+        </unit>
+      </units>
+    </comp>
+    <comp ref="C91">
+      <value>2.2u/10V</value>
+      <footprint>Capacitor_SMD:C_0603_1608Metric</footprint>
+      <fields>
+        <field name="MPN"/>
+        <field name="Source"/>
+        <field name="Footprint">Capacitor_SMD:C_0603_1608Metric</field>
+        <field name="Datasheet"/>
+        <field name="Description"/>
+      </fields>
+      <libsource lib="Device" part="C" description="Unpolarized capacitor"/>
+      <property name="MPN" value=""/>
+      <property name="Source" value=""/>
+      <property name="Sheetname" value="音频播放与功放"/>
+      <property name="Sheetfile" value="audio-playback.kicad_sch"/>
+      <property name="ki_keywords" value="cap capacitor"/>
+      <property name="ki_fp_filters" value="C_*"/>
+      <sheetpath names="/音频播放与功放/" tstamps="/c7630ae3-21ec-5452-b8e7-5a6f48916d73/"/>
+      <tstamps>9a70ae90-cda9-59ff-8ca2-b08840313d5e</tstamps>
+      <units>
+        <unit name="A">
+          <pins>
+            <pin num="1"/>
+            <pin num="2"/>
+          </pins>
+        </unit>
+      </units>
+    </comp>
+    <comp ref="C92">
+      <value>2.2u/10V</value>
+      <footprint>Capacitor_SMD:C_0603_1608Metric</footprint>
+      <fields>
+        <field name="MPN"/>
+        <field name="Source"/>
+        <field name="Footprint">Capacitor_SMD:C_0603_1608Metric</field>
+        <field name="Datasheet"/>
+        <field name="Description"/>
+      </fields>
+      <libsource lib="Device" part="C" description="Unpolarized capacitor"/>
+      <property name="MPN" value=""/>
+      <property name="Source" value=""/>
+      <property name="Sheetname" value="音频播放与功放"/>
+      <property name="Sheetfile" value="audio-playback.kicad_sch"/>
+      <property name="ki_keywords" value="cap capacitor"/>
+      <property name="ki_fp_filters" value="C_*"/>
+      <sheetpath names="/音频播放与功放/" tstamps="/c7630ae3-21ec-5452-b8e7-5a6f48916d73/"/>
+      <tstamps>2af0a22a-ae79-594b-aa09-0fe51748103f</tstamps>
+      <units>
+        <unit name="A">
+          <pins>
+            <pin num="1"/>
+            <pin num="2"/>
+          </pins>
+        </unit>
+      </units>
+    </comp>
+    <comp ref="C93">
+      <value>2.2u/10V</value>
+      <footprint>Capacitor_SMD:C_0603_1608Metric</footprint>
+      <fields>
+        <field name="MPN"/>
+        <field name="Source"/>
+        <field name="Footprint">Capacitor_SMD:C_0603_1608Metric</field>
+        <field name="Datasheet"/>
+        <field name="Description"/>
+      </fields>
+      <libsource lib="Device" part="C" description="Unpolarized capacitor"/>
+      <property name="MPN" value=""/>
+      <property name="Source" value=""/>
+      <property name="Sheetname" value="音频播放与功放"/>
+      <property name="Sheetfile" value="audio-playback.kicad_sch"/>
+      <property name="ki_keywords" value="cap capacitor"/>
+      <property name="ki_fp_filters" value="C_*"/>
+      <sheetpath names="/音频播放与功放/" tstamps="/c7630ae3-21ec-5452-b8e7-5a6f48916d73/"/>
+      <tstamps>74b0d163-7320-5039-a687-c5f6b515d675</tstamps>
+      <units>
+        <unit name="A">
+          <pins>
+            <pin num="1"/>
+            <pin num="2"/>
+          </pins>
+        </unit>
+      </units>
+    </comp>
+    <comp ref="C94">
+      <value>2.2u/10V</value>
+      <footprint>Capacitor_SMD:C_0603_1608Metric</footprint>
+      <fields>
+        <field name="MPN"/>
+        <field name="Source"/>
+        <field name="Footprint">Capacitor_SMD:C_0603_1608Metric</field>
+        <field name="Datasheet"/>
+        <field name="Description"/>
+      </fields>
+      <libsource lib="Device" part="C" description="Unpolarized capacitor"/>
+      <property name="MPN" value=""/>
+      <property name="Source" value=""/>
+      <property name="Sheetname" value="音频播放与功放"/>
+      <property name="Sheetfile" value="audio-playback.kicad_sch"/>
+      <property name="ki_keywords" value="cap capacitor"/>
+      <property name="ki_fp_filters" value="C_*"/>
+      <sheetpath names="/音频播放与功放/" tstamps="/c7630ae3-21ec-5452-b8e7-5a6f48916d73/"/>
+      <tstamps>86b4561c-3720-596c-b05c-1f0751e614e2</tstamps>
+      <units>
+        <unit name="A">
+          <pins>
+            <pin num="1"/>
+            <pin num="2"/>
+          </pins>
+        </unit>
+      </units>
+    </comp>
+    <comp ref="C95">
+      <value>1u/10V</value>
+      <footprint>Capacitor_SMD:C_0603_1608Metric</footprint>
+      <fields>
+        <field name="MPN"/>
+        <field name="Source"/>
+        <field name="Footprint">Capacitor_SMD:C_0603_1608Metric</field>
+        <field name="Datasheet"/>
+        <field name="Description"/>
+      </fields>
+      <libsource lib="Device" part="C" description="Unpolarized capacitor"/>
+      <property name="MPN" value=""/>
+      <property name="Source" value=""/>
+      <property name="Sheetname" value="音频播放与功放"/>
+      <property name="Sheetfile" value="audio-playback.kicad_sch"/>
+      <property name="ki_keywords" value="cap capacitor"/>
+      <property name="ki_fp_filters" value="C_*"/>
+      <sheetpath names="/音频播放与功放/" tstamps="/c7630ae3-21ec-5452-b8e7-5a6f48916d73/"/>
+      <tstamps>544aa838-b33c-5b43-8e3d-2e8ae189ea01</tstamps>
+      <units>
+        <unit name="A">
+          <pins>
+            <pin num="1"/>
+            <pin num="2"/>
+          </pins>
+        </unit>
+      </units>
+    </comp>
+    <comp ref="C96">
+      <value>10u/10V</value>
+      <footprint>Capacitor_SMD:C_0805_2012Metric</footprint>
+      <fields>
+        <field name="MPN"/>
+        <field name="Source"/>
+        <field name="Footprint">Capacitor_SMD:C_0805_2012Metric</field>
+        <field name="Datasheet"/>
+        <field name="Description"/>
+      </fields>
+      <libsource lib="Device" part="C" description="Unpolarized capacitor"/>
+      <property name="MPN" value=""/>
+      <property name="Source" value=""/>
+      <property name="Sheetname" value="音频播放与功放"/>
+      <property name="Sheetfile" value="audio-playback.kicad_sch"/>
+      <property name="ki_keywords" value="cap capacitor"/>
+      <property name="ki_fp_filters" value="C_*"/>
+      <sheetpath names="/音频播放与功放/" tstamps="/c7630ae3-21ec-5452-b8e7-5a6f48916d73/"/>
+      <tstamps>61a1ec14-17cb-5734-9be0-1b1d0a37e445</tstamps>
+      <units>
+        <unit name="A">
+          <pins>
+            <pin num="1"/>
+            <pin num="2"/>
+          </pins>
+        </unit>
+      </units>
+    </comp>
+    <comp ref="C97">
+      <value>100n/16V</value>
+      <footprint>Capacitor_SMD:C_0603_1608Metric</footprint>
+      <fields>
+        <field name="MPN"/>
+        <field name="Source"/>
+        <field name="Footprint">Capacitor_SMD:C_0603_1608Metric</field>
+        <field name="Datasheet"/>
+        <field name="Description"/>
+      </fields>
+      <libsource lib="Device" part="C" description="Unpolarized capacitor"/>
+      <property name="MPN" value=""/>
+      <property name="Source" value=""/>
+      <property name="Sheetname" value="音频播放与功放"/>
+      <property name="Sheetfile" value="audio-playback.kicad_sch"/>
+      <property name="ki_keywords" value="cap capacitor"/>
+      <property name="ki_fp_filters" value="C_*"/>
+      <sheetpath names="/音频播放与功放/" tstamps="/c7630ae3-21ec-5452-b8e7-5a6f48916d73/"/>
+      <tstamps>d490108a-0661-5276-99be-9642942eadf2</tstamps>
+      <units>
+        <unit name="A">
+          <pins>
+            <pin num="1"/>
+            <pin num="2"/>
+          </pins>
+        </unit>
+      </units>
+    </comp>
+    <comp ref="FB5">
+      <value>120R@100MHz</value>
+      <footprint>Inductor_SMD:L_0603_1608Metric</footprint>
+      <fields>
+        <field name="MPN">BLM18PG121SN1D</field>
+        <field name="Source"/>
+        <field name="Footprint">Inductor_SMD:L_0603_1608Metric</field>
+        <field name="Datasheet"/>
+        <field name="Description"/>
+      </fields>
+      <libsource lib="Device" part="FerriteBead" description="Ferrite bead"/>
+      <property name="MPN" value="BLM18PG121SN1D"/>
+      <property name="Source" value=""/>
+      <property name="Sheetname" value="音频播放与功放"/>
+      <property name="Sheetfile" value="audio-playback.kicad_sch"/>
+      <property name="ki_keywords" value="L ferrite bead inductor filter"/>
+      <property name="ki_fp_filters" value="Inductor_* L_* *Ferrite*"/>
+      <sheetpath names="/音频播放与功放/" tstamps="/c7630ae3-21ec-5452-b8e7-5a6f48916d73/"/>
+      <tstamps>1fe0ac91-6923-52e0-8cea-64b94f13a1cc</tstamps>
+      <units>
+        <unit name="A">
+          <pins>
+            <pin num="1"/>
+            <pin num="2"/>
+          </pins>
+        </unit>
+      </units>
+    </comp>
+    <comp ref="J3">
+      <value>扬声器 4R/2W</value>
+      <footprint>Connector_JST:JST_PH_B2B-PH-K_1x02_P2.00mm_Vertical</footprint>
+      <fields>
+        <field name="MPN">B2B-PH-K-S</field>
+        <field name="Source"/>
+        <field name="Footprint">Connector_JST:JST_PH_B2B-PH-K_1x02_P2.00mm_Vertical</field>
+        <field name="Datasheet"/>
+        <field name="Description"/>
+      </fields>
+      <libsource lib="Connector_Generic" part="Conn_01x02" description="Generic connector, single row, 01x02, script generated (kicad-library-utils/schlib/autogen/connector/)"/>
+      <property name="MPN" value="B2B-PH-K-S"/>
+      <property name="Source" value=""/>
+      <property name="Sheetname" value="音频播放与功放"/>
+      <property name="Sheetfile" value="audio-playback.kicad_sch"/>
+      <property name="ki_keywords" value="connector"/>
+      <property name="ki_fp_filters" value="Connector*:*_1x??_*"/>
+      <sheetpath names="/音频播放与功放/" tstamps="/c7630ae3-21ec-5452-b8e7-5a6f48916d73/"/>
+      <tstamps>1037e243-31e2-5812-8be7-6f66d79de226</tstamps>
+      <units>
+        <unit name="A">
+          <pins>
+            <pin num="1"/>
+            <pin num="2"/>
+          </pins>
+        </unit>
+      </units>
+    </comp>
+    <comp ref="R61">
+      <value>30k</value>
+      <footprint>Resistor_SMD:R_0603_1608Metric</footprint>
+      <fields>
+        <field name="MPN"/>
+        <field name="Source"/>
+        <field name="Footprint">Resistor_SMD:R_0603_1608Metric</field>
+        <field name="Datasheet"/>
+        <field name="Description"/>
+      </fields>
+      <libsource lib="Device" part="R" description="Resistor"/>
+      <property name="MPN" value=""/>
+      <property name="Source" value=""/>
+      <property name="Sheetname" value="音频播放与功放"/>
+      <property name="Sheetfile" value="audio-playback.kicad_sch"/>
+      <property name="ki_keywords" value="R res resistor"/>
+      <property name="ki_fp_filters" value="R_*"/>
+      <sheetpath names="/音频播放与功放/" tstamps="/c7630ae3-21ec-5452-b8e7-5a6f48916d73/"/>
+      <tstamps>9f443cd4-0a61-55e1-820e-0f0578ee4cf3</tstamps>
+      <units>
+        <unit name="A">
+          <pins>
+            <pin num="1"/>
+            <pin num="2"/>
+          </pins>
+        </unit>
+      </units>
+    </comp>
+    <comp ref="R62">
+      <value>30k</value>
+      <footprint>Resistor_SMD:R_0603_1608Metric</footprint>
+      <fields>
+        <field name="MPN"/>
+        <field name="Source"/>
+        <field name="Footprint">Resistor_SMD:R_0603_1608Metric</field>
+        <field name="Datasheet"/>
+        <field name="Description"/>
+      </fields>
+      <libsource lib="Device" part="R" description="Resistor"/>
+      <property name="MPN" value=""/>
+      <property name="Source" value=""/>
+      <property name="Sheetname" value="音频播放与功放"/>
+      <property name="Sheetfile" value="audio-playback.kicad_sch"/>
+      <property name="ki_keywords" value="R res resistor"/>
+      <property name="ki_fp_filters" value="R_*"/>
+      <sheetpath names="/音频播放与功放/" tstamps="/c7630ae3-21ec-5452-b8e7-5a6f48916d73/"/>
+      <tstamps>0aacddfe-35f2-5eb3-a946-766fa21686ab</tstamps>
+      <units>
+        <unit name="A">
+          <pins>
+            <pin num="1"/>
+            <pin num="2"/>
+          </pins>
+        </unit>
+      </units>
+    </comp>
+    <comp ref="R63">
+      <value>100k</value>
+      <footprint>Resistor_SMD:R_0603_1608Metric</footprint>
+      <fields>
+        <field name="MPN"/>
+        <field name="Source"/>
+        <field name="Footprint">Resistor_SMD:R_0603_1608Metric</field>
+        <field name="Datasheet"/>
+        <field name="Description"/>
+      </fields>
+      <libsource lib="Device" part="R" description="Resistor"/>
+      <property name="MPN" value=""/>
+      <property name="Source" value=""/>
+      <property name="Sheetname" value="音频播放与功放"/>
+      <property name="Sheetfile" value="audio-playback.kicad_sch"/>
+      <property name="ki_keywords" value="R res resistor"/>
+      <property name="ki_fp_filters" value="R_*"/>
+      <sheetpath names="/音频播放与功放/" tstamps="/c7630ae3-21ec-5452-b8e7-5a6f48916d73/"/>
+      <tstamps>d21bf22e-76eb-504a-8ae2-3a80039806d1</tstamps>
+      <units>
+        <unit name="A">
+          <pins>
+            <pin num="1"/>
+            <pin num="2"/>
+          </pins>
+        </unit>
+      </units>
+    </comp>
+    <comp ref="U6">
+      <value>ES8311</value>
+      <footprint>Package_DFN_QFN:VQFN-20-1EP_3x3mm_P0.4mm_EP1.7x1.7mm</footprint>
+      <fields>
+        <field name="MPN">ES8311</field>
+        <field name="Source">ES8311 Rev5 / audio-component-evidence.md</field>
+        <field name="Footprint">Package_DFN_QFN:VQFN-20-1EP_3x3mm_P0.4mm_EP1.7x1.7mm</field>
+        <field name="Datasheet"/>
+        <field name="Description"/>
+      </fields>
+      <libsource lib="VB" part="ES8311" description=""/>
+      <property name="MPN" value="ES8311"/>
+      <property name="Source" value="ES8311 Rev5 / audio-component-evidence.md"/>
+      <property name="Sheetname" value="音频播放与功放"/>
+      <property name="Sheetfile" value="audio-playback.kicad_sch"/>
+      <sheetpath names="/音频播放与功放/" tstamps="/c7630ae3-21ec-5452-b8e7-5a6f48916d73/"/>
+      <tstamps>df1af311-7f7c-5dfc-bb2b-459dd2da5d5c</tstamps>
+      <units>
+        <unit name="A">
+          <pins>
+            <pin num="1"/>
+            <pin num="2"/>
+            <pin num="3"/>
+            <pin num="4"/>
+            <pin num="5"/>
+            <pin num="6"/>
+            <pin num="7"/>
+            <pin num="8"/>
+            <pin num="9"/>
+            <pin num="10"/>
+            <pin num="11"/>
+            <pin num="12"/>
+            <pin num="13"/>
+            <pin num="14"/>
+            <pin num="15"/>
+            <pin num="16"/>
+            <pin num="17"/>
+            <pin num="18"/>
+            <pin num="19"/>
+            <pin num="20"/>
+            <pin num="21"/>
+          </pins>
+        </unit>
+      </units>
+    </comp>
+    <comp ref="U7">
+      <value>NS4150B</value>
+      <footprint>Package_SO:MSOP-8_3x3mm_P0.65mm</footprint>
+      <fields>
+        <field name="MPN">NS4150B</field>
+        <field name="Source">NS4150B March2021 V1.1</field>
+        <field name="Footprint">Package_SO:MSOP-8_3x3mm_P0.65mm</field>
+        <field name="Datasheet"/>
+        <field name="Description"/>
+      </fields>
+      <libsource lib="VB" part="NS4150B" description=""/>
+      <property name="MPN" value="NS4150B"/>
+      <property name="Source" value="NS4150B March2021 V1.1"/>
+      <property name="Sheetname" value="音频播放与功放"/>
+      <property name="Sheetfile" value="audio-playback.kicad_sch"/>
+      <sheetpath names="/音频播放与功放/" tstamps="/c7630ae3-21ec-5452-b8e7-5a6f48916d73/"/>
+      <tstamps>11083a5e-16fa-5ea7-b3bb-adb2262d8d62</tstamps>
+      <units>
+        <unit name="A">
+          <pins>
+            <pin num="1"/>
+            <pin num="2"/>
+            <pin num="3"/>
+            <pin num="4"/>
+            <pin num="5"/>
+            <pin num="6"/>
+            <pin num="7"/>
+            <pin num="8"/>
+          </pins>
+        </unit>
+      </units>
+    </comp>
+  </components>
+  <libparts>
+    <libpart lib="Connector" part="TestPoint">
+      <description>test point</description>
+      <footprints>
+        <fp>Pin*</fp>
+        <fp>Test*</fp>
+      </footprints>
+      <fields>
+        <field name="Reference">TP</field>
+        <field name="Value">TestPoint</field>
+        <field name="Footprint"/>
+        <field name="Datasheet"/>
+        <field name="Description">test point</field>
+      </fields>
+      <pins>
+        <pin num="1" name="1" type="passive"/>
+      </pins>
+    </libpart>
+    <libpart lib="Connector" part="USB_C_Receptacle_USB2.0_16P">
+      <description>USB 2.0-only 16P Type-C Receptacle connector</description>
+      <docs>https://www.usb.org/sites/default/files/documents/usb_type-c.zip</docs>
+      <footprints>
+        <fp>USB*C*Receptacle*</fp>
+      </footprints>
+      <fields>
+        <field name="Reference">J</field>
+        <field name="Value">USB_C_Receptacle_USB2.0_16P</field>
+        <field name="Footprint"/>
+        <field name="Datasheet">https://www.usb.org/sites/default/files/documents/usb_type-c.zip</field>
+        <field name="Description">USB 2.0-only 16P Type-C Receptacle connector</field>
+      </fields>
+      <pins>
+        <pin num="A1" name="GND" type="passive"/>
+        <pin num="A4" name="VBUS" type="passive"/>
+        <pin num="A5" name="CC1" type="bidirectional"/>
+        <pin num="A6" name="D+" type="bidirectional"/>
+        <pin num="A7" name="D-" type="bidirectional"/>
+        <pin num="A8" name="SBU1" type="bidirectional"/>
+        <pin num="A9" name="VBUS" type="passive"/>
+        <pin num="A12" name="GND" type="passive"/>
+        <pin num="B1" name="GND" type="passive"/>
+        <pin num="B4" name="VBUS" type="passive"/>
+        <pin num="B5" name="CC2" type="bidirectional"/>
+        <pin num="B6" name="D+" type="bidirectional"/>
+        <pin num="B7" name="D-" type="bidirectional"/>
+        <pin num="B8" name="SBU2" type="bidirectional"/>
+        <pin num="B9" name="VBUS" type="passive"/>
+        <pin num="B12" name="GND" type="passive"/>
+        <pin num="SH" name="SHIELD" type="passive"/>
+      </pins>
+    </libpart>
+    <libpart lib="Connector_Generic" part="Conn_01x02">
+      <description>Generic connector, single row, 01x02, script generated (kicad-library-utils/schlib/autogen/connector/)</description>
+      <footprints>
+        <fp>Connector*:*_1x??_*</fp>
+      </footprints>
+      <fields>
+        <field name="Reference">J</field>
+        <field name="Value">Conn_01x02</field>
+        <field name="Footprint"/>
+        <field name="Datasheet"/>
+        <field name="Description">Generic connector, single row, 01x02, script generated (kicad-library-utils/schlib/autogen/connector/)</field>
+      </fields>
+      <pins>
+        <pin num="1" name="Pin_1" type="passive"/>
+        <pin num="2" name="Pin_2" type="passive"/>
+      </pins>
+    </libpart>
+    <libpart lib="Connector_Generic" part="Conn_01x30">
+      <description>Generic connector, single row, 01x30, script generated (kicad-library-utils/schlib/autogen/connector/)</description>
+      <footprints>
+        <fp>Connector*:*_1x??_*</fp>
+      </footprints>
+      <fields>
+        <field name="Reference">J</field>
+        <field name="Value">Conn_01x30</field>
+        <field name="Footprint"/>
+        <field name="Datasheet"/>
+        <field name="Description">Generic connector, single row, 01x30, script generated (kicad-library-utils/schlib/autogen/connector/)</field>
+      </fields>
+      <pins>
+        <pin num="1" name="Pin_1" type="passive"/>
+        <pin num="2" name="Pin_2" type="passive"/>
+        <pin num="3" name="Pin_3" type="passive"/>
+        <pin num="4" name="Pin_4" type="passive"/>
+        <pin num="5" name="Pin_5" type="passive"/>
+        <pin num="6" name="Pin_6" type="passive"/>
+        <pin num="7" name="Pin_7" type="passive"/>
+        <pin num="8" name="Pin_8" type="passive"/>
+        <pin num="9" name="Pin_9" type="passive"/>
+        <pin num="10" name="Pin_10" type="passive"/>
+        <pin num="11" name="Pin_11" type="passive"/>
+        <pin num="12" name="Pin_12" type="passive"/>
+        <pin num="13" name="Pin_13" type="passive"/>
+        <pin num="14" name="Pin_14" type="passive"/>
+        <pin num="15" name="Pin_15" type="passive"/>
+        <pin num="16" name="Pin_16" type="passive"/>
+        <pin num="17" name="Pin_17" type="passive"/>
+        <pin num="18" name="Pin_18" type="passive"/>
+        <pin num="19" name="Pin_19" type="passive"/>
+        <pin num="20" name="Pin_20" type="passive"/>
+        <pin num="21" name="Pin_21" type="passive"/>
+        <pin num="22" name="Pin_22" type="passive"/>
+        <pin num="23" name="Pin_23" type="passive"/>
+        <pin num="24" name="Pin_24" type="passive"/>
+        <pin num="25" name="Pin_25" type="passive"/>
+        <pin num="26" name="Pin_26" type="passive"/>
+        <pin num="27" name="Pin_27" type="passive"/>
+        <pin num="28" name="Pin_28" type="passive"/>
+        <pin num="29" name="Pin_29" type="passive"/>
+        <pin num="30" name="Pin_30" type="passive"/>
+      </pins>
+    </libpart>
+    <libpart lib="Device" part="C">
+      <description>Unpolarized capacitor</description>
+      <footprints>
+        <fp>C_*</fp>
+      </footprints>
+      <fields>
+        <field name="Reference">C</field>
+        <field name="Value">C</field>
+        <field name="Footprint"/>
+        <field name="Datasheet"/>
+        <field name="Description">Unpolarized capacitor</field>
+      </fields>
+      <pins>
+        <pin num="1" name="" type="passive"/>
+        <pin num="2" name="" type="passive"/>
+      </pins>
+    </libpart>
+    <libpart lib="Device" part="FerriteBead">
+      <description>Ferrite bead</description>
+      <footprints>
+        <fp>Inductor_*</fp>
+        <fp>L_*</fp>
+        <fp>*Ferrite*</fp>
+      </footprints>
+      <fields>
+        <field name="Reference">FB</field>
+        <field name="Value">FerriteBead</field>
+        <field name="Footprint"/>
+        <field name="Datasheet"/>
+        <field name="Description">Ferrite bead</field>
+      </fields>
+      <pins>
+        <pin num="1" name="" type="passive"/>
+        <pin num="2" name="" type="passive"/>
+      </pins>
+    </libpart>
+    <libpart lib="Device" part="L">
+      <description>Inductor</description>
+      <footprints>
+        <fp>Choke_*</fp>
+        <fp>*Coil*</fp>
+        <fp>Inductor_*</fp>
+        <fp>L_*</fp>
+      </footprints>
+      <fields>
+        <field name="Reference">L</field>
+        <field name="Value">L</field>
+        <field name="Footprint"/>
+        <field name="Datasheet"/>
+        <field name="Description">Inductor</field>
+      </fields>
+      <pins>
+        <pin num="1" name="1" type="passive"/>
+        <pin num="2" name="2" type="passive"/>
+      </pins>
+    </libpart>
+    <libpart lib="Device" part="R">
+      <description>Resistor</description>
+      <footprints>
+        <fp>R_*</fp>
+      </footprints>
+      <fields>
+        <field name="Reference">R</field>
+        <field name="Value">R</field>
+        <field name="Footprint"/>
+        <field name="Datasheet"/>
+        <field name="Description">Resistor</field>
+      </fields>
+      <pins>
+        <pin num="1" name="" type="passive"/>
+        <pin num="2" name="" type="passive"/>
+      </pins>
+    </libpart>
+    <libpart lib="Power_Protection" part="USBLC6-2SC6">
+      <description>Very low capacitance ESD protection diode, 2 data-line, SOT-23-6</description>
+      <docs>https://www.st.com/resource/en/datasheet/usblc6-2.pdf</docs>
+      <footprints>
+        <fp>SOT?23*</fp>
+      </footprints>
+      <fields>
+        <field name="Reference">U</field>
+        <field name="Value">USBLC6-2SC6</field>
+        <field name="Footprint">Package_TO_SOT_SMD:SOT-23-6</field>
+        <field name="Datasheet">https://www.st.com/resource/en/datasheet/usblc6-2.pdf</field>
+        <field name="Description">Very low capacitance ESD protection diode, 2 data-line, SOT-23-6</field>
+      </fields>
+      <pins>
+        <pin num="1" name="I/O1" type="passive"/>
+        <pin num="2" name="GND" type="passive"/>
+        <pin num="3" name="I/O2" type="passive"/>
+        <pin num="4" name="I/O2" type="passive"/>
+        <pin num="5" name="VBUS" type="passive"/>
+        <pin num="6" name="I/O1" type="passive"/>
+      </pins>
+    </libpart>
+    <libpart lib="RF_Module" part="ESP32-S3-WROOM-1">
+      <description>RF Module, ESP32-S3 SoC, Wi-Fi 802.11b/g/n, Bluetooth, BLE, 32-bit, 3.3V, onboard antenna, SMD</description>
+      <docs>https://www.espressif.com/sites/default/files/documentation/esp32-s3-wroom-1_wroom-1u_datasheet_en.pdf</docs>
+      <footprints>
+        <fp>ESP32?S3?WROOM?1*</fp>
+      </footprints>
+      <fields>
+        <field name="Reference">U</field>
+        <field name="Value">ESP32-S3-WROOM-1</field>
+        <field name="Footprint">RF_Module:ESP32-S3-WROOM-1</field>
+        <field name="Datasheet">https://www.espressif.com/sites/default/files/documentation/esp32-s3-wroom-1_wroom-1u_datasheet_en.pdf</field>
+        <field name="Description">RF Module, ESP32-S3 SoC, Wi-Fi 802.11b/g/n, Bluetooth, BLE, 32-bit, 3.3V, onboard antenna, SMD</field>
+      </fields>
+      <pins>
+        <pin num="1" name="GND" type="power_in"/>
+        <pin num="2" name="3V3" type="power_in"/>
+        <pin num="3" name="EN" type="input"/>
+        <pin num="4" name="IO4" type="bidirectional"/>
+        <pin num="5" name="IO5" type="bidirectional"/>
+        <pin num="6" name="IO6" type="bidirectional"/>
+        <pin num="7" name="IO7" type="bidirectional"/>
+        <pin num="8" name="IO15" type="bidirectional"/>
+        <pin num="9" name="IO16" type="bidirectional"/>
+        <pin num="10" name="IO17" type="bidirectional"/>
+        <pin num="11" name="IO18" type="bidirectional"/>
+        <pin num="12" name="IO8" type="bidirectional"/>
+        <pin num="13" name="USB_D-" type="bidirectional"/>
+        <pin num="14" name="USB_D+" type="bidirectional"/>
+        <pin num="15" name="IO3" type="bidirectional"/>
+        <pin num="16" name="IO46" type="bidirectional"/>
+        <pin num="17" name="IO9" type="bidirectional"/>
+        <pin num="18" name="IO10" type="bidirectional"/>
+        <pin num="19" name="IO11" type="bidirectional"/>
+        <pin num="20" name="IO12" type="bidirectional"/>
+        <pin num="21" name="IO13" type="bidirectional"/>
+        <pin num="22" name="IO14" type="bidirectional"/>
+        <pin num="23" name="IO21" type="bidirectional"/>
+        <pin num="24" name="IO47" type="bidirectional"/>
+        <pin num="25" name="IO48" type="bidirectional"/>
+        <pin num="26" name="IO45" type="bidirectional"/>
+        <pin num="27" name="IO0" type="bidirectional"/>
+        <pin num="28" name="IO35" type="bidirectional"/>
+        <pin num="29" name="IO36" type="bidirectional"/>
+        <pin num="30" name="IO37" type="bidirectional"/>
+        <pin num="31" name="IO38" type="bidirectional"/>
+        <pin num="32" name="IO39" type="bidirectional"/>
+        <pin num="33" name="IO40" type="bidirectional"/>
+        <pin num="34" name="IO41" type="bidirectional"/>
+        <pin num="35" name="IO42" type="bidirectional"/>
+        <pin num="36" name="RXD0" type="bidirectional"/>
+        <pin num="37" name="TXD0" type="bidirectional"/>
+        <pin num="38" name="IO2" type="bidirectional"/>
+        <pin num="39" name="IO1" type="bidirectional"/>
+        <pin num="40" name="GND" type="passive"/>
+        <pin num="41" name="GND" type="passive"/>
+      </pins>
+    </libpart>
+    <libpart lib="Regulator_Linear" part="AP2112K-3.3">
+      <description>600mA low dropout linear regulator, with enable pin, 3.8V-6V input voltage range, 3.3V fixed positive output, SOT-23-5</description>
+      <docs>https://www.diodes.com/assets/Datasheets/AP2112.pdf</docs>
+      <footprints>
+        <fp>SOT?23?5*</fp>
+      </footprints>
+      <fields>
+        <field name="Reference">U</field>
+        <field name="Value">AP2112K-3.3</field>
+        <field name="Footprint">Package_TO_SOT_SMD:SOT-23-5</field>
+        <field name="Datasheet">https://www.diodes.com/assets/Datasheets/AP2112.pdf</field>
+        <field name="Description">600mA low dropout linear regulator, with enable pin, 3.8V-6V input voltage range, 3.3V fixed positive output, SOT-23-5</field>
+      </fields>
+      <pins>
+        <pin num="1" name="VIN" type="power_in"/>
+        <pin num="2" name="GND" type="power_in"/>
+        <pin num="3" name="EN" type="input"/>
+        <pin num="4" name="NC" type="no_connect"/>
+        <pin num="5" name="VOUT" type="power_out"/>
+      </pins>
+    </libpart>
+    <libpart lib="Regulator_Switching" part="AP63203WU">
+      <description>2A, 1.1MHz Buck DC/DC Converter, fixed 3.3V output voltage, TSOT-23-6</description>
+      <docs>https://www.diodes.com/assets/Datasheets/AP63200-AP63201-AP63203-AP63205.pdf</docs>
+      <footprints>
+        <fp>TSOT?23*</fp>
+      </footprints>
+      <fields>
+        <field name="Reference">U</field>
+        <field name="Value">AP63203WU</field>
+        <field name="Footprint">Package_TO_SOT_SMD:TSOT-23-6</field>
+        <field name="Datasheet">https://www.diodes.com/assets/Datasheets/AP63200-AP63201-AP63203-AP63205.pdf</field>
+        <field name="Description">2A, 1.1MHz Buck DC/DC Converter, fixed 3.3V output voltage, TSOT-23-6</field>
+      </fields>
+      <pins>
+        <pin num="1" name="FB" type="input"/>
+        <pin num="2" name="EN" type="input"/>
+        <pin num="3" name="IN" type="power_in"/>
+        <pin num="4" name="GND" type="power_in"/>
+        <pin num="5" name="SW" type="output"/>
+        <pin num="6" name="BST" type="passive"/>
+      </pins>
+    </libpart>
+    <libpart lib="Switch" part="SW_Push">
+      <description>Push button switch, generic, two pins</description>
+      <fields>
+        <field name="Reference">SW</field>
+        <field name="Value">SW_Push</field>
+        <field name="Footprint"/>
+        <field name="Datasheet"/>
+        <field name="Description">Push button switch, generic, two pins</field>
+      </fields>
+      <pins>
+        <pin num="1" name="1" type="passive"/>
+        <pin num="2" name="2" type="passive"/>
+      </pins>
+    </libpart>
+    <libpart lib="Transistor_BJT" part="MMBT3906">
+      <description>-0.2A Ic, -40V Vce, Small Signal PNP Transistor, SOT-23</description>
+      <docs>https://www.onsemi.com/pdf/datasheet/pzt3906-d.pdf</docs>
+      <footprints>
+        <fp>SOT?23*</fp>
+      </footprints>
+      <fields>
+        <field name="Reference">Q</field>
+        <field name="Value">MMBT3906</field>
+        <field name="Footprint">Package_TO_SOT_SMD:SOT-23</field>
+        <field name="Datasheet">https://www.onsemi.com/pdf/datasheet/pzt3906-d.pdf</field>
+        <field name="Description">-0.2A Ic, -40V Vce, Small Signal PNP Transistor, SOT-23</field>
+        <field name="Sim.Device">PNP</field>
+        <field name="Sim.Pins">1=B 2=E 3=C</field>
+      </fields>
+      <pins>
+        <pin num="1" name="B" type="input"/>
+        <pin num="2" name="E" type="passive"/>
+        <pin num="3" name="C" type="passive"/>
+      </pins>
+    </libpart>
+    <libpart lib="VB" part="CMC-4015-40P">
+      <fields>
+        <field name="Reference">U</field>
+        <field name="Value">CMC-4015-40P</field>
+        <field name="Footprint"/>
+        <field name="Datasheet"/>
+        <field name="Description"/>
+      </fields>
+      <pins>
+        <pin num="1" name="MIC+" type="passive"/>
+        <pin num="2" name="CASE/MIC-" type="passive"/>
+      </pins>
+    </libpart>
+    <libpart lib="VB" part="ES7210">
+      <fields>
+        <field name="Reference">U</field>
+        <field name="Value">ES7210</field>
+        <field name="Footprint"/>
+        <field name="Datasheet"/>
+        <field name="Description"/>
+      </fields>
+      <pins>
+        <pin num="1" name="AD0" type="input"/>
+        <pin num="2" name="AD1" type="input"/>
+        <pin num="3" name="CDATA" type="bidirectional"/>
+        <pin num="4" name="CCLK" type="input"/>
+        <pin num="5" name="MCLK" type="input"/>
+        <pin num="6" name="VDDP" type="power_in"/>
+        <pin num="7" name="VDDD" type="power_in"/>
+        <pin num="8" name="GNDD" type="power_in"/>
+        <pin num="9" name="SCLK" type="input"/>
+        <pin num="10" name="LRCK" type="input"/>
+        <pin num="11" name="SDOUT1" type="output"/>
+        <pin num="12" name="SDOUT2" type="output"/>
+        <pin num="13" name="INT" type="output"/>
+        <pin num="14" name="DMIC_CLK" type="output"/>
+        <pin num="15" name="MIC1N" type="input"/>
+        <pin num="16" name="MIC1P" type="input"/>
+        <pin num="17" name="REFP12" type="input"/>
+        <pin num="18" name="REFQ12" type="input"/>
+        <pin num="19" name="MIC2P" type="input"/>
+        <pin num="20" name="MIC2N" type="input"/>
+        <pin num="21" name="GNDA" type="power_in"/>
+        <pin num="22" name="VDDA" type="power_in"/>
+        <pin num="23" name="VDDM" type="power_in"/>
+        <pin num="24" name="MICBIAS12" type="output"/>
+        <pin num="25" name="REFQM" type="input"/>
+        <pin num="26" name="MICBIAS34" type="output"/>
+        <pin num="27" name="MIC4N" type="input"/>
+        <pin num="28" name="MIC4P" type="input"/>
+        <pin num="29" name="REFP34" type="input"/>
+        <pin num="30" name="REFQ34" type="input"/>
+        <pin num="31" name="MIC3P" type="input"/>
+        <pin num="32" name="MIC3N" type="input"/>
+        <pin num="33" name="EP" type="power_in"/>
+      </pins>
+    </libpart>
+    <libpart lib="VB" part="ES8311">
+      <fields>
+        <field name="Reference">U</field>
+        <field name="Value">ES8311</field>
+        <field name="Footprint"/>
+        <field name="Datasheet"/>
+        <field name="Description"/>
+      </fields>
+      <pins>
+        <pin num="1" name="CCLK" type="input"/>
+        <pin num="2" name="MCLK" type="input"/>
+        <pin num="3" name="PVDD" type="power_in"/>
+        <pin num="4" name="DVDD" type="power_in"/>
+        <pin num="5" name="DGND" type="power_in"/>
+        <pin num="6" name="SCLK" type="input"/>
+        <pin num="7" name="ASDOUT" type="output"/>
+        <pin num="8" name="LRCK" type="input"/>
+        <pin num="9" name="DSDIN" type="input"/>
+        <pin num="10" name="AGND" type="power_in"/>
+        <pin num="11" name="AVDD" type="power_in"/>
+        <pin num="12" name="OUTP" type="output"/>
+        <pin num="13" name="OUTN" type="output"/>
+        <pin num="14" name="DACVREF" type="input"/>
+        <pin num="15" name="ADCVREF" type="input"/>
+        <pin num="16" name="VMID" type="input"/>
+        <pin num="17" name="MIC1N" type="input"/>
+        <pin num="18" name="MIC1P" type="input"/>
+        <pin num="19" name="CDATA" type="bidirectional"/>
+        <pin num="20" name="CE" type="input"/>
+        <pin num="21" name="EP" type="power_in"/>
+      </pins>
+    </libpart>
+    <libpart lib="VB" part="NS4150B">
+      <fields>
+        <field name="Reference">U</field>
+        <field name="Value">NS4150B</field>
+        <field name="Footprint">Package_SO:MSOP-8_3x3mm_P0.65mm</field>
+        <field name="Datasheet"/>
+        <field name="Description"/>
+      </fields>
+      <pins>
+        <pin num="1" name="CTRL" type="input"/>
+        <pin num="2" name="BYPASS" type="passive"/>
+        <pin num="3" name="INP" type="input"/>
+        <pin num="4" name="INN" type="input"/>
+        <pin num="5" name="VoN" type="output"/>
+        <pin num="6" name="VCC" type="power_in"/>
+        <pin num="7" name="GND" type="power_in"/>
+        <pin num="8" name="VoP" type="output"/>
+      </pins>
+    </libpart>
+    <libpart lib="VB" part="TPS22918">
+      <fields>
+        <field name="Reference">U</field>
+        <field name="Value">TPS22918</field>
+        <field name="Footprint">Package_TO_SOT_SMD:SOT-23-6</field>
+        <field name="Datasheet"/>
+        <field name="Description"/>
+      </fields>
+      <pins>
+        <pin num="1" name="VIN" type="power_in"/>
+        <pin num="2" name="GND" type="power_in"/>
+        <pin num="3" name="ON" type="input"/>
+        <pin num="4" name="CT" type="passive"/>
+        <pin num="5" name="QOD" type="passive"/>
+        <pin num="6" name="VOUT" type="power_out"/>
+      </pins>
+    </libpart>
+  </libparts>
+  <libraries>
+    <library logical="Connector">
+      <uri>${KICAD10_SYMBOL_DIR}/Connector.kicad_sym</uri>
+    </library>
+    <library logical="Connector_Generic">
+      <uri>${KICAD10_SYMBOL_DIR}/Connector_Generic.kicad_sym</uri>
+    </library>
+    <library logical="Device">
+      <uri>${KICAD10_SYMBOL_DIR}/Device.kicad_sym</uri>
+    </library>
+    <library logical="Power_Protection">
+      <uri>${KICAD10_SYMBOL_DIR}/Power_Protection.kicad_sym</uri>
+    </library>
+    <library logical="RF_Module">
+      <uri>${KICAD10_SYMBOL_DIR}/RF_Module.kicad_sym</uri>
+    </library>
+    <library logical="Regulator_Linear">
+      <uri>${KICAD10_SYMBOL_DIR}/Regulator_Linear.kicad_sym</uri>
+    </library>
+    <library logical="Regulator_Switching">
+      <uri>${KICAD10_SYMBOL_DIR}/Regulator_Switching.kicad_sym</uri>
+    </library>
+    <library logical="Switch">
+      <uri>${KICAD10_SYMBOL_DIR}/Switch.kicad_sym</uri>
+    </library>
+    <library logical="Transistor_BJT">
+      <uri>${KICAD10_SYMBOL_DIR}/Transistor_BJT.kicad_sym</uri>
+    </library>
+    <library logical="VB">
+      <uri>${KIPRJMOD}/VB.kicad_sym</uri>
+    </library>
+  </libraries>
+  <nets>
+    <net code="1" name="3V3" class="Default">
+      <node ref="C15" pin="1" pintype="passive"/>
+      <node ref="C16" pin="1" pintype="passive"/>
+      <node ref="C31" pin="1" pintype="passive"/>
+      <node ref="C32" pin="1" pintype="passive"/>
+      <node ref="C40" pin="1" pintype="passive"/>
+      <node ref="C41" pin="1" pintype="passive"/>
+      <node ref="FB5" pin="1" pintype="passive"/>
+      <node ref="J2" pin="4" pinfunction="Pin_4_4" pintype="passive"/>
+      <node ref="J2" pin="5" pinfunction="Pin_5_5" pintype="passive"/>
+      <node ref="J2" pin="6" pinfunction="Pin_6_6" pintype="passive"/>
+      <node ref="J2" pin="7" pinfunction="Pin_7_7" pintype="passive"/>
+      <node ref="L1" pin="2" pinfunction="2_2" pintype="passive"/>
+      <node ref="R1" pin="1" pintype="passive"/>
+      <node ref="R2" pin="1" pintype="passive"/>
+      <node ref="R3" pin="1" pintype="passive"/>
+      <node ref="R30" pin="1" pintype="passive"/>
+      <node ref="R31" pin="1" pintype="passive"/>
+      <node ref="R32" pin="1" pintype="passive"/>
+      <node ref="R33" pin="1" pintype="passive"/>
+      <node ref="R40" pin="1" pintype="passive"/>
+      <node ref="R43" pin="1" pintype="passive"/>
+      <node ref="TP6" pin="1" pinfunction="1_1" pintype="passive"/>
+      <node ref="U1" pin="2" pinfunction="3V3_2" pintype="power_in"/>
+      <node ref="U3" pin="1" pinfunction="FB_1" pintype="input"/>
+    </net>
+    <net code="2" name="A3V3" class="Default">
+      <node ref="C18" pin="1" pintype="passive"/>
+      <node ref="FB1" pin="1" pintype="passive"/>
+      <node ref="FB2" pin="1" pintype="passive"/>
+      <node ref="FB3" pin="1" pintype="passive"/>
+      <node ref="FB4" pin="1" pintype="passive"/>
+      <node ref="U4" pin="5" pinfunction="VOUT_5" pintype="power_out"/>
+    </net>
+    <net code="3" name="ADCVREF" class="Default">
+      <node ref="C91" pin="1" pintype="passive"/>
+      <node ref="U6" pin="15" pinfunction="ADCVREF_15" pintype="input"/>
+    </net>
+    <net code="4" name="ADC_A3V3" class="Default">
+      <node ref="C73" pin="1" pintype="passive"/>
+      <node ref="C74" pin="1" pintype="passive"/>
+      <node ref="C75" pin="1" pintype="passive"/>
+      <node ref="FB2" pin="2" pintype="passive"/>
+      <node ref="U5" pin="22" pinfunction="VDDA_22" pintype="power_in"/>
+      <node ref="U5" pin="23" pinfunction="VDDM_23" pintype="power_in"/>
+    </net>
+    <net code="5" name="ADC_D3V3" class="Default">
+      <node ref="C70" pin="1" pintype="passive"/>
+      <node ref="C71" pin="1" pintype="passive"/>
+      <node ref="C72" pin="1" pintype="passive"/>
+      <node ref="FB1" pin="2" pintype="passive"/>
+      <node ref="U5" pin="6" pinfunction="VDDP_6" pintype="power_in"/>
+      <node ref="U5" pin="7" pinfunction="VDDD_7" pintype="power_in"/>
+    </net>
+    <net code="6" name="A_BCLK" class="Default">
+      <node ref="R35" pin="2" pintype="passive"/>
+      <node ref="U5" pin="9" pinfunction="SCLK_9" pintype="input"/>
+      <node ref="U6" pin="6" pinfunction="SCLK_6" pintype="input"/>
+    </net>
+    <net code="7" name="A_BCLK_SRC" class="Default">
+      <node ref="R35" pin="1" pintype="passive"/>
+      <node ref="U1" pin="7" pinfunction="IO7_7" pintype="bidirectional"/>
+    </net>
+    <net code="8" name="A_DIN" class="Default">
+      <node ref="U1" pin="10" pinfunction="IO17_10" pintype="bidirectional"/>
+      <node ref="U5" pin="11" pinfunction="SDOUT1_11" pintype="output"/>
+    </net>
+    <net code="9" name="A_DOUT" class="Default">
+      <node ref="U1" pin="9" pinfunction="IO16_9" pintype="bidirectional"/>
+      <node ref="U6" pin="9" pinfunction="DSDIN_9" pintype="input"/>
+    </net>
+    <net code="10" name="A_LRCK" class="Default">
+      <node ref="R36" pin="2" pintype="passive"/>
+      <node ref="U5" pin="10" pinfunction="LRCK_10" pintype="input"/>
+      <node ref="U6" pin="8" pinfunction="LRCK_8" pintype="input"/>
+    </net>
+    <net code="11" name="A_LRCK_SRC" class="Default">
+      <node ref="R36" pin="1" pintype="passive"/>
+      <node ref="U1" pin="8" pinfunction="IO15_8" pintype="bidirectional"/>
+    </net>
+    <net code="12" name="A_MCLK" class="Default">
+      <node ref="R34" pin="2" pintype="passive"/>
+      <node ref="U5" pin="5" pinfunction="MCLK_5" pintype="input"/>
+      <node ref="U6" pin="2" pinfunction="MCLK_2" pintype="input"/>
+    </net>
+    <net code="13" name="A_MCLK_SRC" class="Default">
+      <node ref="R34" pin="1" pintype="passive"/>
+      <node ref="U1" pin="6" pinfunction="IO6_6" pintype="bidirectional"/>
+    </net>
+    <net code="14" name="BOOT0" class="Default">
+      <node ref="R31" pin="2" pintype="passive"/>
+      <node ref="TP1" pin="1" pinfunction="1_1" pintype="passive"/>
+      <node ref="U1" pin="27" pinfunction="IO0_27" pintype="bidirectional"/>
+    </net>
+    <net code="15" name="BUCK_BST" class="Default">
+      <node ref="C13" pin="1" pintype="passive"/>
+      <node ref="U3" pin="6" pinfunction="BST_6" pintype="passive"/>
+    </net>
+    <net code="16" name="BUCK_SW" class="Default">
+      <node ref="C13" pin="2" pintype="passive"/>
+      <node ref="L1" pin="1" pinfunction="1_1" pintype="passive"/>
+      <node ref="U3" pin="5" pinfunction="SW_5" pintype="output"/>
+    </net>
+    <net code="17" name="CC1" class="Default">
+      <node ref="J1" pin="A5" pinfunction="CC1_A5" pintype="bidirectional"/>
+      <node ref="R10" pin="1" pintype="passive"/>
+      <node ref="R14" pin="1" pintype="passive"/>
+    </net>
+    <net code="18" name="CC1_SENSE" class="Default">
+      <node ref="C11" pin="1" pintype="passive"/>
+      <node ref="R14" pin="2" pintype="passive"/>
+      <node ref="R15" pin="1" pintype="passive"/>
+      <node ref="U1" pin="4" pinfunction="IO4_4" pintype="bidirectional"/>
+    </net>
+    <net code="19" name="CC2" class="Default">
+      <node ref="J1" pin="B5" pinfunction="CC2_B5" pintype="bidirectional"/>
+      <node ref="R11" pin="1" pintype="passive"/>
+      <node ref="R16" pin="1" pintype="passive"/>
+    </net>
+    <net code="20" name="CC2_SENSE" class="Default">
+      <node ref="C12" pin="1" pintype="passive"/>
+      <node ref="R16" pin="2" pintype="passive"/>
+      <node ref="R17" pin="1" pintype="passive"/>
+      <node ref="U1" pin="5" pinfunction="IO5_5" pintype="bidirectional"/>
+    </net>
+    <net code="21" name="DACVREF" class="Default">
+      <node ref="C90" pin="1" pintype="passive"/>
+      <node ref="U6" pin="14" pinfunction="DACVREF_14" pintype="input"/>
+    </net>
+    <net code="22" name="DAC_A3V3" class="Default">
+      <node ref="C79" pin="1" pintype="passive"/>
+      <node ref="C80" pin="1" pintype="passive"/>
+      <node ref="FB4" pin="2" pintype="passive"/>
+      <node ref="U6" pin="11" pinfunction="AVDD_11" pintype="power_in"/>
+    </net>
+    <net code="23" name="DAC_D3V3" class="Default">
+      <node ref="C76" pin="1" pintype="passive"/>
+      <node ref="C77" pin="1" pintype="passive"/>
+      <node ref="C78" pin="1" pintype="passive"/>
+      <node ref="FB3" pin="2" pintype="passive"/>
+      <node ref="U6" pin="3" pinfunction="PVDD_3" pintype="power_in"/>
+      <node ref="U6" pin="4" pinfunction="DVDD_4" pintype="power_in"/>
+    </net>
+    <net code="24" name="DAC_OUTN" class="Default">
+      <node ref="C62" pin="1" pintype="passive"/>
+      <node ref="C94" pin="1" pintype="passive"/>
+      <node ref="U6" pin="13" pinfunction="OUTN_13" pintype="output"/>
+    </net>
+    <net code="25" name="DAC_OUTP" class="Default">
+      <node ref="C61" pin="1" pintype="passive"/>
+      <node ref="C93" pin="1" pintype="passive"/>
+      <node ref="U6" pin="12" pinfunction="OUTP_12" pintype="output"/>
+    </net>
+    <net code="26" name="GND" class="Default">
+      <node ref="C10" pin="2" pintype="passive"/>
+      <node ref="C11" pin="2" pintype="passive"/>
+      <node ref="C12" pin="2" pintype="passive"/>
+      <node ref="C14" pin="2" pintype="passive"/>
+      <node ref="C15" pin="2" pintype="passive"/>
+      <node ref="C16" pin="2" pintype="passive"/>
+      <node ref="C17" pin="2" pintype="passive"/>
+      <node ref="C18" pin="2" pintype="passive"/>
+      <node ref="C19" pin="2" pintype="passive"/>
+      <node ref="C30" pin="2" pintype="passive"/>
+      <node ref="C31" pin="2" pintype="passive"/>
+      <node ref="C32" pin="2" pintype="passive"/>
+      <node ref="C40" pin="2" pintype="passive"/>
+      <node ref="C41" pin="2" pintype="passive"/>
+      <node ref="C50" pin="2" pintype="passive"/>
+      <node ref="C51" pin="2" pintype="passive"/>
+      <node ref="C52" pin="2" pintype="passive"/>
+      <node ref="C53" pin="2" pintype="passive"/>
+      <node ref="C54" pin="2" pintype="passive"/>
+      <node ref="C55" pin="2" pintype="passive"/>
+      <node ref="C56" pin="2" pintype="passive"/>
+      <node ref="C57" pin="2" pintype="passive"/>
+      <node ref="C58" pin="2" pintype="passive"/>
+      <node ref="C59" pin="2" pintype="passive"/>
+      <node ref="C60" pin="2" pintype="passive"/>
+      <node ref="C64" pin="1" pintype="passive"/>
+      <node ref="C70" pin="2" pintype="passive"/>
+      <node ref="C71" pin="2" pintype="passive"/>
+      <node ref="C72" pin="2" pintype="passive"/>
+      <node ref="C73" pin="2" pintype="passive"/>
+      <node ref="C74" pin="2" pintype="passive"/>
+      <node ref="C75" pin="2" pintype="passive"/>
+      <node ref="C76" pin="2" pintype="passive"/>
+      <node ref="C77" pin="2" pintype="passive"/>
+      <node ref="C78" pin="2" pintype="passive"/>
+      <node ref="C79" pin="2" pintype="passive"/>
+      <node ref="C80" pin="2" pintype="passive"/>
+      <node ref="C90" pin="2" pintype="passive"/>
+      <node ref="C91" pin="2" pintype="passive"/>
+      <node ref="C92" pin="2" pintype="passive"/>
+      <node ref="C95" pin="2" pintype="passive"/>
+      <node ref="C96" pin="2" pintype="passive"/>
+      <node ref="C97" pin="2" pintype="passive"/>
+      <node ref="J1" pin="A1" pinfunction="GND_A1" pintype="passive"/>
+      <node ref="J1" pin="A12" pinfunction="GND_A12" pintype="passive"/>
+      <node ref="J1" pin="B1" pinfunction="GND_B1" pintype="passive"/>
+      <node ref="J1" pin="B12" pinfunction="GND_B12" pintype="passive"/>
+      <node ref="J1" pin="SH" pinfunction="SHIELD_SH" pintype="passive"/>
+      <node ref="J2" pin="13" pinfunction="Pin_13_13" pintype="passive"/>
+      <node ref="J2" pin="15" pinfunction="Pin_15_15" pintype="passive"/>
+      <node ref="J2" pin="16" pinfunction="Pin_16_16" pintype="passive"/>
+      <node ref="J2" pin="17" pinfunction="Pin_17_17" pintype="passive"/>
+      <node ref="J2" pin="18" pinfunction="Pin_18_18" pintype="passive"/>
+      <node ref="J2" pin="19" pinfunction="Pin_19_19" pintype="passive"/>
+      <node ref="J2" pin="2" pinfunction="Pin_2_2" pintype="passive"/>
+      <node ref="J2" pin="20" pinfunction="Pin_20_20" pintype="passive"/>
+      <node ref="J2" pin="21" pinfunction="Pin_21_21" pintype="passive"/>
+      <node ref="J2" pin="22" pinfunction="Pin_22_22" pintype="passive"/>
+      <node ref="J2" pin="23" pinfunction="Pin_23_23" pintype="passive"/>
+      <node ref="J2" pin="24" pinfunction="Pin_24_24" pintype="passive"/>
+      <node ref="J2" pin="25" pinfunction="Pin_25_25" pintype="passive"/>
+      <node ref="J2" pin="26" pinfunction="Pin_26_26" pintype="passive"/>
+      <node ref="J2" pin="27" pinfunction="Pin_27_27" pintype="passive"/>
+      <node ref="J2" pin="28" pinfunction="Pin_28_28" pintype="passive"/>
+      <node ref="J2" pin="29" pinfunction="Pin_29_29" pintype="passive"/>
+      <node ref="J2" pin="3" pinfunction="Pin_3_3" pintype="passive"/>
+      <node ref="J2" pin="30" pinfunction="Pin_30_30" pintype="passive"/>
+      <node ref="J2" pin="8" pinfunction="Pin_8_8" pintype="passive"/>
+      <node ref="MK1" pin="2" pinfunction="CASE/MIC-_2" pintype="passive"/>
+      <node ref="R10" pin="2" pintype="passive"/>
+      <node ref="R11" pin="2" pintype="passive"/>
+      <node ref="R15" pin="2" pintype="passive"/>
+      <node ref="R17" pin="2" pintype="passive"/>
+      <node ref="R63" pin="2" pintype="passive"/>
+      <node ref="SW1" pin="2" pinfunction="2_2" pintype="passive"/>
+      <node ref="SW2" pin="2" pinfunction="2_2" pintype="passive"/>
+      <node ref="SW3" pin="2" pinfunction="2_2" pintype="passive"/>
+      <node ref="SW4" pin="2" pinfunction="2_2" pintype="passive"/>
+      <node ref="TP3" pin="1" pinfunction="1_1" pintype="passive"/>
+      <node ref="U1" pin="1" pinfunction="GND_1" pintype="power_in"/>
+      <node ref="U1" pin="40" pinfunction="GND_40" pintype="passive"/>
+      <node ref="U1" pin="41" pinfunction="GND_41" pintype="passive"/>
+      <node ref="U2" pin="2" pinfunction="GND_2" pintype="passive"/>
+      <node ref="U3" pin="4" pinfunction="GND_4" pintype="power_in"/>
+      <node ref="U4" pin="2" pinfunction="GND_2" pintype="power_in"/>
+      <node ref="U5" pin="1" pinfunction="AD0_1" pintype="input"/>
+      <node ref="U5" pin="2" pinfunction="AD1_2" pintype="input"/>
+      <node ref="U5" pin="21" pinfunction="GNDA_21" pintype="power_in"/>
+      <node ref="U5" pin="33" pinfunction="EP_33" pintype="power_in"/>
+      <node ref="U5" pin="8" pinfunction="GNDD_8" pintype="power_in"/>
+      <node ref="U6" pin="10" pinfunction="AGND_10" pintype="power_in"/>
+      <node ref="U6" pin="20" pinfunction="CE_20" pintype="input"/>
+      <node ref="U6" pin="21" pinfunction="EP_21" pintype="power_in"/>
+      <node ref="U6" pin="5" pinfunction="DGND_5" pintype="power_in"/>
+      <node ref="U7" pin="7" pinfunction="GND_7" pintype="power_in"/>
+      <node ref="U8" pin="2" pinfunction="GND_2" pintype="power_in"/>
+    </net>
+    <net code="27" name="I2C_SCL" class="Default">
+      <node ref="R32" pin="2" pintype="passive"/>
+      <node ref="U1" pin="38" pinfunction="IO2_38" pintype="bidirectional"/>
+      <node ref="U5" pin="4" pinfunction="CCLK_4" pintype="input"/>
+      <node ref="U6" pin="1" pinfunction="CCLK_1" pintype="input"/>
+    </net>
+    <net code="28" name="I2C_SDA" class="Default">
+      <node ref="R33" pin="2" pintype="passive"/>
+      <node ref="U1" pin="39" pinfunction="IO1_39" pintype="bidirectional"/>
+      <node ref="U5" pin="3" pinfunction="CDATA_3" pintype="bidirectional"/>
+      <node ref="U6" pin="19" pinfunction="CDATA_19" pintype="bidirectional"/>
+    </net>
+    <net code="29" name="KEY1_N" class="Default">
+      <node ref="R1" pin="2" pintype="passive"/>
+      <node ref="SW1" pin="1" pinfunction="1_1" pintype="passive"/>
+      <node ref="U1" pin="23" pinfunction="IO21_23" pintype="bidirectional"/>
+    </net>
+    <net code="30" name="KEY2_N" class="Default">
+      <node ref="R2" pin="2" pintype="passive"/>
+      <node ref="SW2" pin="1" pinfunction="1_1" pintype="passive"/>
+      <node ref="U1" pin="31" pinfunction="IO38_31" pintype="bidirectional"/>
+    </net>
+    <net code="31" name="KEY3_N" class="Default">
+      <node ref="R3" pin="2" pintype="passive"/>
+      <node ref="SW3" pin="1" pinfunction="1_1" pintype="passive"/>
+      <node ref="U1" pin="32" pinfunction="IO39_32" pintype="bidirectional"/>
+    </net>
+    <net code="32" name="LCD_BASE" class="Default">
+      <node ref="Q1" pin="1" pinfunction="B_1" pintype="input"/>
+      <node ref="R41" pin="2" pintype="passive"/>
+      <node ref="R42" pin="2" pintype="passive"/>
+    </net>
+    <net code="33" name="LCD_BL_N" class="Default">
+      <node ref="R42" pin="1" pintype="passive"/>
+      <node ref="R43" pin="2" pintype="passive"/>
+      <node ref="U1" pin="11" pinfunction="IO18_11" pintype="bidirectional"/>
+    </net>
+    <net code="34" name="LCD_CS_N" class="Default">
+      <node ref="J2" pin="10" pinfunction="Pin_10_10" pintype="passive"/>
+      <node ref="U1" pin="18" pinfunction="IO10_18" pintype="bidirectional"/>
+    </net>
+    <net code="35" name="LCD_DC" class="Default">
+      <node ref="J2" pin="12" pinfunction="Pin_12_12" pintype="passive"/>
+      <node ref="U1" pin="17" pinfunction="IO9_17" pintype="bidirectional"/>
+    </net>
+    <net code="36" name="LCD_EMITTER" class="Default">
+      <node ref="Q1" pin="2" pinfunction="E_2" pintype="passive"/>
+      <node ref="R40" pin="2" pintype="passive"/>
+      <node ref="R41" pin="1" pintype="passive"/>
+    </net>
+    <net code="37" name="LCD_LEDA" class="Default">
+      <node ref="J2" pin="1" pinfunction="Pin_1_1" pintype="passive"/>
+      <node ref="Q1" pin="3" pinfunction="C_3" pintype="passive"/>
+    </net>
+    <net code="38" name="LCD_MOSI" class="Default">
+      <node ref="J2" pin="14" pinfunction="Pin_14_14" pintype="passive"/>
+      <node ref="U1" pin="19" pinfunction="IO11_19" pintype="bidirectional"/>
+    </net>
+    <net code="39" name="LCD_RESET_N" class="Default">
+      <node ref="J2" pin="9" pinfunction="Pin_9_9" pintype="passive"/>
+      <node ref="U1" pin="12" pinfunction="IO8_12" pintype="bidirectional"/>
+    </net>
+    <net code="40" name="LCD_SCLK" class="Default">
+      <node ref="J2" pin="11" pinfunction="Pin_11_11" pintype="passive"/>
+      <node ref="U1" pin="20" pinfunction="IO12_20" pintype="bidirectional"/>
+    </net>
+    <net code="41" name="MCU_EN" class="Default">
+      <node ref="C30" pin="1" pintype="passive"/>
+      <node ref="R30" pin="2" pintype="passive"/>
+      <node ref="SW4" pin="1" pinfunction="1_1" pintype="passive"/>
+      <node ref="TP2" pin="1" pinfunction="1_1" pintype="passive"/>
+      <node ref="U1" pin="3" pinfunction="EN_3" pintype="input"/>
+    </net>
+    <net code="42" name="MIC1N" class="Default">
+      <node ref="C64" pin="2" pintype="passive"/>
+      <node ref="U5" pin="15" pinfunction="MIC1N_15" pintype="input"/>
+    </net>
+    <net code="43" name="MIC1P" class="Default">
+      <node ref="C63" pin="2" pintype="passive"/>
+      <node ref="U5" pin="16" pinfunction="MIC1P_16" pintype="input"/>
+    </net>
+    <net code="44" name="MIC2N" class="Default">
+      <node ref="C53" pin="1" pintype="passive"/>
+      <node ref="U5" pin="20" pinfunction="MIC2N_20" pintype="input"/>
+    </net>
+    <net code="45" name="MIC2P" class="Default">
+      <node ref="C52" pin="1" pintype="passive"/>
+      <node ref="U5" pin="19" pinfunction="MIC2P_19" pintype="input"/>
+    </net>
+    <net code="46" name="MIC4N" class="Default">
+      <node ref="C56" pin="1" pintype="passive"/>
+      <node ref="U5" pin="27" pinfunction="MIC4N_27" pintype="input"/>
+    </net>
+    <net code="47" name="MIC4P" class="Default">
+      <node ref="C57" pin="1" pintype="passive"/>
+      <node ref="U5" pin="28" pinfunction="MIC4P_28" pintype="input"/>
+    </net>
+    <net code="48" name="MICBIAS12" class="Default">
+      <node ref="C60" pin="1" pintype="passive"/>
+      <node ref="R60" pin="1" pintype="passive"/>
+      <node ref="U5" pin="24" pinfunction="MICBIAS12_24" pintype="output"/>
+    </net>
+    <net code="49" name="MICBIAS34" class="Default">
+      <node ref="C55" pin="1" pintype="passive"/>
+      <node ref="U5" pin="26" pinfunction="MICBIAS34_26" pintype="output"/>
+    </net>
+    <net code="50" name="MIC_SIGNAL" class="Default">
+      <node ref="C63" pin="1" pintype="passive"/>
+      <node ref="MK1" pin="1" pinfunction="MIC+_1" pintype="passive"/>
+      <node ref="R60" pin="2" pintype="passive"/>
+    </net>
+    <net code="51" name="PA_3V3" class="Default">
+      <node ref="C96" pin="1" pintype="passive"/>
+      <node ref="C97" pin="1" pintype="passive"/>
+      <node ref="FB5" pin="2" pintype="passive"/>
+      <node ref="U7" pin="6" pinfunction="VCC_6" pintype="power_in"/>
+    </net>
+    <net code="52" name="PA_ACN" class="Default">
+      <node ref="C94" pin="2" pintype="passive"/>
+      <node ref="R62" pin="1" pintype="passive"/>
+    </net>
+    <net code="53" name="PA_ACP" class="Default">
+      <node ref="C93" pin="2" pintype="passive"/>
+      <node ref="R61" pin="1" pintype="passive"/>
+    </net>
+    <net code="54" name="PA_BYPASS" class="Default">
+      <node ref="C95" pin="1" pintype="passive"/>
+      <node ref="U7" pin="2" pinfunction="BYPASS_2" pintype="passive"/>
+    </net>
+    <net code="55" name="PA_EN" class="Default">
+      <node ref="R63" pin="1" pintype="passive"/>
+      <node ref="U1" pin="33" pinfunction="IO40_33" pintype="bidirectional"/>
+      <node ref="U7" pin="1" pinfunction="CTRL_1" pintype="input"/>
+    </net>
+    <net code="56" name="PA_INN" class="Default">
+      <node ref="R62" pin="2" pintype="passive"/>
+      <node ref="U7" pin="4" pinfunction="INN_4" pintype="input"/>
+    </net>
+    <net code="57" name="PA_INP" class="Default">
+      <node ref="R61" pin="2" pintype="passive"/>
+      <node ref="U7" pin="3" pinfunction="INP_3" pintype="input"/>
+    </net>
+    <net code="58" name="REFP12" class="Default">
+      <node ref="C50" pin="1" pintype="passive"/>
+      <node ref="U5" pin="17" pinfunction="REFP12_17" pintype="input"/>
+    </net>
+    <net code="59" name="REFP34" class="Default">
+      <node ref="C58" pin="1" pintype="passive"/>
+      <node ref="U5" pin="29" pinfunction="REFP34_29" pintype="input"/>
+    </net>
+    <net code="60" name="REFQ12" class="Default">
+      <node ref="C51" pin="1" pintype="passive"/>
+      <node ref="U5" pin="18" pinfunction="REFQ12_18" pintype="input"/>
+    </net>
+    <net code="61" name="REFQ34" class="Default">
+      <node ref="C59" pin="1" pintype="passive"/>
+      <node ref="U5" pin="30" pinfunction="REFQ34_30" pintype="input"/>
+    </net>
+    <net code="62" name="REFQM" class="Default">
+      <node ref="C54" pin="1" pintype="passive"/>
+      <node ref="U5" pin="25" pinfunction="REFQM_25" pintype="input"/>
+    </net>
+    <net code="63" name="REF_INN" class="Default">
+      <node ref="C62" pin="2" pintype="passive"/>
+      <node ref="U5" pin="32" pinfunction="MIC3N_32" pintype="input"/>
+    </net>
+    <net code="64" name="REF_INP" class="Default">
+      <node ref="C61" pin="2" pintype="passive"/>
+      <node ref="U5" pin="31" pinfunction="MIC3P_31" pintype="input"/>
+    </net>
+    <net code="65" name="SOFT_CT" class="Default">
+      <node ref="C19" pin="1" pintype="passive"/>
+      <node ref="U8" pin="4" pinfunction="CT_4" pintype="passive"/>
+    </net>
+    <net code="66" name="SPK_N" class="Default">
+      <node ref="J3" pin="2" pinfunction="Pin_2_2" pintype="passive"/>
+      <node ref="U7" pin="5" pinfunction="VoN_5" pintype="output"/>
+    </net>
+    <net code="67" name="SPK_P" class="Default">
+      <node ref="J3" pin="1" pinfunction="Pin_1_1" pintype="passive"/>
+      <node ref="U7" pin="8" pinfunction="VoP_8" pintype="output"/>
+    </net>
+    <net code="68" name="UART_RX" class="Default">
+      <node ref="TP5" pin="1" pinfunction="1_1" pintype="passive"/>
+      <node ref="U1" pin="36" pinfunction="RXD0_36" pintype="bidirectional"/>
+    </net>
+    <net code="69" name="UART_TX" class="Default">
+      <node ref="TP4" pin="1" pinfunction="1_1" pintype="passive"/>
+      <node ref="U1" pin="37" pinfunction="TXD0_37" pintype="bidirectional"/>
+    </net>
+    <net code="70" name="USB_DM" class="Default">
+      <node ref="J1" pin="A7" pinfunction="D-_A7" pintype="bidirectional"/>
+      <node ref="J1" pin="B7" pinfunction="D-_B7" pintype="bidirectional"/>
+      <node ref="U2" pin="1" pinfunction="I/O1_1" pintype="passive"/>
+    </net>
+    <net code="71" name="USB_DM_MCU" class="Default">
+      <node ref="R12" pin="2" pintype="passive"/>
+      <node ref="U1" pin="13" pinfunction="USB_D-_13" pintype="bidirectional"/>
+    </net>
+    <net code="72" name="USB_DM_PROT" class="Default">
+      <node ref="R12" pin="1" pintype="passive"/>
+      <node ref="U2" pin="6" pinfunction="I/O1_6" pintype="passive"/>
+    </net>
+    <net code="73" name="USB_DP" class="Default">
+      <node ref="J1" pin="A6" pinfunction="D+_A6" pintype="bidirectional"/>
+      <node ref="J1" pin="B6" pinfunction="D+_B6" pintype="bidirectional"/>
+      <node ref="U2" pin="3" pinfunction="I/O2_3" pintype="passive"/>
+    </net>
+    <net code="74" name="USB_DP_MCU" class="Default">
+      <node ref="R13" pin="2" pintype="passive"/>
+      <node ref="U1" pin="14" pinfunction="USB_D+_14" pintype="bidirectional"/>
+    </net>
+    <net code="75" name="USB_DP_PROT" class="Default">
+      <node ref="R13" pin="1" pintype="passive"/>
+      <node ref="U2" pin="4" pinfunction="I/O2_4" pintype="passive"/>
+    </net>
+    <net code="76" name="VBUS" class="Default">
+      <node ref="C10" pin="1" pintype="passive"/>
+      <node ref="J1" pin="A4" pinfunction="VBUS_A4" pintype="passive"/>
+      <node ref="J1" pin="A9" pinfunction="VBUS_A9" pintype="passive"/>
+      <node ref="J1" pin="B4" pinfunction="VBUS_B4" pintype="passive"/>
+      <node ref="J1" pin="B9" pinfunction="VBUS_B9" pintype="passive"/>
+      <node ref="TP7" pin="1" pinfunction="1_1" pintype="passive"/>
+      <node ref="U2" pin="5" pinfunction="VBUS_5" pintype="passive"/>
+      <node ref="U8" pin="1" pinfunction="VIN_1" pintype="power_in"/>
+      <node ref="U8" pin="3" pinfunction="ON_3" pintype="input"/>
+    </net>
+    <net code="77" name="VBUS_SW" class="Default">
+      <node ref="C14" pin="1" pintype="passive"/>
+      <node ref="C17" pin="1" pintype="passive"/>
+      <node ref="U3" pin="2" pinfunction="EN_2" pintype="input"/>
+      <node ref="U3" pin="3" pinfunction="IN_3" pintype="power_in"/>
+      <node ref="U4" pin="1" pinfunction="VIN_1" pintype="power_in"/>
+      <node ref="U4" pin="3" pinfunction="EN_3" pintype="input"/>
+      <node ref="U8" pin="6" pinfunction="VOUT_6" pintype="power_out"/>
+    </net>
+    <net code="78" name="VMID" class="Default">
+      <node ref="C92" pin="1" pintype="passive"/>
+      <node ref="U6" pin="16" pinfunction="VMID_16" pintype="input"/>
+    </net>
+    <net code="79" name="unconnected-(J1-SBU1-PadA8)" class="Default">
+      <node ref="J1" pin="A8" pinfunction="SBU1_A8" pintype="bidirectional+no_connect"/>
+    </net>
+    <net code="80" name="unconnected-(J1-SBU2-PadB8)" class="Default">
+      <node ref="J1" pin="B8" pinfunction="SBU2_B8" pintype="bidirectional+no_connect"/>
+    </net>
+    <net code="81" name="unconnected-(U1-IO3-Pad15)" class="Default">
+      <node ref="U1" pin="15" pinfunction="IO3_15" pintype="bidirectional+no_connect"/>
+    </net>
+    <net code="82" name="unconnected-(U1-IO13-Pad21)" class="Default">
+      <node ref="U1" pin="21" pinfunction="IO13_21" pintype="bidirectional+no_connect"/>
+    </net>
+    <net code="83" name="unconnected-(U1-IO14-Pad22)" class="Default">
+      <node ref="U1" pin="22" pinfunction="IO14_22" pintype="bidirectional+no_connect"/>
+    </net>
+    <net code="84" name="unconnected-(U1-IO35-Pad28)" class="Default">
+      <node ref="U1" pin="28" pinfunction="IO35_28" pintype="bidirectional+no_connect"/>
+    </net>
+    <net code="85" name="unconnected-(U1-IO36-Pad29)" class="Default">
+      <node ref="U1" pin="29" pinfunction="IO36_29" pintype="bidirectional+no_connect"/>
+    </net>
+    <net code="86" name="unconnected-(U1-IO37-Pad30)" class="Default">
+      <node ref="U1" pin="30" pinfunction="IO37_30" pintype="bidirectional+no_connect"/>
+    </net>
+    <net code="87" name="unconnected-(U1-IO41-Pad34)" class="Default">
+      <node ref="U1" pin="34" pinfunction="IO41_34" pintype="bidirectional+no_connect"/>
+    </net>
+    <net code="88" name="unconnected-(U1-IO42-Pad35)" class="Default">
+      <node ref="U1" pin="35" pinfunction="IO42_35" pintype="bidirectional+no_connect"/>
+    </net>
+    <net code="89" name="unconnected-(U1-IO45-Pad26)" class="Default">
+      <node ref="U1" pin="26" pinfunction="IO45_26" pintype="bidirectional+no_connect"/>
+    </net>
+    <net code="90" name="unconnected-(U1-IO46-Pad16)" class="Default">
+      <node ref="U1" pin="16" pinfunction="IO46_16" pintype="bidirectional+no_connect"/>
+    </net>
+    <net code="91" name="unconnected-(U1-IO47-Pad24)" class="Default">
+      <node ref="U1" pin="24" pinfunction="IO47_24" pintype="bidirectional+no_connect"/>
+    </net>
+    <net code="92" name="unconnected-(U1-IO48-Pad25)" class="Default">
+      <node ref="U1" pin="25" pinfunction="IO48_25" pintype="bidirectional+no_connect"/>
+    </net>
+    <net code="93" name="unconnected-(U4-NC-Pad4)" class="Default">
+      <node ref="U4" pin="4" pinfunction="NC_4" pintype="no_connect"/>
+    </net>
+    <net code="94" name="unconnected-(U5-DMIC_CLK-Pad14)" class="Default">
+      <node ref="U5" pin="14" pinfunction="DMIC_CLK_14" pintype="output+no_connect"/>
+    </net>
+    <net code="95" name="unconnected-(U5-INT-Pad13)" class="Default">
+      <node ref="U5" pin="13" pinfunction="INT_13" pintype="output+no_connect"/>
+    </net>
+    <net code="96" name="unconnected-(U5-SDOUT2-Pad12)" class="Default">
+      <node ref="U5" pin="12" pinfunction="SDOUT2_12" pintype="output+no_connect"/>
+    </net>
+    <net code="97" name="unconnected-(U6-ASDOUT-Pad7)" class="Default">
+      <node ref="U6" pin="7" pinfunction="ASDOUT_7" pintype="output+no_connect"/>
+    </net>
+    <net code="98" name="unconnected-(U6-MIC1N-Pad17)" class="Default">
+      <node ref="U6" pin="17" pinfunction="MIC1N_17" pintype="input+no_connect"/>
+    </net>
+    <net code="99" name="unconnected-(U6-MIC1P-Pad18)" class="Default">
+      <node ref="U6" pin="18" pinfunction="MIC1P_18" pintype="input+no_connect"/>
+    </net>
+    <net code="100" name="unconnected-(U8-QOD-Pad5)" class="Default">
+      <node ref="U8" pin="5" pinfunction="QOD_5" pintype="passive+no_connect"/>
+    </net>
+  </nets>
+</export>

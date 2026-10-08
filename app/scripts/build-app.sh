@@ -42,13 +42,27 @@ cp "${repo_root}/target/release/vibebuddy-hook" "${contents}/MacOS/vibebuddy-hoo
 
 echo "== 固件"
 fw="${repo_root}/firmware/build"
+if [[ -f "${repo_root}/firmware/build-alientek/vibebuddy-fw.bin" ]]; then
+    fw="${repo_root}/firmware/build-alientek"
+fi
+for board in alientek breadboard; do
+destination="${contents}/Resources/firmware"
+if [[ "$board" == breadboard ]]; then
+    fw="${repo_root}/firmware/build-breadboard"
+    destination="${destination}/breadboard"
+    if [[ ! -f "${fw}/vibebuddy-fw.bin" ]]; then
+        echo "没有面包板固件，跳过该板型"
+        continue
+    fi
+fi
+mkdir -p "$destination"
 if [[ -f "${fw}/bootloader/bootloader.bin" && -f "${fw}/partition_table/partition-table.bin" && -f "${fw}/vibebuddy-fw.bin" ]]; then
-    cp "${fw}/bootloader/bootloader.bin" "${contents}/Resources/firmware/bootloader.bin"
-    cp "${fw}/partition_table/partition-table.bin" "${contents}/Resources/firmware/partition-table.bin"
-    cp "${fw}/vibebuddy-fw.bin" "${contents}/Resources/firmware/vibebuddy-fw.bin"
+    cp "${fw}/bootloader/bootloader.bin" "${destination}/bootloader.bin"
+    cp "${fw}/partition_table/partition-table.bin" "${destination}/partition-table.bin"
+    cp "${fw}/vibebuddy-fw.bin" "${destination}/vibebuddy-fw.bin"
     # 构建标识要和盒子页脚报的一模一样：镜像里 esp_app_desc 的 version 加上
     # 本次构建的时刻戳，格式与固件 describe_firmware_build 一致。
-    python3 - "${fw}" > "${contents}/Resources/firmware/build.txt" <<'PY'
+    python3 - "${fw}" > "${destination}/build.txt" <<'PY'
 import re, struct, sys
 from pathlib import Path
 build = Path(sys.argv[1])
@@ -61,13 +75,14 @@ stamp_header = next(build.rglob("agent_build_stamp.h"))
 stamp = re.search(r'"([^"]+)"', stamp_header.read_text()).group(1)[:16]
 print(f"{version} {stamp}")
 PY
-    echo "附带固件 $(cat "${contents}/Resources/firmware/build.txt")"
+    echo "附带 ${board} 固件 $(cat "${destination}/build.txt")"
 elif [[ ${debug} -eq 1 ]]; then
     echo "没有固件构建产物，Debug 构建不附带固件"
 else
     echo "Release 构建需要 firmware/build 里的三件套，先跑 idf.py -C firmware build" >&2
     exit 1
 fi
+done
 
 echo "== 语音包"
 for dir in "${repo_root}"/voices/*/; do

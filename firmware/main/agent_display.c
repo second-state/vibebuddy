@@ -13,6 +13,9 @@
 #include "agent_pomodoro.h"
 #include "driver/gpio.h"
 #include "driver/i2c_master.h"
+#ifdef AGENT_BOARD_BREADBOARD
+#include "driver/spi_master.h"
+#endif
 #include "esp_check.h"
 #include "esp_lcd_panel_io.h"
 #include "esp_lcd_panel_ops.h"
@@ -134,7 +137,9 @@ static const uint8_t DIGIT_GLYPHS[10][7] = {
 static uint16_t framebuffer[DISPLAY_WIDTH * DISPLAY_HEIGHT]
     __attribute__((aligned(4)));
 static esp_lcd_panel_handle_t panel_handle;
+#ifndef AGENT_BOARD_BREADBOARD
 static i2c_master_dev_handle_t xl9555_handle;
+#endif
 static SemaphoreHandle_t transfer_done;
 static bool display_ready;
 static agent_display_state_t current_state = AGENT_DISPLAY_IDLE;
@@ -186,6 +191,7 @@ static bool on_color_transfer_done(esp_lcd_panel_io_handle_t panel_io,
   return task_woken == pdTRUE;
 }
 
+#ifndef AGENT_BOARD_BREADBOARD
 static esp_err_t xl9555_read(uint8_t reg, uint8_t *value) {
   return i2c_master_transmit_receive(xl9555_handle, &reg, 1, value, 1,
                                      pdMS_TO_TICKS(100));
@@ -208,6 +214,37 @@ static esp_err_t set_backlight(bool enabled) {
   }
   return xl9555_write(XL9555_OUTPUT_PORT0, output);
 }
+#else
+// BLK 接 3V3：只能关闭显示内容，不能物理关闭背光。
+static esp_err_t set_backlight(bool enabled) {
+  return esp_lcd_panel_disp_on_off(panel_handle, enabled);
+}
+
+// 保留所有旧页面的 4:3 比例，缩为 240×180，上下各留 30 像素。
+// 截图与实际 SPI 输出共用采样规则。
+static uint16_t output_pixel(size_t index) {
+  unsigned x = index % 240, y = index / 240;
+  if (y < 30 || y >= 210) return COLOR_BACKGROUND;
+  // 面积采样：每个目标像素覆盖 4/3 × 4/3 个源像素。最近邻会直接
+  // 丢弃细字体的整条笔画；以 1/3 像素为整数单位计算覆盖权重。
+  unsigned left = x * 4, top = (y - 30) * 4;
+  unsigned red = 0, green = 0, blue = 0;
+  for (unsigned sy = top / 3; sy <= (top + 3) / 3; ++sy) {
+    unsigned lo_y = top > sy * 3 ? top : sy * 3;
+    unsigned hi_y = top + 4 < sy * 3 + 3 ? top + 4 : sy * 3 + 3;
+    for (unsigned sx = left / 3; sx <= (left + 3) / 3; ++sx) {
+      unsigned lo_x = left > sx * 3 ? left : sx * 3;
+      unsigned hi_x = left + 4 < sx * 3 + 3 ? left + 4 : sx * 3 + 3;
+      unsigned weight = (hi_x - lo_x) * (hi_y - lo_y);
+      uint16_t color = framebuffer[sy * DISPLAY_WIDTH + sx];
+      red += ((color >> 11) & 31) * weight;
+      green += ((color >> 5) & 63) * weight;
+      blue += (color & 31) * weight;
+    }
+  }
+  return (uint16_t)(((red / 16) << 11) | ((green / 16) << 5) | (blue / 16));
+}
+#endif
 
 static void fill_rect(int x, int y, int width, int height, uint16_t color) {
   int x_start = x < 0 ? 0 : x;
@@ -580,6 +617,22 @@ static esp_err_t present(void) {
   }
   while (xSemaphoreTake(transfer_done, 0) == pdTRUE) {
   }
+#ifdef AGENT_BOARD_BREADBOARD
+  static uint16_t stripe[240 * 16] __attribute__((aligned(4)));
+  for (int top = 0; top < 240; top += 16) {
+    for (size_t i = 0; i < 240 * 16; ++i) {
+      uint16_t color = output_pixel((size_t)top * 240 + i);
+      stripe[i] = (uint16_t)((color << 8) | (color >> 8));
+    }
+    ESP_RETURN_ON_ERROR(esp_lcd_panel_draw_bitmap(panel_handle, 0, top,
+                                                 240, top + 16, stripe),
+                        TAG, "提交 SPI LCD 失败");
+    if (xSemaphoreTake(transfer_done, pdMS_TO_TICKS(1000)) != pdTRUE) {
+      // DMA 完成前不可复用 stripe；停止设备，避免下一帧覆盖仍在发送的内存。
+      abort();
+    }
+  }
+#else
   ESP_RETURN_ON_ERROR(esp_lcd_panel_draw_bitmap(panel_handle, 0, 0,
                                                 DISPLAY_WIDTH, DISPLAY_HEIGHT,
                                                 framebuffer),
@@ -587,6 +640,7 @@ static esp_err_t present(void) {
   if (xSemaphoreTake(transfer_done, pdMS_TO_TICKS(1000)) != pdTRUE) {
     return ESP_ERR_TIMEOUT;
   }
+#endif
   return ESP_OK;
 }
 
@@ -1271,17 +1325,32 @@ esp_err_t agent_display_show_tasks(agent_display_state_t state,
 
 void agent_display_dump(void (*write_line)(const char *line)) {
   char line[200];
+#ifdef AGENT_BOARD_BREADBOARD
+  snprintf(line, sizeof(line), "SHOT BEGIN 240x240 BACKLIGHT %s",
+           backlight_on ? "ON" : "OFF");
+  const size_t total = 240 * 240;
+#else
   snprintf(line, sizeof(line), "SHOT BEGIN %dx%d BACKLIGHT %s", DISPLAY_WIDTH,
            DISPLAY_HEIGHT, backlight_on ? "ON" : "OFF");
-  write_line(line);
   const size_t total = (size_t)DISPLAY_WIDTH * DISPLAY_HEIGHT;
+#endif
+  write_line(line);
   size_t index = 0;
   int used = snprintf(line, sizeof(line), "SHOT");
   int runs = 0;
   while (index < total) {
+    #ifdef AGENT_BOARD_BREADBOARD
+    uint16_t color = output_pixel(index);
+    #else
     uint16_t color = framebuffer[index];
+    #endif
     size_t run = 1;
-    while (index + run < total && framebuffer[index + run] == color &&
+    while (index + run < total &&
+           #ifdef AGENT_BOARD_BREADBOARD
+           output_pixel(index + run) == color &&
+           #else
+           framebuffer[index + run] == color &&
+           #endif
            run < 60000) {
       run++;
     }
@@ -1427,6 +1496,35 @@ void agent_display_tick(void) {
 }
 
 esp_err_t agent_display_init(void) {
+#ifdef AGENT_BOARD_BREADBOARD
+  transfer_done = xSemaphoreCreateBinary();
+  if (transfer_done == NULL) return ESP_ERR_NO_MEM;
+  spi_bus_config_t bus = {
+      .sclk_io_num = 12, .mosi_io_num = 11, .miso_io_num = -1,
+      .quadwp_io_num = -1, .quadhd_io_num = -1,
+      .max_transfer_sz = 240 * 16 * sizeof(uint16_t),
+  };
+  ESP_RETURN_ON_ERROR(spi_bus_initialize(SPI2_HOST, &bus, SPI_DMA_CH_AUTO),
+                      TAG, "初始化 SPI 失败");
+  esp_lcd_panel_io_spi_config_t io_config = {
+      .cs_gpio_num = 8, .dc_gpio_num = 9, .spi_mode = 0,
+      .pclk_hz = 4 * 1000 * 1000, .trans_queue_depth = 1,
+      .lcd_cmd_bits = 8, .lcd_param_bits = 8,
+      .on_color_trans_done = on_color_transfer_done, .user_ctx = transfer_done,
+  };
+  esp_lcd_panel_io_handle_t io;
+  ESP_RETURN_ON_ERROR(esp_lcd_new_panel_io_spi((esp_lcd_spi_bus_handle_t)SPI2_HOST,
+                                              &io_config, &io), TAG, "初始化 LCD SPI IO 失败");
+  esp_lcd_panel_dev_config_t config = {
+      .reset_gpio_num = 10, .rgb_ele_order = LCD_RGB_ELEMENT_ORDER_RGB,
+      .bits_per_pixel = 16,
+  };
+  ESP_RETURN_ON_ERROR(esp_lcd_new_panel_st7789(io, &config, &panel_handle), TAG, "创建 ST7789 失败");
+  ESP_RETURN_ON_ERROR(esp_lcd_panel_reset(panel_handle), TAG, "复位屏幕失败");
+  ESP_RETURN_ON_ERROR(esp_lcd_panel_init(panel_handle), TAG, "初始化屏幕失败");
+  ESP_RETURN_ON_ERROR(esp_lcd_panel_invert_color(panel_handle, true), TAG, "设置颜色失败");
+  ESP_RETURN_ON_ERROR(esp_lcd_panel_set_gap(panel_handle, 0, 0), TAG, "设置偏移失败");
+#else
   i2c_master_bus_config_t i2c_config = {
       .i2c_port = I2C_NUM_0,
       .sda_io_num = I2C_SDA_GPIO,
@@ -1536,6 +1634,7 @@ esp_err_t agent_display_init(void) {
                       "设置 LCD 镜像失败");
   ESP_RETURN_ON_ERROR(esp_lcd_panel_disp_on_off(panel_handle, true), TAG,
                       "打开 LCD panel 失败");
+#endif
 
   display_ready = true;
   ESP_RETURN_ON_ERROR(agent_display_show(AGENT_DISPLAY_IDLE, NULL), TAG,

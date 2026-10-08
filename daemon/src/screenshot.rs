@@ -15,6 +15,8 @@ pub const HEIGHT: usize = 240;
 const TIMEOUT: Duration = Duration::from_secs(60);
 
 pub struct Frame {
+    pub width: usize,
+    pub height: usize,
     /// RGB888，按行。
     pub pixels: Vec<u8>,
     pub backlight_on: bool,
@@ -53,7 +55,7 @@ pub fn decode_runs(line: &str, pixels: &mut Vec<u8>) -> Result<(), String> {
 pub fn encode_png(frame: &Frame) -> Result<Vec<u8>, String> {
     let mut output = Vec::new();
     {
-        let mut encoder = png::Encoder::new(&mut output, WIDTH as u32, HEIGHT as u32);
+        let mut encoder = png::Encoder::new(&mut output, frame.width as u32, frame.height as u32);
         encoder.set_color(png::ColorType::Rgb);
         encoder.set_depth(png::BitDepth::Eight);
         let mut writer = encoder.write_header().map_err(|error| error.to_string())?;
@@ -82,6 +84,7 @@ pub async fn capture(
     let mut pixels = Vec::with_capacity(WIDTH * HEIGHT * 3);
     let mut started = false;
     let mut backlight_on = true;
+    let (mut width, mut height) = (WIDTH, HEIGHT);
     loop {
         let message = match tokio::time::timeout_at(deadline, bus.recv()).await {
             Ok(Ok(message)) => message,
@@ -95,6 +98,11 @@ pub async fn capture(
             _ => continue,
         };
         if let Some(header) = line.strip_prefix("SHOT BEGIN") {
+            (width, height) = match header.split_whitespace().next() {
+                Some("320x240") => (320, 240),
+                Some("240x240") => (240, 240),
+                _ => return Err("未知屏幕尺寸".to_owned()),
+            };
             started = true;
             backlight_on = !header.contains("BACKLIGHT OFF");
             pixels.clear();
@@ -104,10 +112,10 @@ pub async fn capture(
             if !started {
                 continue;
             }
-            if pixels.len() != WIDTH * HEIGHT * 3 {
+            if pixels.len() != width * height * 3 {
                 return Err(format!("帧不完整：{} 像素", pixels.len() / 3));
             }
-            return Ok(Frame { pixels, backlight_on });
+            return Ok(Frame { pixels, backlight_on, width, height });
         }
         if started && let Some(runs) = line.strip_prefix("SHOT ") {
             decode_runs(runs, &mut pixels)?;
@@ -130,8 +138,12 @@ mod tests {
 
     #[test]
     fn a_full_frame_encodes_as_png() {
-        let frame = Frame { pixels: vec![0x80; WIDTH * HEIGHT * 3], backlight_on: true };
-        let png = encode_png(&frame).expect("编码 PNG");
-        assert_eq!(&png[..8], b"\x89PNG\r\n\x1a\n");
+        for width in [320, 240] {
+            let frame = Frame { pixels: vec![0x80; width * HEIGHT * 3], backlight_on: true, width, height: HEIGHT };
+            let png = encode_png(&frame).expect("编码 PNG");
+            assert_eq!(&png[..8], b"\x89PNG\r\n\x1a\n");
+            assert_eq!(u32::from_be_bytes(png[16..20].try_into().unwrap()), width as u32);
+            assert_eq!(u32::from_be_bytes(png[20..24].try_into().unwrap()), HEIGHT as u32);
+        }
     }
 }

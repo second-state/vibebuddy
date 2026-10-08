@@ -513,6 +513,8 @@ async fn post_voice_pack(
 
 #[derive(serde::Deserialize)]
 struct FirmwareRequest {
+    #[serde(default)]
+    board: Option<String>,
     bootloader: PathBuf,
     partition_table: PathBuf,
     app: PathBuf,
@@ -538,6 +540,14 @@ async fn post_firmware(
     }
     let (port, bridge) = {
         let device = state.device.lock().await;
+        // 旧 App 的请求没有板型，只兼容原 BOX。新板禁止误刷旧包。
+        let requested_board = request.board.as_deref().unwrap_or("alientek-box");
+        if device.board.as_deref().unwrap_or("alientek-box") != requested_board {
+            return (
+                StatusCode::CONFLICT,
+                Json(ApiResponse { accepted: false, message: "固件板型与连接设备不匹配".to_owned() }),
+            );
+        }
         match &device.port {
             Some(port) if device.connected => (port.clone(), device.bridge),
             _ => {
@@ -914,6 +924,7 @@ mod tests {
 
     #[tokio::test]
     async fn a_screenshot_is_assembled_from_shot_lines_into_a_png() {
+        for width in [320, 240] {
         let transport = Arc::new(RecordingTransport::default());
         let state = test_state(transport.clone());
         let handle = tokio::spawn({
@@ -922,14 +933,17 @@ mod tests {
         });
         nth_event(&transport, 0).await;
         assert_eq!(transport.events()[0].event, "device.screenshot");
-        publish_device_message(&state, DeviceMessage::Line("SHOT BEGIN 320x240 BACKLIGHT ON".to_owned())).await;
+        publish_device_message(&state, DeviceMessage::Line(format!("SHOT BEGIN {width}x240 BACKLIGHT ON"))).await;
         for _ in 0..240 {
-            publish_device_message(&state, DeviceMessage::Line("SHOT 0000:320".to_owned())).await;
+            publish_device_message(&state, DeviceMessage::Line(format!("SHOT 0000:{width}"))).await;
         }
         publish_device_message(&state, DeviceMessage::Line("SHOT END".to_owned())).await;
         let response = handle.await.expect("截图任务不该崩");
         assert_eq!(response.status(), StatusCode::OK);
         assert_eq!(response.headers()["content-type"], "image/png");
+        let bytes = axum::body::to_bytes(response.into_body(), 1_000_000).await.unwrap();
+        assert_eq!(u32::from_be_bytes(bytes[16..20].try_into().unwrap()), width);
+        }
     }
 
     #[tokio::test]
@@ -938,6 +952,20 @@ mod tests {
         let (status, _) = post_identify(State(test_state(transport.clone()))).await;
         assert_eq!(status, StatusCode::ACCEPTED);
         assert_eq!(transport.events()[0].event, "device.identify");
+    }
+
+    #[tokio::test]
+    async fn old_app_firmware_cannot_overwrite_breadboard() {
+        let state = test_state(Arc::new(RecordingTransport::default()));
+        state.device.lock().await.board = Some("goouuu-s3-spi".to_owned());
+        let path = std::env::temp_dir().join(format!("vibe-fw-board-test-{}", std::process::id()));
+        std::fs::write(&path, [0xe9]).unwrap();
+        let request = FirmwareRequest { board: None, bootloader: path.clone(), partition_table: path.clone(), app: path.clone() };
+        let (code, Json(body)) = post_firmware(State(state), Json(request)).await;
+        std::fs::remove_file(path).unwrap();
+        assert_eq!(code, StatusCode::CONFLICT);
+        assert!(!body.accepted);
+        assert!(body.message.contains("板型"));
     }
 
     #[tokio::test]

@@ -15,6 +15,7 @@ pub struct DeviceState {
     pub port: Option<String>,
     /// 接在 UART 桥上（而非乐鑫原生 USB 口）。
     pub bridge: bool,
+    pub board: Option<String>,
     /// duty / pomodoro / leisure
     pub mode: Option<String>,
     pub firmware_build: Option<String>,
@@ -30,16 +31,24 @@ impl DeviceState {
         let before = self.clone();
         match message {
             DeviceMessage::Connected { port, bridge } => {
+                self.board = None;
+                self.firmware_build = None;
+                self.mode = None;
+                self.voice = None;
+                self.volume = None;
                 self.connected = true;
                 self.port = Some(port.clone());
                 self.bridge = *bridge;
             }
             DeviceMessage::Disconnected => {
+                self.board = None;
                 self.connected = false;
                 self.port = None;
             }
             DeviceMessage::Line(line) => {
-                if let Some(mode) = line.strip_prefix("MODE ") {
+                if let Some(board) = line.strip_prefix("BOARD ") {
+                    self.board = Some(board.trim().to_owned());
+                } else if let Some(mode) = line.strip_prefix("MODE ") {
                     self.mode = Some(mode.trim().to_ascii_lowercase());
                 } else if let Some(build) = line.strip_prefix("DISPLAY READY BUILD ") {
                     self.firmware_build = Some(build.trim().to_owned());
@@ -134,6 +143,7 @@ mod tests {
                 connected: true,
                 port: Some("/dev/cu.x".to_owned()),
                 bridge: true,
+                board: None,
                 mode: Some("pomodoro".to_owned()),
                 firmware_build: Some("21a8360-dirty 2026-09-16 10:23".to_owned()),
                 voice: Some("builtin".to_owned()),
@@ -148,7 +158,10 @@ mod tests {
         state.apply(&DeviceMessage::Connected { port: "/dev/cu.x".to_owned(), bridge: true });
         state.apply(&line("DISPLAY READY BUILD abc 2026-09-16 10:23"));
         state.apply(&line("VOICES wanwanxiaohe"));
+        state.apply(&line("BOARD goouuu-s3-spi"));
+        assert_eq!(state.board.as_deref(), Some("goouuu-s3-spi"));
         assert!(state.apply(&DeviceMessage::Disconnected));
+        assert_eq!(state.board, None, "换板时不能沿用上一台板型");
         assert!(!state.connected);
         assert_eq!(state.port, None);
         assert_eq!(state.firmware_build.as_deref(), Some("abc 2026-09-16 10:23"));

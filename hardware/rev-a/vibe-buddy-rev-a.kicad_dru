@@ -1,0 +1,4 @@
+(version 1)
+(rule "ES7210 细间距封装焊盘间隙"
+ (condition "A.Type == 'Pad' && B.Type == 'Pad' && A.memberOfFootprint('U5') && B.memberOfFootprint('U5')")
+ (constraint clearance (min 0.15mm)))

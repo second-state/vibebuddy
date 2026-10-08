@@ -18,7 +18,7 @@ final class AppModel: ObservableObject {
     let client = DaemonClient()
     let supervisor = DaemonSupervisor()
     let preview = VoicePreview()
-    let bundledFirmwareBuild = Resources.bundledFirmwareBuild
+    var bundledFirmwareBuild: String? { Resources.bundledFirmwareBuild(board: status?.device.board) }
     /// 由 App 自己看管 daemon；发现旧 LaunchAgent 且用户不肯卸时为 false。
     var managesDaemon = true
 
@@ -152,8 +152,9 @@ final class AppModel: ObservableObject {
     }
 
     func updateFirmware() {
-        guard let files = Resources.firmwareFiles else { lastError = "这个构建没有附带固件"; return }
-        run { try await self.client.flashFirmware(bootloader: files.bootloader, partitionTable: files.partitionTable, app: files.app) }
+        let board = status?.device.board ?? "alientek-box"
+        guard let files = Resources.firmwareFiles(board: board) else { lastError = "这个构建没有附带该板型的固件"; return }
+        run { try await self.client.flashFirmware(bootloader: files.bootloader, partitionTable: files.partitionTable, app: files.app, board: board) }
     }
 
     func takeScreenshot() {
