@@ -51,12 +51,28 @@ pub enum Surface {
         bundle_id: String,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         tty: Option<String>,
+        /// Inside tmux the tty belongs to a pane; the pane is switched to through tmux instead.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        tmux: Option<TmuxPane>,
     },
     /// No host app: SSH, daemons, sessions started by launchd. K2 has nowhere to go.
     Headless,
     /// Outside macOS: the agent's ancestor pids, nearest first. K2 focuses the window owned by the first of
     /// them that has one; with none (SSH, tmux) it is headless after all.
     Window { pids: Vec<u32> },
+}
+
+/// A tmux pane, by the server's socket and the pane id (`%3`), as the hook read them from `$TMUX` and `$TMUX_PANE`.
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
+pub struct TmuxPane {
+    pub socket: String,
+    pub pane: String,
+}
+
+impl TmuxPane {
+    pub fn from_hook(socket: Option<String>, pane: Option<String>) -> Option<Self> {
+        Some(Self { socket: socket?, pane: pane? })
+    }
 }
 
 impl Default for Surface {
@@ -72,13 +88,14 @@ impl Surface {
         kind: Option<&str>,
         host_bundle_id: Option<String>,
         host_tty: Option<String>,
+        tmux: Option<TmuxPane>,
         host_pids: Option<Vec<u32>>,
         desktop_session_id: Option<String>,
     ) -> Self {
         match kind {
             // Claims a host but gave no bundle id: nowhere to go, and falling back to App would jump to the wrong place.
             Some("host") => match host_bundle_id {
-                Some(bundle_id) => Self::Host { bundle_id, tty: host_tty },
+                Some(bundle_id) => Self::Host { bundle_id, tty: host_tty, tmux },
                 None => Self::Headless,
             },
             Some("headless") => Self::Headless,

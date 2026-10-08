@@ -6,7 +6,7 @@ use vibebuddy_protocol::Event;
 use serde::Deserialize;
 
 use crate::activity::{
-    ActivityId, ActivitySource, ActivityStatus, ActivityTracker, Surface, card_title,
+    ActivityId, ActivitySource, ActivityStatus, ActivityTracker, Surface, TmuxPane, card_title,
     display_title, project_name,
 };
 use crate::session_titles::{SessionTitles, git_branch};
@@ -36,6 +36,10 @@ pub struct ClaudeHook {
     #[serde(default)]
     pub host_tty: Option<String>,
     #[serde(default)]
+    pub tmux_socket: Option<String>,
+    #[serde(default)]
+    pub tmux_pane: Option<String>,
+    #[serde(default)]
     pub host_pids: Option<Vec<u32>>,
     #[serde(default)]
     pub desktop_session_id: Option<String>,
@@ -61,6 +65,7 @@ pub fn apply(
             hook.surface.as_deref(),
             hook.host_bundle_id.clone(),
             hook.host_tty.clone(),
+            TmuxPane::from_hook(hook.tmux_socket.clone(), hook.tmux_pane.clone()),
             hook.host_pids.clone(),
             hook.desktop_session_id.clone(),
         ),
@@ -126,6 +131,8 @@ mod tests {
             surface: None,
             host_bundle_id: None,
             host_tty: None,
+            tmux_socket: None,
+            tmux_pane: None,
             host_pids: None,
             desktop_session_id: None,
         }
@@ -306,6 +313,8 @@ mod tests {
             surface: None,
             host_bundle_id: None,
             host_tty: None,
+            tmux_socket: None,
+            tmux_pane: None,
             host_pids: None,
         };
         let mixed = codex_hooks::apply(&mut tracker, &mut SessionTitles::disabled(), codex).expect("another agent should refresh the card stack");

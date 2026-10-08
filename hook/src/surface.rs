@@ -15,9 +15,10 @@
 //! ChatGPT.app nests `CodexCLI.app` (`com.openai.codex.cli`) inside itself, and that inner bundle
 //! has no window to bring forward.
 //!
-//! A terminal host also gets the agent's tty (`ttys016`): the one thing that tells two tabs in the same
-//! directory apart, so the daemon can reach the session's own tab. It is read from the process table,
-//! walking up from the hook in case the agent started it in a session of its own.
+//! A terminal host also gets where in it the session sits, so the daemon can reach the session's own tab.
+//! Normally that is the agent's tty (`ttys016`), the one thing that tells two tabs in the same directory
+//! apart, read from the process table, walking up from the hook in case the agent started it in a session
+//! of its own. Inside tmux that tty belongs to a pane, so the tmux socket and pane are reported instead.
 //!
 //! Outside macOS there is no such variable, so the hook reports its ancestor pids instead and leaves
 //! finding their window to the daemon, which asks the compositor when K2 is pressed.
@@ -34,14 +35,21 @@ pub enum Surface {
     /// Runs in the agent's own desktop app; K2 uses that agent's deeplink.
     App,
     /// Runs inside another app, and this bundle id is where K2 goes. Unknown apps are all treated
-    /// as hosts, so even unfamiliar terminals are reached correctly. The tty, when the agent has one,
-    /// narrows it to a tab.
-    Host(String, Option<String>),
+    /// as hosts, so even unfamiliar terminals are reached correctly. The tab, when it can be told,
+    /// narrows it down.
+    Host(String, Option<Tab>),
     /// No host app: sessions started over SSH, by a daemon, or by launchd. K2 has nowhere to go.
     Headless,
     /// Outside macOS there are no bundle ids: the hook's ancestor process ids, nearest first. The daemon
     /// looks for a window owned by one of them when K2 is pressed; finding none means headless.
     Window(Vec<u32>),
+}
+
+/// Where in a terminal host the session sits.
+#[derive(Debug, PartialEq, Eq)]
+pub enum Tab {
+    Tty(String),
+    Tmux { socket: String, pane: String },
 }
 
 pub fn detect(own_bundle_id: &str) -> Surface {
@@ -53,9 +61,25 @@ pub fn detect(own_bundle_id: &str) -> Surface {
         .filter(|id| !id.is_empty())
         .or_else(launched_app_bundle_id);
     match from_bundle_id(found.as_deref(), own_bundle_id) {
-        Surface::Host(bundle_id, _) => Surface::Host(bundle_id, controlling_tty()),
+        Surface::Host(bundle_id, _) => Surface::Host(bundle_id, current_tab()),
         surface => surface,
     }
+}
+
+fn current_tab() -> Option<Tab> {
+    let tmux = std::env::var("TMUX").ok();
+    let pane = std::env::var("TMUX_PANE").ok();
+    match (tmux, pane) {
+        (Some(tmux), Some(pane)) => tmux_tab(&tmux, &pane),
+        _ => controlling_tty().map(Tab::Tty),
+    }
+}
+
+/// `$TMUX` is `<socket>,<server pid>,<session index>`; the socket path itself may hold commas.
+fn tmux_tab(tmux: &str, pane: &str) -> Option<Tab> {
+    let socket = tmux.rsplitn(3, ',').nth(2)?;
+    let valid_pane = pane.strip_prefix('%').is_some_and(|id| !id.is_empty() && id.bytes().all(|byte| byte.is_ascii_digit()));
+    (socket.starts_with('/') && valid_pane).then(|| Tab::Tmux { socket: socket.to_owned(), pane: pane.to_owned() })
 }
 
 /// The controlling terminal of the nearest process in this chain that has one, as `ttys016`.
@@ -172,10 +196,17 @@ fn from_bundle_id(found: Option<&str>, own_bundle_id: &str) -> Surface {
 pub fn write_into(payload: &mut Map<String, Value>, surface: &Surface) {
     let name = match surface {
         Surface::App => "app",
-        Surface::Host(bundle_id, tty) => {
+        Surface::Host(bundle_id, tab) => {
             payload.insert("host_bundle_id".to_owned(), Value::String(bundle_id.clone()));
-            if let Some(tty) = tty {
-                payload.insert("host_tty".to_owned(), Value::String(tty.clone()));
+            match tab {
+                Some(Tab::Tty(tty)) => {
+                    payload.insert("host_tty".to_owned(), Value::String(tty.clone()));
+                }
+                Some(Tab::Tmux { socket, pane }) => {
+                    payload.insert("tmux_socket".to_owned(), Value::String(socket.clone()));
+                    payload.insert("tmux_pane".to_owned(), Value::String(pane.clone()));
+                }
+                None => {}
             }
             "host"
         }
@@ -197,6 +228,31 @@ mod tests {
         assert_eq!(parent_from_stat("3620 (claude) S 3534 3620 3534 34816"), Some(3534));
         assert_eq!(parent_from_stat("42 (a) b (c)) R 7 42 42 0"), Some(7));
         assert_eq!(parent_from_stat("garbage"), None);
+    }
+
+    #[test]
+    fn a_tmux_pane_is_reported_by_socket_and_pane() {
+        assert_eq!(
+            tmux_tab("/private/tmp/tmux-502/default,84233,0", "%3"),
+            Some(Tab::Tmux { socket: "/private/tmp/tmux-502/default".to_owned(), pane: "%3".to_owned() })
+        );
+        assert_eq!(
+            tmux_tab("/tmp/odd,name/default,1,0", "%12"),
+            Some(Tab::Tmux { socket: "/tmp/odd,name/default".to_owned(), pane: "%12".to_owned() })
+        );
+        for (tmux, pane) in [("relative,1,0", "%3"), ("/tmp/default,1,0", "3"), ("/tmp/default,1,0", "%3;x"), ("garbage", "%3")] {
+            assert_eq!(tmux_tab(tmux, pane), None, "{tmux} {pane}");
+        }
+    }
+
+    #[test]
+    fn a_tmux_pane_goes_into_the_payload_instead_of_a_tty() {
+        let mut payload = Map::new();
+        let tab = Tab::Tmux { socket: "/tmp/tmux-502/default".to_owned(), pane: "%3".to_owned() };
+        write_into(&mut payload, &Surface::Host("com.mitchellh.ghostty".to_owned(), Some(tab)));
+        assert_eq!(payload["tmux_socket"], "/tmp/tmux-502/default");
+        assert_eq!(payload["tmux_pane"], "%3");
+        assert!(!payload.contains_key("host_tty"));
     }
 
     #[cfg(target_os = "macos")]
@@ -297,7 +353,7 @@ mod tests {
     #[test]
     fn the_payload_carries_the_landing_spot_only_for_a_host() {
         let mut payload = Map::new();
-        write_into(&mut payload, &Surface::Host("com.mitchellh.ghostty".to_owned(), Some("ttys016".to_owned())));
+        write_into(&mut payload, &Surface::Host("com.mitchellh.ghostty".to_owned(), Some(Tab::Tty("ttys016".to_owned()))));
         assert_eq!(payload["surface"], "host");
         assert_eq!(payload["host_bundle_id"], "com.mitchellh.ghostty");
         assert_eq!(payload["host_tty"], "ttys016");

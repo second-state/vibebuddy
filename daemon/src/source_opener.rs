@@ -10,7 +10,7 @@ use std::time::Duration;
 use serde::Deserialize;
 use tokio::process::Command;
 
-use crate::activity::{ActivitySource, Surface};
+use crate::activity::{ActivitySource, Surface, TmuxPane};
 
 const OPEN_TIMEOUT: Duration = Duration::from_secs(5);
 const CODEX_BUNDLE_ID: &str = "com.openai.codex";
@@ -27,6 +27,8 @@ const GHOSTTY_LIST_TERMINALS: [&str; 7] = [
     "return out",
     "end tell",
 ];
+/// The daemon starts with launchd's bare PATH, so tmux is looked for where package managers put it.
+const TMUX_PATHS: [&str; 4] = ["/opt/homebrew/bin/tmux", "/usr/local/bin/tmux", "/usr/bin/tmux", "/run/current-system/sw/bin/tmux"];
 /// How long Ghostty gets to read a title off the tty before the listing is retried.
 const GHOSTTY_TITLE_POLLS: u32 = 10;
 const GHOSTTY_TITLE_POLL_INTERVAL: Duration = Duration::from_millis(50);
@@ -55,14 +57,28 @@ pub async fn open(source: ActivitySource) -> Result<String, String> {
     if let Some(Surface::Window { pids }) = surface_of(&source) {
         return focus_window(pids).await;
     }
-    // Ghostty can be asked about its terminals, so go to the session's own tab. Failing that, Ghostty is still
-    // brought forward below, as any other host is.
-    if let Some(Surface::Host { bundle_id, tty: Some(tty) }) = surface_of(&source)
-        && bundle_id == GHOSTTY_BUNDLE_ID
-    {
-        match focus_ghostty_terminal(tty).await {
-            Ok(target) => return Ok(target),
-            Err(error) => tracing::info!(%error, "cannot find the session's Ghostty tab, bringing Ghostty forward"),
+    if let Some(Surface::Host { bundle_id, tty, tmux }) = surface_of(&source) {
+        // Inside tmux, first switch the user's tmux client to the session's pane; the tab to find is then the
+        // one that client runs in.
+        let tty = match tmux {
+            Some(tmux) => match focus_tmux_pane(tmux).await {
+                Ok(client_tty) => Some(client_tty),
+                Err(error) => {
+                    tracing::info!(%error, "cannot switch tmux to the session's pane");
+                    None
+                }
+            },
+            None => tty.clone(),
+        };
+        // Ghostty can be asked about its terminals, so go to that tab. Failing that, Ghostty is still brought
+        // forward below, as any other host is.
+        if bundle_id == GHOSTTY_BUNDLE_ID
+            && let Some(tty) = tty
+        {
+            match focus_ghostty_terminal(&tty).await {
+                Ok(target) => return Ok(target),
+                Err(error) => tracing::info!(%error, "cannot find the session's Ghostty tab, bringing Ghostty forward"),
+            }
         }
     }
     let desktop = reported_desktop_session(&source)
@@ -236,21 +252,76 @@ fn valid_tty(tty: &str) -> bool {
         .is_some_and(|rest| !rest.is_empty() && rest.len() <= 8 && rest.bytes().all(|byte| byte.is_ascii_alphanumeric()))
 }
 
+/// Switches a tmux client to the session's pane, across sessions and windows, and returns that client's tty:
+/// the terminal tab the user sees tmux in. A client already showing the pane's session is preferred, so a
+/// client watching some other session isn't pulled away from it; otherwise the one used most recently.
+async fn focus_tmux_pane(tmux: &TmuxPane) -> Result<String, String> {
+    if !valid_tmux_pane(&tmux.pane) {
+        return Err("invalid tmux pane".to_owned());
+    }
+    check_own_socket(&tmux.socket)?;
+    let program = TMUX_PATHS
+        .into_iter()
+        .find(|path| Path::new(path).exists())
+        .ok_or_else(|| "tmux not found".to_owned())?;
+    let socket = tmux.socket.as_str();
+    let pane = tmux.pane.as_str();
+    let session = run(program, &["-S", socket, "display-message", "-p", "-t", pane, "#{session_id}"]).await?;
+    let clients = run(program, &["-S", socket, "list-clients", "-F", "#{client_activity} #{client_tty} #{session_id}"]).await?;
+    let client = tmux_client_for(&clients, session.trim()).ok_or_else(|| "no tmux client is attached".to_owned())?;
+    run(program, &["-S", socket, "switch-client", "-c", &client, "-t", pane]).await?;
+    Ok(client.trim_start_matches("/dev/").to_owned())
+}
+
+fn tmux_client_for(clients: &str, session: &str) -> Option<String> {
+    clients
+        .lines()
+        .filter_map(|line| {
+            // tmux turns tabs in the format into `_`; none of these fields can hold a space.
+            let mut fields = line.split(' ');
+            let activity: u64 = fields.next()?.parse().ok()?;
+            let tty = fields.next()?;
+            let same_session = fields.next()? == session;
+            tty.starts_with("/dev/").then_some((same_session, activity, tty))
+        })
+        .max_by_key(|&(same_session, activity, _)| (same_session, activity))
+        .map(|(_, _, tty)| tty.to_owned())
+}
+
+fn valid_tmux_pane(pane: &str) -> bool {
+    pane.strip_prefix('%')
+        .is_some_and(|id| !id.is_empty() && id.bytes().all(|byte| byte.is_ascii_digit()))
+}
+
+/// The socket path comes from the hook; only a socket this user owns is handed to tmux.
+fn check_own_socket(socket: &str) -> Result<(), String> {
+    use std::os::unix::fs::{FileTypeExt, MetadataExt};
+    let metadata = std::fs::metadata(socket).map_err(|error| format!("cannot read tmux socket: {error}"))?;
+    let own = metadata.uid() == unsafe { libc::getuid() };
+    if socket.starts_with('/') && metadata.file_type().is_socket() && own {
+        Ok(())
+    } else {
+        Err("not a tmux socket of this user".to_owned())
+    }
+}
+
 /// Runs a fixed AppleScript. The first run against an app asks the user for Automation access; until they answer,
 /// the call waits and then times out here, and the caller falls back to bringing the app forward.
 async fn run_osascript(script: &[&str], args: &[&str]) -> Result<String, String> {
-    let mut command = Command::new("/usr/bin/osascript");
-    for line in script {
-        command.args(["-e", line]);
-    }
-    command.args(args).kill_on_drop(true);
-    let output = tokio::time::timeout(OPEN_TIMEOUT, command.output())
+    let mut command_line: Vec<&str> = script.iter().flat_map(|line| ["-e", *line]).collect();
+    command_line.extend_from_slice(args);
+    run("/usr/bin/osascript", &command_line).await
+}
+
+/// Runs a helper with arguments passed straight through, never a shell, and returns its stdout.
+async fn run(program: &str, args: &[&str]) -> Result<String, String> {
+    let output = tokio::time::timeout(OPEN_TIMEOUT, Command::new(program).args(args).kill_on_drop(true).output())
         .await
-        .map_err(|_| "osascript timed out".to_owned())?
-        .map_err(|error| format!("cannot run osascript: {error}"))?;
+        .map_err(|_| format!("{program} timed out"))?
+        .map_err(|error| format!("cannot run {program}: {error}"))?;
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
-        return Err(format!("osascript failed: {}", stderr.trim()));
+        return Err(format!("{program} failed: {}", stderr.trim()));
     }
     Ok(String::from_utf8_lossy(&output.stdout).into_owned())
 }
@@ -454,6 +525,23 @@ mod tests {
     }
 
     #[test]
+    fn the_tmux_client_on_the_panes_session_is_switched_before_a_busier_one() {
+        let clients = "1791453500 /dev/ttys044 $1\n1791453400 /dev/ttys016 $0\n";
+        assert_eq!(tmux_client_for(clients, "$0").as_deref(), Some("/dev/ttys016"));
+        // Nobody watches the pane's session: the most recently used client is moved there.
+        assert_eq!(tmux_client_for(clients, "$7").as_deref(), Some("/dev/ttys044"));
+        assert_eq!(tmux_client_for("", "$0"), None);
+    }
+
+    #[test]
+    fn only_tmux_pane_ids_reach_tmux() {
+        assert!(valid_tmux_pane("%3"));
+        for bogus in ["", "%", "3", "%3;kill-server", "%-1"] {
+            assert!(!valid_tmux_pane(bogus), "{bogus}");
+        }
+    }
+
+    #[test]
     fn only_pseudo_terminal_names_are_written_to() {
         assert!(valid_tty("ttys016"));
         for bogus in ["", "tty", "ttys016/../disk0", "disk0", "console", "ttys 1"] {
@@ -463,12 +551,12 @@ mod tests {
 
     #[test]
     fn a_host_tty_survives_a_state_file_round_trip() {
-        let surface = Surface::Host { bundle_id: GHOSTTY_BUNDLE_ID.to_owned(), tty: Some("ttys016".to_owned()) };
+        let surface = Surface::Host { bundle_id: GHOSTTY_BUNDLE_ID.to_owned(), tty: Some("ttys016".to_owned()), tmux: None };
         let json = serde_json::to_string(&surface).unwrap();
         assert_eq!(serde_json::from_str::<Surface>(&json).unwrap(), surface);
         // State files from before the tty was reported still load.
         let old: Surface = serde_json::from_str(r#"{"surface":"host","bundle_id":"com.mitchellh.ghostty"}"#).unwrap();
-        assert_eq!(old, Surface::Host { bundle_id: GHOSTTY_BUNDLE_ID.to_owned(), tty: None });
+        assert_eq!(old, Surface::Host { bundle_id: GHOSTTY_BUNDLE_ID.to_owned(), tty: None, tmux: None });
     }
 
     #[test]
@@ -491,7 +579,7 @@ mod tests {
         let source = ActivitySource::ClaudeCode {
             session_id: "19b63622-e3e0-4cd0-a37e-dc8d71253155".to_owned(),
             cwd: Some("/work/vibe-buddy".to_owned()),
-            surface: Surface::Host { tty: None, bundle_id: "com.mitchellh.ghostty".to_owned() },
+            surface: Surface::Host { tty: None, tmux: None, bundle_id: "com.mitchellh.ghostty".to_owned() },
         };
 
         assert!(reported_desktop_session(&source).is_none());
@@ -506,7 +594,7 @@ mod tests {
             &ActivitySource::ClaudeCode {
                 session_id: "19b63622-e3e0-4cd0-a37e-dc8d71253155".to_owned(),
                 cwd: Some("/work/vibe-buddy".to_owned()),
-                surface: Surface::Host { tty: None, bundle_id: "com.mitchellh.ghostty".to_owned() },
+                surface: Surface::Host { tty: None, tmux: None, bundle_id: "com.mitchellh.ghostty".to_owned() },
             },
             None,
         )
@@ -522,7 +610,7 @@ mod tests {
         let spec = command_for(
             &ActivitySource::Codex {
                 thread_id: "019c6e27-e55b-73d1-87d8-4e01f1f75043".to_owned(),
-                surface: Surface::Host { tty: None, bundle_id: "net.example.SomeNewTerminal".to_owned() },
+                surface: Surface::Host { tty: None, tmux: None, bundle_id: "net.example.SomeNewTerminal".to_owned() },
             },
             None,
         )
@@ -553,7 +641,7 @@ mod tests {
                 command_for(
                     &ActivitySource::Codex {
                         thread_id: "t".to_owned(),
-                        surface: Surface::Host { bundle_id: bogus.to_owned(), tty: None },
+                        surface: Surface::Host { bundle_id: bogus.to_owned(), tty: None, tmux: None },
                     },
                     None,
                 )
@@ -566,13 +654,13 @@ mod tests {
     #[test]
     fn a_host_without_a_bundle_id_has_nowhere_to_go() {
         // The hook says there's a host but gave no target: skip it, rather than fall back to importing the session into the app.
-        assert_eq!(Surface::from_hook(Some("host"), None, None, None, None), Surface::Headless);
+        assert_eq!(Surface::from_hook(Some("host"), None, None, None, None, None), Surface::Headless);
     }
 
     #[test]
     fn an_older_hook_keeps_the_desktop_behaviour() {
         // Old hooks and old state files report no surface; back then only the desktop app was supported.
-        assert_eq!(Surface::from_hook(None, None, None, None, None), Surface::default());
+        assert_eq!(Surface::from_hook(None, None, None, None, None, None), Surface::default());
         assert!(matches!(Surface::default(), Surface::App { .. }));
     }
 
