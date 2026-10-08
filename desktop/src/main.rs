@@ -105,7 +105,6 @@ enum Message {
     ChooseDrawings,
     Drawings(Result<Option<Vec<character::Image>>, String>),
     PickLender(Lender),
-    PickRobotLender(Lender),
     UseRobot,
     UseCustom,
     CopyPrompt,
@@ -158,8 +157,7 @@ struct App {
     custom_look: Option<(Vec<u8>, Vec<image::Handle>)>,
     lender: Option<Lender>,
     custom_problem: Option<String>,
-    /// Who lends the robot voice and lines, `builtin` for its own five lines; and its face for the card.
-    robot_lender: Lender,
+    /// The robot's face for its card.
     robot_face: Option<image::Handle>,
     /// The firmware update waits for a second click, since the box restarts.
     confirm_firmware: bool,
@@ -200,7 +198,6 @@ impl App {
             custom_look: None,
             lender: None,
             custom_problem: None,
-            robot_lender: Lender { id: BUILTIN },
             robot_face: None,
             confirm_firmware: false,
             notice: None,
@@ -224,12 +221,6 @@ impl App {
             .and_then(|id| app.voices.iter().find(|voice| voice.id == id))
             .or(app.voices.first())
             .map(Lender::of);
-        app.robot_lender = app
-            .characters
-            .robot_lender
-            .as_deref()
-            .and_then(|id| app.voices.iter().find(|voice| voice.id == id))
-            .map_or(Lender { id: BUILTIN }, Lender::of);
         app.robot_face = ::image::load_from_memory(include_bytes!("../../characters/robot/face.png")).ok().map(|face| {
             let face = face.to_rgba8();
             image::Handle::from_rgba(face.width(), face.height(), face.into_raw())
@@ -430,9 +421,6 @@ impl App {
                 if current.as_deref() == Some(CUSTOM) && lends && self.custom_look.is_some() {
                     return Task::done(Message::UseCustom);
                 }
-                if current.as_deref() == Some(ROBOT) && assets::language_of(self.robot_lender.id) == Some(language) {
-                    return Task::done(Message::UseRobot);
-                }
             }
             Message::ChooseDrawings => return Task::perform(custom::choose_drawings(), Message::Drawings),
             Message::Drawings(Ok(None)) => {}
@@ -446,23 +434,10 @@ impl App {
             },
             Message::Drawings(Err(error)) => self.custom_problem = Some(error),
             Message::PickLender(lender) => self.lender = Some(lender),
-            Message::PickRobotLender(lender) => self.robot_lender = lender,
             Message::UseRobot => {
-                let lender = self.robot_lender;
-                self.characters.robot_lender = (lender.id != BUILTIN).then(|| lender.id.to_owned());
+                self.characters.robot_lender = None;
                 self.characters.save();
-                let form = assets::language_of(lender.id).and_then(|language| self.characters.address(language)).map(str::to_owned);
-                let write = async move {
-                    let pack = if lender.id == BUILTIN {
-                        assets::read_pack(ROBOT).await?
-                    } else {
-                        let mut pack = assets::read_character(lender.id, form.as_deref()).await?;
-                        pack.look = None;
-                        pack.id = ROBOT.to_owned();
-                        pack.build().ok_or("the Character pack doesn't fit")?
-                    };
-                    client::write_voice_pack(pack).await
-                };
+                let write = async move { client::write_voice_pack(assets::read_pack(ROBOT).await?).await };
                 return Task::perform(write, Message::Done);
             }
             Message::UseCustom => {
@@ -736,9 +711,9 @@ impl App {
             .align_y(iced::Alignment::Center);
         let custom_in_use = current.as_deref() == Some(CUSTOM);
         let wears_robot = matches!(current.as_deref(), Some(ROBOT | BUILTIN));
-        let robot_lenders: Vec<Lender> = std::iter::once(Lender { id: BUILTIN }).chain(self.voices.iter().map(Lender::of)).collect();
-        let robot_lender_in_use = self.characters.robot_lender.as_deref().unwrap_or(BUILTIN) == self.robot_lender.id;
-        let robot_action: Element<'_, Message> = if wears_robot && robot_lender_in_use {
+        // A box an older version wrote with another Character's voice on the robot still needs writing again.
+        let robot_in_use = wears_robot && self.characters.robot_lender.is_none();
+        let robot_action: Element<'_, Message> = if robot_in_use {
             text(tr("In use", &[])).style(text::success).into()
         } else {
             button(text(tr("Use", &[]))).on_press_maybe((online && !busy).then_some(Message::UseRobot)).into()
@@ -750,9 +725,6 @@ impl App {
                     .spacing(6)
                     .align_y(iced::Alignment::Center),
                 text(tr("The original robot, drawn by the box itself", &[])).size(13),
-                row![text(tr("Voice and lines from", &[])).size(13), pick_list(robot_lenders, Some(self.robot_lender), Message::PickRobotLender)]
-                    .spacing(8)
-                    .align_y(iced::Alignment::Center),
             ]
             .spacing(4))
             .push(space::horizontal())
@@ -815,7 +787,7 @@ impl App {
             ))
             .size(13),
             address,
-            character_card(robot_card.into(), wears_robot),
+            character_card(robot_card.into(), robot_in_use),
             column(cards).spacing(10),
             character_card(custom_card.into(), custom_in_use),
         ]

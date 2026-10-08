@@ -15,4 +15,4 @@ cp voices/jessica/*.pcm firmware/main/assets/
 
 `tools/make_voice_pack.py` still builds the older five-line voice pack (ADR-0003) from a directory like this one; the firmware keeps playing such packs until the App writes a Character pack.
 
-The voices that used to live here were retired on 2026-10-06: `chris` (ElevenLabs) became the Character Jackson with a Doubao voice, `wanwanxiaohe` became the Character of the same name, and `xiaohe2` was dropped.
+The voices that used to live here were retired on 2026-10-06: `chris` (ElevenLabs) became the Character Jackson with a Doubao voice (himself retired on 2026-10-08), `wanwanxiaohe` became the Character of the same name, and `xiaohe2` was dropped.

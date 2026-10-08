@@ -90,15 +90,13 @@
 
 /* Voice catalog */
 "Xiaohe" = "小何";
-"Ahu" = "阿虎";
-"Chinese · Beijing accent" = "中文 · 京腔";
 "Chinese · Taiwanese accent" = "中文 · 台湾口音";
 "A sweet, lively friend from Taiwan who's always rooting for you." = "来自台湾的甜美女孩，总在为你打气。";
-"A Beijing guy with the gift of the gab. Hearty praise, and nothing fazes him." = "能侃的北京爷们儿，夸人实在，啥事儿都不慌。";
-"A cheerful friend who celebrates every small win." = "开朗的朋友，为你每个小胜利欢呼。";
-"The calm coworker at the next desk. Dry humor, rare but honest praise." = "邻座的淡定同事，冷幽默，夸得少但真诚。";
 "English · British accent" = "英文 · 英式口音";
 "English · Bay Area" = "英文 · 湾区";
+"English · California accent" = "英文 · 加州口音";
+"A greybeard engineer who's seen every outage. Few words, dry praise." = "见过所有线上事故的老派工程师，话少，夸人干脆。";
+"A laid-back San Diego surfer and developer. Nothing stresses him out." = "圣地亚哥的冲浪程序员，松弛乐观，什么都不慌。";
 "A witty Londoner. Understated praise, gently bossy about breaks." = "机智的伦敦姑娘，夸人含蓄，催你休息毫不手软。";
 "Late-night lofi calm. Never rushes you." = "深夜 lofi 般的安静陪伴，从不催你。";
 "An upbeat Bay Area engineer who cheers you on, sometimes in Chinese." = "元气满满的湾区华裔工程师，偶尔用中文给你加油。";

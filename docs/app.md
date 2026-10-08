@@ -85,7 +85,7 @@ Writing goes over the existing serial protocol: the Mac sends base64 in chunks, 
 
 The packs the app ships are the Character packs committed as `characters/*/pack.bin` (see [`characters.md`](characters.md)), about 2.5 MB for four.
 
-The voice catalog `VoiceCatalogEntry.all` tags each voice with the language of its lines (`VoiceLanguage.zh` / `.en`). The voice picker lists only the voices this build actually ships a pack for (computed once at startup from whether the file exists), and puts voices matching the interface language first. The catalog has two English Characters, `amanda` and `jackson`, and two Chinese, `wanwanxiaohe` and `ahu`. The firmware's built-in voice is Jessica, in English, so onboarding in the Chinese interface suggests picking a Chinese voice.
+The voice catalog `VoiceCatalogEntry.all` tags each voice with the language of its lines (`VoiceLanguage.zh` / `.en`). The voice picker lists only the voices this build actually ships a pack for (computed once at startup from whether the file exists), and puts voices matching the interface language first. The catalog has five English Characters, `ada`, `hank`, `luna`, `kai` and `mei`, and one Chinese, `wanwanxiaohe`. The firmware's built-in voice is Jessica, in English, so onboarding in the Chinese interface suggests picking a Chinese voice.
 
 New events the device protocol needs (a draft, to be written into `protocol.md` at implementation time): `device.identify` (blink), `voice.begin` / `voice.chunk` / `voice.end`, and the device reporting `voice.written` with the verification result.
 

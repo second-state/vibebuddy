@@ -220,31 +220,26 @@ final class AppModel: ObservableObject {
             writeVoice(current)
         } else if current == "custom", let saved = savedCustomCharacter, VoiceCatalogEntry.language(ofVoice: saved.lender) == language {
             writeCustomCharacter(look: saved.look, lender: saved.lender)
-        } else if current == Self.robotID, VoiceCatalogEntry.language(ofVoice: robotLender) == language {
-            writeRobot(lender: robotLender)
         }
     }
 
     static let robotID = "robot"
+    /// Older versions let another Character lend the robot its voice and lines; a box written that way
+    /// still says that Character's lines until the robot is written again.
     private static let robotLenderKey = "robot.lender"
-    /// Who lends the robot voice and lines: "builtin" (the five fixed lines it shipped with) or a Character id.
-    var robotLender: String { UserDefaults.standard.string(forKey: Self.robotLenderKey) ?? "builtin" }
+    var robotBorrowsVoice: Bool { ![nil, "builtin"].contains(UserDefaults.standard.string(forKey: Self.robotLenderKey)) }
 
     /// Whether the box wears the robot: written as one, or still on the firmware's own default.
     var wearsRobot: Bool { [Self.robotID, "builtin"].contains(status?.device.voice) }
 
     /// Writes the robot, the default Character: drawn by the box itself, so the pack carries no look,
-    /// only the voice and lines of `lender` (with the form of address of its language) or, for
-    /// "builtin", the five fixed lines it shipped with.
-    func writeRobot(lender: String) {
-        let pack: Data?
-        if lender == "builtin" {
-            pack = Resources.voicePack(Self.robotID)?.data
-        } else {
-            pack = Resources.voicePack(lender).flatMap { addressed($0, id: lender).withoutLook(id: Self.robotID) }
+    /// only its own voice, the built-in one, and the five fixed lines it shipped with.
+    func writeRobot() {
+        guard let pack = Resources.voicePack(Self.robotID)?.data else {
+            lastError = String(localized: "This app has no voice pack for \(Self.robotID)")
+            return
         }
-        guard let pack else { lastError = String(localized: "This app has no voice pack for \(lender)"); return }
-        UserDefaults.standard.set(lender, forKey: Self.robotLenderKey)
+        UserDefaults.standard.removeObject(forKey: Self.robotLenderKey)
         objectWillChange.send()
         writePack(pack)
     }
