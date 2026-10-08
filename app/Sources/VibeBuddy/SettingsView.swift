@@ -366,8 +366,11 @@ struct DeviceView: View {
             Section {
                 LabeledContent("Link", value: connectionText)
                 // Not while a flash waits for a replug: that row says not to hold K0 this time.
+                if let pin = model.status?.device.pin {
+                    PinNotice(pin: pin)
+                }
                 if model.daemonAlive, !connected, !model.operationRunning, model.operation?.state != .replug {
-                    BoxNotFoundHelp()
+                    BoxSearchHelp(model: model)
                 }
                 LabeledContent("Box firmware", value: model.boxFirmware ?? "—")
                 LabeledContent("Latest firmware", value: latestFirmware)
@@ -444,7 +447,9 @@ struct DeviceView: View {
 
     private var connectionText: String {
         guard let device = model.status?.device else { return String(localized: "daemon isn't running") }
-        guard device.connected else { return String(localized: "Box not found") }
+        guard device.connected else {
+            return device.candidates?.isEmpty == false ? String(localized: "Several devices found") : String(localized: "Box not found")
+        }
         return "\(device.port ?? "") · \(device.bridge ? String(localized: "UART bridge") : String(localized: "native USB"))"
     }
 
@@ -508,6 +513,57 @@ struct FirmwareUnavailable: View {
             }
         }
         .font(.caption).foregroundStyle(.secondary)
+    }
+}
+
+/// Why no box is connected yet: several devices to choose from, or else the usual causes of none at all.
+struct BoxSearchHelp: View {
+    @ObservedObject var model: AppModel
+
+    var body: some View {
+        if let candidates = model.status?.device.candidates, !candidates.isEmpty {
+            BoxChoice(model: model, candidates: candidates)
+        } else if model.status?.device.pin == nil {
+            BoxNotFoundHelp()
+        }
+    }
+}
+
+/// Every ESP32-S3 on native USB looks the same, so with several plugged in and none of them the box seen before,
+/// the user says which one it is; the daemon remembers that, as it would a box that reported our firmware.
+struct BoxChoice: View {
+    @ObservedObject var model: AppModel
+    let candidates: [BoxCandidate]
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text("Several devices are plugged in, and none of them is the box seen before. Which one is the box?")
+                .font(.caption).foregroundStyle(.secondary)
+            ForEach(candidates) { candidate in
+                HStack {
+                    Text(candidate.usbSerial.map { "\(candidate.port) · \($0)" } ?? candidate.port)
+                        .font(.caption.monospaced())
+                    Spacer()
+                    if let serial = candidate.usbSerial {
+                        Button("This is the box") { model.chooseBox(usbSerial: serial) }
+                            .disabled(model.operationRunning)
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// A pin left set hides every other box behind "Box not found", so it is always shown.
+struct PinNotice: View {
+    let pin: SerialPin
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text("Only looking at \(pin.value), set by \(pin.variable).").foregroundStyle(.orange)
+            Text("To find the box on its own again, run `launchctl unsetenv \(pin.variable)` in Terminal, then restart Vibe Buddy.")
+                .font(.caption).foregroundStyle(.secondary).textSelection(.enabled)
+        }
     }
 }
 

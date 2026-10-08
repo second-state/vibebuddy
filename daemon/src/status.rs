@@ -6,7 +6,7 @@ use serde::Serialize;
 
 use crate::activity::TodaySummary;
 use crate::config::Config;
-use crate::serial_transport::{BUILD_MARKER, DeviceMessage};
+use crate::serial_transport::{BUILD_MARKER, Candidate, DeviceMessage, Pin};
 
 /// Reported next to the build, at boot and in answer to hello, so it can arrive glued behind a stray line too.
 const VERSION_MARKER: &str = "FIRMWARE VERSION ";
@@ -41,6 +41,11 @@ pub struct DeviceState {
     /// to it: on 2026-10-08 the update offer flashed the breadboard devkit with box firmware, and its screen,
     /// speaker and buttons all failed to start.
     pub unsupported_board: Option<String>,
+    /// Set when an environment variable narrows the search to one port or device; the app says so, or a box
+    /// elsewhere would just look unfound.
+    pub pin: Option<Pin>,
+    /// Devices that could be the box when there are several and none is the remembered one; the user picks.
+    pub candidates: Vec<Candidate>,
 }
 
 impl DeviceState {
@@ -58,6 +63,7 @@ impl DeviceState {
                 // 2026-10-06 a leftover voice made another product look like the box, and it nearly got flashed.
                 self.usb_serial = usb_serial.clone();
                 self.unsupported_board = None;
+                self.candidates.clear();
                 self.foreign_firmware = false;
                 self.firmware_build = None;
                 self.firmware_version = None;
@@ -106,6 +112,7 @@ impl DeviceState {
                     }
                 }
             }
+            DeviceMessage::Candidates(candidates) => self.candidates = candidates.clone(),
             DeviceMessage::Event(_) => {}
         }
         *self != before
@@ -173,6 +180,20 @@ mod tests {
     }
 
     #[test]
+    fn candidates_wait_for_a_choice_and_go_once_a_box_connects() {
+        let mut state = DeviceState::default();
+        let candidates = vec![
+            Candidate { port: "/dev/cu.usbmodem1101".to_owned(), usb_serial: Some("30:ED:A0:A4:0D:08".to_owned()) },
+            Candidate { port: "/dev/cu.usbmodem8401".to_owned(), usb_serial: Some("98:88:E0:06:8B:CC".to_owned()) },
+        ];
+        assert!(state.apply(&DeviceMessage::Candidates(candidates.clone())));
+        assert_eq!(state.candidates, candidates);
+        let usb_serial = Some("98:88:E0:06:8B:CC".to_owned());
+        state.apply(&DeviceMessage::Connected { port: "/dev/cu.usbmodem8401".to_owned(), bridge: false, usb_serial });
+        assert!(state.candidates.is_empty(), "connected: there is nothing left to choose");
+    }
+
+    #[test]
     fn a_build_glued_behind_a_stray_line_is_still_read() {
         let mut state = DeviceState::default();
         state.apply(&line("LEISURE SKIT DISPLAY READY BUILD v0.2.1-38-ga0bffc7 2026-09-30 16:29"));
@@ -211,6 +232,8 @@ mod tests {
                 usb_serial: None,
                 foreign_firmware: false,
                 unsupported_board: None,
+                pin: None,
+                candidates: Vec::new(),
             }
         );
     }

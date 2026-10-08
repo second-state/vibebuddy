@@ -273,6 +273,12 @@ On 2026-10-05 and again on 2026-10-07 the daemon wrote heartbeats to a box runni
 
 When a link can reach firmware that isn't ours, find out who is there from what it already prints before writing anything; a question written to the wrong peer is input to it. Here that meant listening first (ESP-IDF application logs give other firmware away; our build line gives ours away), asking once only a box that stays quiet, and never probing a box judged foreign: its reset banner is the signal to look again. A test that checks the foreign box got "nothing but hello" would have passed with the bug in; the test that guards it says nothing at all reaches the box.
 
+## A temporary workaround must be visible or expire on its own
+
+During the Muse tests on 2026-10-05, `launchctl setenv VIBEBUDDY_SERIAL_PORT /dev/cu.usbmodem8401` pinned the app's daemon to the Vibe Buddy box until a release could tell the two apart. The release shipped two days later, but the pin stayed: launchd keeps it until the Mac restarts, and nothing showed it. On 2026-10-08 a devkit plugged in place of the box showed as "Box not found", the Device tab offered no flash, and it looked like a regression in box detection. It only worked again by luck, when the devkit went into the same Mac socket, because macOS names a port after the socket, not the device.
+
+An override that changes what the product does must show where the user looks for the cause; here the daemon reports the pin in its status and the Device tab says so, in place of the "not found" help. If it can't be shown, give it an expiry. A note saying "undo this later" is not a mechanism. When something stops being found, check the process's environment (`ps eww`) before the code.
+
 ## An update offer must check the hardware, not just the version
 
 On 2026-10-08 the app offered firmware 0.3.3 to the breadboard devkit (a GoouuuTech S3-N16R8 with an ST7789 SPI screen and a MAX98357A amp), because it ran our firmware at 0.1.0 and the offer compared versions only. Released firmware is built for the box; on the devkit the screen, speaker and buttons all failed to start. The devkit's firmware had said `BOARD goouuu-s3-spi` at every boot, and nothing read it.

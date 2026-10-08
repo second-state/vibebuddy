@@ -152,6 +152,8 @@ final class AppModel: ObservableObject {
         run { try await self.client.setVolume(level, preview: preview) }
     }
 
+    func chooseBox(usbSerial: String) { run { try await self.client.chooseBox(usbSerial: usbSerial) } }
+
     func setNotifyLink(_ enabled: Bool) {
         guard var config = status?.config else { return }
         config.notifyLink = enabled

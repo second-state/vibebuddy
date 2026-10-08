@@ -96,6 +96,8 @@ enum Message {
     VolumeDragged(u8),
     VolumeReleased,
     PlayLine,
+    /// The user says which of several devices is the box, by its USB serial number.
+    ChooseBox(String),
     Identify,
     UseVoice(&'static str),
     /// A form of address for a language, or none.
@@ -406,6 +408,7 @@ impl App {
                 let level = self.volume.or_else(|| self.status.as_ref()?.device.volume).unwrap_or(60);
                 return Task::perform(client::set_volume(level, true), Message::Done);
             }
+            Message::ChooseBox(usb_serial) => return Task::perform(client::choose_box(usb_serial), Message::Done),
             Message::Identify => return Task::perform(client::identify(), Message::Done),
             Message::UseVoice(id) => {
                 let form = assets::language_of(id).and_then(|language| self.characters.address(language)).map(str::to_owned);
@@ -854,6 +857,7 @@ impl App {
         let device = self.status.as_ref().map(|status| &status.device);
         let link = match device {
             None => tr("daemon isn't running", &[]),
+            Some(device) if !device.connected && !device.candidates.is_empty() => tr("Several devices found", &[]),
             Some(device) if !device.connected => tr("Box not found", &[]),
             Some(device) => {
                 let kind = if device.bridge { tr("UART bridge", &[]) } else { tr("native USB", &[]) };
@@ -971,7 +975,37 @@ impl App {
         });
         // Not while a flash waits for a replug: that row says not to hold K0 this time.
         let replug = operation.is_some_and(|operation| operation.state == status::OperationState::Replug);
-        let not_found = (self.status.is_some() && !online && !busy && !replug).then(|| {
+        // A pin left set hides every other box behind "Box not found", so it is always shown.
+        let pin = device.and_then(|device| device.pin.as_ref()).map(|pin| {
+            column![
+                text(tr("Only looking at %@, set by %@.", &[&pin.value, &pin.variable])).size(13).style(text::warning),
+                text(tr("To find the box on its own again, unset %@ and restart the daemon.", &[&pin.variable])).size(13),
+            ]
+            .spacing(4)
+        });
+        // Every ESP32-S3 on native USB looks the same: with several plugged in and none of them the box seen
+        // before, the user says which one it is.
+        let candidates = device.map(|device| device.candidates.as_slice()).unwrap_or_default();
+        let choice = (!online && !candidates.is_empty()).then(|| {
+            let rows = candidates.iter().map(|candidate| {
+                let label = match &candidate.usb_serial {
+                    Some(serial) => format!("{} · {serial}", candidate.port),
+                    None => candidate.port.clone(),
+                };
+                let pick = candidate.usb_serial.clone().map(|serial| {
+                    button(text(tr("This is the box", &[]))).on_press_maybe((!busy).then_some(Message::ChooseBox(serial)))
+                });
+                row![text(label).size(13).font(Font::MONOSPACE), space::horizontal()].push(pick).spacing(12).into()
+            });
+            column![text(tr(
+                "Several devices are plugged in, and none of them is the box seen before. Which one is the box?",
+                &[]
+            ))
+            .size(13)]
+            .extend(rows)
+            .spacing(6)
+        });
+        let not_found = (self.status.is_some() && !online && !busy && !replug && candidates.is_empty() && pin.is_none()).then(|| {
             column![
                 text(tr("Not showing up? Use a cable that carries data, not just power.", &[])).size(13),
                 text(tr(
@@ -1000,6 +1034,8 @@ impl App {
             (None, false) => on_frame(tr("Click Refresh to see what the box is showing", &[])).into(),
         };
         column![row![text(tr("Link", &[])).width(140), text(link)].spacing(12)]
+            .push(pin)
+            .push(choice)
             .push(not_found)
             .push(row![text(tr("Box firmware", &[])).width(140), text(firmware)].spacing(12))
             .push(row![text(tr("Latest firmware", &[])).width(140), text(latest)].spacing(12))

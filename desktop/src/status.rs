@@ -134,6 +134,25 @@ pub struct Device {
     pub foreign_firmware: bool,
     /// Our firmware built for other hardware (the breadboard devkit); released firmware isn't offered to it.
     pub unsupported_board: Option<String>,
+    /// An environment variable narrowing the search to one port or device; older daemons report none.
+    pub pin: Option<Pin>,
+    /// Devices that could be the box when there are several and none is the remembered one.
+    pub candidates: Vec<Candidate>,
+}
+
+#[derive(Clone, Debug, Default, Deserialize, PartialEq)]
+#[serde(default)]
+pub struct Pin {
+    pub variable: String,
+    pub value: String,
+}
+
+#[derive(Clone, Debug, Default, Deserialize, PartialEq)]
+#[serde(default)]
+pub struct Candidate {
+    pub port: String,
+    /// What the choice is remembered by; without one the device can't be chosen.
+    pub usb_serial: Option<String>,
 }
 
 impl Device {

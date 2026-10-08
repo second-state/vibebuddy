@@ -60,6 +60,13 @@ do {
     check(!Firmware.foreign(DeviceState(connected: true)), "just connected, not judged yet: not foreign")
     check(!Firmware.foreign(DeviceState(connected: true, firmwareBuild: "abc 1", foreignFirmware: true)), "a reported build means it is ours")
     check(!Firmware.foreign(DeviceState(connected: false, foreignFirmware: true)), "not connected: not foreign")
+    check(status.device.pin == nil && status.device.candidates == nil, "an older daemon: no pin, no candidates")
+    let choosing = try StatusCoding.decoder().decode(DeviceState.self, from: Data("""
+    {"connected":false,"bridge":false,"pin":{"variable":"VIBEBUDDY_SERIAL_PORT","value":"/dev/cu.usbmodem8401"},
+     "candidates":[{"port":"/dev/cu.usbmodem1101","usb_serial":"30:ED:A0:A4:0D:08"},{"port":"/dev/cu.usbserial-840","usb_serial":null}]}
+    """.utf8))
+    check(choosing.pin == SerialPin(variable: "VIBEBUDDY_SERIAL_PORT", value: "/dev/cu.usbmodem8401"), "pin decodes")
+    check(choosing.candidates?.map(\.usbSerial) == ["30:ED:A0:A4:0D:08", nil], "candidates decode, with or without a serial")
 } catch {
     check(false, "status decoding threw: \(error)")
 }
