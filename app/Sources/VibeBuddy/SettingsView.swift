@@ -108,11 +108,50 @@ struct GeneralView: View {
     }
 }
 
+/// Volume slider: the value comes from the box's status and is sent on release; while dragging, the status stream can't yank it back.
+/// Floor of 20: a saved zero volume would be a persistent mute, and muting is deliberately box-only and not persisted.
+struct VolumeRow: View {
+    @ObservedObject var model: AppModel
+    @State private var level: Double = 65
+    @State private var editing = false
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack {
+                Text("Volume").font(.headline)
+                Spacer()
+                Text("\(Int(level))").monospacedDigit().foregroundStyle(.secondary)
+            }
+            HStack(spacing: 12) {
+                Slider(value: $level, in: 20...100, step: 5) { isEditing in
+                    editing = isEditing
+                    if !isEditing { model.setVolume(Int(level)) }
+                }
+                Button("Play a line on the box") { model.setVolume(Int(level), preview: true) }
+            }
+            .disabled(!connected || model.operationRunning)
+            Text("Saved on the box and kept across restarts. Previews on this Mac aren't affected; to mute, long-press K2 on the box.")
+                .font(.caption).foregroundStyle(.secondary)
+        }
+        .onAppear(perform: sync)
+        .onChange(of: model.status?.device.volume) { sync() }
+    }
+
+    private var connected: Bool { model.status?.device.connected ?? false }
+
+    private func sync() {
+        guard !editing, let volume = model.status?.device.volume else { return }
+        level = Double(volume)
+    }
+}
+
 struct VoicesView: View {
     @ObservedObject var model: AppModel
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
+            VolumeRow(model: model)
+            Divider()
             Text("Character").font(.headline)
             Text("The box is speaking as “\(currentVoiceName)”. Each character has its own voice and lines. Preview one, then click Use to write it to the box — no firmware flash needed. Over the UART port this takes a few minutes; when it's done the box says a line as the new character.")
                 .font(.callout).foregroundStyle(.secondary)

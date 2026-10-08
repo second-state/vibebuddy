@@ -20,7 +20,7 @@ mod tray;
 
 use std::time::{Duration, SystemTime};
 
-use iced::widget::{button, checkbox, column, container, image, pick_list, row, scrollable, space, text, toggler};
+use iced::widget::{button, checkbox, column, container, image, pick_list, row, scrollable, slider, space, text, toggler};
 use iced::{Element, Font, Length, Subscription, Task, Theme, window};
 
 use i18n::{UiLanguage, tr};
@@ -93,6 +93,9 @@ enum Message {
     /// Restart now (true) or later (false) to apply the picked language.
     RestartForLanguage(bool),
     ConfigSaved(Result<Config, String>),
+    VolumeDragged(u8),
+    VolumeReleased,
+    PlayLine,
     Identify,
     UseVoice(&'static str),
     /// A form of address for a language, or none.
@@ -138,6 +141,8 @@ struct App {
     theme_stamp: Option<SystemTime>,
     settings: Option<window::Id>,
     tab: Tab,
+    /// The slider's position while it is being dragged; the box's own value otherwise.
+    volume: Option<u8>,
     /// The last screen grabbed from the box, as PNG, and whether a grab is under way.
     screenshot: Option<(Vec<u8>, image::Handle)>,
     screenshot_busy: bool,
@@ -184,6 +189,7 @@ impl App {
             theme_stamp: theme::stamp(),
             settings: None,
             tab: Tab::General,
+            volume: None,
             screenshot: None,
             screenshot_busy: false,
             voices: Vec::new(),
@@ -390,6 +396,16 @@ impl App {
                     Err(error) => self.notice = Some(Err(error)),
                 }
             }
+            Message::VolumeDragged(level) => self.volume = Some(level),
+            Message::VolumeReleased => {
+                if let Some(level) = self.volume {
+                    return Task::perform(client::set_volume(level, false), Message::Done);
+                }
+            }
+            Message::PlayLine => {
+                let level = self.volume.or_else(|| self.status.as_ref()?.device.volume).unwrap_or(60);
+                return Task::perform(client::set_volume(level, true), Message::Done);
+            }
             Message::Identify => return Task::perform(client::identify(), Message::Done),
             Message::UseVoice(id) => {
                 let form = assets::language_of(id).and_then(|language| self.characters.address(language)).map(str::to_owned);
@@ -504,6 +520,8 @@ impl App {
                 return Task::perform(export_diagnostics(summary, config), Message::Notice);
             }
             Message::Done(result) => {
+                // The box answers a volume change through the status stream; drop the dragged value then.
+                self.volume = None;
                 if let Err(error) = result {
                     self.notice = Some(Err(error));
                 }
@@ -664,7 +682,13 @@ impl App {
     }
 
     fn sound(&self) -> Element<'_, Message> {
+        let box_volume = self.status.as_ref().and_then(|status| status.device.volume);
+        let level = self.volume.or(box_volume).unwrap_or(60);
         let online = self.status.as_ref().is_some_and(|status| status.device.connected);
+        let mut volume = slider(20..=100, level, Message::VolumeDragged).step(5u8);
+        if online {
+            volume = volume.on_release(Message::VolumeReleased);
+        }
         let operation = self.status.as_ref().and_then(|status| status.operation.as_ref());
         let busy = operation.is_some_and(status::Operation::running);
         let current = self.status.as_ref().and_then(|status| status.device.voice.clone());
@@ -771,6 +795,10 @@ impl App {
         // No pack at all is the robot too, with the lines it shipped with.
         let using = assets::voice_name(current.as_deref().filter(|&id| id != BUILTIN).unwrap_or(ROBOT));
         let page = column![
+            row![text(tr("Volume", &[])), volume, text(level.to_string())].spacing(12),
+            button(text(tr("Play a line on the box", &[]))).on_press_maybe(online.then_some(Message::PlayLine)),
+            text(tr("Saved on the box and kept across restarts. To mute, long-press K2 on the box.", &[])).size(13),
+            space().height(8),
             text(tr("Character", &[])).size(18),
             text(tr(
                 "The box is speaking as “%@”. Each character has its own voice and lines. Click Use to write another one to it — no firmware flash needed. Over the UART port this takes a few minutes; when it's done the box says a line as the new character.",
