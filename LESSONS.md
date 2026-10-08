@@ -273,6 +273,14 @@ On 2026-10-05 and again on 2026-10-07 the daemon wrote heartbeats to a box runni
 
 When a link can reach firmware that isn't ours, find out who is there from what it already prints before writing anything; a question written to the wrong peer is input to it. Here that meant listening first (ESP-IDF application logs give other firmware away; our build line gives ours away), asking once only a box that stays quiet, and never probing a box judged foreign: its reset banner is the signal to look again. A test that checks the foreign box got "nothing but hello" would have passed with the bug in; the test that guards it says nothing at all reaches the box.
 
+## A locator must be unique per session, not merely plausible
+
+The first cut of Ghostty tab switching matched terminals by working directory, on the reasoning that worktrees keep directories apart. The first real test had two Claude sessions in the same repo, and K2 could only fall back to bringing Ghostty forward. Running several agents in one repository is the normal way to work, not an edge case.
+
+Before choosing what identifies a session's window or tab, ask whether two live sessions can share it in ordinary use. The working directory, the title and the project name all can; the tty can't. When the host doesn't expose the unique key directly (Ghostty's AppleScript has no tty), find an indirect bridge to it (here a one-off title written to the tty) rather than settling for a key that is only usually unique.
+
+The same session's acceptance run was also invalidated once by the session doing the work: K2 opens whatever activity the box shows, and the agent running commands while the user tested kept itself on screen, so every press opened the Claude App. When testing K2 by hand, the agent must go idle first, and the tester should check that the box shows the session under test before pressing.
+
 ## A temporary workaround must be visible or expire on its own
 
 During the Muse tests on 2026-10-05, `launchctl setenv VIBEBUDDY_SERIAL_PORT /dev/cu.usbmodem8401` pinned the app's daemon to the Vibe Buddy box until a release could tell the two apart. The release shipped two days later, but the pin stayed: launchd keeps it until the Mac restarts, and nothing showed it. On 2026-10-08 a devkit plugged in place of the box showed as "Box not found", the Device tab offered no flash, and it looked like a regression in box detection. It only worked again by luck, when the devkit went into the same Mac socket, because macOS names a port after the socket, not the device.

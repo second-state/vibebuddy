@@ -8,7 +8,7 @@ use serde::Deserialize;
 
 use crate::activity::{
     ActivityId, ActivitySource, ActivityStatus, ActivityTracker, card_title, display_title,
-    project_name, Surface};
+    project_name, Surface, TmuxPane};
 use crate::session_titles::{SessionTitles, git_branch};
 
 /// Prefix on task cards that tells agents apart.
@@ -33,6 +33,14 @@ pub struct CodexHook {
     pub surface: Option<String>,
     #[serde(default)]
     pub host_bundle_id: Option<String>,
+    #[serde(default)]
+    pub host_ttys: Option<Vec<String>>,
+    #[serde(default)]
+    pub tmux_socket: Option<String>,
+    #[serde(default)]
+    pub tmux_pane: Option<String>,
+    #[serde(default)]
+    pub host_focus_url: Option<String>,
     #[serde(default)]
     pub host_pids: Option<Vec<u32>>,
 }
@@ -71,6 +79,9 @@ pub fn apply(
         surface: Surface::from_hook(
             hook.surface.as_deref(),
             hook.host_bundle_id.clone(),
+            hook.host_ttys.clone(),
+            TmuxPane::from_hook(hook.tmux_socket.clone(), hook.tmux_pane.clone()),
+            hook.host_focus_url.clone(),
             hook.host_pids.clone(),
             None,
         ),
@@ -140,6 +151,10 @@ mod tests {
             response_kind: None,
             surface: None,
             host_bundle_id: None,
+            host_ttys: None,
+            tmux_socket: None,
+            tmux_pane: None,
+            host_focus_url: None,
             host_pids: None,
         };
         assert!(apply(&mut tracker, &mut titles, ghost).is_none());
@@ -155,6 +170,10 @@ mod tests {
             response_kind: None,
             surface: None,
             host_bundle_id: None,
+            host_ttys: None,
+            tmux_socket: None,
+            tmux_pane: None,
+            host_focus_url: None,
             host_pids: None,
         };
         assert!(apply(&mut tracker, &mut titles, fresh).is_some());
@@ -169,6 +188,10 @@ mod tests {
             response_kind: None,
             surface: None,
             host_bundle_id: None,
+            host_ttys: None,
+            tmux_socket: None,
+            tmux_pane: None,
+            host_focus_url: None,
             host_pids: None,
         };
         let event = apply(&mut tracker, &mut titles, known).expect("known thread should be visible");
@@ -189,6 +212,10 @@ mod tests {
             response_kind: None,
             surface: None,
             host_bundle_id: None,
+            host_ttys: None,
+            tmux_socket: None,
+            tmux_pane: None,
+            host_focus_url: None,
             host_pids: None,
         }
     }

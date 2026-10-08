@@ -130,7 +130,8 @@ if command -v codesign >/dev/null 2>&1; then
     sign --preserve-metadata=entitlements "${sparkle}/XPCServices/Downloader.xpc"
     sign "${sparkle}/Autoupdate" "${sparkle}/Updater.app"
     sign "${contents}/Frameworks/Sparkle.framework"
-    sign "${bundle}"
+    # The app asks for Automation access itself (Agents tab), which the hardened runtime only allows with this entitlement.
+    sign --entitlements "${app_dir}/VibeBuddy.entitlements" "${bundle}"
 else
     echo "codesign unavailable, skipping signing"
 fi

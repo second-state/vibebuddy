@@ -15,6 +15,8 @@
     <key>CFBundleVersion</key><string>__BUILD__</string>
     <key>LSMinimumSystemVersion</key><string>14.0</string>
     <key>LSUIElement</key><true/>
+    <!-- Shown in the Automation prompt: the Agents tab asks for Ghostty, and the daemon's AppleScript counts as this app. -->
+    <key>NSAppleEventsUsageDescription</key><string>Vibe Buddy uses this to take K2 to the terminal tab your agent session runs in.</string>
     <key>NSHumanReadableCopyright</key><string>Licensed under GPL-3.0-or-later</string>
     <key>NSPrincipalClass</key><string>NSApplication</string>
     <!-- Sparkle (ADR-0010): the key the appcast's downloads are signed with; build-app.sh fills it in from

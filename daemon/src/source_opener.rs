@@ -10,11 +10,89 @@ use std::time::Duration;
 use serde::Deserialize;
 use tokio::process::Command;
 
-use crate::activity::{ActivitySource, Surface};
+use crate::activity::{ActivitySource, Surface, TmuxPane};
 
 const OPEN_TIMEOUT: Duration = Duration::from_secs(5);
 const CODEX_BUNDLE_ID: &str = "com.openai.codex";
 const CLAUDE_BUNDLE_ID: &str = "com.anthropic.claudefordesktop";
+const GHOSTTY_BUNDLE_ID: &str = "com.mitchellh.ghostty";
+const TERMINAL_BUNDLE_ID: &str = "com.apple.Terminal";
+const ITERM_BUNDLE_ID: &str = "com.googlecode.iterm2";
+/// Warp's channels: `dev.warp.Warp-Stable`, `dev.warp.Warp-Preview`, …
+const WARP_BUNDLE_PREFIX: &str = "dev.warp.Warp";
+/// Turns the tty arguments (`ttys016`) into `targets`, the device paths terminals name.
+const TTY_TARGETS: [&str; 5] = [
+    "on run argv",
+    "set targets to {}",
+    "repeat with name in argv",
+    "set end of targets to \"/dev/\" & name",
+    "end repeat",
+];
+/// Terminal.app names each tab's tty, so its tab is found directly. `w` and `t` are references by index, which
+/// point elsewhere once the window order changes, so the tty is read before anything moves. The ttys come in as arguments; the one
+/// that matched is returned.
+const TERMINAL_FOCUS_TTY: [&str; 14] = [
+    "tell application id \"com.apple.Terminal\"",
+    "repeat with w in windows",
+    "repeat with t in tabs of w",
+    "set found to tty of t",
+    "if targets contains found then",
+    "set selected of t to true",
+    "set frontmost of w to true",
+    "activate",
+    "return found",
+    "end if",
+    "end repeat",
+    "end repeat",
+    "end tell",
+    "error \"no Terminal tab is on \" & (targets as text)",
+];
+/// iTerm2 names each session's tty, a split pane being a session of its own. The ttys come in as arguments; the
+/// one that matched is returned.
+const ITERM_FOCUS_TTY: [&str; 17] = [
+    "tell application id \"com.googlecode.iterm2\"",
+    "repeat with w in windows",
+    "repeat with t in tabs of w",
+    "repeat with s in sessions of t",
+    "set found to tty of s",
+    "if targets contains found then",
+    "select w",
+    "select t",
+    "select s",
+    "activate",
+    "return found",
+    "end if",
+    "end repeat",
+    "end repeat",
+    "end repeat",
+    "end tell",
+    "error \"no iTerm2 session is on \" & (targets as text)",
+];
+/// One `id<TAB>title` line per Ghostty terminal. `tab` would name Ghostty's own tab class inside the tell block,
+/// hence the character ids.
+const GHOSTTY_LIST_TERMINALS: [&str; 7] = [
+    "tell application id \"com.mitchellh.ghostty\"",
+    "set out to \"\"",
+    "repeat with t in terminals",
+    "set out to out & (id of t) & (character id 9) & (name of t) & (character id 10)",
+    "end repeat",
+    "return out",
+    "end tell",
+];
+/// The daemon starts with launchd's bare PATH, so tmux is looked for where package managers put it.
+const TMUX_PATHS: [&str; 4] = ["/opt/homebrew/bin/tmux", "/usr/local/bin/tmux", "/usr/bin/tmux", "/run/current-system/sw/bin/tmux"];
+/// How long Ghostty gets to read a title off the tty before the listing is retried.
+const GHOSTTY_TITLE_POLLS: u32 = 10;
+const GHOSTTY_TITLE_POLL_INTERVAL: Duration = Duration::from_millis(50);
+/// The terminal id comes in as an argument, never spliced into the script.
+const GHOSTTY_FOCUS_TERMINAL: [&str; 6] = [
+    "on run argv",
+    "tell application id \"com.mitchellh.ghostty\"",
+    "focus terminal id (item 1 of argv)",
+    "activate",
+    "end tell",
+    "end run",
+];
 /// Where Claude App keeps a record of each Code session, one subdirectory per account.
 const DESKTOP_SESSIONS_DIR: &str = "Library/Application Support/Claude/claude-code-sessions";
 /// Prefix of desktop session ids; the deep link only accepts this form.
@@ -30,6 +108,36 @@ struct CommandSpec {
 pub async fn open(source: ActivitySource) -> Result<String, String> {
     if let Some(Surface::Window { pids }) = surface_of(&source) {
         return focus_window(pids).await;
+    }
+    if let Some(Surface::Host { bundle_id, ttys, tmux, focus_url }) = surface_of(&source) {
+        // Warp hands each session a deeplink back to its pane; it only counts when Warp really is the host,
+        // since the variable is inherited by anything started from a Warp shell.
+        if tmux.is_none()
+            && let Some(url) = focus_url
+            && bundle_id.starts_with(WARP_BUNDLE_PREFIX)
+        {
+            match focus_warp_session(bundle_id, url).await {
+                Ok(link) => return Ok(link),
+                Err(error) => tracing::info!(%error, "cannot open the session's Warp pane, bringing Warp forward"),
+            }
+        }
+        // Inside tmux, first switch the user's tmux client to the session's pane; the tab to find is then the
+        // one that client runs in.
+        let ttys = match tmux {
+            Some(tmux) => focus_tmux_pane(tmux).await.unwrap_or_else(|error| {
+                tracing::info!(%error, "cannot switch tmux to the session's pane");
+                Vec::new()
+            }),
+            None => ttys.clone(),
+        };
+        // Terminals that can be asked about their tabs go to that tab. Failing that, the terminal is still
+        // brought forward below, as any other host is.
+        if !ttys.is_empty() {
+            match focus_terminal_tab(bundle_id, &ttys).await {
+                Ok(target) => return Ok(target),
+                Err(error) => tracing::info!(%error, %bundle_id, "cannot find the session's tab, bringing the host forward"),
+            }
+        }
     }
     let desktop = reported_desktop_session(&source)
         .map(str::to_owned)
@@ -54,7 +162,7 @@ fn command_for(source: &ActivitySource, desktop: Option<&str>) -> Result<Command
     // First answer one question: is the user inside this agent's app? If not, don't use the deeplink;
     // it would import a terminal session into the app as a copy.
     match surface_of(source) {
-        Some(Surface::Host { bundle_id }) => return activate(bundle_id),
+        Some(Surface::Host { bundle_id, .. }) => return activate(bundle_id),
         Some(Surface::Headless) => return Err("session has no host window (SSH or background process)".to_owned()),
         Some(Surface::Window { .. }) => return Err("a window is focused through the compositor, not a command".to_owned()),
         _ => {}
@@ -133,6 +241,218 @@ fn surface_of(source: &ActivitySource) -> Option<&Surface> {
         ActivitySource::Codex { surface, .. } | ActivitySource::ClaudeCode { surface, .. } => Some(surface),
         ActivitySource::GitHubActions { .. } => None,
     }
+}
+
+/// `ttys` is nearest first. Ghostty's title marker goes to the nearest, which a terminal wrapper passes on; the
+/// others name ttys directly, and only the outermost is theirs, so all are offered.
+async fn focus_terminal_tab(bundle_id: &str, ttys: &[String]) -> Result<String, String> {
+    if !ttys.iter().all(|tty| valid_tty(tty)) {
+        return Err("invalid tty".to_owned());
+    }
+    let script: &[&str] = match bundle_id {
+        GHOSTTY_BUNDLE_ID => return focus_ghostty_terminal(&ttys[0]).await,
+        TERMINAL_BUNDLE_ID => &TERMINAL_FOCUS_TTY,
+        ITERM_BUNDLE_ID => &ITERM_FOCUS_TTY,
+        _ => return Err("this host can't be asked about its tabs".to_owned()),
+    };
+    let lines: Vec<&str> = TTY_TARGETS.iter().chain(script).chain(&["end run"]).copied().collect();
+    let args: Vec<&str> = ttys.iter().map(String::as_str).collect();
+    let tty = run_osascript(&lines, &args).await?;
+    Ok(format!("{bundle_id} tab on {}", tty.trim()))
+}
+
+async fn focus_warp_session(bundle_id: &str, url: &str) -> Result<String, String> {
+    if !valid_bundle_id(bundle_id) || !valid_warp_focus_url(url) {
+        return Err("invalid Warp session link".to_owned());
+    }
+    run("/usr/bin/open", &["-b", bundle_id, url]).await?;
+    Ok(url.to_owned())
+}
+
+/// The same shape the hook checks: `warp://session/<32 hex digits>` under one of Warp's channel schemes.
+fn valid_warp_focus_url(url: &str) -> bool {
+    let Some((scheme, session)) = url.split_once("://session/") else {
+        return false;
+    };
+    ["warp", "warppreview", "warpdev", "warplocal", "warposs"].contains(&scheme)
+        && session.len() == 32
+        && session.bytes().all(|byte| byte.is_ascii_hexdigit())
+}
+
+/// Focuses the Ghostty terminal on the agent's tty. Ghostty doesn't tell which terminal owns which tty, but it
+/// does report titles, and anything written to a tty is read by the terminal that owns it: so the tab is
+/// briefly given a one-off title, found by it, and handed its own title back. Ghostty has no title stack to
+/// restore from, so the original comes from a listing taken first.
+async fn focus_ghostty_terminal(tty: &str) -> Result<String, String> {
+    let before = run_osascript(&GHOSTTY_LIST_TERMINALS, &[]).await?;
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |elapsed| elapsed.as_nanos());
+    let marker = format!("vibebuddy-{nanos}");
+    set_title(tty, &marker)?;
+    let mut found = None;
+    for _ in 0..GHOSTTY_TITLE_POLLS {
+        tokio::time::sleep(GHOSTTY_TITLE_POLL_INTERVAL).await;
+        let listing = run_osascript(&GHOSTTY_LIST_TERMINALS, &[]).await;
+        if let Some(id) = listing.ok().and_then(|listing| terminal_titled(&listing, &marker)) {
+            found = Some(id);
+            break;
+        }
+    }
+    // Hand the title back before anything else can fail. If no terminal showed the marker, the tty isn't a
+    // Ghostty tab of its own (tmux, for one, keeps titles to itself), and clearing is all that's left.
+    let original = found.as_deref().and_then(|id| title_of(&before, id)).unwrap_or_default();
+    set_title(tty, &original)?;
+    let id = found.ok_or_else(|| format!("no Ghostty terminal is on {tty}"))?;
+    run_osascript(&GHOSTTY_FOCUS_TERMINAL, &[&id]).await?;
+    Ok(format!("ghostty terminal {id}"))
+}
+
+fn terminals(listing: &str) -> impl Iterator<Item = (&str, &str)> {
+    listing
+        .lines()
+        .filter_map(|line| line.split_once('\t'))
+        .filter(|(id, _)| valid_identifier(id))
+}
+
+fn terminal_titled(listing: &str, title: &str) -> Option<String> {
+    terminals(listing).find(|(_, name)| *name == title).map(|(id, _)| id.to_owned())
+}
+
+fn title_of(listing: &str, id: &str) -> Option<String> {
+    terminals(listing).find(|(terminal, _)| *terminal == id).map(|(_, name)| name.to_owned())
+}
+
+/// Writes an OSC 2 title sequence to the tty. Control characters are dropped so a title read back from the
+/// terminal can't end the sequence early and smuggle in one of its own.
+fn set_title(tty: &str, title: &str) -> Result<(), String> {
+    use std::io::Write;
+    use std::os::unix::fs::OpenOptionsExt;
+    let title: String = title.chars().filter(|character| !character.is_control()).collect();
+    std::fs::OpenOptions::new()
+        .write(true)
+        .custom_flags(libc::O_NOCTTY | libc::O_NONBLOCK)
+        .open(format!("/dev/{tty}"))
+        .and_then(|mut device| device.write_all(format!("\x1b]2;{title}\x07").as_bytes()))
+        .map_err(|error| format!("cannot write to {tty}: {error}"))
+}
+
+/// `ttys016`: a pseudo-terminal name, nothing that could point elsewhere under /dev.
+fn valid_tty(tty: &str) -> bool {
+    tty.strip_prefix("tty")
+        .is_some_and(|rest| !rest.is_empty() && rest.len() <= 8 && rest.bytes().all(|byte| byte.is_ascii_alphanumeric()))
+}
+
+/// Switches a tmux client to the session's pane, across sessions and windows, and returns the ttys of the
+/// terminal tab the user sees tmux in, nearest first, as the hook reports them outside tmux. A client already showing the pane's session is preferred, so a
+/// client watching some other session isn't pulled away from it; otherwise the one used most recently.
+async fn focus_tmux_pane(tmux: &TmuxPane) -> Result<Vec<String>, String> {
+    if !valid_tmux_pane(&tmux.pane) {
+        return Err("invalid tmux pane".to_owned());
+    }
+    check_own_socket(&tmux.socket)?;
+    let program = TMUX_PATHS
+        .into_iter()
+        .find(|path| Path::new(path).exists())
+        .ok_or_else(|| "tmux not found".to_owned())?;
+    let socket = tmux.socket.as_str();
+    let pane = tmux.pane.as_str();
+    let session = run(program, &["-S", socket, "display-message", "-p", "-t", pane, "#{session_id}"]).await?;
+    let clients = run(program, &["-S", socket, "list-clients", "-F", "#{client_activity} #{client_tty} #{session_id} #{client_pid}"]).await?;
+    let (client, pid) = tmux_client_for(&clients, session.trim()).ok_or_else(|| "no tmux client is attached".to_owned())?;
+    run(program, &["-S", socket, "switch-client", "-c", &client, "-t", pane]).await?;
+    let ttys = controlling_ttys(pid);
+    Ok(if ttys.is_empty() { vec![client.trim_start_matches("/dev/").to_owned()] } else { ttys })
+}
+
+/// The controlling terminals from `pid` up, nearest first: the daemon's twin of the hook's walk, for a tmux
+/// client, which a terminal wrapper may sit under just like an agent.
+#[cfg(target_os = "macos")]
+fn controlling_ttys(mut pid: u32) -> Vec<String> {
+    const NO_DEVICE: u32 = u32::MAX;
+    let mut ttys: Vec<String> = Vec::new();
+    for _ in 0..32 {
+        let mut info: libc::proc_bsdinfo = unsafe { std::mem::zeroed() };
+        let size = std::mem::size_of::<libc::proc_bsdinfo>() as libc::c_int;
+        let read = unsafe { libc::proc_pidinfo(pid as libc::c_int, libc::PROC_PIDTBSDINFO, 0, (&raw mut info).cast(), size) };
+        if read != size {
+            break;
+        }
+        if info.e_tdev != NO_DEVICE {
+            let name = unsafe { libc::devname(info.e_tdev as libc::dev_t, libc::S_IFCHR) };
+            if !name.is_null()
+                && let Ok(name) = unsafe { std::ffi::CStr::from_ptr(name) }.to_str()
+                && name.starts_with("tty")
+                && !ttys.iter().any(|tty| tty == name)
+            {
+                ttys.push(name.to_owned());
+            }
+        }
+        pid = info.pbi_ppid;
+        if pid <= 1 {
+            break;
+        }
+    }
+    ttys
+}
+
+#[cfg(not(target_os = "macos"))]
+fn controlling_ttys(_pid: u32) -> Vec<String> {
+    Vec::new()
+}
+
+fn tmux_client_for(clients: &str, session: &str) -> Option<(String, u32)> {
+    clients
+        .lines()
+        .filter_map(|line| {
+            // tmux turns tabs in the format into `_`; none of these fields can hold a space.
+            let mut fields = line.split(' ');
+            let activity: u64 = fields.next()?.parse().ok()?;
+            let tty = fields.next()?;
+            let same_session = fields.next()? == session;
+            let pid: u32 = fields.next()?.parse().ok()?;
+            tty.starts_with("/dev/").then_some((same_session, activity, tty, pid))
+        })
+        .max_by_key(|&(same_session, activity, _, _)| (same_session, activity))
+        .map(|(_, _, tty, pid)| (tty.to_owned(), pid))
+}
+
+fn valid_tmux_pane(pane: &str) -> bool {
+    pane.strip_prefix('%')
+        .is_some_and(|id| !id.is_empty() && id.bytes().all(|byte| byte.is_ascii_digit()))
+}
+
+/// The socket path comes from the hook; only a socket this user owns is handed to tmux.
+fn check_own_socket(socket: &str) -> Result<(), String> {
+    use std::os::unix::fs::{FileTypeExt, MetadataExt};
+    let metadata = std::fs::metadata(socket).map_err(|error| format!("cannot read tmux socket: {error}"))?;
+    let own = metadata.uid() == unsafe { libc::getuid() };
+    if socket.starts_with('/') && metadata.file_type().is_socket() && own {
+        Ok(())
+    } else {
+        Err("not a tmux socket of this user".to_owned())
+    }
+}
+
+/// Runs a fixed AppleScript. The first run against an app asks the user for Automation access; until they answer,
+/// the call waits and then times out here, and the caller falls back to bringing the app forward.
+async fn run_osascript(script: &[&str], args: &[&str]) -> Result<String, String> {
+    let mut command_line: Vec<&str> = script.iter().flat_map(|line| ["-e", *line]).collect();
+    command_line.extend_from_slice(args);
+    run("/usr/bin/osascript", &command_line).await
+}
+
+/// Runs a helper with arguments passed straight through, never a shell, and returns its stdout.
+async fn run(program: &str, args: &[&str]) -> Result<String, String> {
+    let output = tokio::time::timeout(OPEN_TIMEOUT, Command::new(program).args(args).kill_on_drop(true).output())
+        .await
+        .map_err(|_| format!("{program} timed out"))?
+        .map_err(|error| format!("cannot run {program}: {error}"))?;
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        return Err(format!("{program} failed: {}", stderr.trim()));
+    }
+    Ok(String::from_utf8_lossy(&output.stdout).into_owned())
 }
 
 /// Brings the host app to the front. Whether we recognise the bundle id doesn't matter: unfamiliar terminals take
@@ -318,6 +638,65 @@ mod tests {
     use super::*;
 
     #[test]
+    fn the_ghostty_terminal_showing_the_marker_is_found_and_its_title_kept() {
+        let before = "1CF0AA92-F606-4D99-BA8C-B686DF838744\t✳ Fix the build\nD7394CAC-B8EA-44DF-A4E5-C0676CF3F0E4\tdragon@mac:~/notes\n";
+        let after = "1CF0AA92-F606-4D99-BA8C-B686DF838744\tvibebuddy-42\nD7394CAC-B8EA-44DF-A4E5-C0676CF3F0E4\tdragon@mac:~/notes\n";
+        let id = terminal_titled(after, "vibebuddy-42").expect("marked terminal");
+        assert_eq!(id, "1CF0AA92-F606-4D99-BA8C-B686DF838744");
+        assert_eq!(title_of(before, &id).as_deref(), Some("✳ Fix the build"));
+        assert_eq!(terminal_titled(before, "vibebuddy-42"), None);
+    }
+
+    #[test]
+    fn a_ghostty_terminal_id_that_could_break_out_is_ignored() {
+        let listing = "x\" & do shell script \"y\tvibebuddy-42\n";
+        assert_eq!(terminal_titled(listing, "vibebuddy-42"), None);
+    }
+
+    #[test]
+    fn the_tmux_client_on_the_panes_session_is_switched_before_a_busier_one() {
+        let clients = "1791453500 /dev/ttys044 $1 4401\n1791453400 /dev/ttys016 $0 1601\n";
+        assert_eq!(tmux_client_for(clients, "$0"), Some(("/dev/ttys016".to_owned(), 1601)));
+        // Nobody watches the pane's session: the most recently used client is moved there.
+        assert_eq!(tmux_client_for(clients, "$7"), Some(("/dev/ttys044".to_owned(), 4401)));
+        assert_eq!(tmux_client_for("", "$0"), None);
+    }
+
+    #[test]
+    fn only_warp_session_links_are_opened() {
+        assert!(valid_warp_focus_url("warp://session/550e8400e29b41d4a716446655440000"));
+        for bogus in ["warp://action/new_tab?path=/", "https://example.com", "warp://session/zz0e8400e29b41d4a716446655440000"] {
+            assert!(!valid_warp_focus_url(bogus), "{bogus}");
+        }
+    }
+
+    #[test]
+    fn only_tmux_pane_ids_reach_tmux() {
+        assert!(valid_tmux_pane("%3"));
+        for bogus in ["", "%", "3", "%3;kill-server", "%-1"] {
+            assert!(!valid_tmux_pane(bogus), "{bogus}");
+        }
+    }
+
+    #[test]
+    fn only_pseudo_terminal_names_are_written_to() {
+        assert!(valid_tty("ttys016"));
+        for bogus in ["", "tty", "ttys016/../disk0", "disk0", "console", "ttys 1"] {
+            assert!(!valid_tty(bogus), "{bogus}");
+        }
+    }
+
+    #[test]
+    fn a_host_tty_survives_a_state_file_round_trip() {
+        let surface = Surface::Host { bundle_id: GHOSTTY_BUNDLE_ID.to_owned(), ttys: vec!["ttys016".to_owned()], tmux: None, focus_url: None };
+        let json = serde_json::to_string(&surface).unwrap();
+        assert_eq!(serde_json::from_str::<Surface>(&json).unwrap(), surface);
+        // State files from before the tty was reported still load.
+        let old: Surface = serde_json::from_str(r#"{"surface":"host","bundle_id":"com.mitchellh.ghostty"}"#).unwrap();
+        assert_eq!(old, Surface::Host { bundle_id: GHOSTTY_BUNDLE_ID.to_owned(), ttys: Vec::new(), tmux: None, focus_url: None });
+    }
+
+    #[test]
     fn a_reported_desktop_session_skips_the_disk_lookup() {
         // The app's own identity wins; no more claiming transcripts on disk by CLI session id.
         let source = ActivitySource::ClaudeCode {
@@ -337,7 +716,7 @@ mod tests {
         let source = ActivitySource::ClaudeCode {
             session_id: "19b63622-e3e0-4cd0-a37e-dc8d71253155".to_owned(),
             cwd: Some("/work/vibe-buddy".to_owned()),
-            surface: Surface::Host { bundle_id: "com.mitchellh.ghostty".to_owned() },
+            surface: Surface::Host { ttys: Vec::new(), tmux: None, focus_url: None, bundle_id: "com.mitchellh.ghostty".to_owned() },
         };
 
         assert!(reported_desktop_session(&source).is_none());
@@ -352,7 +731,7 @@ mod tests {
             &ActivitySource::ClaudeCode {
                 session_id: "19b63622-e3e0-4cd0-a37e-dc8d71253155".to_owned(),
                 cwd: Some("/work/vibe-buddy".to_owned()),
-                surface: Surface::Host { bundle_id: "com.mitchellh.ghostty".to_owned() },
+                surface: Surface::Host { ttys: Vec::new(), tmux: None, focus_url: None, bundle_id: "com.mitchellh.ghostty".to_owned() },
             },
             None,
         )
@@ -368,7 +747,7 @@ mod tests {
         let spec = command_for(
             &ActivitySource::Codex {
                 thread_id: "019c6e27-e55b-73d1-87d8-4e01f1f75043".to_owned(),
-                surface: Surface::Host { bundle_id: "net.example.SomeNewTerminal".to_owned() },
+                surface: Surface::Host { ttys: Vec::new(), tmux: None, focus_url: None, bundle_id: "net.example.SomeNewTerminal".to_owned() },
             },
             None,
         )
@@ -399,7 +778,7 @@ mod tests {
                 command_for(
                     &ActivitySource::Codex {
                         thread_id: "t".to_owned(),
-                        surface: Surface::Host { bundle_id: bogus.to_owned() },
+                        surface: Surface::Host { bundle_id: bogus.to_owned(), ttys: Vec::new(), tmux: None, focus_url: None },
                     },
                     None,
                 )
@@ -412,13 +791,13 @@ mod tests {
     #[test]
     fn a_host_without_a_bundle_id_has_nowhere_to_go() {
         // The hook says there's a host but gave no target: skip it, rather than fall back to importing the session into the app.
-        assert_eq!(Surface::from_hook(Some("host"), None, None, None), Surface::Headless);
+        assert_eq!(Surface::from_hook(Some("host"), None, None, None, None, None, None), Surface::Headless);
     }
 
     #[test]
     fn an_older_hook_keeps_the_desktop_behaviour() {
         // Old hooks and old state files report no surface; back then only the desktop app was supported.
-        assert_eq!(Surface::from_hook(None, None, None, None), Surface::default());
+        assert_eq!(Surface::from_hook(None, None, None, None, None, None, None), Surface::default());
         assert!(matches!(Surface::default(), Surface::App { .. }));
     }
 

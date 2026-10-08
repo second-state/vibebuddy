@@ -12,6 +12,8 @@ final class AppModel: ObservableObject {
     @Published private(set) var screenshot: NSImage?
     @Published private(set) var screenshotBusy = false
     @Published private(set) var hookInstalled: [HookAgent: Bool] = [:]
+    /// Keyed by bundle id, for the supported terminals installed on this Mac.
+    @Published private(set) var terminalAccess: [String: TerminalAccess.State] = [:]
     @Published private(set) var launchAtLogin = LoginItem.isEnabled
     @Published private(set) var previewingVoice: String?
     /// Serial port open but no build ID ever reported: the box isn't running our firmware (a factory box), so offer to flash it.
@@ -372,6 +374,42 @@ final class AppModel: ObservableObject {
     }
 
     func hookPresent(_ agent: HookAgent) -> Bool { HookInstaller.isPresent(agent) }
+
+    // MARK: Terminal tabs
+
+    /// Reads the current answers without prompting.
+    func refreshTerminalAccess() {
+        let terminals = TerminalAccess.installed
+        Task {
+            var states: [String: TerminalAccess.State] = [:]
+            for terminal in terminals {
+                states[terminal.bundleID] = await Task.detached { TerminalAccess.check(terminal, ask: false) }.value
+            }
+            terminalAccess = states
+        }
+    }
+
+    /// Shows the system prompt. macOS only asks about a running app, so the terminal is started first if needed.
+    func allowTerminalAccess(_ terminal: TerminalAccess.Terminal) {
+        guard let url = terminal.url else { return }
+        Task {
+            if !terminal.running {
+                let configuration = NSWorkspace.OpenConfiguration()
+                configuration.activates = false
+                _ = try? await NSWorkspace.shared.openApplication(at: url, configuration: configuration)
+                for _ in 0..<50 where !terminal.running {
+                    try? await Task.sleep(for: .milliseconds(100))
+                }
+            }
+            terminalAccess[terminal.bundleID] = await Task.detached { TerminalAccess.check(terminal, ask: true) }.value
+        }
+    }
+
+    func openAutomationSettings() {
+        if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Automation") {
+            NSWorkspace.shared.open(url)
+        }
+    }
     func hookConfigModifiedAt(_ agent: HookAgent) -> Date? { HookInstaller.configModifiedAt(agent) }
 
     /// Returns the diff to confirm; the caller applies it after confirmation.

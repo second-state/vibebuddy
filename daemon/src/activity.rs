@@ -45,13 +45,38 @@ pub enum Surface {
         desktop_session_id: Option<String>,
     },
     /// Running in some other app: a terminal, an editor's integrated terminal, or any host we haven't seen. This
-    /// bundle id is the destination; the daemon doesn't need to know it.
-    Host { bundle_id: String },
+    /// bundle id is the destination; the daemon doesn't need to know it. The agent's ttys, when it has
+    /// any, let a terminal that can be asked about its tabs go to the session's own tab.
+    Host {
+        bundle_id: String,
+        /// Nearest first: a terminal wrapper adds a pseudo-terminal of its own under the one the terminal names.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        ttys: Vec<String>,
+        /// Inside tmux the tty belongs to a pane; the pane is switched to through tmux instead.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        tmux: Option<TmuxPane>,
+        /// Warp's deeplink back to the session's pane (`warp://session/<id>`), from `WARP_FOCUS_URL`.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        focus_url: Option<String>,
+    },
     /// No host app: SSH, daemons, sessions started by launchd. K2 has nowhere to go.
     Headless,
     /// Outside macOS: the agent's ancestor pids, nearest first. K2 focuses the window owned by the first of
     /// them that has one; with none (SSH, tmux) it is headless after all.
     Window { pids: Vec<u32> },
+}
+
+/// A tmux pane, by the server's socket and the pane id (`%3`), as the hook read them from `$TMUX` and `$TMUX_PANE`.
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
+pub struct TmuxPane {
+    pub socket: String,
+    pub pane: String,
+}
+
+impl TmuxPane {
+    pub fn from_hook(socket: Option<String>, pane: Option<String>) -> Option<Self> {
+        Some(Self { socket: socket?, pane: pane? })
+    }
 }
 
 impl Default for Surface {
@@ -66,13 +91,16 @@ impl Surface {
     pub fn from_hook(
         kind: Option<&str>,
         host_bundle_id: Option<String>,
+        host_ttys: Option<Vec<String>>,
+        tmux: Option<TmuxPane>,
+        focus_url: Option<String>,
         host_pids: Option<Vec<u32>>,
         desktop_session_id: Option<String>,
     ) -> Self {
         match kind {
             // Claims a host but gave no bundle id: nowhere to go, and falling back to App would jump to the wrong place.
             Some("host") => match host_bundle_id {
-                Some(bundle_id) => Self::Host { bundle_id },
+                Some(bundle_id) => Self::Host { bundle_id, ttys: host_ttys.unwrap_or_default(), tmux, focus_url },
                 None => Self::Headless,
             },
             Some("headless") => Self::Headless,
