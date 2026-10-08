@@ -88,6 +88,7 @@ enum Message {
     CheckUpdates(bool),
     CheckForUpdatesNow,
     OpenReleases,
+    ReportProblem,
     PickLanguage(UiLanguage),
     SwitchVoice(bool),
     /// Restart now (true) or later (false) to apply the picked language.
@@ -339,6 +340,12 @@ impl App {
             Message::CheckForUpdatesNow => return Task::perform(client::check_for_updates(), Message::Done),
             Message::OpenReleases => {
                 if let Err(error) = launch("xdg-open", &[std::ffi::OsStr::new(RELEASES_PAGE)]) {
+                    self.notice = Some(Err(error));
+                }
+            }
+            Message::ReportProblem => {
+                let url = issue_url(&self.diagnostics_summary());
+                if let Err(error) = launch("xdg-open", &[std::ffi::OsStr::new(url.as_str())]) {
                     self.notice = Some(Err(error));
                 }
             }
@@ -612,6 +619,7 @@ impl App {
                     space::horizontal(),
                     button(text(tr("Check now", &[]))).on_press_maybe(enabled.then_some(Message::CheckForUpdatesNow)),
                     button(text(tr("Releases", &[]))).style(button::secondary).on_press(Message::OpenReleases),
+                    button(text(tr("Report a Problem…", &[]))).style(button::secondary).on_press(Message::ReportProblem),
                 ]
                 .spacing(8)
                 .align_y(iced::Alignment::Center),
@@ -1071,18 +1079,39 @@ impl App {
         .into()
     }
 
-    /// Both sides' build IDs and the voice, as in the Mac app's summary.txt.
+    /// Both sides' build IDs, the voice and the OS, as in the Mac app's summary.txt; also what a problem report
+    /// starts with. No logs and nothing an agent did.
     fn diagnostics_summary(&self) -> String {
         let device = self.status.as_ref().map(|status| &status.device);
         format!(
-            "App {}\ndaemon {}\nfirmware {}\noffered firmware {}\nvoice {}\n",
+            "App {}\ndaemon {}\nfirmware {}\noffered firmware {}\nvoice {}\nOS {}\n",
             env!("CARGO_PKG_VERSION"),
             self.status.as_ref().map_or("not connected", |status| status.daemon.build.as_str()),
             device.and_then(|device| device.firmware_label()).as_deref().unwrap_or("—"),
             self.updates().and_then(|updates| updates.firmware.as_ref()).map_or("—", |offer| offer.version.as_str()),
             device.and_then(|device| device.voice.as_deref()).unwrap_or("—"),
+            os_name(),
         )
     }
+}
+
+/// The distribution's own name for itself, from os-release.
+fn os_name() -> String {
+    std::fs::read_to_string("/etc/os-release")
+        .ok()
+        .and_then(|release| {
+            release.lines().find_map(|line| Some(line.strip_prefix("PRETTY_NAME=")?.trim_matches('"').to_owned()))
+        })
+        .unwrap_or_else(|| std::env::consts::OS.to_owned())
+}
+
+/// "Report a problem": a new GitHub issue with the versions filled in, as the Mac app's `IssueReport`.
+fn issue_url(summary: &str) -> reqwest::Url {
+    let body = format!(
+        "**What happened?**\n\n\n\n**What did you expect?**\n\n\n\n---\n```\n{}\n```",
+        summary.trim_end()
+    );
+    reqwest::Url::parse_with_params(NEW_ISSUE, [("body", body)]).expect("a fixed, valid URL")
 }
 
 /// Starts a desktop helper and lets it run on its own.
@@ -1124,6 +1153,7 @@ async fn export_diagnostics(summary: String, config: Option<Config>) -> Result<S
 
 /// Where every release lives: the new App, and the firmware zip for flashing by hand when the daemon can't get it.
 const RELEASES_PAGE: &str = "https://github.com/second-state/vibebuddy/releases";
+const NEW_ISSUE: &str = "https://github.com/second-state/vibebuddy/issues/new";
 
 /// The id under which the box wears the user's own Character.
 const CUSTOM: &str = "custom";
@@ -1334,6 +1364,8 @@ fn run_tray() -> impl futures::Stream<Item = Message> {
         while let Some(event) = clicks.next().await {
             let message = match event {
                 tray::TrayEvent::OpenSettings => Message::OpenSettings,
+                tray::TrayEvent::CheckForUpdates => Message::CheckForUpdatesNow,
+                tray::TrayEvent::ReportProblem => Message::ReportProblem,
                 tray::TrayEvent::Quit => Message::Quit,
                 tray::TrayEvent::HostGone => Message::TrayHost(false),
                 tray::TrayEvent::HostBack => Message::TrayHost(true),
@@ -1371,5 +1403,13 @@ mod tests {
     fn event_times_read_as_local_minutes() {
         assert_eq!(short_time("2026-10-01T17:06:59.003370003+08:00"), "2026-10-01 17:06");
         assert_eq!(short_time("garbage"), "garbage");
+    }
+
+    #[test]
+    fn a_problem_report_opens_a_new_issue_with_the_versions() {
+        let url = issue_url("App 0.3.5\nOS Omarchy 3.1+beta\n");
+        assert!(url.as_str().starts_with("https://github.com/second-state/vibebuddy/issues/new?body="));
+        let body = url.query_pairs().find(|(name, _)| name == "body").map(|(_, value)| value.into_owned());
+        assert!(body.is_some_and(|body| body.contains("App 0.3.5\nOS Omarchy 3.1+beta\n```")));
     }
 }
