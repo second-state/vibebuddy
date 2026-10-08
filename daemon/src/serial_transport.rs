@@ -48,7 +48,27 @@ pub enum DeviceMessage {
     Connected { port: String, bridge: bool, usb_serial: Option<String> },
     /// The box runs other firmware (see [`Firmware::Foreign`]): it's there, but gets nothing written.
     ForeignFirmware,
+    /// Several devices could be the box and none is the one remembered, so none is connected until the user picks
+    /// one; empty once that is no longer so.
+    Candidates(Vec<Candidate>),
     Disconnected,
+}
+
+/// A device that could be the box, offered to the user when there are several.
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize)]
+pub struct Candidate {
+    pub port: String,
+    /// What a choice is remembered by; without one the device can't be chosen.
+    pub usb_serial: Option<String>,
+}
+
+/// An environment variable that narrows the daemon to one port or device. Meant for development; left set, it
+/// hides every other box behind "Box not found", so the status reports it (2026-10-08: a pin set for the Muse
+/// tests outlived them and a swapped box looked unfound).
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize)]
+pub struct Pin {
+    pub variable: &'static str,
+    pub value: String,
 }
 
 pub trait Transport: Send + Sync {
@@ -69,6 +89,14 @@ impl SerialConfig {
             explicit_port: env::var("VIBEBUDDY_SERIAL_PORT").ok(),
             usb_serial: env::var("VIBEBUDDY_USB_SERIAL").ok(),
             known_box,
+        }
+    }
+
+    pub fn pin(&self) -> Option<Pin> {
+        match (&self.explicit_port, &self.usb_serial) {
+            (Some(port), _) => Some(Pin { variable: "VIBEBUDDY_SERIAL_PORT", value: port.clone() }),
+            (None, Some(serial)) => Some(Pin { variable: "VIBEBUDDY_USB_SERIAL", value: serial.clone() }),
+            (None, None) => None,
         }
     }
 
@@ -131,6 +159,8 @@ async fn serial_worker(
     mut suspend: watch::Receiver<bool>,
 ) {
     let mut pending: VecDeque<Vec<u8>> = VecDeque::new();
+    // What the status last heard about candidates, so a choice that stays open is reported (and logged) once.
+    let mut offered: Vec<Candidate> = Vec::new();
 
     loop {
         if *suspend.borrow() {
@@ -150,9 +180,25 @@ async fn serial_worker(
             }
             continue;
         }
-        let PortChoice { name: port_name, paced, usb_serial } = match find_port(&config) {
-            Ok(Some(choice)) => choice,
-            Ok(None) => {
+        let found = find_port(&config);
+        let candidates = match &found {
+            Ok(Found::Several(choices)) => choices
+                .iter()
+                .map(|choice| Candidate { port: choice.name.clone(), usb_serial: choice.usb_serial.clone() })
+                .collect(),
+            _ => Vec::new(),
+        };
+        if candidates != offered {
+            if !candidates.is_empty() {
+                let ports = candidates.iter().map(|candidate| candidate.port.as_str()).collect::<Vec<_>>().join(", ");
+                warn!(%ports, "several devices could be the box and none is the known one; waiting for a choice");
+            }
+            let _ = device_event_sender.send(DeviceMessage::Candidates(candidates.clone())).await;
+            offered = candidates;
+        }
+        let PortChoice { name: port_name, paced, usb_serial } = match found {
+            Ok(Found::One(choice)) => choice,
+            Ok(Found::None | Found::Several(_)) => {
                 tokio::time::sleep(RECONNECT_DELAY).await;
                 continue;
             }
@@ -423,14 +469,22 @@ fn needs_pacing(vid: u16, pid: u16) -> bool {
     (vid, pid) == (QINHENG_VID, USB_SINGLE_SERIAL_PID)
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug, PartialEq)]
 struct PortChoice {
     name: String,
     paced: bool,
     usb_serial: Option<String>,
 }
 
-fn find_port(config: &SerialConfig) -> Result<Option<PortChoice>, String> {
+#[derive(Debug, PartialEq)]
+enum Found {
+    None,
+    One(PortChoice),
+    /// More than one could be the box, and the remembered one isn't among them.
+    Several(Vec<PortChoice>),
+}
+
+fn find_port(config: &SerialConfig) -> Result<Found, String> {
     let ports = tokio_serial::available_ports().map_err(|error| error.to_string())?;
     if let Some(port) = &config.explicit_port {
         // An explicitly given port still has its VID/PID looked up to choose pacing; if the system can't find it, assume the bridge, the most conservative case.
@@ -442,7 +496,7 @@ fn find_port(config: &SerialConfig) -> Result<Option<PortChoice>, String> {
                 _ => None,
             })
             .unwrap_or(true);
-        return Ok(Some(PortChoice { name: port.clone(), paced, usb_serial: None }));
+        return Ok(Found::One(PortChoice { name: port.clone(), paced, usb_serial: None }));
     }
 
     let mut matches: Vec<PortChoice> = ports
@@ -472,11 +526,11 @@ fn find_port(config: &SerialConfig) -> Result<Option<PortChoice>, String> {
     }
     matches.sort_by(|left, right| left.name.cmp(&right.name));
     matches.dedup_by(|left, right| left.name == right.name);
-    choose_port(matches, config.known_box_serial().as_deref())
+    Ok(choose_port(matches, config.known_box_serial().as_deref()))
 }
 
 /// One candidate is the box; several are, too, when one of them is the box we have seen before.
-fn choose_port(mut matches: Vec<PortChoice>, known_box: Option<&str>) -> Result<Option<PortChoice>, String> {
+fn choose_port(mut matches: Vec<PortChoice>, known_box: Option<&str>) -> Found {
     if matches.len() > 1
         && let Some(known) = known_box
     {
@@ -489,13 +543,10 @@ fn choose_port(mut matches: Vec<PortChoice>, known_box: Option<&str>) -> Result<
             matches = ours;
         }
     }
-    match matches.as_slice() {
-        [] => Ok(None),
-        [choice] => Ok(Some(choice.clone())),
-        choices => Err(format!(
-            "found several matching devices: {}",
-            choices.iter().map(|choice| choice.name.as_str()).collect::<Vec<_>>().join(", ")
-        )),
+    match matches.len() {
+        0 => Found::None,
+        1 => Found::One(matches.remove(0)),
+        _ => Found::Several(matches),
     }
 }
 
@@ -510,7 +561,7 @@ fn open_port(port_name: &str) -> tokio_serial::Result<SerialStream> {
     tokio_serial::new(port_name, BAUD_RATE).open_native_async()
 }
 
-fn serials_equal(actual: &str, expected: &str) -> bool {
+pub fn serials_equal(actual: &str, expected: &str) -> bool {
     let normalize = |value: &str| {
         value
             .chars()
@@ -597,12 +648,13 @@ mod tests {
     #[test]
     fn with_another_device_plugged_in_the_known_box_wins() {
         let both = vec![candidate("/dev/cu.usbmodem1101", "30:ED:A0:A4:0D:08"), candidate("/dev/cu.usbmodem8401", "98:88:E0:06:8B:CC")];
-        let chosen = choose_port(both.clone(), Some("98:88:e0:06:8b:cc")).unwrap().unwrap();
+        let Found::One(chosen) = choose_port(both.clone(), Some("98:88:e0:06:8b:cc")) else { panic!("the known box wins") };
         assert_eq!(chosen.name, "/dev/cu.usbmodem8401");
-        assert!(choose_port(both.clone(), None).is_err(), "no box known yet: don't guess");
-        assert!(choose_port(both, Some("11:22:33:44:55:66")).is_err(), "the known box isn't one of them");
+        assert_eq!(choose_port(both.clone(), None), Found::Several(both.clone()), "no box known yet: don't guess, offer them");
+        assert_eq!(choose_port(both.clone(), Some("11:22:33:44:55:66")), Found::Several(both), "the known box isn't one of them");
         let alone = vec![candidate("/dev/cu.usbmodem1101", "30:ED:A0:A4:0D:08")];
-        assert_eq!(choose_port(alone, Some("98:88:E0:06:8B:CC")).unwrap().unwrap().name, "/dev/cu.usbmodem1101", "a lone device is still tried");
+        let Found::One(lone) = choose_port(alone, Some("98:88:E0:06:8B:CC")) else { panic!("a lone device is still tried") };
+        assert_eq!(lone.name, "/dev/cu.usbmodem1101");
     }
 
     #[test]

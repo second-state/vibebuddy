@@ -5,6 +5,13 @@
 "daemon not responding · click to restart" = "daemon 异常 · 点击重启";
 "Box online · firmware %@" = "盒子在线 · 固件 %@";
 "Box not found" = "未找到盒子";
+"Several devices found" = "找到多台设备";
+"Several devices are plugged in, and none of them is the box seen before. Which one is the box?" = "插着好几台设备，都不是之前连过的盒子。哪一台是盒子？";
+"This is the box" = "就是这台";
+"Choosing the box was rejected (%lld)" = "选择盒子未被接受（%lld）";
+"Only looking at %@, set by %@." = "只在 %@ 上找盒子（由 %@ 指定）。";
+"To find the box on its own again, run `launchctl unsetenv %@` in Terminal, then restart Vibe Buddy." = "要让它重新自动找盒子，在终端里运行 `launchctl unsetenv %@`，然后重启 Vibe Buddy。";
+"To find the box on its own again, unset %@ and restart the daemon." = "要让它重新自动找盒子，取消 %@ 后重启 daemon。";
 "On duty" = "值班";
 "Pomodoro" = "番茄钟";
 "Leisure" = "休闲";
