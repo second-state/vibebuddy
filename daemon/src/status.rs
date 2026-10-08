@@ -10,6 +10,11 @@ use crate::serial_transport::{BUILD_MARKER, DeviceMessage};
 
 /// Reported next to the build, at boot and in answer to hello, so it can arrive glued behind a stray line too.
 const VERSION_MARKER: &str = "FIRMWARE VERSION ";
+/// The board our firmware says it was built for. Released firmware is built for the box alone and says nothing;
+/// a build for other hardware (the breadboard devkit, `goouuu-s3-spi`) says which.
+const BOARD_PREFIX: &str = "BOARD ";
+/// What a build for the box itself calls it, when it does say.
+const RELEASE_BOARD: &str = "alientek-box";
 
 /// What the device looks like right now, pieced together from diagnostic lines; a device reboot reports it all again.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize)]
@@ -32,6 +37,10 @@ pub struct DeviceState {
     /// Connected, but running other firmware (a factory unit, or Muse on a box that runs it): it's there, not
     /// offline, and the daemon writes it nothing until it resets and reports our build.
     pub foreign_firmware: bool,
+    /// Our firmware built for hardware that released firmware doesn't run on. Released firmware is never offered
+    /// to it: on 2026-10-08 the update offer flashed the breadboard devkit with box firmware, and its screen,
+    /// speaker and buttons all failed to start.
+    pub unsupported_board: Option<String>,
 }
 
 impl DeviceState {
@@ -48,6 +57,7 @@ impl DeviceState {
                 // entirely), and the app offers to flash it. Nothing left by the previous device may pass for this one: on
                 // 2026-10-06 a leftover voice made another product look like the box, and it nearly got flashed.
                 self.usb_serial = usb_serial.clone();
+                self.unsupported_board = None;
                 self.foreign_firmware = false;
                 self.firmware_build = None;
                 self.firmware_version = None;
@@ -58,6 +68,7 @@ impl DeviceState {
             DeviceMessage::ForeignFirmware => {
                 // Over the bridge the port survives a reset into other firmware, so what ours reported must go too.
                 self.foreign_firmware = true;
+                self.unsupported_board = None;
                 self.firmware_build = None;
                 self.firmware_version = None;
                 self.mode = None;
@@ -72,6 +83,9 @@ impl DeviceState {
             DeviceMessage::Line(line) => {
                 if let Some(mode) = line.strip_prefix("MODE ") {
                     self.mode = Some(mode.trim().to_ascii_lowercase());
+                } else if let Some(board) = line.strip_prefix(BOARD_PREFIX) {
+                    let board = board.trim();
+                    self.unsupported_board = (board != RELEASE_BOARD).then(|| board.to_owned());
                 // Anywhere in the line: a line the box wrote before the port was opened can lose its newline and
                 // arrive glued in front ("LEISURE SKIT DISPLAY READY BUILD …", seen 2026-10-01), and missing the
                 // build hides the firmware update.
@@ -196,8 +210,20 @@ mod tests {
                 volume: Some(65),
                 usb_serial: None,
                 foreign_firmware: false,
+                unsupported_board: None,
             }
         );
+    }
+
+    #[test]
+    fn a_board_other_than_the_box_is_flagged_until_another_device_connects() {
+        let mut state = DeviceState::default();
+        state.apply(&line("BOARD alientek-box"));
+        assert_eq!(state.unsupported_board, None, "a build for the box itself");
+        state.apply(&line("BOARD goouuu-s3-spi"));
+        assert_eq!(state.unsupported_board.as_deref(), Some("goouuu-s3-spi"));
+        state.apply(&DeviceMessage::Connected { port: "/dev/cu.x".to_owned(), bridge: false, usb_serial: None });
+        assert_eq!(state.unsupported_board, None, "released firmware says no board: the box");
     }
 
     #[test]

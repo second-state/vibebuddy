@@ -371,6 +371,10 @@ struct DeviceView: View {
                 }
                 LabeledContent("Box firmware", value: model.boxFirmware ?? "—")
                 LabeledContent("Latest firmware", value: latestFirmware)
+                if connected, let board = model.status?.device.unsupportedBoard {
+                    Text("This is a \(board) board, which released firmware doesn't run on, so no update is offered.")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
                 if model.firmwareUpdateAvailable, let offer = model.offeredFirmware {
                     Button("Update to \(offer.version)") { confirmUpdate(offer) }
                         .disabled(model.operationRunning || !connected)

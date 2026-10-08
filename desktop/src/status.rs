@@ -132,6 +132,8 @@ pub struct Device {
     pub volume: Option<u8>,
     /// Connected but running other firmware, as the daemon judged it (docs/architecture.md, decision 17).
     pub foreign_firmware: bool,
+    /// Our firmware built for other hardware (the breadboard devkit); released firmware isn't offered to it.
+    pub unsupported_board: Option<String>,
 }
 
 impl Device {

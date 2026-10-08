@@ -195,6 +195,10 @@ pub fn pick_firmware<'a>(manifest: &'a Manifest, app: &Version) -> Option<&'a Fi
 /// Offer a firmware to the box when it runs something older, something without a version (firmware from before
 /// versions, or another firmware entirely), or a dirty build of the same version or older. Never a downgrade.
 pub fn offer_to_box(offered: &str, device: &DeviceState) -> bool {
+    // Released firmware is built for the box; on other hardware it starts nothing.
+    if device.unsupported_board.is_some() {
+        return false;
+    }
     let Some(offered) = parse(offered) else { return false };
     let Some(running) = device.firmware_version.as_deref().and_then(parse) else { return true };
     let dirty = device.firmware_build.as_deref().is_some_and(|build| build.contains("-dirty"));
@@ -424,6 +428,8 @@ mod tests {
         assert!(offer_to_box("0.4.0", &box_running(None, "v0.3.2-33-gd6b1212 2026-10-06 18:54")), "firmware from before versions");
         assert!(offer_to_box("0.4.0", &box_running(Some("0.4.0"), "v0.3.2-43-g5541f3e-dirty 2026-10-07 12:11")));
         assert!(!offer_to_box("0.4.0", &box_running(Some("0.5.0"), "v0.5.0-dirty 2026-10-07 12:11")), "a dirty newer build is not downgraded");
+        let devkit = DeviceState { unsupported_board: Some("goouuu-s3-spi".to_owned()), ..box_running(None, "685118c-dirty 2026-09-17 15:56") };
+        assert!(!offer_to_box("0.4.0", &devkit), "released firmware is built for the box, not the breadboard devkit");
     }
 
     #[test]

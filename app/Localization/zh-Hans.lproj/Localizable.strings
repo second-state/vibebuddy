@@ -5,6 +5,7 @@
 "daemon not responding · click to restart" = "daemon 异常 · 点击重启";
 "Box online · firmware %@" = "盒子在线 · 固件 %@";
 "Box not found" = "未找到盒子";
+"This is a %@ board, which released firmware doesn't run on, so no update is offered." = "这是一块 %@ 板子，正式发布的固件跑不了，所以不提示更新。";
 "On duty" = "值班";
 "Pomodoro" = "番茄钟";
 "Leisure" = "休闲";
