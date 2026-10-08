@@ -44,7 +44,7 @@ pub fn sanitized_payload(source: &Value) -> Option<Map<String, Value>> {
 /// Without it, treat Claude App as the host: K2 brings it to the front, and the user is in that panel.
 fn resolve_surface(detected: Surface, desktop_session: Option<&str>) -> Surface {
     match (detected, desktop_session) {
-        (Surface::App, None) => Surface::Host(BUNDLE_ID.to_owned()),
+        (Surface::App, None) => Surface::Host(BUNDLE_ID.to_owned(), None),
         (detected, _) => detected,
     }
 }
@@ -110,14 +110,14 @@ mod tests {
         // The CLI in the panel inherits Claude App's bundle id but has no desktop session id.
         assert_eq!(
             resolve_surface(Surface::App, None),
-            Surface::Host(BUNDLE_ID.to_owned())
+            Surface::Host(BUNDLE_ID.to_owned(), None)
         );
     }
 
     #[test]
     fn a_terminal_session_is_left_alone() {
-        let ghostty = Surface::Host("com.mitchellh.ghostty".to_owned());
-        assert_eq!(resolve_surface(ghostty, None), Surface::Host("com.mitchellh.ghostty".to_owned()));
+        let ghostty = Surface::Host("com.mitchellh.ghostty".to_owned(), None);
+        assert_eq!(resolve_surface(ghostty, None), Surface::Host("com.mitchellh.ghostty".to_owned(), None));
         assert_eq!(resolve_surface(Surface::Headless, None), Surface::Headless);
     }
 

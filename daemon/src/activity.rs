@@ -45,8 +45,13 @@ pub enum Surface {
         desktop_session_id: Option<String>,
     },
     /// Running in some other app: a terminal, an editor's integrated terminal, or any host we haven't seen. This
-    /// bundle id is the destination; the daemon doesn't need to know it.
-    Host { bundle_id: String },
+    /// bundle id is the destination; the daemon doesn't need to know it. The agent's tty, when it has one,
+    /// lets a terminal that can be asked about its tabs go to the session's own tab.
+    Host {
+        bundle_id: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        tty: Option<String>,
+    },
     /// No host app: SSH, daemons, sessions started by launchd. K2 has nowhere to go.
     Headless,
     /// Outside macOS: the agent's ancestor pids, nearest first. K2 focuses the window owned by the first of
@@ -66,13 +71,14 @@ impl Surface {
     pub fn from_hook(
         kind: Option<&str>,
         host_bundle_id: Option<String>,
+        host_tty: Option<String>,
         host_pids: Option<Vec<u32>>,
         desktop_session_id: Option<String>,
     ) -> Self {
         match kind {
             // Claims a host but gave no bundle id: nowhere to go, and falling back to App would jump to the wrong place.
             Some("host") => match host_bundle_id {
-                Some(bundle_id) => Self::Host { bundle_id },
+                Some(bundle_id) => Self::Host { bundle_id, tty: host_tty },
                 None => Self::Headless,
             },
             Some("headless") => Self::Headless,

@@ -15,6 +15,10 @@
 //! ChatGPT.app nests `CodexCLI.app` (`com.openai.codex.cli`) inside itself, and that inner bundle
 //! has no window to bring forward.
 //!
+//! A terminal host also gets the agent's tty (`ttys016`): the one thing that tells two tabs in the same
+//! directory apart, so the daemon can reach the session's own tab. It is read from the process table,
+//! walking up from the hook in case the agent started it in a session of its own.
+//!
 //! Outside macOS there is no such variable, so the hook reports its ancestor pids instead and leaves
 //! finding their window to the daemon, which asks the compositor when K2 is pressed.
 
@@ -30,8 +34,9 @@ pub enum Surface {
     /// Runs in the agent's own desktop app; K2 uses that agent's deeplink.
     App,
     /// Runs inside another app, and this bundle id is where K2 goes. Unknown apps are all treated
-    /// as hosts, so even unfamiliar terminals are reached correctly.
-    Host(String),
+    /// as hosts, so even unfamiliar terminals are reached correctly. The tty, when the agent has one,
+    /// narrows it to a tab.
+    Host(String, Option<String>),
     /// No host app: sessions started over SSH, by a daemon, or by launchd. K2 has nowhere to go.
     Headless,
     /// Outside macOS there are no bundle ids: the hook's ancestor process ids, nearest first. The daemon
@@ -47,7 +52,43 @@ pub fn detect(own_bundle_id: &str) -> Surface {
         .ok()
         .filter(|id| !id.is_empty())
         .or_else(launched_app_bundle_id);
-    from_bundle_id(found.as_deref(), own_bundle_id)
+    match from_bundle_id(found.as_deref(), own_bundle_id) {
+        Surface::Host(bundle_id, _) => Surface::Host(bundle_id, controlling_tty()),
+        surface => surface,
+    }
+}
+
+/// The controlling terminal of the nearest process in this chain that has one, as `ttys016`.
+#[cfg(target_os = "macos")]
+fn controlling_tty() -> Option<String> {
+    const NO_DEVICE: u32 = u32::MAX;
+    let mut pid = std::process::id() as libc::c_int;
+    for _ in 0..8 {
+        let mut info: libc::proc_bsdinfo = unsafe { std::mem::zeroed() };
+        let size = std::mem::size_of::<libc::proc_bsdinfo>() as libc::c_int;
+        let read = unsafe { libc::proc_pidinfo(pid, libc::PROC_PIDTBSDINFO, 0, (&raw mut info).cast(), size) };
+        if read != size {
+            return None;
+        }
+        if info.e_tdev != NO_DEVICE {
+            let name = unsafe { libc::devname(info.e_tdev as libc::dev_t, libc::S_IFCHR) };
+            if name.is_null() {
+                return None;
+            }
+            let name = unsafe { std::ffi::CStr::from_ptr(name) }.to_str().ok()?;
+            return name.starts_with("tty").then(|| name.to_owned());
+        }
+        pid = info.pbi_ppid as libc::c_int;
+        if pid <= 1 {
+            return None;
+        }
+    }
+    None
+}
+
+#[cfg(not(target_os = "macos"))]
+fn controlling_tty() -> Option<String> {
+    None
 }
 
 /// The bundle id of the app launchd started at the top of this process chain, if it is an app.
@@ -123,7 +164,7 @@ fn parent_from_stat(stat: &str) -> Option<u32> {
 fn from_bundle_id(found: Option<&str>, own_bundle_id: &str) -> Surface {
     match found {
         Some(id) if id == own_bundle_id => Surface::App,
-        Some(id) if !id.is_empty() => Surface::Host(id.to_owned()),
+        Some(id) if !id.is_empty() => Surface::Host(id.to_owned(), None),
         _ => Surface::Headless,
     }
 }
@@ -131,8 +172,11 @@ fn from_bundle_id(found: Option<&str>, own_bundle_id: &str) -> Surface {
 pub fn write_into(payload: &mut Map<String, Value>, surface: &Surface) {
     let name = match surface {
         Surface::App => "app",
-        Surface::Host(bundle_id) => {
+        Surface::Host(bundle_id, tty) => {
             payload.insert("host_bundle_id".to_owned(), Value::String(bundle_id.clone()));
+            if let Some(tty) = tty {
+                payload.insert("host_tty".to_owned(), Value::String(tty.clone()));
+            }
             "host"
         }
         Surface::Headless => "headless",
@@ -155,6 +199,16 @@ mod tests {
         assert_eq!(parent_from_stat("garbage"), None);
     }
 
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn the_tty_matches_what_ps_reports() {
+        // Under a terminal ps names the tty; under launchd or CI it prints `??` and there is none.
+        let output = Command::new("/bin/ps").args(["-o", "tty=", "-p", &std::process::id().to_string()]).output().unwrap();
+        let reported = String::from_utf8(output.stdout).unwrap().trim().to_owned();
+        let expected = (reported != "??").then(|| format!("tty{}", reported.trim_start_matches("tty")));
+        assert_eq!(controlling_tty(), expected);
+    }
+
     #[test]
     fn window_pids_are_reported_for_the_daemon() {
         let mut payload = Map::new();
@@ -172,7 +226,7 @@ mod tests {
     fn any_other_app_is_the_landing_spot() {
         assert_eq!(
             from_bundle_id(Some("com.mitchellh.ghostty"), "com.openai.codex"),
-            Surface::Host("com.mitchellh.ghostty".to_owned())
+            Surface::Host("com.mitchellh.ghostty".to_owned(), None)
         );
     }
 
@@ -181,7 +235,7 @@ mod tests {
         // Unfamiliar terminals take the same path as known ones: jump to whatever we read.
         assert_eq!(
             from_bundle_id(Some("net.example.SomeNewTerminal"), "com.openai.codex"),
-            Surface::Host("net.example.SomeNewTerminal".to_owned())
+            Surface::Host("net.example.SomeNewTerminal".to_owned(), None)
         );
     }
 
@@ -243,9 +297,10 @@ mod tests {
     #[test]
     fn the_payload_carries_the_landing_spot_only_for_a_host() {
         let mut payload = Map::new();
-        write_into(&mut payload, &Surface::Host("com.mitchellh.ghostty".to_owned()));
+        write_into(&mut payload, &Surface::Host("com.mitchellh.ghostty".to_owned(), Some("ttys016".to_owned())));
         assert_eq!(payload["surface"], "host");
         assert_eq!(payload["host_bundle_id"], "com.mitchellh.ghostty");
+        assert_eq!(payload["host_tty"], "ttys016");
 
         let mut payload = Map::new();
         write_into(&mut payload, &Surface::App);

@@ -34,6 +34,8 @@ pub struct CodexHook {
     #[serde(default)]
     pub host_bundle_id: Option<String>,
     #[serde(default)]
+    pub host_tty: Option<String>,
+    #[serde(default)]
     pub host_pids: Option<Vec<u32>>,
 }
 
@@ -71,6 +73,7 @@ pub fn apply(
         surface: Surface::from_hook(
             hook.surface.as_deref(),
             hook.host_bundle_id.clone(),
+            hook.host_tty.clone(),
             hook.host_pids.clone(),
             None,
         ),
@@ -140,6 +143,7 @@ mod tests {
             response_kind: None,
             surface: None,
             host_bundle_id: None,
+            host_tty: None,
             host_pids: None,
         };
         assert!(apply(&mut tracker, &mut titles, ghost).is_none());
@@ -155,6 +159,7 @@ mod tests {
             response_kind: None,
             surface: None,
             host_bundle_id: None,
+            host_tty: None,
             host_pids: None,
         };
         assert!(apply(&mut tracker, &mut titles, fresh).is_some());
@@ -169,6 +174,7 @@ mod tests {
             response_kind: None,
             surface: None,
             host_bundle_id: None,
+            host_tty: None,
             host_pids: None,
         };
         let event = apply(&mut tracker, &mut titles, known).expect("known thread should be visible");
@@ -189,6 +195,7 @@ mod tests {
             response_kind: None,
             surface: None,
             host_bundle_id: None,
+            host_tty: None,
             host_pids: None,
         }
     }

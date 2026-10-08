@@ -15,6 +15,30 @@ use crate::activity::{ActivitySource, Surface};
 const OPEN_TIMEOUT: Duration = Duration::from_secs(5);
 const CODEX_BUNDLE_ID: &str = "com.openai.codex";
 const CLAUDE_BUNDLE_ID: &str = "com.anthropic.claudefordesktop";
+const GHOSTTY_BUNDLE_ID: &str = "com.mitchellh.ghostty";
+/// One `id<TAB>title` line per Ghostty terminal. `tab` would name Ghostty's own tab class inside the tell block,
+/// hence the character ids.
+const GHOSTTY_LIST_TERMINALS: [&str; 7] = [
+    "tell application id \"com.mitchellh.ghostty\"",
+    "set out to \"\"",
+    "repeat with t in terminals",
+    "set out to out & (id of t) & (character id 9) & (name of t) & (character id 10)",
+    "end repeat",
+    "return out",
+    "end tell",
+];
+/// How long Ghostty gets to read a title off the tty before the listing is retried.
+const GHOSTTY_TITLE_POLLS: u32 = 10;
+const GHOSTTY_TITLE_POLL_INTERVAL: Duration = Duration::from_millis(50);
+/// The terminal id comes in as an argument, never spliced into the script.
+const GHOSTTY_FOCUS_TERMINAL: [&str; 6] = [
+    "on run argv",
+    "tell application id \"com.mitchellh.ghostty\"",
+    "focus terminal id (item 1 of argv)",
+    "activate",
+    "end tell",
+    "end run",
+];
 /// Where Claude App keeps a record of each Code session, one subdirectory per account.
 const DESKTOP_SESSIONS_DIR: &str = "Library/Application Support/Claude/claude-code-sessions";
 /// Prefix of desktop session ids; the deep link only accepts this form.
@@ -30,6 +54,16 @@ struct CommandSpec {
 pub async fn open(source: ActivitySource) -> Result<String, String> {
     if let Some(Surface::Window { pids }) = surface_of(&source) {
         return focus_window(pids).await;
+    }
+    // Ghostty can be asked about its terminals, so go to the session's own tab. Failing that, Ghostty is still
+    // brought forward below, as any other host is.
+    if let Some(Surface::Host { bundle_id, tty: Some(tty) }) = surface_of(&source)
+        && bundle_id == GHOSTTY_BUNDLE_ID
+    {
+        match focus_ghostty_terminal(tty).await {
+            Ok(target) => return Ok(target),
+            Err(error) => tracing::info!(%error, "cannot find the session's Ghostty tab, bringing Ghostty forward"),
+        }
     }
     let desktop = reported_desktop_session(&source)
         .map(str::to_owned)
@@ -54,7 +88,7 @@ fn command_for(source: &ActivitySource, desktop: Option<&str>) -> Result<Command
     // First answer one question: is the user inside this agent's app? If not, don't use the deeplink;
     // it would import a terminal session into the app as a copy.
     match surface_of(source) {
-        Some(Surface::Host { bundle_id }) => return activate(bundle_id),
+        Some(Surface::Host { bundle_id, .. }) => return activate(bundle_id),
         Some(Surface::Headless) => return Err("session has no host window (SSH or background process)".to_owned()),
         Some(Surface::Window { .. }) => return Err("a window is focused through the compositor, not a command".to_owned()),
         _ => {}
@@ -133,6 +167,92 @@ fn surface_of(source: &ActivitySource) -> Option<&Surface> {
         ActivitySource::Codex { surface, .. } | ActivitySource::ClaudeCode { surface, .. } => Some(surface),
         ActivitySource::GitHubActions { .. } => None,
     }
+}
+
+/// Focuses the Ghostty terminal on the agent's tty. Ghostty doesn't tell which terminal owns which tty, but it
+/// does report titles, and anything written to a tty is read by the terminal that owns it: so the tab is
+/// briefly given a one-off title, found by it, and handed its own title back. Ghostty has no title stack to
+/// restore from, so the original comes from a listing taken first.
+async fn focus_ghostty_terminal(tty: &str) -> Result<String, String> {
+    if !valid_tty(tty) {
+        return Err("invalid tty".to_owned());
+    }
+    let before = run_osascript(&GHOSTTY_LIST_TERMINALS, &[]).await?;
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |elapsed| elapsed.as_nanos());
+    let marker = format!("vibebuddy-{nanos}");
+    set_title(tty, &marker)?;
+    let mut found = None;
+    for _ in 0..GHOSTTY_TITLE_POLLS {
+        tokio::time::sleep(GHOSTTY_TITLE_POLL_INTERVAL).await;
+        let listing = run_osascript(&GHOSTTY_LIST_TERMINALS, &[]).await;
+        if let Some(id) = listing.ok().and_then(|listing| terminal_titled(&listing, &marker)) {
+            found = Some(id);
+            break;
+        }
+    }
+    // Hand the title back before anything else can fail. If no terminal showed the marker, the tty isn't a
+    // Ghostty tab of its own (tmux, for one, keeps titles to itself), and clearing is all that's left.
+    let original = found.as_deref().and_then(|id| title_of(&before, id)).unwrap_or_default();
+    set_title(tty, &original)?;
+    let id = found.ok_or_else(|| format!("no Ghostty terminal is on {tty}"))?;
+    run_osascript(&GHOSTTY_FOCUS_TERMINAL, &[&id]).await?;
+    Ok(format!("ghostty terminal {id}"))
+}
+
+fn terminals(listing: &str) -> impl Iterator<Item = (&str, &str)> {
+    listing
+        .lines()
+        .filter_map(|line| line.split_once('\t'))
+        .filter(|(id, _)| valid_identifier(id))
+}
+
+fn terminal_titled(listing: &str, title: &str) -> Option<String> {
+    terminals(listing).find(|(_, name)| *name == title).map(|(id, _)| id.to_owned())
+}
+
+fn title_of(listing: &str, id: &str) -> Option<String> {
+    terminals(listing).find(|(terminal, _)| *terminal == id).map(|(_, name)| name.to_owned())
+}
+
+/// Writes an OSC 2 title sequence to the tty. Control characters are dropped so a title read back from the
+/// terminal can't end the sequence early and smuggle in one of its own.
+fn set_title(tty: &str, title: &str) -> Result<(), String> {
+    use std::io::Write;
+    use std::os::unix::fs::OpenOptionsExt;
+    let title: String = title.chars().filter(|character| !character.is_control()).collect();
+    std::fs::OpenOptions::new()
+        .write(true)
+        .custom_flags(libc::O_NOCTTY | libc::O_NONBLOCK)
+        .open(format!("/dev/{tty}"))
+        .and_then(|mut device| device.write_all(format!("\x1b]2;{title}\x07").as_bytes()))
+        .map_err(|error| format!("cannot write to {tty}: {error}"))
+}
+
+/// `ttys016`: a pseudo-terminal name, nothing that could point elsewhere under /dev.
+fn valid_tty(tty: &str) -> bool {
+    tty.strip_prefix("tty")
+        .is_some_and(|rest| !rest.is_empty() && rest.len() <= 8 && rest.bytes().all(|byte| byte.is_ascii_alphanumeric()))
+}
+
+/// Runs a fixed AppleScript. The first run against an app asks the user for Automation access; until they answer,
+/// the call waits and then times out here, and the caller falls back to bringing the app forward.
+async fn run_osascript(script: &[&str], args: &[&str]) -> Result<String, String> {
+    let mut command = Command::new("/usr/bin/osascript");
+    for line in script {
+        command.args(["-e", line]);
+    }
+    command.args(args).kill_on_drop(true);
+    let output = tokio::time::timeout(OPEN_TIMEOUT, command.output())
+        .await
+        .map_err(|_| "osascript timed out".to_owned())?
+        .map_err(|error| format!("cannot run osascript: {error}"))?;
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        return Err(format!("osascript failed: {}", stderr.trim()));
+    }
+    Ok(String::from_utf8_lossy(&output.stdout).into_owned())
 }
 
 /// Brings the host app to the front. Whether we recognise the bundle id doesn't matter: unfamiliar terminals take
@@ -318,6 +438,40 @@ mod tests {
     use super::*;
 
     #[test]
+    fn the_ghostty_terminal_showing_the_marker_is_found_and_its_title_kept() {
+        let before = "1CF0AA92-F606-4D99-BA8C-B686DF838744\t✳ Fix the build\nD7394CAC-B8EA-44DF-A4E5-C0676CF3F0E4\tdragon@mac:~/notes\n";
+        let after = "1CF0AA92-F606-4D99-BA8C-B686DF838744\tvibebuddy-42\nD7394CAC-B8EA-44DF-A4E5-C0676CF3F0E4\tdragon@mac:~/notes\n";
+        let id = terminal_titled(after, "vibebuddy-42").expect("marked terminal");
+        assert_eq!(id, "1CF0AA92-F606-4D99-BA8C-B686DF838744");
+        assert_eq!(title_of(before, &id).as_deref(), Some("✳ Fix the build"));
+        assert_eq!(terminal_titled(before, "vibebuddy-42"), None);
+    }
+
+    #[test]
+    fn a_ghostty_terminal_id_that_could_break_out_is_ignored() {
+        let listing = "x\" & do shell script \"y\tvibebuddy-42\n";
+        assert_eq!(terminal_titled(listing, "vibebuddy-42"), None);
+    }
+
+    #[test]
+    fn only_pseudo_terminal_names_are_written_to() {
+        assert!(valid_tty("ttys016"));
+        for bogus in ["", "tty", "ttys016/../disk0", "disk0", "console", "ttys 1"] {
+            assert!(!valid_tty(bogus), "{bogus}");
+        }
+    }
+
+    #[test]
+    fn a_host_tty_survives_a_state_file_round_trip() {
+        let surface = Surface::Host { bundle_id: GHOSTTY_BUNDLE_ID.to_owned(), tty: Some("ttys016".to_owned()) };
+        let json = serde_json::to_string(&surface).unwrap();
+        assert_eq!(serde_json::from_str::<Surface>(&json).unwrap(), surface);
+        // State files from before the tty was reported still load.
+        let old: Surface = serde_json::from_str(r#"{"surface":"host","bundle_id":"com.mitchellh.ghostty"}"#).unwrap();
+        assert_eq!(old, Surface::Host { bundle_id: GHOSTTY_BUNDLE_ID.to_owned(), tty: None });
+    }
+
+    #[test]
     fn a_reported_desktop_session_skips_the_disk_lookup() {
         // The app's own identity wins; no more claiming transcripts on disk by CLI session id.
         let source = ActivitySource::ClaudeCode {
@@ -337,7 +491,7 @@ mod tests {
         let source = ActivitySource::ClaudeCode {
             session_id: "19b63622-e3e0-4cd0-a37e-dc8d71253155".to_owned(),
             cwd: Some("/work/vibe-buddy".to_owned()),
-            surface: Surface::Host { bundle_id: "com.mitchellh.ghostty".to_owned() },
+            surface: Surface::Host { tty: None, bundle_id: "com.mitchellh.ghostty".to_owned() },
         };
 
         assert!(reported_desktop_session(&source).is_none());
@@ -352,7 +506,7 @@ mod tests {
             &ActivitySource::ClaudeCode {
                 session_id: "19b63622-e3e0-4cd0-a37e-dc8d71253155".to_owned(),
                 cwd: Some("/work/vibe-buddy".to_owned()),
-                surface: Surface::Host { bundle_id: "com.mitchellh.ghostty".to_owned() },
+                surface: Surface::Host { tty: None, bundle_id: "com.mitchellh.ghostty".to_owned() },
             },
             None,
         )
@@ -368,7 +522,7 @@ mod tests {
         let spec = command_for(
             &ActivitySource::Codex {
                 thread_id: "019c6e27-e55b-73d1-87d8-4e01f1f75043".to_owned(),
-                surface: Surface::Host { bundle_id: "net.example.SomeNewTerminal".to_owned() },
+                surface: Surface::Host { tty: None, bundle_id: "net.example.SomeNewTerminal".to_owned() },
             },
             None,
         )
@@ -399,7 +553,7 @@ mod tests {
                 command_for(
                     &ActivitySource::Codex {
                         thread_id: "t".to_owned(),
-                        surface: Surface::Host { bundle_id: bogus.to_owned() },
+                        surface: Surface::Host { bundle_id: bogus.to_owned(), tty: None },
                     },
                     None,
                 )
@@ -412,13 +566,13 @@ mod tests {
     #[test]
     fn a_host_without_a_bundle_id_has_nowhere_to_go() {
         // The hook says there's a host but gave no target: skip it, rather than fall back to importing the session into the app.
-        assert_eq!(Surface::from_hook(Some("host"), None, None, None), Surface::Headless);
+        assert_eq!(Surface::from_hook(Some("host"), None, None, None, None), Surface::Headless);
     }
 
     #[test]
     fn an_older_hook_keeps_the_desktop_behaviour() {
         // Old hooks and old state files report no surface; back then only the desktop app was supported.
-        assert_eq!(Surface::from_hook(None, None, None, None), Surface::default());
+        assert_eq!(Surface::from_hook(None, None, None, None, None), Surface::default());
         assert!(matches!(Surface::default(), Surface::App { .. }));
     }
 

@@ -34,6 +34,8 @@ pub struct ClaudeHook {
     #[serde(default)]
     pub host_bundle_id: Option<String>,
     #[serde(default)]
+    pub host_tty: Option<String>,
+    #[serde(default)]
     pub host_pids: Option<Vec<u32>>,
     #[serde(default)]
     pub desktop_session_id: Option<String>,
@@ -58,6 +60,7 @@ pub fn apply(
         surface: Surface::from_hook(
             hook.surface.as_deref(),
             hook.host_bundle_id.clone(),
+            hook.host_tty.clone(),
             hook.host_pids.clone(),
             hook.desktop_session_id.clone(),
         ),
@@ -122,6 +125,7 @@ mod tests {
             response_kind: None,
             surface: None,
             host_bundle_id: None,
+            host_tty: None,
             host_pids: None,
             desktop_session_id: None,
         }
@@ -301,6 +305,7 @@ mod tests {
             response_kind: None,
             surface: None,
             host_bundle_id: None,
+            host_tty: None,
             host_pids: None,
         };
         let mixed = codex_hooks::apply(&mut tracker, &mut SessionTitles::disabled(), codex).expect("another agent should refresh the card stack");
