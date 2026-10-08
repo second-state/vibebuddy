@@ -95,27 +95,6 @@ fn catalog() -> Vec<Voice> {
             Language::Chinese,
         ),
         voice(
-            "ahu",
-            tr("Ahu", &[]),
-            tr("Chinese · Beijing accent", &[]),
-            "A Beijing guy with the gift of the gab. Hearty praise, and nothing fazes him.",
-            Language::Chinese,
-        ),
-        voice(
-            "amanda",
-            "Amanda".to_owned(),
-            tr("English", &[]),
-            "A cheerful friend who celebrates every small win.",
-            Language::English,
-        ),
-        voice(
-            "jackson",
-            "Jackson".to_owned(),
-            tr("English", &[]),
-            "The calm coworker at the next desk. Dry humor, rare but honest praise.",
-            Language::English,
-        ),
-        voice(
             "ada",
             "Ada".to_owned(),
             tr("English · British accent", &[]),
@@ -123,10 +102,24 @@ fn catalog() -> Vec<Voice> {
             Language::English,
         ),
         voice(
+            "hank",
+            "Hank".to_owned(),
+            tr("English", &[]),
+            "A greybeard engineer who's seen every outage. Few words, dry praise.",
+            Language::English,
+        ),
+        voice(
             "luna",
             "Luna".to_owned(),
             tr("English", &[]),
             "Late-night lofi calm. Never rushes you.",
+            Language::English,
+        ),
+        voice(
+            "kai",
+            "Kai".to_owned(),
+            tr("English · California accent", &[]),
+            "A laid-back San Diego surfer and developer. Nothing stresses him out.",
             Language::English,
         ),
         voice(
@@ -256,10 +249,10 @@ mod tests {
             switch_among(catalog(), voice, language, installed).map(|voice| voice.id)
         };
         assert_eq!(switch("builtin", Language::Chinese, &all), Some("wanwanxiaohe"));
-        assert_eq!(switch("wanwanxiaohe", Language::English, &all), Some("amanda"));
-        assert_eq!(switch("jackson", Language::English, &all), None);
+        assert_eq!(switch("wanwanxiaohe", Language::English, &all), Some("ada"));
+        assert_eq!(switch("ada", Language::English, &all), None);
         assert_eq!(switch("someone-else", Language::English, &all), None);
-        assert_eq!(switch("builtin", Language::Chinese, &|id: &str| id == "ahu"), Some("ahu"));
+        assert_eq!(switch("wanwanxiaohe", Language::English, &|id: &str| id == "luna"), Some("luna"));
         assert_eq!(switch("builtin", Language::Chinese, &|_: &str| false), None);
     }
 

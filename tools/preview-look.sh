@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Render a look sheet on the real screens before it goes into a pack: every duty state and leisure skit
 # as a GIF, in .preview/look/<name>/ (needs ffmpeg and Pillow).
-# Usage: tools/preview-look.sh characters/amanda/look.png
+# Usage: tools/preview-look.sh characters/ada/look.png
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"

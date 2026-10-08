@@ -342,7 +342,7 @@ mod tests {
 
     #[test]
     fn a_shipped_pack_rebuilds_byte_for_byte() {
-        for id in ["amanda", "ahu"] {
+        for id in ["ada", "wanwanxiaohe"] {
             let data = shipped(&format!("{id}/pack.bin")).expect("the pack is in the repo");
             let pack = Pack::parse(&data).expect("a Character pack");
             assert_eq!(pack.id, id);
@@ -353,8 +353,8 @@ mod tests {
 
     #[test]
     fn a_form_of_address_replaces_the_first_lines_of_each_pool() {
-        let base = Pack::parse(&shipped("ahu/pack.bin").unwrap()).unwrap();
-        let variant = Pack::parse(&shipped("ahu/address/ge.bin").unwrap()).unwrap();
+        let base = Pack::parse(&shipped("wanwanxiaohe/pack.bin").unwrap()).unwrap();
+        let variant = Pack::parse(&shipped("wanwanxiaohe/address/ge.bin").unwrap()).unwrap();
         let addressed = base.clone().with_address(&variant);
         for (occasion, (pool, lines)) in addressed.pools.iter().zip(&variant.pools).enumerate() {
             assert_eq!(&pool[..lines.len()], &lines[..], "occasion {occasion}: the variant's lines come first");

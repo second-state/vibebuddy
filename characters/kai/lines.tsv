@@ -1,0 +1,55 @@
+input_required	Hey {address}, it needs you for a sec.
+input_required	Hey {address}, your turn, man.
+input_required	Hey dude, it's waiting on you.
+input_required	Hey, quick one for you.
+input_required	Hey, it needs your call.
+input_required	Hey, it's stuck till you answer.
+input_required	Hey, can you give it a look?
+input_required	Hey, it's all yours.
+done	Stoked, {address}. All done.
+done	Nailed it, {address}.
+done	Dude, nice. That's done.
+done	Sweet, that one's done.
+done	And done. Easy.
+done	Boom. Finished.
+done	That went smooth.
+done	Another one, dude.
+failed	Wipeout. Paddle back out.
+failed	No worries, it just failed.
+failed	Gnarly. It got stuck.
+failed	Eh, it broke. We got this.
+focus_done	Break time. Go touch some grass.
+focus_done	Step outside for a sec.
+focus_done	Stretch it out, dude.
+focus_done	Grab some water, man.
+break_done	Back in the water. Let's go.
+break_done	Break's over, dude.
+break_done	Alright, let's ride.
+break_done	Feeling fresh? Let's go.
+first_done	First one, {address}. Stoked.
+first_done	First wave of the day.
+first_done	And we're up. Nice.
+milestone	You're on fire, {address}.
+milestone	Dude, you're on a roll.
+milestone	Another one. Unreal.
+late_night_done	Done. Go crash, {address}.
+late_night_done	That's done. Bed, man.
+late_night_done	It's late, dude. Go sleep.
+late_night_input	Hey, it's late, but it needs you.
+late_night_input	Hey, one more, then crash.
+late_night_input	Hey, still up? It needs you.
+greeting_morning	Morning, {address}.
+greeting_morning	Morning, dude. Good vibes today.
+greeting_morning	Morning. Let's have a good one.
+greeting_afternoon	Hey {address}, good afternoon.
+greeting_afternoon	Afternoon, dude.
+greeting_afternoon	Afternoon. Keep it rolling.
+greeting_evening	Evening, {address}.
+greeting_evening	Evening, man. Long day?
+greeting_evening	Hey, evening. Take it easy.
+long_session	Hours in, {address}. Go touch grass.
+long_session	Dude, take a real break.
+long_session	Get up, grab some water.
+welcome_back	There you are, {address}.
+welcome_back	Hey, you're back. Sweet.
+welcome_back	Welcome back, dude.

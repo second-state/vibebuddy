@@ -228,17 +228,10 @@ check(CRC32.of(Data("123456789".utf8)) == 0xCBF4_3926, "CRC32 as in zlib")
 
 // The app lays a pack out byte for byte as tools/character_pack.py does: rebuilding a shipped pack
 // from its own pools gives it back unchanged.
-for id in ["amanda", "ahu"] {
+for id in ["ada", "wanwanxiaohe"] {
     if let data = try? Data(contentsOf: URL(fileURLWithPath: "characters/\(id)/pack.bin")), let pack = VoicePack(data: data), let pools = pack.pools {
         check(VoicePack.build(id: pack.voiceID, pools: pools, look: pack.look) == data, "\(id): rebuilt byte for byte")
     }
-}
-
-// The robot wears a Character's lines without its look.
-if let data = try? Data(contentsOf: URL(fileURLWithPath: "characters/ahu/pack.bin")), let ahu = VoicePack(data: data),
-   let robot = ahu.withoutLook(id: "robot").flatMap(VoicePack.init(data:)) {
-    check(robot.voiceID == "robot" && robot.look == nil && robot.data[4] == 1, "the robot is a version 1 pack without a look")
-    check(robot.pools?.count == ahu.pools?.count && robot.pools?[1].count == ahu.pools?[1].count, "with Ahu's lines")
 }
 
 // A form of address: the variant's lines replace the first lines of each pool, the rest stay.
@@ -270,11 +263,11 @@ check(VoiceCatalogEntry.sorted(catalog, preferring: .zh).first?.id == "wanwanxia
 check(VoiceCatalogEntry.language(ofVoice: "builtin") == .en, "the built-in voice is English")
 check(VoiceCatalogEntry.language(ofVoice: "hsiaoyu") == nil, "an unknown voice has no language")
 check(VoiceCatalogEntry.switchSuggestion(boxVoice: "builtin", to: .zh, bundled: catalog)?.id == "wanwanxiaohe", "English box, Chinese UI: suggest the first Chinese voice")
-check(VoiceCatalogEntry.switchSuggestion(boxVoice: "wanwanxiaohe", to: .en, bundled: catalog)?.id == "amanda", "Chinese box, English UI: suggest Amanda")
-check(VoiceCatalogEntry.switchSuggestion(boxVoice: "jackson", to: .en, bundled: catalog) == nil, "the box already speaks the UI language")
+check(VoiceCatalogEntry.switchSuggestion(boxVoice: "wanwanxiaohe", to: .en, bundled: catalog)?.id == "ada", "Chinese box, English UI: suggest Ada")
+check(VoiceCatalogEntry.switchSuggestion(boxVoice: "ada", to: .en, bundled: catalog) == nil, "the box already speaks the UI language")
 check(VoiceCatalogEntry.switchSuggestion(boxVoice: "hsiaoyu", to: .zh, bundled: catalog) == nil, "unknown box voice: don't guess")
 check(VoiceCatalogEntry.switchSuggestion(boxVoice: "builtin", to: .zh, bundled: catalog.filter { $0.language == .en }) == nil, "no Chinese pack bundled: nothing to offer")
-check(VoiceCatalogEntry.switchSuggestion(boxVoice: "wanwanxiaohe", to: .en, bundled: catalog.filter { $0.id == "jackson" })?.id == "jackson", "skip Characters this build doesn't ship")
+check(VoiceCatalogEntry.switchSuggestion(boxVoice: "wanwanxiaohe", to: .en, bundled: catalog.filter { $0.id == "luna" })?.id == "luna", "skip Characters this build doesn't ship")
 
 if failures > 0 {
     print("\(failures) failure(s)")

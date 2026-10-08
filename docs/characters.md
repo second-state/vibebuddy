@@ -62,28 +62,27 @@ A line in `lines.tsv` that can carry a form of address has `{address}` where it 
 
 ### Characters at launch
 
-Four Characters, a woman and a man in each language, share the robot look, each with its own persona and pool, all spoken by Volcano Engine Doubao voices. A Character speaks one language; the App suggests Characters in the UI language first, as it did for voices.
+Four Characters launched, a woman and a man in each language, each with its own persona and pool, all spoken by Volcano Engine Doubao voices; the one still offered is below. A Character speaks one language; the App suggests Characters in the UI language first, as it did for voices.
 
 | Character id | Language | Voice |
 | --- | --- | --- |
-| `amanda` | en | Doubao `en_female_amanda_mars_bigtts` |
-| `jackson` | en | Doubao `en_male_jackson_mars_bigtts` |
 | `wanwanxiaohe` | zh | Doubao Wanwan Xiaohe |
-| `ahu` | zh | Doubao `zh_male_beijingxiaoye_emo_v2_mars_bigtts` (Beijing accent) |
 
-They replace the four voices the App used to offer: Jessica and Chris (ElevenLabs) gave way to Amanda and Jackson, since the built-in voice is still ElevenLabs Jessica and two different voices both called Jessica would only confuse; Xiaohe 2.0 was dropped, and Ahu joined so Chinese has a man's voice too; he later became a Beijinger with a Beijing-accent voice.
+They replace the four voices the App used to offer: Jessica and Chris (ElevenLabs) gave way to Amanda and Jackson, since the built-in voice is still ElevenLabs Jessica and two different voices both called Jessica would only confuse; Xiaohe 2.0 was dropped, and Ahu joined so Chinese has a man's voice too; he later became a Beijinger with a Beijing-accent voice. Amanda, Jackson and Ahu were retired on 2026-10-08, once Ada, Luna and Mei joined.
 
 With no Character pack on the box, the built-in default Character speaks Jessica's original five fixed lines.
 
 ### Characters added later
 
-Vibe Buddy is mainly for programmers in Europe and North America, so three more English-speaking women followed, each with a distinct personality. Their voices come from ElevenLabs Voice Design (described in words, auditioned through the box's 16 kHz ADPCM path, then saved to the account) and are synthesized with `eleven_multilingual_v2`, steadier across 55 lines than `eleven_v3`. ElevenLabs sounds native in English where Doubao's English voices don't; Chinese stays with Doubao.
+Vibe Buddy is mainly for programmers in Europe and North America, so three English-speaking women followed, each with a distinct personality, then two men, Hank and Kai, so the line-up isn't all women. Their voices come from ElevenLabs Voice Design (described in words, auditioned through the box's 16 kHz ADPCM path, then saved to the account) and are synthesized with `eleven_multilingual_v2`, steadier across 55 lines than `eleven_v3`. ElevenLabs sounds native in English where Doubao's English voices don't; Chinese stays with Doubao.
 
 | Character id | Language | Voice |
 | --- | --- | --- |
 | `ada` | en | ElevenLabs, a witty Londoner with a modern Southern British accent |
 | `luna` | en | ElevenLabs, calm late-night lofi |
 | `mei` | en | ElevenLabs, an upbeat Chinese-American from the Bay Area who says "jiayou" now and then |
+| `hank` | en | ElevenLabs, a greybeard engineer in his fifties: low, dry, few words |
+| `kai` | en | ElevenLabs, a laid-back surfer and developer from San Diego |
 
 Each Character card in the App carries a one-sentence summary of who they are, so users can choose between them.
 
@@ -146,7 +145,7 @@ Firmware that doesn't know `occasion` ignores it and plays the ordinary line; fi
 
 Each of the four Characters gets a look of its own; the code-drawn robot stays the built-in default Character's look, shown when the box has no Character pack.
 
-The robot is a Character the user can pick again at any time: it comes first on the Character tab. Its card picks who lends it voice and lines, by default the built-in voice's five fixed lines (`voices/jessica/`, packed as `robot`); with a preset lending them, the App writes that Character's pack, form of address included, without its look and under the id `robot`, and the box draws the robot. A box with no pack at all also counts as wearing the robot.
+The robot is a Character the user can pick again at any time: it comes first on the Character tab. Like every other Character it has its own voice: the built-in voice's five fixed lines (`voices/jessica/`, packed as `robot`), which no other Character can replace. Its card is marked Default. Earlier versions let a preset lend the robot its voice and lines; a box written that way shows the robot's card as not in use until the robot is written again. A box with no pack at all also counts as wearing the robot.
 
 ### Four key frames, moved by the firmware
 

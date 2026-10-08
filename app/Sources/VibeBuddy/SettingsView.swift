@@ -779,12 +779,13 @@ struct AddressRow: View {
 /// Character picked here, or the five fixed lines it shipped with.
 struct RobotCard: View {
     @ObservedObject var model: AppModel
-    @State private var lender = "builtin"
+
+    private var inUse: Bool { model.wearsRobot && !model.robotBorrowsVoice }
 
     var body: some View {
         HStack(spacing: 12) {
-            Button { model.togglePreview(previewID) } label: {
-                Image(systemName: model.previewingVoice == previewID ? "stop.fill" : "play.fill")
+            Button { model.togglePreview(AppModel.robotID) } label: {
+                Image(systemName: model.previewingVoice == AppModel.robotID ? "stop.fill" : "play.fill")
             }
             .disabled(model.operationRunning)
             if let face = Resources.robotFace {
@@ -801,28 +802,19 @@ struct RobotCard: View {
                         .background(Capsule().fill(Color.accentColor.opacity(0.15)))
                 }
                 Text("The original robot, drawn by the box itself").font(.caption).foregroundStyle(.secondary)
-                Picker(String(localized: "Voice and lines from"), selection: $lender) {
-                    Text("Built-in voice (Jessica)").tag("builtin")
-                    ForEach(Resources.bundledVoices) { entry in Text(entry.name).tag(entry.id) }
-                }
-                .frame(maxWidth: 320)
             }
             Spacer()
-            if model.wearsRobot && lender == model.robotLender {
+            if inUse {
                 Label("In use", systemImage: "checkmark.circle.fill").foregroundStyle(.green)
             } else {
-                Button("Use") { model.writeRobot(lender: lender) }
+                Button("Use") { model.writeRobot() }
                     .disabled(model.operationRunning || !(model.status?.device.connected ?? false))
             }
         }
         .padding(10)
         .background(RoundedRectangle(cornerRadius: 8).fill(Color(nsColor: .controlBackgroundColor)))
-        .overlay(RoundedRectangle(cornerRadius: 8).stroke(model.wearsRobot ? Color.accentColor : .clear, lineWidth: 2))
-        .onAppear { lender = model.robotLender }
+        .overlay(RoundedRectangle(cornerRadius: 8).stroke(inUse ? Color.accentColor : .clear, lineWidth: 2))
     }
-
-    /// The pack to preview: the robot's own lines (the built-in voice's), or the lender's.
-    private var previewID: String { lender == "builtin" ? AppModel.robotID : lender }
 }
 
 /// The column every Character card gives its face, so names line up whatever the figure's width.

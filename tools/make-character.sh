@@ -19,7 +19,7 @@
 # enough to catch from across the desk.
 #
 # Usage: VOLC_API_KEY=... tools/make-character.sh wanwanxiaohe
-#        VOLC_API_KEY=... tools/make-character.sh amanda
+#        ELEVENLABS_API_KEY=... tools/make-character.sh ada
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"

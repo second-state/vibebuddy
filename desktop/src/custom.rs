@@ -19,7 +19,8 @@ pub struct Settings {
     /// The Character lending voice and lines to the user's own, as last written.
     #[serde(default)]
     pub custom_lender: Option<String>,
-    /// The Character lending voice and lines to the robot; none means its five built-in lines.
+    /// The Character an older version had lend the robot its voice and lines; none means its own five
+    /// built-in lines, the only ones the robot now has.
     #[serde(default)]
     pub robot_lender: Option<String>,
 }
