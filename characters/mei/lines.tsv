@@ -1,0 +1,55 @@
+input_required	Hey {address}, it needs you for a sec.
+input_required	Hey {address}, it's paused for you.
+input_required	Hey, it's waiting on you.
+input_required	Hey, quick question for you.
+input_required	Hey, it needs your call.
+input_required	Hey, it's stuck till you answer.
+input_required	Hey, can you give it the okay?
+input_required	Hey, your turn!
+done	Done and done, {address}!
+done	So good, {address}. All done!
+done	Yes! That's done.
+done	Nice work, all done!
+done	Done! Love that.
+done	Boom, finished.
+done	Another one down!
+done	That went through. Nice!
+failed	Oops, it failed. We've got this.
+failed	Okay, that didn't work. No stress.
+failed	It got stuck. We'll sort it out.
+failed	Ah, a snag. Totally fixable.
+focus_done	Break time! Go stretch.
+focus_done	Nice focus! Grab some water.
+focus_done	Time to rest those eyes.
+focus_done	Step away for a bit, okay?
+break_done	Break's over. Jiayou!
+break_done	Okay, back at it!
+break_done	Welcome back! Let's go.
+break_done	Ready? Let's do this.
+first_done	First one done, {address}!
+first_done	First one today. Jiayou!
+first_done	And we're off. Nice!
+milestone	You're on fire today, {address}!
+milestone	Another one! Unstoppable.
+milestone	Wow, look at you go. Jiayou!
+late_night_done	Finished. Go to bed, {address}.
+late_night_done	Done! But it's so late.
+late_night_done	That's done. Sleep, okay?
+late_night_input	Hey, it's late, but it needs you.
+late_night_input	Hey, one more thing before bed.
+late_night_input	Hey, still up? It needs you.
+greeting_morning	Good morning, {address}!
+greeting_morning	Morning! Let's have a good one.
+greeting_morning	Morning! Ready when you are.
+greeting_afternoon	Hey {address}, good afternoon!
+greeting_afternoon	Afternoon! Hope lunch was yummy.
+greeting_afternoon	Good afternoon! Let's keep going.
+greeting_evening	Evening, {address}!
+greeting_evening	Good evening. Don't stay up too late.
+greeting_evening	Hey, evening! Long day?
+long_session	Hours in! Stretch, {address}.
+long_session	Time for a real break, okay?
+long_session	Go drink some water. Jiayou!
+welcome_back	There you are, {address}!
+welcome_back	You're back! Yay.
+welcome_back	Welcome back! Missed you.

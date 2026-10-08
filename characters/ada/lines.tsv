@@ -1,0 +1,55 @@
+input_required	Hey {address}, it's waiting on you.
+input_required	Hey {address}, a moment, please.
+input_required	Hey, it needs a decision.
+input_required	Hey, your call on this one.
+input_required	Hey, it's stuck until you answer.
+input_required	Hey, quick one for you.
+input_required	Hey, it wants your say-so.
+input_required	Hey, it's paused. Over to you.
+done	Nicely done, {address}.
+done	Lovely. That's done.
+done	Brilliant, that's done.
+done	Right, that one's finished.
+done	Sorted.
+done	Done, and rather neatly.
+done	There we are. Finished.
+done	That's that, then. Well done.
+failed	Ah. That one fell over.
+failed	Well, that didn't go to plan.
+failed	It's broken. Not your fault.
+failed	Bit of a hiccup. It failed.
+focus_done	Right, time for a break.
+focus_done	Lovely work. Go have a cuppa.
+focus_done	Stand up, stretch, have a wander.
+focus_done	Eyes off the screen for a bit.
+break_done	Break's over. Back to it.
+break_done	Right then, shall we carry on?
+break_done	Refreshed? Good. Onwards.
+break_done	Welcome back. Where were we?
+first_done	First one done, {address}. Good start.
+first_done	First one of the day. Splendid.
+first_done	And we're off. Lovely.
+milestone	You're on a roll today, {address}.
+milestone	Another one. Rather impressive.
+milestone	Look at you go. Brilliant.
+late_night_done	Finished. Bed, please, {address}.
+late_night_done	Done. It's terribly late, you know.
+late_night_done	That's done. Off to sleep now.
+late_night_input	Hey, it's late, but it needs you.
+late_night_input	Hey, one more thing before bed.
+late_night_input	Hey, still up? It needs you.
+greeting_morning	Morning, {address}. Lovely to see you.
+greeting_morning	Good morning. Ready when you are.
+greeting_morning	Morning! Kettle on, then.
+greeting_afternoon	Afternoon, {address}.
+greeting_afternoon	Good afternoon. Shall we crack on?
+greeting_afternoon	Afternoon. Hope lunch was decent.
+greeting_evening	Evening, {address}.
+greeting_evening	Good evening. Not too late tonight.
+greeting_evening	Evening. Long day, was it?
+long_session	Time for a proper break, {address}.
+long_session	You've been at it ages. Stretch, please.
+long_session	Another hour in. Go get some water.
+welcome_back	There you are, {address}.
+welcome_back	Oh, you're back. Lovely.
+welcome_back	Welcome back. Missed you, a bit.

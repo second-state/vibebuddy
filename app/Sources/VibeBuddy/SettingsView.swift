@@ -195,11 +195,12 @@ struct VoiceCard: View {
             }
             .disabled(model.operationRunning)
             if let frame = Resources.voicePack(entry.id)?.look.flatMap(LookBuilder.frames(of:))?.first {
-                Image(nsImage: LookImages.image(frame, scale: 1))
+                Image(nsImage: LookImages.image(frame, scale: 1)).frame(width: CharacterFace.width)
             }
             VStack(alignment: .leading) {
                 Text(entry.name).font(.body.weight(.semibold))
                 Text(entry.tag).font(.caption).foregroundStyle(.secondary)
+                Text(entry.summary).font(.caption).fixedSize(horizontal: false, vertical: true)
             }
             Spacer()
             if inUse {
@@ -782,11 +783,23 @@ struct RobotCard: View {
 
     var body: some View {
         HStack(spacing: 12) {
-            if let face = Resources.robotFace {
-                Image(nsImage: face)
+            Button { model.togglePreview(previewID) } label: {
+                Image(systemName: model.previewingVoice == previewID ? "stop.fill" : "play.fill")
             }
-            VStack(alignment: .leading, spacing: 4) {
-                Text(verbatim: "Vibe Buddy").font(.body.weight(.semibold))
+            .disabled(model.operationRunning)
+            if let face = Resources.robotFace {
+                Image(nsImage: face).frame(width: CharacterFace.width)
+            }
+            VStack(alignment: .leading) {
+                HStack(spacing: 6) {
+                    Text(verbatim: "Vibe Buddy").font(.body.weight(.semibold))
+                    Text("Default")
+                        .font(.caption2.weight(.semibold))
+                        .foregroundStyle(Color.accentColor)
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 1)
+                        .background(Capsule().fill(Color.accentColor.opacity(0.15)))
+                }
                 Text("The original robot, drawn by the box itself").font(.caption).foregroundStyle(.secondary)
                 Picker(String(localized: "Voice and lines from"), selection: $lender) {
                     Text("Built-in voice (Jessica)").tag("builtin")
@@ -807,4 +820,12 @@ struct RobotCard: View {
         .overlay(RoundedRectangle(cornerRadius: 8).stroke(model.wearsRobot ? Color.accentColor : .clear, lineWidth: 2))
         .onAppear { lender = model.robotLender }
     }
+
+    /// The pack to preview: the robot's own lines (the built-in voice's), or the lender's.
+    private var previewID: String { lender == "builtin" ? AppModel.robotID : lender }
+}
+
+/// The column every Character card gives its face, so names line up whatever the figure's width.
+enum CharacterFace {
+    static let width: CGFloat = 56
 }

@@ -706,7 +706,11 @@ impl App {
             };
             let card = row![]
                 .push(face.clone().map(image))
-                .push(column![text(voice.name.clone()), text(voice.tag.clone()).size(13)])
+                .push(column![
+                    text(voice.name.clone()),
+                    text(voice.tag.clone()).size(13),
+                    text(voice.summary.clone()).size(13),
+                ])
                 .push(space::horizontal())
                 .push(action)
                 .spacing(12)
@@ -742,7 +746,9 @@ impl App {
         let robot_card = row![]
             .push(self.robot_face.clone().map(image))
             .push(column![
-                text("Vibe Buddy"),
+                row![text("Vibe Buddy"), text(tr("Default", &[])).size(13).style(text::primary)]
+                    .spacing(6)
+                    .align_y(iced::Alignment::Center),
                 text(tr("The original robot, drawn by the box itself", &[])).size(13),
                 row![text(tr("Voice and lines from", &[])).size(13), pick_list(robot_lenders, Some(self.robot_lender), Message::PickRobotLender)]
                     .spacing(8)
