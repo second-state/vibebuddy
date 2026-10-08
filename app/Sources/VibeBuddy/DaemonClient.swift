@@ -57,6 +57,13 @@ struct DaemonClient {
         guard code == 202 else { throw DaemonError(message: DaemonClient.message(in: data) ?? String(localized: "Volume change was rejected (\(code))")) }
     }
 
+    /// The daemon remembers the choice and connects to that device on its next look around.
+    func chooseBox(usbSerial: String) async throws {
+        let body = try JSONSerialization.data(withJSONObject: ["usb_serial": usbSerial])
+        let (code, data) = try await post("/v1/device/choice", body: body, contentType: "application/json")
+        guard code == 202 else { throw DaemonError(message: DaemonClient.message(in: data) ?? String(localized: "Choosing the box was rejected (\(code))")) }
+    }
+
     func writeVoicePack(_ pack: Data) async throws {
         let (code, data) = try await post("/v1/device/voice-pack", body: pack, contentType: "application/octet-stream")
         guard code == 202 else { throw DaemonError(message: DaemonClient.message(in: data) ?? String(localized: "Voice pack write was rejected (\(code))")) }

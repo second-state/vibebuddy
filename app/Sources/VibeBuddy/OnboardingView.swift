@@ -103,7 +103,8 @@ struct OnboardingView: View {
             } else {
                 Label(model.daemonAlive ? "No box yet — this updates once you plug it in." : "Starting the daemon…", systemImage: "cable.connector")
                     .foregroundStyle(.secondary)
-                if model.daemonAlive { BoxNotFoundHelp() }
+                if let pin = model.status?.device.pin { PinNotice(pin: pin) }
+                if model.daemonAlive { BoxSearchHelp(model: model) }
             }
         }
     }

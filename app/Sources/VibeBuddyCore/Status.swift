@@ -29,6 +29,22 @@ public struct DaemonInfo: Codable, Equatable {
     public init(build: String, appVersion: String?) { self.build = build; self.appVersion = appVersion }
 }
 
+/// An environment variable that narrows the daemon's search to one port or device.
+public struct SerialPin: Codable, Equatable {
+    public var variable: String
+    public var value: String
+    public init(variable: String, value: String) { self.variable = variable; self.value = value }
+}
+
+/// A device that could be the box, offered when several are plugged in and none is the remembered one.
+public struct BoxCandidate: Codable, Equatable, Identifiable {
+    public var port: String
+    public var usbSerial: String?
+    public var id: String { port }
+    enum CodingKeys: String, CodingKey { case port, usbSerial = "usb_serial" }
+    public init(port: String, usbSerial: String?) { self.port = port; self.usbSerial = usbSerial }
+}
+
 public struct DeviceState: Codable, Equatable {
     public var connected: Bool
     public var port: String?
@@ -42,7 +58,10 @@ public struct DeviceState: Codable, Equatable {
     public var volume: Int?
     /// Connected but running other firmware, as the daemon judged it; absent from older daemons.
     public var foreignFirmware: Bool?
-    enum CodingKeys: String, CodingKey { case connected, port, bridge, mode, firmwareBuild = "firmware_build", firmwareVersion = "firmware_version", voice, volume, foreignFirmware = "foreign_firmware" }
+    /// Absent from older daemons, like the two below.
+    public var pin: SerialPin?
+    public var candidates: [BoxCandidate]?
+    enum CodingKeys: String, CodingKey { case connected, port, bridge, mode, firmwareBuild = "firmware_build", firmwareVersion = "firmware_version", voice, volume, foreignFirmware = "foreign_firmware", pin, candidates }
     public init(connected: Bool, port: String? = nil, bridge: Bool = false, mode: String? = nil, firmwareBuild: String? = nil, firmwareVersion: String? = nil, voice: String? = nil, volume: Int? = nil, foreignFirmware: Bool? = nil) {
         self.connected = connected; self.port = port; self.bridge = bridge; self.mode = mode; self.firmwareBuild = firmwareBuild; self.firmwareVersion = firmwareVersion; self.voice = voice; self.volume = volume
         self.foreignFirmware = foreignFirmware

@@ -95,6 +95,11 @@ pub async fn check_for_updates() -> Result<(), String> {
     post("/v1/updates/check", None).await
 }
 
+/// The daemon remembers the choice and connects to that device on its next look around.
+pub async fn choose_box(usb_serial: String) -> Result<(), String> {
+    post("/v1/device/choice", Some(serde_json::json!({ "usb_serial": usb_serial }))).await
+}
+
 pub async fn identify() -> Result<(), String> {
     post("/v1/device/identify", None).await
 }
