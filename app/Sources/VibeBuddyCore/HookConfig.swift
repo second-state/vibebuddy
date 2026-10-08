@@ -4,19 +4,27 @@ import Foundation
 /// Claude Code's user-level settings.json and Codex's hooks.json share one shape:
 /// `hooks.<event>: [ { hooks: [ { type: "command", command, timeout } ] } ]`.
 public enum HookAgent: String, CaseIterable {
-    case codex, claude
+    case codex, claude, opencode, copilot
 
+    /// The events merged into a shared config; empty for agents whose whole file Vibe Buddy owns.
     public var events: [String] {
         switch self {
         case .codex: return ["UserPromptSubmit", "PermissionRequest", "PostToolUse", "Stop", "Interrupt", "SessionEnd"]
         case .claude: return ["UserPromptSubmit", "PermissionRequest", "PostToolUse", "Stop", "StopFailure", "SubagentStart", "SubagentStop", "SessionEnd"]
+        case .opencode, .copilot: return []
         }
     }
+
+    /// OpenCode and Copilot get a file of Vibe Buddy's own in their config directory, instead of entries merged
+    /// into the user's: connecting writes it, removing deletes it. The hook binary makes its contents.
+    public var ownsFile: Bool { events.isEmpty }
 
     public var displayName: String {
         switch self {
         case .codex: return "Codex"
         case .claude: return "Claude Code"
+        case .opencode: return "OpenCode"
+        case .copilot: return "GitHub Copilot CLI"
         }
     }
 }
@@ -35,6 +43,14 @@ public enum CodexTrustHint: Equatable {
 }
 
 public enum HookConfig {
+    /// The change shown before writing a file Vibe Buddy owns: the whole file, added or removed.
+    public static func describeOwnedFile(from before: String?, to after: String?) -> [String] {
+        guard before != after else { return [] }
+        let removed = (before ?? "").split(separator: "\n", omittingEmptySubsequences: false).filter { !$0.isEmpty }.map { "- \($0)" }
+        let added = (after ?? "").split(separator: "\n", omittingEmptySubsequences: false).filter { !$0.isEmpty }.map { "+ \($0)" }
+        return removed + added
+    }
+
     public static func codexTrustHint(configModifiedAt: Date?, lastEvent: Date?) -> CodexTrustHint {
         guard let lastEvent else { return .waitingFirstEvent }
         if let configModifiedAt, configModifiedAt > lastEvent { return .changedSinceLastEvent(configModifiedAt) }

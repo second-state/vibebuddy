@@ -68,6 +68,8 @@ enum Tab {
 enum Agent {
     Claude,
     Codex,
+    OpenCode,
+    Copilot,
 }
 
 #[derive(Clone, Debug)]
@@ -809,6 +811,8 @@ impl App {
             let (name, last) = match agent {
                 Agent::Claude => ("Claude Code", self.status.as_ref().and_then(|s| s.hooks.claude.as_deref())),
                 Agent::Codex => ("Codex", self.status.as_ref().and_then(|s| s.hooks.codex.as_deref())),
+                Agent::OpenCode => ("OpenCode", self.status.as_ref().and_then(|s| s.hooks.opencode.as_deref())),
+                Agent::Copilot => ("Copilot CLI", self.status.as_ref().and_then(|s| s.hooks.copilot.as_deref())),
             };
             let state = match last {
                 Some(time) => tr("Last event %@", &[&short_time(time)]),
@@ -823,7 +827,7 @@ impl App {
                 &[]
             ))
             .size(13),
-            column([line(Agent::Claude), line(Agent::Codex)]).spacing(8),
+            column([line(Agent::Claude), line(Agent::Codex), line(Agent::OpenCode), line(Agent::Copilot)]).spacing(8),
             row![
                 button(text(tr("Connect", &[]))).on_press(Message::Hooks("install")),
                 button(text(tr("Remove", &[]))).style(button::secondary).on_press(Message::Hooks("uninstall")),

@@ -168,6 +168,8 @@ fn command_for(source: &ActivitySource, desktop: Option<&str>) -> Result<Command
         _ => {}
     }
     match source {
+        // No app of its own to open: the hook reports it in another app's host, or nowhere.
+        ActivitySource::Cli { agent, .. } => Err(format!("{agent} has no app of its own to open")),
         ActivitySource::Codex { thread_id, .. } => {
             if !valid_identifier(thread_id) {
                 return Err("Codex thread id contains invalid characters".to_owned());
@@ -238,7 +240,9 @@ fn fallback_desktop_session(source: &ActivitySource) -> Option<String> {
 
 fn surface_of(source: &ActivitySource) -> Option<&Surface> {
     match source {
-        ActivitySource::Codex { surface, .. } | ActivitySource::ClaudeCode { surface, .. } => Some(surface),
+        ActivitySource::Codex { surface, .. }
+        | ActivitySource::ClaudeCode { surface, .. }
+        | ActivitySource::Cli { surface, .. } => Some(surface),
         ActivitySource::GitHubActions { .. } => None,
     }
 }
@@ -660,6 +664,17 @@ mod tests {
         // Nobody watches the pane's session: the most recently used client is moved there.
         assert_eq!(tmux_client_for(clients, "$7"), Some(("/dev/ttys044".to_owned(), 4401)));
         assert_eq!(tmux_client_for("", "$0"), None);
+    }
+
+    #[test]
+    fn a_cli_agent_in_a_terminal_brings_the_terminal_forward() {
+        let source = ActivitySource::Cli {
+            agent: "opencode".to_owned(),
+            session_id: "ses_1".to_owned(),
+            surface: Surface::Host { bundle_id: "com.apple.Terminal".to_owned(), ttys: Vec::new(), tmux: None, focus_url: None },
+        };
+        let spec = command_for(&source, None).expect("activatable");
+        assert_eq!(spec.args, ["-b", "com.apple.Terminal"]);
     }
 
     #[test]

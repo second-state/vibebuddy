@@ -139,6 +139,13 @@ pub enum ActivitySource {
         repo: String,
         run_id: u64,
     },
+    /// An agent with no desktop app to deeplink into (OpenCode, GitHub Copilot CLI): K2 can only go to where it runs.
+    Cli {
+        agent: String,
+        session_id: String,
+        #[serde(default)]
+        surface: Surface,
+    },
 }
 
 /// An activity's identity. `key` is unique across all sessions; `session_id` is for session-level operations.
@@ -341,6 +348,10 @@ impl ActivityTracker {
             activity.child = true;
         }
         self.visible_activity()
+    }
+
+    pub fn has_activity(&self, id: &ActivityId) -> bool {
+        self.activities.contains_key(&id.key)
     }
 
     /// Mark the activity as waiting for the user. Marking it again doesn't trigger the voice again.

@@ -1,5 +1,6 @@
 mod activity;
 mod ci;
+mod agent_hooks;
 mod claude_hooks;
 mod codex_hooks;
 mod config;
@@ -31,6 +32,7 @@ use axum::{Json, Router};
 use vibebuddy_protocol::{Event, VERSION};
 use chrono::Timelike;
 use ci::CiWatcher;
+use agent_hooks::AgentHook;
 use claude_hooks::ClaudeHook;
 use codex_hooks::CodexHook;
 use config::Config;
@@ -370,6 +372,7 @@ fn app(state: AppState) -> Router {
         .route("/v1/events", post(post_event))
         .route("/v1/codex-hooks", post(post_codex_hook))
         .route("/v1/claude-hooks", post(post_claude_hook))
+        .route("/v1/agent-hooks", post(post_agent_hook))
         .route("/v1/status", get(get_status))
         .route("/v1/status/stream", get(status_stream))
         .route("/v1/config", get(get_config).put(put_config))
@@ -962,6 +965,30 @@ async fn post_claude_hook(
         let mut tracker = state.activities.lock().await;
         let mut titles = state.titles.lock().await;
         claude_hooks::apply(&mut tracker, &mut titles, hook).map(|mut event| {
+            tracker.stamp_live_fields(&mut event);
+            event
+        })
+    };
+    forward(state, event).await
+}
+
+async fn post_agent_hook(
+    State(state): State<AppState>,
+    Json(hook): Json<AgentHook>,
+) -> (StatusCode, Json<ApiResponse>) {
+    {
+        let mut seen = state.hooks_seen.lock().await;
+        let now = Some(chrono::Local::now());
+        match hook.agent.as_str() {
+            "opencode" => seen.opencode = now,
+            "copilot" => seen.copilot = now,
+            _ => {}
+        }
+    }
+    state.notify_status();
+    let event = {
+        let mut tracker = state.activities.lock().await;
+        agent_hooks::apply(&mut tracker, hook).map(|mut event| {
             tracker.stamp_live_fields(&mut event);
             event
         })

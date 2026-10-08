@@ -290,7 +290,7 @@ struct HookRow: View {
 
     private var present: Bool { model.hookPresent(agent) }
     private var installed: Bool { model.hookInstalled[agent] ?? false }
-    private var lastEvent: Date? { agent == .codex ? model.status?.hooks.codex : model.status?.hooks.claude }
+    private var lastEvent: Date? { model.status?.hooks.lastEvent(agent) }
     /// Only Codex has a trust step; Claude Code picks up config changes in its next session.
     private var codexHint: CodexTrustHint? {
         guard agent == .codex, installed else { return nil }

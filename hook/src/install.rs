@@ -1,5 +1,6 @@
 //! `vibebuddy-hook install` / `uninstall`: where there is no app (Linux), the hook registers itself in the
-//! user-level config of Claude Code and Codex. Same rules as the app's `HookConfig.swift`: only Vibe Buddy's own
+//! user-level config of Claude Code and Codex, and writes or deletes the file it owns for OpenCode and Copilot
+//! (`cli_agents`). Same rules as the app's `HookConfig.swift`: only Vibe Buddy's own
 //! entries are added or removed, a `.bak` is kept, and the new file is swapped in whole.
 //!
 //! An install that changes nothing leaves the file untouched: Codex keys its trust to a hash of each hook, so
@@ -8,6 +9,8 @@
 use std::path::{Path, PathBuf};
 
 use serde_json::{Map, Value, json};
+
+use crate::cli_agents;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Agent {
@@ -207,9 +210,34 @@ pub fn run(installing: bool) -> Result<(), String> {
             );
         }
     }
+    for agent in cli_agents::Agent::ALL {
+        if !agent.dir(&home).is_dir() {
+            continue;
+        }
+        found = true;
+        let path = agent.file(&home);
+        let wanted = installing.then(|| agent.file_contents(binary));
+        let current = std::fs::read_to_string(&path).ok();
+        if current == wanted {
+            println!("{}: nothing to change in {}", agent.display_name(), path.display());
+            continue;
+        }
+        let fail = |error: std::io::Error| format!("cannot write {}: {error}", path.display());
+        match wanted {
+            Some(text) => {
+                std::fs::create_dir_all(path.parent().unwrap_or(&home)).map_err(fail)?;
+                std::fs::write(&path, text).map_err(fail)?;
+                println!("{}: wrote {}", agent.display_name(), path.display());
+            }
+            None => {
+                std::fs::remove_file(&path).map_err(fail)?;
+                println!("{}: removed {}", agent.display_name(), path.display());
+            }
+        }
+    }
     if !found {
         println!(
-            "Neither ~/.claude nor ~/.codex exists. Run Claude Code or Codex once, then run this again."
+            "None of Claude Code, Codex, OpenCode or GitHub Copilot CLI has run here yet. Run one once, then run this again."
         );
     }
     Ok(())
