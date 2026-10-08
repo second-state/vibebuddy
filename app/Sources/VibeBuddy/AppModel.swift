@@ -12,8 +12,8 @@ final class AppModel: ObservableObject {
     @Published private(set) var screenshot: NSImage?
     @Published private(set) var screenshotBusy = false
     @Published private(set) var hookInstalled: [HookAgent: Bool] = [:]
-    /// nil when Ghostty isn't installed: there is nothing to ask for.
-    @Published private(set) var ghosttyAccess: TerminalAccess.State?
+    /// Keyed by bundle id, for the supported terminals installed on this Mac.
+    @Published private(set) var terminalAccess: [String: TerminalAccess.State] = [:]
     @Published private(set) var launchAtLogin = LoginItem.isEnabled
     @Published private(set) var previewingVoice: String?
     /// Serial port open but no build ID ever reported: the box isn't running our firmware (a factory box), so offer to flash it.
@@ -364,32 +364,31 @@ final class AppModel: ObservableObject {
 
     // MARK: Terminal tabs
 
-    /// Reads the current answer without prompting.
-    func refreshGhosttyAccess() {
-        guard TerminalAccess.ghosttyURL != nil else {
-            ghosttyAccess = nil
-            return
-        }
+    /// Reads the current answers without prompting.
+    func refreshTerminalAccess() {
+        let terminals = TerminalAccess.installed
         Task {
-            let state = await Task.detached { TerminalAccess.check(ask: false) }.value
-            ghosttyAccess = state
+            var states: [String: TerminalAccess.State] = [:]
+            for terminal in terminals {
+                states[terminal.bundleID] = await Task.detached { TerminalAccess.check(terminal, ask: false) }.value
+            }
+            terminalAccess = states
         }
     }
 
-    /// Shows the system prompt. macOS only asks about a running app, so Ghostty is started first if needed.
-    func allowGhosttyAccess() {
-        guard let url = TerminalAccess.ghosttyURL else { return }
+    /// Shows the system prompt. macOS only asks about a running app, so the terminal is started first if needed.
+    func allowTerminalAccess(_ terminal: TerminalAccess.Terminal) {
+        guard let url = terminal.url else { return }
         Task {
-            if !TerminalAccess.ghosttyRunning {
+            if !terminal.running {
                 let configuration = NSWorkspace.OpenConfiguration()
                 configuration.activates = false
                 _ = try? await NSWorkspace.shared.openApplication(at: url, configuration: configuration)
-                for _ in 0..<50 where !TerminalAccess.ghosttyRunning {
+                for _ in 0..<50 where !terminal.running {
                     try? await Task.sleep(for: .milliseconds(100))
                 }
             }
-            let state = await Task.detached { TerminalAccess.check(ask: true) }.value
-            ghosttyAccess = state
+            terminalAccess[terminal.bundleID] = await Task.detached { TerminalAccess.check(terminal, ask: true) }.value
         }
     }
 

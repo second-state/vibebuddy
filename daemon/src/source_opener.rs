@@ -16,6 +16,49 @@ const OPEN_TIMEOUT: Duration = Duration::from_secs(5);
 const CODEX_BUNDLE_ID: &str = "com.openai.codex";
 const CLAUDE_BUNDLE_ID: &str = "com.anthropic.claudefordesktop";
 const GHOSTTY_BUNDLE_ID: &str = "com.mitchellh.ghostty";
+const TERMINAL_BUNDLE_ID: &str = "com.apple.Terminal";
+const ITERM_BUNDLE_ID: &str = "com.googlecode.iterm2";
+/// Terminal.app names each tab's tty, so its tab is found directly. The tty comes in as an argument.
+const TERMINAL_FOCUS_TTY: [&str; 16] = [
+    "on run argv",
+    "set target to \"/dev/\" & item 1 of argv",
+    "tell application id \"com.apple.Terminal\"",
+    "repeat with w in windows",
+    "repeat with t in tabs of w",
+    "if tty of t is target then",
+    "set selected of t to true",
+    "set frontmost of w to true",
+    "activate",
+    "return",
+    "end if",
+    "end repeat",
+    "end repeat",
+    "end tell",
+    "error \"no Terminal tab is on \" & target",
+    "end run",
+];
+/// iTerm2 names each session's tty, a split pane being a session of its own. The tty comes in as an argument.
+const ITERM_FOCUS_TTY: [&str; 19] = [
+    "on run argv",
+    "set target to \"/dev/\" & item 1 of argv",
+    "tell application id \"com.googlecode.iterm2\"",
+    "repeat with w in windows",
+    "repeat with t in tabs of w",
+    "repeat with s in sessions of t",
+    "if tty of s is target then",
+    "select w",
+    "select t",
+    "select s",
+    "activate",
+    "return",
+    "end if",
+    "end repeat",
+    "end repeat",
+    "end repeat",
+    "end tell",
+    "error \"no iTerm2 session is on \" & target",
+    "end run",
+];
 /// One `id<TAB>title` line per Ghostty terminal. `tab` would name Ghostty's own tab class inside the tell block,
 /// hence the character ids.
 const GHOSTTY_LIST_TERMINALS: [&str; 7] = [
@@ -70,14 +113,12 @@ pub async fn open(source: ActivitySource) -> Result<String, String> {
             },
             None => tty.clone(),
         };
-        // Ghostty can be asked about its terminals, so go to that tab. Failing that, Ghostty is still brought
-        // forward below, as any other host is.
-        if bundle_id == GHOSTTY_BUNDLE_ID
-            && let Some(tty) = tty
-        {
-            match focus_ghostty_terminal(&tty).await {
+        // Terminals that can be asked about their tabs go to that tab. Failing that, the terminal is still
+        // brought forward below, as any other host is.
+        if let Some(tty) = tty {
+            match focus_terminal_tab(bundle_id, &tty).await {
                 Ok(target) => return Ok(target),
-                Err(error) => tracing::info!(%error, "cannot find the session's Ghostty tab, bringing Ghostty forward"),
+                Err(error) => tracing::info!(%error, %bundle_id, "cannot find the session's tab, bringing the host forward"),
             }
         }
     }
@@ -185,14 +226,25 @@ fn surface_of(source: &ActivitySource) -> Option<&Surface> {
     }
 }
 
+async fn focus_terminal_tab(bundle_id: &str, tty: &str) -> Result<String, String> {
+    if !valid_tty(tty) {
+        return Err("invalid tty".to_owned());
+    }
+    let script: &[&str] = match bundle_id {
+        GHOSTTY_BUNDLE_ID => return focus_ghostty_terminal(tty).await,
+        TERMINAL_BUNDLE_ID => &TERMINAL_FOCUS_TTY,
+        ITERM_BUNDLE_ID => &ITERM_FOCUS_TTY,
+        _ => return Err("this host can't be asked about its tabs".to_owned()),
+    };
+    run_osascript(script, &[tty]).await?;
+    Ok(format!("{bundle_id} tab on {tty}"))
+}
+
 /// Focuses the Ghostty terminal on the agent's tty. Ghostty doesn't tell which terminal owns which tty, but it
 /// does report titles, and anything written to a tty is read by the terminal that owns it: so the tab is
 /// briefly given a one-off title, found by it, and handed its own title back. Ghostty has no title stack to
 /// restore from, so the original comes from a listing taken first.
 async fn focus_ghostty_terminal(tty: &str) -> Result<String, String> {
-    if !valid_tty(tty) {
-        return Err("invalid tty".to_owned());
-    }
     let before = run_osascript(&GHOSTTY_LIST_TERMINALS, &[]).await?;
     let nanos = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)

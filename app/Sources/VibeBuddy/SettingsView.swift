@@ -259,17 +259,17 @@ struct HooksView: View {
             ForEach(HookAgent.allCases, id: \.rawValue) { agent in
                 HookRow(model: model, agent: agent, pendingPlan: $pendingPlan)
             }
-            if let access = model.ghosttyAccess {
-                Text("Terminal tabs").font(.headline).padding(.top, 8)
-                Text("With access to Ghostty, K2 goes straight to the tab a session runs in, instead of just bringing Ghostty forward.").font(.callout).foregroundStyle(.secondary)
-                TerminalAccessRow(model: model, state: access)
+            Text("Terminal tabs").font(.headline).padding(.top, 8)
+            Text("With access to your terminal, K2 goes straight to the tab a session runs in, instead of just bringing the terminal forward. Only the terminals you run agents in need it.").font(.callout).foregroundStyle(.secondary)
+            ForEach(TerminalAccess.installed) { terminal in
+                TerminalAccessRow(model: model, terminal: terminal, state: model.terminalAccess[terminal.bundleID] ?? .unknown)
             }
             Spacer()
         }
-        .onAppear { model.refreshGhosttyAccess() }
+        .onAppear { model.refreshTerminalAccess() }
         // The answer may have changed in System Settings while the window was in the background.
         .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
-            model.refreshGhosttyAccess()
+            model.refreshTerminalAccess()
         }
         .sheet(item: Binding(get: { pendingPlan.map(PlanBox.init) }, set: { pendingPlan = $0?.plan })) { box in
             PlanSheet(plan: box.plan, confirm: { model.applyHookPlan(box.plan); pendingPlan = nil }, cancel: { pendingPlan = nil })
@@ -335,20 +335,21 @@ struct HookRow: View {
 
 struct TerminalAccessRow: View {
     @ObservedObject var model: AppModel
+    let terminal: TerminalAccess.Terminal
     let state: TerminalAccess.State
 
     var body: some View {
         HStack(spacing: 12) {
             Circle().fill(dotColor).frame(width: 10, height: 10)
             VStack(alignment: .leading) {
-                Text(verbatim: "Ghostty").font(.body.weight(.semibold))
+                Text(verbatim: terminal.name).font(.body.weight(.semibold))
                 Text(statusText).font(.caption).foregroundStyle(.secondary)
             }
             Spacer()
             switch state {
             case .allowed: EmptyView()
             case .denied: Button("Open System Settings") { model.openAutomationSettings() }
-            case .notAsked, .unknown: Button("Allow…") { model.allowGhosttyAccess() }
+            case .notAsked, .unknown: Button("Allow…") { model.allowTerminalAccess(terminal) }
             }
         }
         .padding(10)
@@ -367,8 +368,8 @@ struct TerminalAccessRow: View {
         switch state {
         case .allowed: String(localized: "Allowed")
         case .notAsked: String(localized: "Not allowed yet")
-        case .denied: String(localized: "Denied. Turn Vibe Buddy back on for Ghostty under Privacy & Security → Automation.")
-        case .unknown: String(localized: "Not checked yet: macOS only answers while Ghostty is running")
+        case .denied: String(localized: "Denied. Turn Vibe Buddy back on for \(terminal.name) under Privacy & Security → Automation.")
+        case .unknown: String(localized: "Not checked yet: macOS only answers while \(terminal.name) is running")
         }
     }
 }
