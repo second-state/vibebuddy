@@ -31,6 +31,7 @@ do {
     check(Firmware.label(version: "0.2.2", build: "abc 1") == "0.2.2 · abc 1", "version leads the firmware label")
     check(Firmware.label(version: nil, build: "abc 1") == "abc 1", "firmware without a version shows its build")
     check(status.hooks.codex != nil && status.hooks.claude == nil, "hook timestamps decode")
+    check(status.hooks.opencode == nil && status.hooks.lastEvent(.codex) == status.hooks.codex, "a daemon without OpenCode and Copilot still decodes")
     check(status.operation?.kind == .voicePack && status.operation?.progress == 0.42, "operation decodes")
     let menu = MenuState.derive(status: status, daemonAlive: true)
     check(menu.icon == .online, "online icon")
@@ -139,6 +140,10 @@ check(removedHooks.keys.sorted() == ["PreToolUse"], "after removal only other ho
 let diff = HookConfig.describeChange(from: existing, to: installed, agent: .codex)
 check(diff.contains("- Stop: /usr/bin/python3 /old/codex-hook.py") && diff.contains("+ Stop: \"\(binary)\" codex"), "change description: \(diff)")
 check(HookAgent.claude.events.count == 8, "Claude has eight events")
+check(HookAgent.opencode.ownsFile && HookAgent.copilot.ownsFile && !HookAgent.codex.ownsFile, "OpenCode and Copilot get a file of their own")
+check(HookConfig.describeOwnedFile(from: nil, to: "a\nb\n") == ["+ a", "+ b"], "writing an owned file shows every line")
+check(HookConfig.describeOwnedFile(from: "a\n", to: nil) == ["- a"], "removing an owned file shows what goes")
+check(HookConfig.describeOwnedFile(from: "a\n", to: "a\n").isEmpty, "an unchanged owned file needs no write")
 // Codex trust hint: warn only if the config is newer than the last event; no verdict without events; no warning if the file time is unreadable.
 let earlier = Date(timeIntervalSince1970: 1_000)
 let later = Date(timeIntervalSince1970: 2_000)

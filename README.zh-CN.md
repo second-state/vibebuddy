@@ -2,7 +2,7 @@
 
 [English](README.md) | 简体中文
 
-Vibe Buddy 是给 AI 编程 Agent 配的桌面宠物。它住在键盘旁一个小小的 ESP32-S3 盒子里，替你盯着 Codex、Claude Code 和 GitHub Actions：Agent 需要你、做完了或者失败了，氛围小助手会用动画、任务卡片和一句短语音告诉你。
+Vibe Buddy 是给 AI 编程 Agent 配的桌面宠物。它住在键盘旁一个小小的 ESP32-S3 盒子里，替你盯着 Codex、Claude Code、OpenCode、GitHub Copilot CLI 和 GitHub Actions：Agent 需要你、做完了或者失败了，氛围小助手会用动画、任务卡片和一句短语音告诉你。
 
 氛围小助手是原创角色。Codex 是第一个接入的 Agent，但设备协议不绑定某个客户端，本机任何程序或脚本都能给它发事件。
 
@@ -115,6 +115,10 @@ Hook 是一个 Rust 二进制 [`hook/`](hook/)（`vibebuddy-hook codex` / `vibeb
 
 - Codex：`~/.codex/hooks.json` 的六个事件，写入后要在 Codex 的 `/hooks` 页面审查、信任一次；详见 [`docs/codex-adapter.md`](docs/codex-adapter.md)。
 - Claude Code：`~/.claude/settings.json` 的八个事件；详见 [`docs/claude-adapter.md`](docs/claude-adapter.md)。
+- OpenCode：Vibe Buddy 自己的插件 `~/.config/opencode/plugins/vibebuddy.js`，把每个事件交给 hook。
+- GitHub Copilot CLI：Vibe Buddy 自己的 hooks 文件 `~/.copilot/hooks/vibebuddy.json`。Copilot 在一轮结束时不给出回复内容，所以结尾留了问题的一轮也会播报为完成。
+
+OpenCode 和 Copilot 的这两个文件只属于 Vibe Buddy：接入时整份写入，移除时直接删除，不动你自己的配置。
 
 **隐私：** Hook 只转发会话与回合标识、事件名和工作目录，不转发 prompt、助手回复、transcript 或工具结果。判断助手是否在等待回答的规则两个 Agent 共用。
 

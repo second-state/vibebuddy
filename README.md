@@ -2,7 +2,7 @@
 
 English | [简体中文](README.zh-CN.md)
 
-Vibe Buddy is a desk pet for your AI coding agents. It lives in a small ESP32-S3 box next to your keyboard and keeps an eye on Codex, Claude Code and your GitHub Actions runs, so you don't have to. When an agent needs you, finishes, or fails, the buddy tells you with an animation, a task card and a short spoken line.
+Vibe Buddy is a desk pet for your AI coding agents. It lives in a small ESP32-S3 box next to your keyboard and keeps an eye on Codex, Claude Code, OpenCode, GitHub Copilot CLI and your GitHub Actions runs, so you don't have to. When an agent needs you, finishes, or fails, the buddy tells you with an animation, a task card and a short spoken line.
 
 The buddy is an original character. Codex was the first agent it supported, but the device protocol isn't tied to any one client: any local program or script can send it events.
 
@@ -28,7 +28,7 @@ Screen captures from a real box running the Rust firmware. Status scenes use exa
 
 ## What it does
 
-- **Watches your agents.** Codex, Claude Code and GitHub Actions all feed the same stack of up to three task cards, newest on top. Each card shows which agent it is (`CX:` Codex, `CC:` Claude Code, `CI:` GitHub Actions), the session's name and the project, and how long it has been in its current state.
+- **Watches your agents.** Codex, Claude Code and GitHub Actions all feed the same stack of up to three task cards, newest on top. Each card shows which agent it is (`CX:` Codex, `CC:` Claude Code, `OC:` OpenCode, `CP:` GitHub Copilot CLI, `CI:` GitHub Actions), the session's name and the project, and how long it has been in its current state.
 - **Speaks up only when it matters.** The buddy shows idle, working, needs input, done, failed and disconnected. It says one short line when an agent needs your input, finishes or fails, and stays quiet while agents work.
 - **Keeps today's stats.** When nothing is going on it cycles through what got done today and now and then does a little something.
 
@@ -115,6 +115,10 @@ The hook is a Rust binary in [`hook/`](hook/) (`vibebuddy-hook codex` / `vibebud
 
 - Codex: six events in `~/.codex/hooks.json`. After they're written, review and trust them once on Codex's `/hooks` page. See [`docs/codex-adapter.md`](docs/codex-adapter.md).
 - Claude Code: eight events in `~/.claude/settings.json`. See [`docs/claude-adapter.md`](docs/claude-adapter.md).
+- OpenCode: a plugin of Vibe Buddy's own at `~/.config/opencode/plugins/vibebuddy.js`, which hands each event to the hook.
+- GitHub Copilot CLI: a hooks file of Vibe Buddy's own at `~/.copilot/hooks/vibebuddy.json`. Copilot passes no reply at the end of a turn, so a question left at the end is announced as done.
+
+OpenCode's and Copilot's files belong to Vibe Buddy alone: connecting writes the whole file and removing deletes it, without touching your own config.
 
 **Privacy:** the hook only forwards session and turn IDs, event names and the working directory. It never forwards prompts, assistant replies, transcripts or tool results. Both agents share the same rule for deciding whether the assistant is waiting for your answer.
 

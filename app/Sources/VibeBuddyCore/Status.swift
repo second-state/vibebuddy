@@ -81,7 +81,21 @@ public struct TodaySummary: Codable, Equatable {
 public struct HooksSeen: Codable, Equatable {
     public var codex: Date?
     public var claude: Date?
-    public init(codex: Date? = nil, claude: Date? = nil) { self.codex = codex; self.claude = claude }
+    /// Absent from daemons older than OpenCode and Copilot support.
+    public var opencode: Date?
+    public var copilot: Date?
+    public init(codex: Date? = nil, claude: Date? = nil, opencode: Date? = nil, copilot: Date? = nil) {
+        self.codex = codex; self.claude = claude; self.opencode = opencode; self.copilot = copilot
+    }
+
+    public func lastEvent(_ agent: HookAgent) -> Date? {
+        switch agent {
+        case .codex: return codex
+        case .claude: return claude
+        case .opencode: return opencode
+        case .copilot: return copilot
+        }
+    }
 }
 
 /// Named DeviceOperation rather than Operation, which clashes with Foundation's.
