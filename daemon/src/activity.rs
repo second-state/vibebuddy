@@ -55,6 +55,9 @@ pub enum Surface {
         /// Inside tmux the tty belongs to a pane; the pane is switched to through tmux instead.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         tmux: Option<TmuxPane>,
+        /// Warp's deeplink back to the session's pane (`warp://session/<id>`), from `WARP_FOCUS_URL`.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        focus_url: Option<String>,
     },
     /// No host app: SSH, daemons, sessions started by launchd. K2 has nowhere to go.
     Headless,
@@ -90,13 +93,14 @@ impl Surface {
         host_bundle_id: Option<String>,
         host_ttys: Option<Vec<String>>,
         tmux: Option<TmuxPane>,
+        focus_url: Option<String>,
         host_pids: Option<Vec<u32>>,
         desktop_session_id: Option<String>,
     ) -> Self {
         match kind {
             // Claims a host but gave no bundle id: nowhere to go, and falling back to App would jump to the wrong place.
             Some("host") => match host_bundle_id {
-                Some(bundle_id) => Self::Host { bundle_id, ttys: host_ttys.unwrap_or_default(), tmux },
+                Some(bundle_id) => Self::Host { bundle_id, ttys: host_ttys.unwrap_or_default(), tmux, focus_url },
                 None => Self::Headless,
             },
             Some("headless") => Self::Headless,

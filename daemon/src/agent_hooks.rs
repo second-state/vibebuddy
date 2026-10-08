@@ -33,6 +33,8 @@ pub struct AgentHook {
     #[serde(default)]
     pub tmux_pane: Option<String>,
     #[serde(default)]
+    pub host_focus_url: Option<String>,
+    #[serde(default)]
     pub host_pids: Option<Vec<u32>>,
 }
 
@@ -62,6 +64,7 @@ pub fn apply(tracker: &mut ActivityTracker, hook: AgentHook) -> Option<Event> {
             hook.host_bundle_id.clone(),
             hook.host_ttys.clone(),
             TmuxPane::from_hook(hook.tmux_socket.clone(), hook.tmux_pane.clone()),
+            hook.host_focus_url.clone(),
             hook.host_pids.clone(),
             None,
         ),
@@ -153,6 +156,7 @@ mod tests {
                     bundle_id: "com.mitchellh.ghostty".to_owned(),
                     ttys: vec!["ttys016".to_owned()],
                     tmux: None,
+                    focus_url: None,
                 },
             })
         );

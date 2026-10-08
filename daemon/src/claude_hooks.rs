@@ -40,6 +40,8 @@ pub struct ClaudeHook {
     #[serde(default)]
     pub tmux_pane: Option<String>,
     #[serde(default)]
+    pub host_focus_url: Option<String>,
+    #[serde(default)]
     pub host_pids: Option<Vec<u32>>,
     #[serde(default)]
     pub desktop_session_id: Option<String>,
@@ -66,6 +68,7 @@ pub fn apply(
             hook.host_bundle_id.clone(),
             hook.host_ttys.clone(),
             TmuxPane::from_hook(hook.tmux_socket.clone(), hook.tmux_pane.clone()),
+            hook.host_focus_url.clone(),
             hook.host_pids.clone(),
             hook.desktop_session_id.clone(),
         ),
@@ -133,6 +136,7 @@ mod tests {
             host_ttys: None,
             tmux_socket: None,
             tmux_pane: None,
+            host_focus_url: None,
             host_pids: None,
             desktop_session_id: None,
         }
@@ -315,6 +319,7 @@ mod tests {
             host_ttys: None,
             tmux_socket: None,
             tmux_pane: None,
+            host_focus_url: None,
             host_pids: None,
         };
         let mixed = codex_hooks::apply(&mut tracker, &mut SessionTitles::disabled(), codex).expect("another agent should refresh the card stack");
