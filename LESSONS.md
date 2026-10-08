@@ -278,3 +278,9 @@ When a link can reach firmware that isn't ours, find out who is there from what 
 During the Muse tests on 2026-10-05, `launchctl setenv VIBEBUDDY_SERIAL_PORT /dev/cu.usbmodem8401` pinned the app's daemon to the Vibe Buddy box until a release could tell the two apart. The release shipped two days later, but the pin stayed: launchd keeps it until the Mac restarts, and nothing showed it. On 2026-10-08 a devkit plugged in place of the box showed as "Box not found", the Device tab offered no flash, and it looked like a regression in box detection. It only worked again by luck, when the devkit went into the same Mac socket, because macOS names a port after the socket, not the device.
 
 An override that changes what the product does must show where the user looks for the cause; here the daemon reports the pin in its status and the Device tab says so, in place of the "not found" help. If it can't be shown, give it an expiry. A note saying "undo this later" is not a mechanism. When something stops being found, check the process's environment (`ps eww`) before the code.
+
+## An update offer must check the hardware, not just the version
+
+On 2026-10-08 the app offered firmware 0.3.3 to the breadboard devkit (a GoouuuTech S3-N16R8 with an ST7789 SPI screen and a MAX98357A amp), because it ran our firmware at 0.1.0 and the offer compared versions only. Released firmware is built for the box; on the devkit the screen, speaker and buttons all failed to start. The devkit's firmware had said `BOARD goouuu-s3-spi` at every boot, and nothing read it.
+
+When one firmware line runs on more than one board, every offer to flash has to know the board first, and any board it doesn't know is a reason to hold back, not to go ahead. Also: the devkit's board support lived only as uncommitted changes in a Codex worktree. That is how a working setup gets lost. Commit such work on a branch, even one that is never pushed.

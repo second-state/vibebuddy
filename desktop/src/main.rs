@@ -1039,6 +1039,9 @@ impl App {
             .push(not_found)
             .push(row![text(tr("Box firmware", &[])).width(140), text(firmware)].spacing(12))
             .push(row![text(tr("Latest firmware", &[])).width(140), text(latest)].spacing(12))
+            .push(device.filter(|_| online).and_then(|device| device.unsupported_board.as_ref()).map(|board| {
+                text(tr("This is a %@ board, which released firmware doesn't run on, so no update is offered.", &[board])).size(13)
+            }))
             .push(update)
             .push(unavailable)
             .push(flashing)

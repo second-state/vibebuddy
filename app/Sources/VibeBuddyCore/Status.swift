@@ -61,7 +61,9 @@ public struct DeviceState: Codable, Equatable {
     /// Absent from older daemons, like the two below.
     public var pin: SerialPin?
     public var candidates: [BoxCandidate]?
-    enum CodingKeys: String, CodingKey { case connected, port, bridge, mode, firmwareBuild = "firmware_build", firmwareVersion = "firmware_version", voice, volume, foreignFirmware = "foreign_firmware", pin, candidates }
+    /// Our firmware built for other hardware (the breadboard devkit); released firmware isn't offered to it. Absent from older daemons.
+    public var unsupportedBoard: String?
+    enum CodingKeys: String, CodingKey { case connected, port, bridge, mode, firmwareBuild = "firmware_build", firmwareVersion = "firmware_version", voice, volume, foreignFirmware = "foreign_firmware", pin, candidates, unsupportedBoard = "unsupported_board" }
     public init(connected: Bool, port: String? = nil, bridge: Bool = false, mode: String? = nil, firmwareBuild: String? = nil, firmwareVersion: String? = nil, voice: String? = nil, volume: Int? = nil, foreignFirmware: Bool? = nil) {
         self.connected = connected; self.port = port; self.bridge = bridge; self.mode = mode; self.firmwareBuild = firmwareBuild; self.firmwareVersion = firmwareVersion; self.voice = voice; self.volume = volume
         self.foreignFirmware = foreignFirmware
