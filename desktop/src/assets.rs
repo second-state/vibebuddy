@@ -70,23 +70,72 @@ pub struct Voice {
     pub id: &'static str,
     pub name: String,
     pub tag: String,
+    /// Who the Character is, in one sentence, so the user can pick between them.
+    pub summary: String,
     pub language: Language,
     /// The normal frame of the Character's look, for its card; None for a pack without one.
     pub face: Option<crate::character::Image>,
 }
 
 fn catalog() -> Vec<Voice> {
-    let voice = |id, name: String, tag: String, language| Voice { id, name, tag, language, face: None };
+    let voice = |id, name: String, tag: String, summary: &str, language| Voice {
+        id,
+        name,
+        tag,
+        summary: tr(summary, &[]),
+        language,
+        face: None,
+    };
     vec![
         voice(
             "wanwanxiaohe",
-            tr("Wanwan Xiaohe", &[]),
+            tr("Xiaohe", &[]),
             tr("Chinese · Taiwanese accent", &[]),
+            "A sweet, lively friend from Taiwan who's always rooting for you.",
             Language::Chinese,
         ),
-        voice("ahu", tr("Ahu", &[]), tr("Chinese · Mandarin", &[]), Language::Chinese),
-        voice("amanda", "Amanda".to_owned(), tr("English", &[]), Language::English),
-        voice("jackson", "Jackson".to_owned(), tr("English", &[]), Language::English),
+        voice(
+            "ahu",
+            tr("Ahu", &[]),
+            tr("Chinese · Beijing accent", &[]),
+            "A Beijing guy with the gift of the gab. Hearty praise, and nothing fazes him.",
+            Language::Chinese,
+        ),
+        voice(
+            "amanda",
+            "Amanda".to_owned(),
+            tr("English", &[]),
+            "A cheerful friend who celebrates every small win.",
+            Language::English,
+        ),
+        voice(
+            "jackson",
+            "Jackson".to_owned(),
+            tr("English", &[]),
+            "The calm coworker at the next desk. Dry humor, rare but honest praise.",
+            Language::English,
+        ),
+        voice(
+            "ada",
+            "Ada".to_owned(),
+            tr("English · British accent", &[]),
+            "A witty Londoner. Understated praise, gently bossy about breaks.",
+            Language::English,
+        ),
+        voice(
+            "luna",
+            "Luna".to_owned(),
+            tr("English", &[]),
+            "Late-night lofi calm. Never rushes you.",
+            Language::English,
+        ),
+        voice(
+            "mei",
+            "Mei".to_owned(),
+            tr("English · Bay Area", &[]),
+            "An upbeat Bay Area engineer who cheers you on, sometimes in Chinese.",
+            Language::English,
+        ),
     ]
 }
 

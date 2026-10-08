@@ -108,11 +108,50 @@ struct GeneralView: View {
     }
 }
 
+/// Volume slider: the value comes from the box's status and is sent on release; while dragging, the status stream can't yank it back.
+/// Floor of 20: a saved zero volume would be a persistent mute, and muting is deliberately box-only and not persisted.
+struct VolumeRow: View {
+    @ObservedObject var model: AppModel
+    @State private var level: Double = 65
+    @State private var editing = false
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack {
+                Text("Volume").font(.headline)
+                Spacer()
+                Text("\(Int(level))").monospacedDigit().foregroundStyle(.secondary)
+            }
+            HStack(spacing: 12) {
+                Slider(value: $level, in: 20...100, step: 5) { isEditing in
+                    editing = isEditing
+                    if !isEditing { model.setVolume(Int(level)) }
+                }
+                Button("Play a line on the box") { model.setVolume(Int(level), preview: true) }
+            }
+            .disabled(!connected || model.operationRunning)
+            Text("Saved on the box and kept across restarts. Previews on this Mac aren't affected; to mute, long-press K2 on the box.")
+                .font(.caption).foregroundStyle(.secondary)
+        }
+        .onAppear(perform: sync)
+        .onChange(of: model.status?.device.volume) { sync() }
+    }
+
+    private var connected: Bool { model.status?.device.connected ?? false }
+
+    private func sync() {
+        guard !editing, let volume = model.status?.device.volume else { return }
+        level = Double(volume)
+    }
+}
+
 struct VoicesView: View {
     @ObservedObject var model: AppModel
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
+            VolumeRow(model: model)
+            Divider()
             Text("Character").font(.headline)
             Text("The box is speaking as “\(currentVoiceName)”. Each character has its own voice and lines. Preview one, then click Use to write it to the box — no firmware flash needed. Over the UART port this takes a few minutes; when it's done the box says a line as the new character.")
                 .font(.callout).foregroundStyle(.secondary)
@@ -156,11 +195,12 @@ struct VoiceCard: View {
             }
             .disabled(model.operationRunning)
             if let frame = Resources.voicePack(entry.id)?.look.flatMap(LookBuilder.frames(of:))?.first {
-                Image(nsImage: LookImages.image(frame, scale: 1))
+                Image(nsImage: LookImages.image(frame, scale: 1)).frame(width: CharacterFace.width)
             }
             VStack(alignment: .leading) {
                 Text(entry.name).font(.body.weight(.semibold))
                 Text(entry.tag).font(.caption).foregroundStyle(.secondary)
+                Text(entry.summary).font(.caption).fixedSize(horizontal: false, vertical: true)
             }
             Spacer()
             if inUse {
@@ -377,11 +417,18 @@ struct DeviceView: View {
             Section {
                 LabeledContent("Link", value: connectionText)
                 // Not while a flash waits for a replug: that row says not to hold K0 this time.
+                if let pin = model.status?.device.pin {
+                    PinNotice(pin: pin)
+                }
                 if model.daemonAlive, !connected, !model.operationRunning, model.operation?.state != .replug {
-                    BoxNotFoundHelp()
+                    BoxSearchHelp(model: model)
                 }
                 LabeledContent("Box firmware", value: model.boxFirmware ?? "—")
                 LabeledContent("Latest firmware", value: latestFirmware)
+                if connected, let board = model.status?.device.unsupportedBoard {
+                    Text("This is a \(board) board, which released firmware doesn't run on, so no update is offered.")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
                 if model.firmwareUpdateAvailable, let offer = model.offeredFirmware {
                     Button("Update to \(offer.version)") { confirmUpdate(offer) }
                         .disabled(model.operationRunning || !connected)
@@ -451,7 +498,9 @@ struct DeviceView: View {
 
     private var connectionText: String {
         guard let device = model.status?.device else { return String(localized: "daemon isn't running") }
-        guard device.connected else { return String(localized: "Box not found") }
+        guard device.connected else {
+            return device.candidates?.isEmpty == false ? String(localized: "Several devices found") : String(localized: "Box not found")
+        }
         return "\(device.port ?? "") · \(device.bridge ? String(localized: "UART bridge") : String(localized: "native USB"))"
     }
 
@@ -515,6 +564,57 @@ struct FirmwareUnavailable: View {
             }
         }
         .font(.caption).foregroundStyle(.secondary)
+    }
+}
+
+/// Why no box is connected yet: several devices to choose from, or else the usual causes of none at all.
+struct BoxSearchHelp: View {
+    @ObservedObject var model: AppModel
+
+    var body: some View {
+        if let candidates = model.status?.device.candidates, !candidates.isEmpty {
+            BoxChoice(model: model, candidates: candidates)
+        } else if model.status?.device.pin == nil {
+            BoxNotFoundHelp()
+        }
+    }
+}
+
+/// Every ESP32-S3 on native USB looks the same, so with several plugged in and none of them the box seen before,
+/// the user says which one it is; the daemon remembers that, as it would a box that reported our firmware.
+struct BoxChoice: View {
+    @ObservedObject var model: AppModel
+    let candidates: [BoxCandidate]
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text("Several devices are plugged in, and none of them is the box seen before. Which one is the box?")
+                .font(.caption).foregroundStyle(.secondary)
+            ForEach(candidates) { candidate in
+                HStack {
+                    Text(candidate.usbSerial.map { "\(candidate.port) · \($0)" } ?? candidate.port)
+                        .font(.caption.monospaced())
+                    Spacer()
+                    if let serial = candidate.usbSerial {
+                        Button("This is the box") { model.chooseBox(usbSerial: serial) }
+                            .disabled(model.operationRunning)
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// A pin left set hides every other box behind "Box not found", so it is always shown.
+struct PinNotice: View {
+    let pin: SerialPin
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text("Only looking at \(pin.value), set by \(pin.variable).").foregroundStyle(.orange)
+            Text("To find the box on its own again, run `launchctl unsetenv \(pin.variable)` in Terminal, then restart Vibe Buddy.")
+                .font(.caption).foregroundStyle(.secondary).textSelection(.enabled)
+        }
     }
 }
 
@@ -733,11 +833,23 @@ struct RobotCard: View {
 
     var body: some View {
         HStack(spacing: 12) {
-            if let face = Resources.robotFace {
-                Image(nsImage: face)
+            Button { model.togglePreview(previewID) } label: {
+                Image(systemName: model.previewingVoice == previewID ? "stop.fill" : "play.fill")
             }
-            VStack(alignment: .leading, spacing: 4) {
-                Text(verbatim: "Vibe Buddy").font(.body.weight(.semibold))
+            .disabled(model.operationRunning)
+            if let face = Resources.robotFace {
+                Image(nsImage: face).frame(width: CharacterFace.width)
+            }
+            VStack(alignment: .leading) {
+                HStack(spacing: 6) {
+                    Text(verbatim: "Vibe Buddy").font(.body.weight(.semibold))
+                    Text("Default")
+                        .font(.caption2.weight(.semibold))
+                        .foregroundStyle(Color.accentColor)
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 1)
+                        .background(Capsule().fill(Color.accentColor.opacity(0.15)))
+                }
                 Text("The original robot, drawn by the box itself").font(.caption).foregroundStyle(.secondary)
                 Picker(String(localized: "Voice and lines from"), selection: $lender) {
                     Text("Built-in voice (Jessica)").tag("builtin")
@@ -758,4 +870,12 @@ struct RobotCard: View {
         .overlay(RoundedRectangle(cornerRadius: 8).stroke(model.wearsRobot ? Color.accentColor : .clear, lineWidth: 2))
         .onAppear { lender = model.robotLender }
     }
+
+    /// The pack to preview: the robot's own lines (the built-in voice's), or the lender's.
+    private var previewID: String { lender == "builtin" ? AppModel.robotID : lender }
+}
+
+/// The column every Character card gives its face, so names line up whatever the figure's width.
+enum CharacterFace {
+    static let width: CGFloat = 56
 }

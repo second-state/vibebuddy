@@ -1,0 +1,55 @@
+input_required	Hey {address}, it's waiting on you.
+input_required	Hey {address}, it needs your okay.
+input_required	Hey, whenever you're ready, it needs you.
+input_required	Hey, it needs your answer.
+input_required	Hey, no rush, but it's waiting.
+input_required	Hey, it needs a little decision.
+input_required	Hey, it's paused for you.
+input_required	Hey, can you take a look?
+done	That's done, {address}. Nice.
+done	All wrapped up, {address}.
+done	Nice. That one's done.
+done	Mm, all done.
+done	That's finished. Nice and easy.
+done	Done. Good work.
+done	Another one, done.
+done	There it goes. Finished.
+failed	Mm, that didn't work out.
+failed	It got stuck. It's okay.
+failed	That one failed. Take a breath.
+failed	Hmm, it hit a snag. No worries.
+focus_done	Time for a little break.
+focus_done	Rest your eyes for a bit.
+focus_done	Go stretch. I'll be here.
+focus_done	Maybe make some tea.
+break_done	Break's over. Whenever you're ready.
+break_done	Okay, back to it. Gently.
+break_done	Welcome back. Let's ease in.
+break_done	Ready? Let's keep going.
+first_done	And that's the first one, {address}.
+first_done	First one today. Nice start.
+first_done	First one done. Here we go.
+milestone	You're really in the flow, {address}.
+milestone	Another one. You're on a roll.
+milestone	Look at you, getting it all done.
+late_night_done	That's finished. Sleep soon, {address}.
+late_night_done	Done. It's really late, you know.
+late_night_done	All done. Time to rest, okay?
+late_night_input	Hey, it's late, but it needs you.
+late_night_input	Hey, one more before bed.
+late_night_input	Hey, still up? It's waiting.
+greeting_morning	Morning, {address}. Sleep okay?
+greeting_morning	Good morning. Take it slow.
+greeting_morning	Mm, morning. Ready when you are.
+greeting_afternoon	Hey {address}, good afternoon.
+greeting_afternoon	Afternoon. Nice to see you.
+greeting_afternoon	Good afternoon. Let's keep it cozy.
+greeting_evening	Evening, {address}. My favorite time.
+greeting_evening	Good evening. Long day?
+greeting_evening	Hey, evening. Settle in.
+long_session	It's been a while. Stretch, {address}.
+long_session	Time for a real break, okay?
+long_session	Go get some water. I'll wait.
+welcome_back	There you are, {address}.
+welcome_back	Oh, you're back. Nice.
+welcome_back	Welcome back. I kept watch.

@@ -10,7 +10,7 @@ The buddy is an original character. Codex was the first agent it supported, but 
 
 [![Watch the 2-minute intro](docs/images/intro-poster.jpg)](https://www.youtube.com/watch?v=lLEFGSrcwDA)
 
-**Rather not build one?** A ready-to-use Vibe Buddy, assembled, flashed and tested, is available for pre-order at [vibekeys.dev](https://vibekeys.dev/vibebuddy.html?utm_source=github&utm_medium=readme&utm_campaign=vibe-buddy-launch). Everything it runs is the open-source code in this repository.
+**Rather not build one?** A ready-to-use Vibe Buddy, assembled, flashed and tested, is in stock at [vibekeys.dev](https://vibekeys.dev/vibebuddy.html?utm_source=github&utm_medium=readme&utm_campaign=vibe-buddy-launch). Everything it runs is the open-source code in this repository.
 
 ## On the box
 
@@ -44,7 +44,7 @@ Pomodoro runs entirely on the box: its timer and today's tally keep going withou
 
 ## What you need
 
-- **The box:** a Vibe Buddy (ESP32-S3, 16 MB flash, 8 MB PSRAM), with LCD, speaker and three buttons. One USB-C cable powers it, flashes it and carries events. [Pre-order one](https://vibekeys.dev/vibebuddy.html?utm_source=github&utm_medium=readme&utm_campaign=vibe-buddy-launch) that ships assembled and flashed, or see [`docs/hardware.md`](docs/hardware.md) to build your own.
+- **The box:** a Vibe Buddy (ESP32-S3, 16 MB flash, 8 MB PSRAM), with LCD, speaker and three buttons. One USB-C cable powers it, flashes it and carries events. [Order one](https://vibekeys.dev/vibebuddy.html?utm_source=github&utm_medium=readme&utm_campaign=vibe-buddy-launch) that ships assembled and flashed, or see [`docs/hardware.md`](docs/hardware.md) to build your own.
 - **A Mac** with Apple silicon and macOS 14 or later, or a Linux machine (experimental, see below).
 - **At least one agent:** Codex or Claude Code. GitHub Actions support uses the `gh` CLI you're already signed in to.
 
@@ -230,9 +230,9 @@ Run `vibebuddyd` on its own:
 cargo run -p vibebuddyd
 ```
 
-By default it only listens on `127.0.0.1:7331` and finds the box by its Espressif USB Serial/JTAG ID, `VID:PID 303A:1001`. `VIBEBUDDY_BIND` changes the listen address, `VIBEBUDDY_SERIAL_PORT` names a serial port explicitly, and `VIBEBUDDY_USB_SERIAL` picks one box among several identical ones; without it, the daemon connects to the box that has reported Vibe Buddy firmware to it before. A box running other firmware, such as Muse, is written nothing. HTTP `202 Accepted` means the event entered the bounded send queue; whether the box actually received it is what the daemon logs from the box's reply.
+By default it only listens on `127.0.0.1:7331` and finds the box by its Espressif USB Serial/JTAG ID, `VID:PID 303A:1001`. `VIBEBUDDY_BIND` changes the listen address, `VIBEBUDDY_SERIAL_PORT` names a serial port explicitly, and `VIBEBUDDY_USB_SERIAL` picks one box among several identical ones; without it, the daemon connects to the box that has reported Vibe Buddy firmware to it before, and when none of several devices is that box, the app asks which one is. Either variable shows up in the app's Device tab, so a pin left set can't pass for a missing box. A box running other firmware, such as Muse, is written nothing. HTTP `202 Accepted` means the event entered the bounded send queue; whether the box actually received it is what the daemon logs from the box's reply.
 
-The app normally supervises the daemon. On a development machine without the app you can install it as a LaunchAgent with [`packaging/com.vibebuddy.vibebuddyd.plist`](packaging/com.vibebuddy.vibebuddyd.plist), but don't run both: they'd fight over the serial port. For the app, the daemon also serves `GET /v1/status`, SSE `/v1/status/stream`, `/v1/config`, `/v1/device/{identify,screenshot,voice-pack,firmware}` and `/v1/daemon/restart`.
+The app normally supervises the daemon. On a development machine without the app you can install it as a LaunchAgent with [`packaging/com.vibebuddy.vibebuddyd.plist`](packaging/com.vibebuddy.vibebuddyd.plist), but don't run both: they'd fight over the serial port. For the app, the daemon also serves `GET /v1/status`, SSE `/v1/status/stream`, `/v1/config`, `/v1/device/{identify,volume,choice,screenshot,voice-pack,firmware}` and `/v1/daemon/restart`.
 
 When sending through the box's CH343 UART bridge, the daemon writes in line-rate chunks: the bridge can't take more than about two hundred bytes of continuous data and garbles the content without changing its length. The native USB port doesn't have this problem. See [`LESSONS.md`](LESSONS.md).
 

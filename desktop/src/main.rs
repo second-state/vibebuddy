@@ -20,7 +20,7 @@ mod tray;
 
 use std::time::{Duration, SystemTime};
 
-use iced::widget::{button, checkbox, column, container, image, pick_list, row, scrollable, space, text, toggler};
+use iced::widget::{button, checkbox, column, container, image, pick_list, row, scrollable, slider, space, text, toggler};
 use iced::{Element, Font, Length, Subscription, Task, Theme, window};
 
 use i18n::{UiLanguage, tr};
@@ -93,6 +93,11 @@ enum Message {
     /// Restart now (true) or later (false) to apply the picked language.
     RestartForLanguage(bool),
     ConfigSaved(Result<Config, String>),
+    VolumeDragged(u8),
+    VolumeReleased,
+    PlayLine,
+    /// The user says which of several devices is the box, by its USB serial number.
+    ChooseBox(String),
     Identify,
     UseVoice(&'static str),
     /// A form of address for a language, or none.
@@ -138,6 +143,8 @@ struct App {
     theme_stamp: Option<SystemTime>,
     settings: Option<window::Id>,
     tab: Tab,
+    /// The slider's position while it is being dragged; the box's own value otherwise.
+    volume: Option<u8>,
     /// The last screen grabbed from the box, as PNG, and whether a grab is under way.
     screenshot: Option<(Vec<u8>, image::Handle)>,
     screenshot_busy: bool,
@@ -184,6 +191,7 @@ impl App {
             theme_stamp: theme::stamp(),
             settings: None,
             tab: Tab::General,
+            volume: None,
             screenshot: None,
             screenshot_busy: false,
             voices: Vec::new(),
@@ -390,6 +398,17 @@ impl App {
                     Err(error) => self.notice = Some(Err(error)),
                 }
             }
+            Message::VolumeDragged(level) => self.volume = Some(level),
+            Message::VolumeReleased => {
+                if let Some(level) = self.volume {
+                    return Task::perform(client::set_volume(level, false), Message::Done);
+                }
+            }
+            Message::PlayLine => {
+                let level = self.volume.or_else(|| self.status.as_ref()?.device.volume).unwrap_or(60);
+                return Task::perform(client::set_volume(level, true), Message::Done);
+            }
+            Message::ChooseBox(usb_serial) => return Task::perform(client::choose_box(usb_serial), Message::Done),
             Message::Identify => return Task::perform(client::identify(), Message::Done),
             Message::UseVoice(id) => {
                 let form = assets::language_of(id).and_then(|language| self.characters.address(language)).map(str::to_owned);
@@ -504,6 +523,8 @@ impl App {
                 return Task::perform(export_diagnostics(summary, config), Message::Notice);
             }
             Message::Done(result) => {
+                // The box answers a volume change through the status stream; drop the dragged value then.
+                self.volume = None;
                 if let Err(error) = result {
                     self.notice = Some(Err(error));
                 }
@@ -664,7 +685,13 @@ impl App {
     }
 
     fn sound(&self) -> Element<'_, Message> {
+        let box_volume = self.status.as_ref().and_then(|status| status.device.volume);
+        let level = self.volume.or(box_volume).unwrap_or(60);
         let online = self.status.as_ref().is_some_and(|status| status.device.connected);
+        let mut volume = slider(20..=100, level, Message::VolumeDragged).step(5u8);
+        if online {
+            volume = volume.on_release(Message::VolumeReleased);
+        }
         let operation = self.status.as_ref().and_then(|status| status.operation.as_ref());
         let busy = operation.is_some_and(status::Operation::running);
         let current = self.status.as_ref().and_then(|status| status.device.voice.clone());
@@ -679,7 +706,11 @@ impl App {
             };
             let card = row![]
                 .push(face.clone().map(image))
-                .push(column![text(voice.name.clone()), text(voice.tag.clone()).size(13)])
+                .push(column![
+                    text(voice.name.clone()),
+                    text(voice.tag.clone()).size(13),
+                    text(voice.summary.clone()).size(13),
+                ])
                 .push(space::horizontal())
                 .push(action)
                 .spacing(12)
@@ -715,7 +746,9 @@ impl App {
         let robot_card = row![]
             .push(self.robot_face.clone().map(image))
             .push(column![
-                text("Vibe Buddy"),
+                row![text("Vibe Buddy"), text(tr("Default", &[])).size(13).style(text::primary)]
+                    .spacing(6)
+                    .align_y(iced::Alignment::Center),
                 text(tr("The original robot, drawn by the box itself", &[])).size(13),
                 row![text(tr("Voice and lines from", &[])).size(13), pick_list(robot_lenders, Some(self.robot_lender), Message::PickRobotLender)]
                     .spacing(8)
@@ -771,6 +804,10 @@ impl App {
         // No pack at all is the robot too, with the lines it shipped with.
         let using = assets::voice_name(current.as_deref().filter(|&id| id != BUILTIN).unwrap_or(ROBOT));
         let page = column![
+            row![text(tr("Volume", &[])), volume, text(level.to_string())].spacing(12),
+            button(text(tr("Play a line on the box", &[]))).on_press_maybe(online.then_some(Message::PlayLine)),
+            text(tr("Saved on the box and kept across restarts. To mute, long-press K2 on the box.", &[])).size(13),
+            space().height(8),
             text(tr("Character", &[])).size(18),
             text(tr(
                 "The box is speaking as “%@”. Each character has its own voice and lines. Click Use to write another one to it — no firmware flash needed. Over the UART port this takes a few minutes; when it's done the box says a line as the new character.",
@@ -826,6 +863,7 @@ impl App {
         let device = self.status.as_ref().map(|status| &status.device);
         let link = match device {
             None => tr("daemon isn't running", &[]),
+            Some(device) if !device.connected && !device.candidates.is_empty() => tr("Several devices found", &[]),
             Some(device) if !device.connected => tr("Box not found", &[]),
             Some(device) => {
                 let kind = if device.bridge { tr("UART bridge", &[]) } else { tr("native USB", &[]) };
@@ -943,7 +981,37 @@ impl App {
         });
         // Not while a flash waits for a replug: that row says not to hold K0 this time.
         let replug = operation.is_some_and(|operation| operation.state == status::OperationState::Replug);
-        let not_found = (self.status.is_some() && !online && !busy && !replug).then(|| {
+        // A pin left set hides every other box behind "Box not found", so it is always shown.
+        let pin = device.and_then(|device| device.pin.as_ref()).map(|pin| {
+            column![
+                text(tr("Only looking at %@, set by %@.", &[&pin.value, &pin.variable])).size(13).style(text::warning),
+                text(tr("To find the box on its own again, unset %@ and restart the daemon.", &[&pin.variable])).size(13),
+            ]
+            .spacing(4)
+        });
+        // Every ESP32-S3 on native USB looks the same: with several plugged in and none of them the box seen
+        // before, the user says which one it is.
+        let candidates = device.map(|device| device.candidates.as_slice()).unwrap_or_default();
+        let choice = (!online && !candidates.is_empty()).then(|| {
+            let rows = candidates.iter().map(|candidate| {
+                let label = match &candidate.usb_serial {
+                    Some(serial) => format!("{} · {serial}", candidate.port),
+                    None => candidate.port.clone(),
+                };
+                let pick = candidate.usb_serial.clone().map(|serial| {
+                    button(text(tr("This is the box", &[]))).on_press_maybe((!busy).then_some(Message::ChooseBox(serial)))
+                });
+                row![text(label).size(13).font(Font::MONOSPACE), space::horizontal()].push(pick).spacing(12).into()
+            });
+            column![text(tr(
+                "Several devices are plugged in, and none of them is the box seen before. Which one is the box?",
+                &[]
+            ))
+            .size(13)]
+            .extend(rows)
+            .spacing(6)
+        });
+        let not_found = (self.status.is_some() && !online && !busy && !replug && candidates.is_empty() && pin.is_none()).then(|| {
             column![
                 text(tr("Not showing up? Use a cable that carries data, not just power.", &[])).size(13),
                 text(tr(
@@ -972,9 +1040,14 @@ impl App {
             (None, false) => on_frame(tr("Click Refresh to see what the box is showing", &[])).into(),
         };
         column![row![text(tr("Link", &[])).width(140), text(link)].spacing(12)]
+            .push(pin)
+            .push(choice)
             .push(not_found)
             .push(row![text(tr("Box firmware", &[])).width(140), text(firmware)].spacing(12))
             .push(row![text(tr("Latest firmware", &[])).width(140), text(latest)].spacing(12))
+            .push(device.filter(|_| online).and_then(|device| device.unsupported_board.as_ref()).map(|board| {
+                text(tr("This is a %@ board, which released firmware doesn't run on, so no update is offered.", &[board])).size(13)
+            }))
             .push(update)
             .push(unavailable)
             .push(flashing)

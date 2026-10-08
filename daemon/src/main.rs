@@ -178,6 +178,10 @@ async fn main() {
         .parse::<SocketAddr>()
         .unwrap_or_else(|error| panic!("invalid VIBEBUDDY_BIND: {error}"));
     let serial_config = SerialConfig::from_env(known_box_file());
+    let pin = serial_config.pin();
+    if let Some(pin) = &pin {
+        warn!(variable = pin.variable, value = %pin.value, "the serial search is pinned; other boxes are ignored");
+    }
     let (serial_transport, device_events) = SerialTransport::spawn(serial_config);
     let serial_transport = Arc::new(serial_transport);
     let transport: Arc<dyn Transport> = serial_transport.clone();
@@ -192,6 +196,7 @@ async fn main() {
         config::config_file(),
     );
     state.serial = Some(serial_transport);
+    state.device.lock().await.pin = pin;
     state.updates = Arc::new(Mutex::new(Updates::new(
         updates::Source::configured(),
         config::state_dir().map(|dir| dir.join("updates")),
@@ -370,6 +375,7 @@ fn app(state: AppState) -> Router {
         .route("/v1/config", get(get_config).put(put_config))
         .route("/v1/device/identify", post(post_identify))
         .route("/v1/device/volume", post(post_volume))
+        .route("/v1/device/choice", post(post_choice))
         .route(
             "/v1/device/voice-pack",
             post(post_voice_pack).layer(DefaultBodyLimit::max(4 * 1024 * 1024)),
@@ -568,6 +574,37 @@ async fn post_volume(
         event.extra.insert("preview".to_owned(), true.into());
     }
     post_event(State(state), Json(event)).await
+}
+
+#[derive(serde::Deserialize)]
+struct ChoiceRequest {
+    usb_serial: String,
+}
+
+/// The user picked which of several devices is the box: remember it as the box, and the serial worker connects
+/// to it on its next look around, as it would to a box that had reported our build.
+async fn post_choice(
+    State(state): State<AppState>,
+    Json(request): Json<ChoiceRequest>,
+) -> (StatusCode, Json<ApiResponse>) {
+    let offered = state.device.lock().await.candidates.iter().any(|candidate| {
+        candidate.usb_serial.as_deref().is_some_and(|serial| serial_transport::serials_equal(serial, &request.usb_serial))
+    });
+    if !offered {
+        return (
+            StatusCode::CONFLICT,
+            Json(ApiResponse { accepted: false, message: "that device isn't one of the candidates".to_owned() }),
+        );
+    }
+    let Some(path) = known_box_file() else {
+        return (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(ApiResponse { accepted: false, message: "no state directory to remember the box in".to_owned() }),
+        );
+    };
+    serial_transport::remember_box(&path, &request.usb_serial);
+    info!(usb_serial = %request.usb_serial, "the user chose the box");
+    (StatusCode::ACCEPTED, Json(ApiResponse { accepted: true, message: "remembered".to_owned() }))
 }
 
 /// Write a voice pack: the request body is the pack itself. The write runs in the background with progress in the status stream.
@@ -1131,6 +1168,15 @@ mod tests {
         let (status, _) = post_identify(State(test_state(transport.clone()))).await;
         assert_eq!(status, StatusCode::ACCEPTED);
         assert_eq!(transport.events()[0].event, "device.identify");
+    }
+
+    #[tokio::test]
+    async fn only_an_offered_device_can_be_chosen_as_the_box() {
+        let state = test_state(Arc::new(RecordingTransport::default()));
+        let request = ChoiceRequest { usb_serial: "98:88:E0:06:8B:CC".to_owned() };
+        let (status, Json(response)) = post_choice(State(state), Json(request)).await;
+        assert_eq!(status, StatusCode::CONFLICT, "nothing was offered");
+        assert!(!response.accepted);
     }
 
     #[tokio::test]

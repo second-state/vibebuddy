@@ -161,17 +161,29 @@ public struct VoiceCatalogEntry: Equatable, Identifiable, Sendable {
     public var id: String
     public var name: String
     public var tag: String
+    /// Who the Character is, in one sentence, so the user can pick between them.
+    public var summary: String
     public var language: VoiceLanguage
-    public init(id: String, name: String, tag: String, language: VoiceLanguage) {
-        self.id = id; self.name = name; self.tag = tag; self.language = language
+    public init(id: String, name: String, tag: String, summary: String, language: VoiceLanguage) {
+        self.id = id; self.name = name; self.tag = tag; self.summary = summary; self.language = language
     }
 
-    /// Built once: names and tags are localized for the language the process started in.
+    /// Built once: names, tags and summaries are localized for the language the process started in.
     public static let all: [VoiceCatalogEntry] = [
-        VoiceCatalogEntry(id: "wanwanxiaohe", name: String(localized: "Wanwan Xiaohe"), tag: String(localized: "Chinese · Taiwanese accent"), language: .zh),
-        VoiceCatalogEntry(id: "ahu", name: String(localized: "Ahu"), tag: String(localized: "Chinese · Mandarin"), language: .zh),
-        VoiceCatalogEntry(id: "amanda", name: "Amanda", tag: String(localized: "English"), language: .en),
-        VoiceCatalogEntry(id: "jackson", name: "Jackson", tag: String(localized: "English"), language: .en),
+        VoiceCatalogEntry(id: "wanwanxiaohe", name: String(localized: "Xiaohe"), tag: String(localized: "Chinese · Taiwanese accent"),
+                          summary: String(localized: "A sweet, lively friend from Taiwan who's always rooting for you."), language: .zh),
+        VoiceCatalogEntry(id: "ahu", name: String(localized: "Ahu"), tag: String(localized: "Chinese · Beijing accent"),
+                          summary: String(localized: "A Beijing guy with the gift of the gab. Hearty praise, and nothing fazes him."), language: .zh),
+        VoiceCatalogEntry(id: "amanda", name: "Amanda", tag: String(localized: "English"),
+                          summary: String(localized: "A cheerful friend who celebrates every small win."), language: .en),
+        VoiceCatalogEntry(id: "jackson", name: "Jackson", tag: String(localized: "English"),
+                          summary: String(localized: "The calm coworker at the next desk. Dry humor, rare but honest praise."), language: .en),
+        VoiceCatalogEntry(id: "ada", name: "Ada", tag: String(localized: "English · British accent"),
+                          summary: String(localized: "A witty Londoner. Understated praise, gently bossy about breaks."), language: .en),
+        VoiceCatalogEntry(id: "luna", name: "Luna", tag: String(localized: "English"),
+                          summary: String(localized: "Late-night lofi calm. Never rushes you."), language: .en),
+        VoiceCatalogEntry(id: "mei", name: "Mei", tag: String(localized: "English · Bay Area"),
+                          summary: String(localized: "An upbeat Bay Area engineer who cheers you on, sometimes in Chinese."), language: .en),
     ]
 
     /// The language a box voice speaks, from the voice id the box reports; "builtin" is Jessica (English).
