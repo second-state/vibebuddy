@@ -69,11 +69,23 @@ Four Characters, a woman and a man in each language, share the robot look, each 
 | `amanda` | en | Doubao `en_female_amanda_mars_bigtts` |
 | `jackson` | en | Doubao `en_male_jackson_mars_bigtts` |
 | `wanwanxiaohe` | zh | Doubao Wanwan Xiaohe |
-| `ahu` | zh | Doubao `zh_male_wennuanahu_moon_bigtts` |
+| `ahu` | zh | Doubao `zh_male_beijingxiaoye_emo_v2_mars_bigtts` (Beijing accent) |
 
-They replace the four voices the App used to offer: Jessica and Chris (ElevenLabs) gave way to Amanda and Jackson, since the built-in voice is still ElevenLabs Jessica and two different voices both called Jessica would only confuse; Xiaohe 2.0 was dropped, and Ahu, a steady senior colleague, joined so Chinese has a man's voice too.
+They replace the four voices the App used to offer: Jessica and Chris (ElevenLabs) gave way to Amanda and Jackson, since the built-in voice is still ElevenLabs Jessica and two different voices both called Jessica would only confuse; Xiaohe 2.0 was dropped, and Ahu joined so Chinese has a man's voice too; he later became a Beijinger with a Beijing-accent voice.
 
 With no Character pack on the box, the built-in default Character speaks Jessica's original five fixed lines.
+
+### Characters added later
+
+Vibe Buddy is mainly for programmers in Europe and North America, so three more English-speaking women followed, each with a distinct personality. Their voices come from ElevenLabs Voice Design (described in words, auditioned through the box's 16 kHz ADPCM path, then saved to the account) and are synthesized with `eleven_multilingual_v2`, steadier across 55 lines than `eleven_v3`. ElevenLabs sounds native in English where Doubao's English voices don't; Chinese stays with Doubao.
+
+| Character id | Language | Voice |
+| --- | --- | --- |
+| `ada` | en | ElevenLabs, a witty Londoner with a modern Southern British accent |
+| `luna` | en | ElevenLabs, calm late-night lofi |
+| `mei` | en | ElevenLabs, an upbeat Chinese-American from the Bay Area who says "jiayou" now and then |
+
+Each Character card in the App carries a one-sentence summary of who they are, so users can choose between them.
 
 ### Where the lines come from
 
