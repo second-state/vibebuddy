@@ -1,0 +1,55 @@
+input_required	Hey {address}. Your turn.
+input_required	Hey. It needs you.
+input_required	Hey. Quick decision.
+input_required	Hey. Don't keep it waiting.
+input_required	Hey. Ball's in your court.
+input_required	Hey. Your call, not mine.
+input_required	Hey. Have a look.
+input_required	Hey. It's asking for you.
+done	Done. Simple as that, {address}.
+done	Done. No drama.
+done	That's how it's done.
+done	Finished. Nice and simple.
+done	Good. On to the next.
+done	Excellent. Done.
+done	Done. Told you it was easy.
+done	Right. That's finished.
+failed	Broken. Fine. Try again.
+failed	That didn't work. Next idea.
+failed	Nope. Make it simpler.
+failed	Failed. Shrug it off, go again.
+focus_done	Stop. Take a break.
+focus_done	Enough. Go outside.
+focus_done	Break time. Walk away.
+focus_done	Up. Five minutes. Go.
+break_done	Okay, back to it.
+break_done	Break's done. Let's go.
+break_done	Right. Back at it.
+break_done	Rested? Good. Go.
+first_done	First one, {address}. Good.
+first_done	One done. Easy.
+first_done	First of the day. Nice.
+milestone	You're on fire, {address}.
+milestone	Look at you go.
+milestone	This is a good day.
+late_night_done	Done. Now sleep, {address}.
+late_night_done	It's late. Close the laptop.
+late_night_done	Done. Bed. Seriously.
+late_night_input	Hey. Late, but it needs you.
+late_night_input	Hey. One more, then sleep.
+late_night_input	Hey. Still awake? Your turn.
+greeting_morning	Good morning, {address}.
+greeting_morning	Morning. Let's keep it simple.
+greeting_morning	Morning. Fresh start.
+greeting_afternoon	Afternoon, {address}.
+greeting_afternoon	Afternoon. Keep it moving.
+greeting_afternoon	Afternoon. Still going strong?
+greeting_evening	Evening, {address}.
+greeting_evening	Evening. Don't work too late.
+greeting_evening	Evening. Short one tonight, yes?
+long_session	Hours now, {address}. Stand up.
+long_session	Enough. Go for a walk.
+long_session	Take a real break. Now.
+welcome_back	Ah, there you are, {address}.
+welcome_back	Welcome back. Let's go.
+welcome_back	Back? Good.
