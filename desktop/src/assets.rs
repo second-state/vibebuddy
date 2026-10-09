@@ -123,6 +123,13 @@ fn catalog() -> Vec<Voice> {
             Language::English,
         ),
         voice(
+            "niels",
+            "Niels".to_owned(),
+            tr("English · Danish accent", &[]),
+            "An opinionated Danish developer. Hates complexity, keeps it simple.",
+            Language::English,
+        ),
+        voice(
             "mei",
             "Mei".to_owned(),
             tr("English · Bay Area", &[]),
