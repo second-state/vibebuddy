@@ -1,14 +1,14 @@
-Vibe Buddy assets license
+VibeBuddy assets license
 =========================
 
-The source code of Vibe Buddy is licensed under the GNU General Public
+The source code of VibeBuddy is licensed under the GNU General Public
 License, version 3 or later (see LICENSE). That includes the code that
 draws the buddy, its animations and the app icon.
 
 The non-code assets listed below are licensed under the Creative Commons
 Attribution-ShareAlike 4.0 International license (CC BY-SA 4.0), whose
 full text follows. You may share and adapt them, including commercially,
-as long as you credit "Vibe Buddy" with a link to
+as long as you credit "VibeBuddy" with a link to
 https://github.com/second-state/vibebuddy and release your adaptations under
 the same license.
 
@@ -31,7 +31,7 @@ terms of the service that produced it:
 - characters/*/pack.bin, the Characters' synthesized lines (Volcano Engine
   Doubao TTS)
 
-Neither license grants rights to the name "Vibe Buddy" or to the buddy
+Neither license grants rights to the name "VibeBuddy" or to the buddy
 character as a trademark.
 
 =======================================================================

@@ -1,6 +1,6 @@
-# Vibe Buddy Protocol v1
+# VibeBuddy Protocol v1
 
-Vibe Buddy Protocol is the application protocol between `vibebuddyd` and a Vibe Buddy device. v1 uses UTF-8 NDJSON; the transport is responsible for delivering the byte stream reliably, and the protocol doesn't depend on any particular serial port name.
+VibeBuddy Protocol is the application protocol between `vibebuddyd` and a VibeBuddy device. v1 uses UTF-8 NDJSON; the transport is responsible for delivering the byte stream reliably, and the protocol doesn't depend on any particular serial port name.
 
 ## Framing
 

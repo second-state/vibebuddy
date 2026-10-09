@@ -1,5 +1,5 @@
 // swift-tools-version:5.9
-// Vibe Buddy's Mac app: built with SwiftPM, no Xcode project (this machine only has the command
+// VibeBuddy's Mac app: built with SwiftPM, no Xcode project (this machine only has the command
 // line tools; with Xcode installed, open this Package.swift directly). Bundling: scripts/build-app.sh.
 import PackageDescription
 

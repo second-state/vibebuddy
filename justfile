@@ -78,7 +78,7 @@ release version:
         -p vibebuddy-firmware-core -p vibebuddy-protocol --offline -q
     git add Cargo.toml Cargo.lock firmware-rs/device/Cargo.lock
     git commit -q -m "release: v${v}"
-    git tag -a "v${v}" -m "Vibe Buddy v${v}"
+    git tag -a "v${v}" -m "VibeBuddy v${v}"
     git push -q origin main "v${v}"
     echo "pushed v${v}; CI will notarize and publish the Release: gh run watch"
 
@@ -103,6 +103,6 @@ release-firmware version:
     RUSTUP_TOOLCHAIN=stable cargo update --manifest-path firmware-rs/device/Cargo.toml -p vibebuddy-firmware --offline -q
     git add firmware-rs/device/Cargo.toml firmware-rs/device/Cargo.lock
     git commit -q -m "release: firmware-v${v}"
-    git tag -a "firmware-v${v}" -m "Vibe Buddy firmware v${v}"
+    git tag -a "firmware-v${v}" -m "VibeBuddy firmware v${v}"
     git push -q origin main "firmware-v${v}"
     echo "pushed firmware-v${v}; CI will build and publish it: gh run watch"

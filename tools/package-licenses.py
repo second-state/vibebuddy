@@ -74,7 +74,7 @@ def main():
         if "apple" in app_target
         else ""
     )
-    (licenses / "SOURCE.txt").write_text(f"""Vibe Buddy corresponding source
+    (licenses / "SOURCE.txt").write_text(f"""VibeBuddy corresponding source
 ================================
 
 Source revision: {revision}

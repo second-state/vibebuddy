@@ -1,4 +1,4 @@
-//! `vibebuddy-desktop`: Vibe Buddy's tray icon and settings window outside macOS, the counterpart of the Mac
+//! `vibebuddy-desktop`: VibeBuddy's tray icon and settings window outside macOS, the counterpart of the Mac
 //! app's menu bar icon and settings window. It is only a client of `vibebuddyd`: systemd supervises the
 //! daemon here, so quitting the app leaves the box online.
 
@@ -203,7 +203,7 @@ struct App {
     tray_host: bool,
     #[cfg(target_os = "linux")]
     tray: Option<TrayHandle>,
-    /// Vibe Buddy's Omarchy plugin is in the bar, showing the face; the tray icon would be a second one.
+    /// VibeBuddy's Omarchy plugin is in the bar, showing the face; the tray icon would be a second one.
     #[cfg(target_os = "linux")]
     plugin: bool,
 }
@@ -275,7 +275,7 @@ impl App {
     }
 
     fn title(&self, _window: window::Id) -> String {
-        "Vibe Buddy".to_owned()
+        "VibeBuddy".to_owned()
     }
 
     fn theme(&self, _window: window::Id) -> Theme {
@@ -711,7 +711,7 @@ impl App {
         let summary = match updates {
             Some(updates) if updates.enabled => match (&updates.error, &updates.app, &updates.last_check) {
                 (Some(error), _, _) => tr("Last check failed: %@", &[error]),
-                (None, Some(app), _) => tr("Vibe Buddy %@ is available", &[&app.version]),
+                (None, Some(app), _) => tr("VibeBuddy %@ is available", &[&app.version]),
                 (None, None, Some(checked)) => tr("Up to date · checked %@", &[&short_time(checked)]),
                 (None, None, None) => tr("Not checked yet", &[]),
             },
@@ -722,7 +722,7 @@ impl App {
             text(tr("To upgrade, download the new release and run its install.sh again.", &[])).size(13)
         });
         let unsupported = updates.filter(|updates| updates.unsupported_app).map(|_| {
-            text(tr("This version of Vibe Buddy is no longer supported. Update it to keep getting firmware for the box.", &[]))
+            text(tr("This version of VibeBuddy is no longer supported. Update it to keep getting firmware for the box.", &[]))
                 .style(text::warning)
         });
         column![]
@@ -791,7 +791,7 @@ impl App {
             ),
             None => None,
         };
-        column![text(tr("Restart Vibe Buddy to change the language?", &[]))]
+        column![text(tr("Restart VibeBuddy to change the language?", &[]))]
             .push(voice)
             .push(
                 row![
@@ -866,7 +866,7 @@ impl App {
         let robot_card = row![self.preview_button(ROBOT, busy)]
             .push(self.robot_face.clone().map(image))
             .push(column![
-                row![text("Vibe Buddy"), text(tr("Default", &[])).size(13).style(text::primary)]
+                row![text("VibeBuddy"), text(tr("Default", &[])).size(13).style(text::primary)]
                     .spacing(6)
                     .align_y(iced::Alignment::Center),
                 text(tr("The original robot, drawn by the box itself", &[])).size(13),
@@ -970,7 +970,7 @@ impl App {
                 (DOT_OFF, tr("Not set up", &[]))
             } else if let Some(agents::CodexTrust::ChangedSinceLastEvent(changed)) = &codex {
                 (DOT_BAD, tr(
-                    "The config changed at %@ and no Codex event has arrived since. Codex silently disables hooks that change: type /hooks in Codex and re-trust Vibe Buddy's six hooks.",
+                    "The config changed at %@ and no Codex event has arrived since. Codex silently disables hooks that change: type /hooks in Codex and re-trust VibeBuddy's six hooks.",
                     &[&short_time(changed)],
                 ))
             } else if let Some(time) = last {
@@ -1040,7 +1040,7 @@ impl App {
         let page = column![
             text(tr("Connect agents", &[])).size(18),
             text(tr(
-                "Vibe Buddy only forwards session IDs, event names and working directories — never prompts or replies.",
+                "VibeBuddy only forwards session IDs, event names and working directories — never prompts or replies.",
                 &[]
             ))
             .size(13),
@@ -1095,7 +1095,7 @@ impl App {
                     (None, Some(_)) => tr("Downloading the firmware…", &[]),
                     (None, None) => tr("Looking for firmware…", &[]),
                 },
-                _ => tr("Update checks are off, so Vibe Buddy can't download firmware.", &[]),
+                _ => tr("Update checks are off, so VibeBuddy can't download firmware.", &[]),
             };
             column![
                 text(reason).size(13),
@@ -1129,7 +1129,7 @@ impl App {
         });
         let update: Option<Element<'_, Message>> = match (foreign, outdated && online, self.confirm_firmware) {
             (true, _, true) => Some(confirm(
-                tr("Flash the box with Vibe Buddy?", &[]),
+                tr("Flash the box with VibeBuddy?", &[]),
                 tr(
                     "The box's current firmware and data will be erased and can't be recovered. It restarts on its own when done; over the UART port this takes a few minutes.",
                     &[],
@@ -1138,8 +1138,8 @@ impl App {
             )),
             (true, _, false) => Some(
                 column![
-                    text(tr("The box isn't running Vibe Buddy firmware.", &[])).style(text::warning),
-                    button(text(tr("Flash Vibe Buddy firmware", &[])))
+                    text(tr("The box isn't running VibeBuddy firmware.", &[])).style(text::warning),
+                    button(text(tr("Flash VibeBuddy firmware", &[])))
                         .on_press_maybe((!busy).then_some(Message::AskFirmwareUpdate(true))),
                 ]
                 .spacing(8)
@@ -1219,7 +1219,7 @@ impl App {
                 ))
                 .size(13),
                 text(tr(
-                    "Still nothing? Hold K0 on the box while you plug in the cable. The box starts in download mode with a dark screen, ready to be flashed with Vibe Buddy firmware.",
+                    "Still nothing? Hold K0 on the box while you plug in the cable. The box starts in download mode with a dark screen, ready to be flashed with VibeBuddy firmware.",
                     &[]
                 ))
                 .size(13),
@@ -1483,11 +1483,11 @@ fn set_launch_at_login(enabled: bool) -> Result<(), String> {
     let exe = std::env::current_exe().map_err(|error| error.to_string())?;
     let entry = if enabled {
         format!(
-            "[Desktop Entry]\nType=Application\nName=Vibe Buddy\nComment=Tray icon and settings for the Vibe Buddy box\nExec={}\nIcon=vibebuddy\nTerminal=false\nCategories=Utility;\nStartupWMClass=vibebuddy\n",
+            "[Desktop Entry]\nType=Application\nName=VibeBuddy\nComment=Tray icon and settings for the VibeBuddy box\nExec={}\nIcon=vibebuddy\nTerminal=false\nCategories=Utility;\nStartupWMClass=vibebuddy\n",
             exe.display()
         )
     } else {
-        "[Desktop Entry]\nType=Application\nName=Vibe Buddy\nHidden=true\n".to_owned()
+        "[Desktop Entry]\nType=Application\nName=VibeBuddy\nHidden=true\n".to_owned()
     };
     std::fs::create_dir_all(path.parent().unwrap_or(&path)).map_err(|error| error.to_string())?;
     std::fs::write(&path, entry).map_err(|error| format!("{}: {error}", path.display()))
@@ -1508,7 +1508,7 @@ fn notify_new_firmware(status: &Status) {
     let _ = std::fs::write(&marker, &offer.version);
     let title = tr("Box firmware %@ is available", &[&offer.version]);
     let body = tr("Open Settings → Device to update the box.", &[]);
-    if let Err(error) = launch("notify-send", &["--app-name=Vibe Buddy".as_ref(), title.as_ref(), body.as_ref()]) {
+    if let Err(error) = launch("notify-send", &["--app-name=VibeBuddy".as_ref(), title.as_ref(), body.as_ref()]) {
         eprintln!("vibebuddy-desktop: {error}");
     }
 }

@@ -9,7 +9,7 @@ use tracing::warn;
 const GRACE: Duration = Duration::from_secs(30);
 const CHECK_INTERVAL: Duration = Duration::from_secs(5);
 const TITLE: &str = "Box disconnected";
-const BODY: &str = "Vibe Buddy hasn't seen the box for 30 seconds. Check the USB cable.";
+const BODY: &str = "VibeBuddy hasn't seen the box for 30 seconds. Check the USB cable.";
 
 #[derive(Default)]
 struct LinkAlert {
@@ -47,7 +47,7 @@ pub(crate) async fn watch(state: crate::AppState) {
         let enabled = state.config.lock().await.notify_link;
         if alert.check(connected, enabled, Instant::now()) {
             let result = Command::new("notify-send")
-                .args(["--app-name=Vibe Buddy", TITLE, BODY])
+                .args(["--app-name=VibeBuddy", TITLE, BODY])
                 .status()
                 .await;
             if let Err(error) = result {

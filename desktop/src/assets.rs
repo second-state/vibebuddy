@@ -164,7 +164,7 @@ pub fn voice_name(id: &str) -> String {
         return tr("Your own character", &[]);
     }
     if id == "robot" {
-        return "Vibe Buddy".to_owned();
+        return "VibeBuddy".to_owned();
     }
     catalog().into_iter().find(|voice| voice.id == id).map(|voice| voice.name).unwrap_or_else(|| id.to_owned())
 }

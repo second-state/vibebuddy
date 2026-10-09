@@ -4,7 +4,7 @@ Accepted: 2026-09-14 (Asia/Singapore)
 
 ## Conclusion
 
-Stage 2 **has passed on-device acceptance**. A local HTTP request on the Mac reaches `vibebuddy-fw` via `vibebuddyd`, `SerialTransport`, ESP32-S3 native USB Serial/JTAG and the Vibe Buddy Protocol; after a real USB unplug and replug, the daemon automatically rediscovered and reconnected to the device, and events sent after the reconnect were delivered as well.
+Stage 2 **has passed on-device acceptance**. A local HTTP request on the Mac reaches `vibebuddy-fw` via `vibebuddyd`, `SerialTransport`, ESP32-S3 native USB Serial/JTAG and the VibeBuddy Protocol; after a real USB unplug and replug, the daemon automatically rediscovered and reconnected to the device, and events sent after the reconnect were delivered as well.
 
 ## Implementation boundaries
 

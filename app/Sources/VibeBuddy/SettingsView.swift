@@ -25,7 +25,7 @@ struct GeneralView: View {
         Form {
             // Nothing stops working; the App just says, every time, that it's too old (ADR-0010).
             if model.updates?.unsupportedApp == true {
-                Label("This version of Vibe Buddy is no longer supported. Update it to keep getting firmware for the box.", systemImage: "exclamationmark.triangle.fill")
+                Label("This version of VibeBuddy is no longer supported. Update it to keep getting firmware for the box.", systemImage: "exclamationmark.triangle.fill")
                     .foregroundStyle(.orange)
             }
             // The dialog runs after this update rather than as a nested modal loop inside SwiftUI's binding setter.
@@ -67,7 +67,7 @@ struct GeneralView: View {
     private var updateSummary: String {
         guard let updates = model.updates, updates.enabled else { return String(localized: "Off") }
         if let error = updates.error { return String(localized: "Last check failed: \(error)") }
-        if let app = updates.app { return String(localized: "Vibe Buddy \(app.version) is available") }
+        if let app = updates.app { return String(localized: "VibeBuddy \(app.version) is available") }
         guard let checked = updates.lastCheck else { return String(localized: "Not checked yet") }
         return String(localized: "Up to date · checked \(checked.formatted(.relative(presentation: .named)))")
     }
@@ -80,7 +80,7 @@ struct GeneralView: View {
         let target = choice.resolved
         guard target != Resources.uiLanguage else { return }
         let alert = NSAlert()
-        alert.messageText = String(localized: "Restart Vibe Buddy to change the language?")
+        alert.messageText = String(localized: "Restart VibeBuddy to change the language?")
         alert.informativeText = String(localized: "The box goes offline for a few seconds while the app restarts.")
         var voiceSwitch: (entry: VoiceCatalogEntry, checkbox: NSButton)?
         let device = model.status?.device
@@ -177,7 +177,7 @@ struct VoicesView: View {
 
     private var currentVoiceName: String {
         let id = model.status?.device.voice ?? "builtin"
-        if id == "builtin" || id == AppModel.robotID { return "Vibe Buddy" }
+        if id == "builtin" || id == AppModel.robotID { return "VibeBuddy" }
         if id == CustomCharacterCard.id { return String(localized: "Your own character") }
         return VoiceCatalogEntry.all.first { $0.id == id }?.name ?? id
     }
@@ -255,7 +255,7 @@ struct HooksView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             Text("Connect agents").font(.headline)
-            Text("Vibe Buddy only forwards session IDs, event names and working directories — never prompts or replies.").font(.callout).foregroundStyle(.secondary)
+            Text("VibeBuddy only forwards session IDs, event names and working directories — never prompts or replies.").font(.callout).foregroundStyle(.secondary)
             Text("This writes user-level config, so one install covers both the desktop app's sessions and the same agent running in a terminal.").font(.callout).foregroundStyle(.secondary)
             ForEach(HookAgent.allCases, id: \.rawValue) { agent in
                 HookRow(model: model, agent: agent, pendingPlan: $pendingPlan)
@@ -325,7 +325,7 @@ struct HookRow: View {
         if !present { return String(localized: "\(agent.displayName) wasn't found on this Mac") }
         if !installed { return String(localized: "Not set up") }
         if case .changedSinceLastEvent(let changed)? = codexHint {
-            return String(localized: "The config changed at \(changed.formatted(date: .abbreviated, time: .shortened)) and no Codex event has arrived since. Codex silently disables hooks that change: type /hooks in Codex and re-trust Vibe Buddy's six hooks.")
+            return String(localized: "The config changed at \(changed.formatted(date: .abbreviated, time: .shortened)) and no Codex event has arrived since. Codex silently disables hooks that change: type /hooks in Codex and re-trust VibeBuddy's six hooks.")
         }
         if let lastEvent { return String(localized: "Last event \(lastEvent.formatted(date: .abbreviated, time: .shortened))") }
         return agent == .codex
@@ -369,7 +369,7 @@ struct TerminalAccessRow: View {
         switch state {
         case .allowed: String(localized: "Allowed")
         case .notAsked: String(localized: "Not allowed yet")
-        case .denied: String(localized: "Denied. Turn Vibe Buddy back on for \(terminal.name) under Privacy & Security → Automation.")
+        case .denied: String(localized: "Denied. Turn VibeBuddy back on for \(terminal.name) under Privacy & Security → Automation.")
         case .unknown: String(localized: "Not checked yet: macOS only answers while \(terminal.name) is running")
         }
     }
@@ -435,9 +435,9 @@ struct DeviceView: View {
                     Button("Update to \(offer.version)") { confirmUpdate(offer) }
                         .disabled(model.operationRunning || !connected)
                 } else if model.foreignFirmware {
-                    Text("The box isn't running Vibe Buddy firmware.").foregroundStyle(.orange)
+                    Text("The box isn't running VibeBuddy firmware.").foregroundStyle(.orange)
                     if model.firmwareDownloaded {
-                        Button("Flash Vibe Buddy firmware") { FlashConfirm.foreign(then: model.updateFirmware) }
+                        Button("Flash VibeBuddy firmware") { FlashConfirm.foreign(then: model.updateFirmware) }
                             .disabled(model.operationRunning)
                     } else {
                         FirmwareUnavailable(model: model)
@@ -558,7 +558,7 @@ struct FirmwareUnavailable: View {
                 }
                 Button("Check again") { model.checkForUpdates() }
             } else {
-                Text("Update checks are off, so Vibe Buddy can't download firmware.")
+                Text("Update checks are off, so VibeBuddy can't download firmware.")
             }
             HStack(spacing: 4) {
                 Text("Or download the firmware zip yourself and use Flash from file… on the Device tab:")
@@ -614,7 +614,7 @@ struct PinNotice: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
             Text("Only looking at \(pin.value), set by \(pin.variable).").foregroundStyle(.orange)
-            Text("To find the box on its own again, run `launchctl unsetenv \(pin.variable)` in Terminal, then restart Vibe Buddy.")
+            Text("To find the box on its own again, run `launchctl unsetenv \(pin.variable)` in Terminal, then restart VibeBuddy.")
                 .font(.caption).foregroundStyle(.secondary).textSelection(.enabled)
         }
     }
@@ -627,7 +627,7 @@ struct BoxNotFoundHelp: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
             Text("Not showing up? Use a cable that carries data, not just power, and click Allow if macOS asks whether to let the accessory connect.")
-            Text("Still nothing? Hold K0 on the box while you plug in the cable, then click Allow. The box starts in download mode with a dark screen, ready to be flashed with Vibe Buddy firmware.")
+            Text("Still nothing? Hold K0 on the box while you plug in the cable, then click Allow. The box starts in download mode with a dark screen, ready to be flashed with VibeBuddy firmware.")
         }
         .font(.caption).foregroundStyle(.secondary)
     }
@@ -638,7 +638,7 @@ enum FlashConfirm {
     @MainActor
     static func foreign(then flash: () -> Void) {
         let alert = NSAlert()
-        alert.messageText = String(localized: "Flash the box with Vibe Buddy?")
+        alert.messageText = String(localized: "Flash the box with VibeBuddy?")
         alert.informativeText = String(localized: "The box's current firmware and data will be erased and can't be recovered. It restarts on its own when done; over the UART port this takes a few minutes.")
         alert.alertStyle = .warning
         alert.addButton(withTitle: String(localized: "Flash"))
@@ -838,7 +838,7 @@ struct RobotCard: View {
             }
             VStack(alignment: .leading) {
                 HStack(spacing: 6) {
-                    Text(verbatim: "Vibe Buddy").font(.body.weight(.semibold))
+                    Text(verbatim: "VibeBuddy").font(.body.weight(.semibold))
                     Text("Default")
                         .font(.caption2.weight(.semibold))
                         .foregroundStyle(Color.accentColor)

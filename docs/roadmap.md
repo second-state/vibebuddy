@@ -1,4 +1,4 @@
-# Vibe Buddy roadmap
+# VibeBuddy roadmap
 
 ## Stage gates
 

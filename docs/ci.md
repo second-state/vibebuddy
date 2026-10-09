@@ -8,7 +8,7 @@ CI and agents share the same task cards, the same buddy and the same set of anno
 
 ## Mapping
 
-| GitHub Actions run | Vibe Buddy state |
+| GitHub Actions run | VibeBuddy state |
 | --- | --- |
 | `queued` / `in_progress` | Working, titled `CI:<repo name>` |
 | `completed` + `success` | Done; plays "All done!" once |

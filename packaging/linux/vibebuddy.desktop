@@ -1,7 +1,7 @@
 [Desktop Entry]
 Type=Application
-Name=Vibe Buddy
-Comment=Tray icon and settings for the Vibe Buddy box
+Name=VibeBuddy
+Comment=Tray icon and settings for the VibeBuddy box
 Exec=vibebuddy-desktop
 Icon=vibebuddy
 Terminal=false

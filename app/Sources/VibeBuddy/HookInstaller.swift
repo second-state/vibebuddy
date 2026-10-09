@@ -3,7 +3,7 @@ import VibeBuddyCore
 
 /// Hook setup: copies vibebuddy-hook to Application Support, then merges the hook entries into
 /// the user-level config. Only our own entries are added or removed (VibeBuddyCore.HookConfig). OpenCode,
-/// Copilot and Pi get a whole file of Vibe Buddy's own instead, made by the hook binary.
+/// Copilot and Pi get a whole file of VibeBuddy's own instead, made by the hook binary.
 struct HookInstaller {
     struct Plan {
         let agent: HookAgent
@@ -144,7 +144,7 @@ struct HookInstaller {
         return String(data: data, encoding: .utf8)
     }
 
-    /// Keeps a .bak before writing, and writes via a temp file swap. A file Vibe Buddy owns is simply deleted.
+    /// Keeps a .bak before writing, and writes via a temp file swap. A file VibeBuddy owns is simply deleted.
     static func apply(_ plan: Plan) throws {
         let manager = FileManager.default
         guard let contents = plan.contents else {

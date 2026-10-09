@@ -1,6 +1,6 @@
 # Characters
 
-The buddy is a role: the one presence on the box that watches the agents and speaks up for you. A **Character** is who it is right now: a look, a voice, a persona and a set of lines, always shipped together in one Character pack. The original pixel robot is the default Character, Vibe Buddy. Vocabulary is in [`CONTEXT.md`](../CONTEXT.md); the decisions behind this design are ADR-0007, ADR-0008 and ADR-0009.
+The buddy is a role: the one presence on the box that watches the agents and speaks up for you. A **Character** is who it is right now: a look, a voice, a persona and a set of lines, always shipped together in one Character pack. The original pixel robot is the default Character, VibeBuddy. Vocabulary is in [`CONTEXT.md`](../CONTEXT.md); the decisions behind this design are ADR-0007, ADR-0008 and ADR-0009.
 
 The work comes in two phases:
 
@@ -74,7 +74,7 @@ With no Character pack on the box, the built-in default Character speaks Jessica
 
 ### Characters added later
 
-Vibe Buddy is mainly for programmers in Europe and North America, so three English-speaking women followed, each with a distinct personality, then two men, Hank and Kai, so the line-up isn't all women. Their voices come from ElevenLabs Voice Design (described in words, auditioned through the box's 16 kHz ADPCM path, then saved to the account) and are synthesized with `eleven_multilingual_v2`, steadier across 55 lines than `eleven_v3`. ElevenLabs sounds native in English where Doubao's English voices don't; Chinese stays with Doubao.
+VibeBuddy is mainly for programmers in Europe and North America, so three English-speaking women followed, each with a distinct personality, then two men, Hank and Kai, so the line-up isn't all women. Their voices come from ElevenLabs Voice Design (described in words, auditioned through the box's 16 kHz ADPCM path, then saved to the account) and are synthesized with `eleven_multilingual_v2`, steadier across 55 lines than `eleven_v3`. ElevenLabs sounds native in English where Doubao's English voices don't; Chinese stays with Doubao.
 
 | Character id | Language | Voice |
 | --- | --- | --- |

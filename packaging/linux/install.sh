@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Installs Vibe Buddy for the current Linux user: the binaries in ~/.local/bin, the daemon as a systemd user service,
+# Installs VibeBuddy for the current Linux user: the binaries in ~/.local/bin, the daemon as a systemd user service,
 # the tray app in the launcher and at login, the hooks for whichever agents this machine has (Claude Code, Codex,
 # OpenCode, GitHub Copilot CLI, Pi), and the Character packs the app offers to write to the box. Run it again to upgrade.
 #
@@ -76,7 +76,7 @@ if [[ ! -e "${plugin_marker}" ]] && command -v omarchy >/dev/null && omarchy plu
     if omarchy plugin add https://github.com/second-state/omarchy-vibebuddy-plugin --enable --yes; then
         mkdir -p "$(dirname "${plugin_marker}")" && touch "${plugin_marker}"
     else
-        echo "Could not add Vibe Buddy's Omarchy bar plugin; the app's tray icon stays instead."
+        echo "Could not add VibeBuddy's Omarchy bar plugin; the app's tray icon stays instead."
     fi
 fi
 

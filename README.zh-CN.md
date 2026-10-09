@@ -1,16 +1,16 @@
-# Vibe Buddy
+# VibeBuddy
 
 [English](README.md) | 简体中文
 
-Vibe Buddy 是给 AI 编程 Agent 配的桌面宠物。它住在键盘旁一个小小的 ESP32-S3 盒子里，替你盯着 Codex、Claude Code、OpenCode、GitHub Copilot CLI、Pi 和 GitHub Actions：Agent 需要你、做完了或者失败了，氛围小助手会用动画、任务卡片和一句短语音告诉你。
+VibeBuddy 是给 AI 编程 Agent 配的桌面宠物。它住在键盘旁一个小小的 ESP32-S3 盒子里，替你盯着 Codex、Claude Code、OpenCode、GitHub Copilot CLI、Pi 和 GitHub Actions：Agent 需要你、做完了或者失败了，氛围小助手会用动画、任务卡片和一句短语音告诉你。
 
 氛围小助手是原创角色。Codex 是第一个接入的 Agent，但设备协议不绑定某个客户端，本机任何程序或脚本都能给它发事件。
 
-（项目原名 VibeBuddy，仓库、`vibebuddyd` 守护进程与 Vibe Buddy Protocol 沿用旧名。）
+（项目原名 VibeBuddy，仓库、`vibebuddyd` 守护进程与 VibeBuddy Protocol 沿用旧名。）
 
 [![观看 2 分钟产品介绍](docs/images/intro-poster.zh-CN.jpg)](https://www.youtube.com/watch?v=lLEFGSrcwDA)
 
-**不想自己动手？** 组装好、刷好固件并测试过的 Vibe Buddy 成品已在 [vibekeys.dev](https://vibekeys.dev/vibebuddy.html?utm_source=github&utm_medium=readme&utm_campaign=vibe-buddy-launch) 现货销售，运行的就是本仓库里的开源代码。
+**不想自己动手？** 组装好、刷好固件并测试过的 VibeBuddy 成品已在 [vibekeys.dev](https://vibekeys.dev/vibebuddy.html?utm_source=github&utm_medium=readme&utm_campaign=vibe-buddy-launch) 现货销售，运行的就是本仓库里的开源代码。
 
 ## 盒子上的画面
 
@@ -44,21 +44,21 @@ Vibe Buddy 是给 AI 编程 Agent 配的桌面宠物。它住在键盘旁一个�
 
 ## 需要准备
 
-- **盒子：** 一台 Vibe Buddy（ESP32-S3，16 MB Flash，8 MB PSRAM），带 LCD、扬声器和三个按键。一根 USB-C 线同时供电、烧录和传事件。可以直接[购买成品](https://vibekeys.dev/vibebuddy.html?utm_source=github&utm_medium=readme&utm_campaign=vibe-buddy-launch)，组装和刷机都已完成；想自己做，硬件说明见 [`docs/hardware.md`](docs/hardware.md)。
+- **盒子：** 一台 VibeBuddy（ESP32-S3，16 MB Flash，8 MB PSRAM），带 LCD、扬声器和三个按键。一根 USB-C 线同时供电、烧录和传事件。可以直接[购买成品](https://vibekeys.dev/vibebuddy.html?utm_source=github&utm_medium=readme&utm_campaign=vibe-buddy-launch)，组装和刷机都已完成；想自己做，硬件说明见 [`docs/hardware.md`](docs/hardware.md)。
 - **一台 Mac：** Apple 芯片，macOS 14 或更新；也可以是一台 Linux 机器（实验性，见下文）。
 - **至少一个 Agent：** Codex 或 Claude Code。GitHub Actions 用的是你已经登录好的 `gh` 命令行。
 
 ## 上手
 
-1. 从[最新 Release](https://github.com/second-state/vibebuddy/releases/latest) 下载 `VibeBuddy-<版本>-arm64.dmg`，把 Vibe Buddy 拖进「应用程序」。
+1. 从[最新 Release](https://github.com/second-state/vibebuddy/releases/latest) 下载 `VibeBuddy-<版本>-arm64.dmg`，把 VibeBuddy 拖进「应用程序」。
 2. 把盒子插上 Mac。
-3. 打开 Vibe Buddy，首次启动的引导会带你：
+3. 打开 VibeBuddy，首次启动的引导会带你：
    - 找到盒子（它会眨眼，确认是这一台）；
    - 接入 Codex 与 Claude Code（写 Hook 配置前先展示改动）；
    - 挑一个播报音色写进盒子；
    - 设置登录时启动。
 
-之后 Vibe Buddy 住在菜单栏，随时再打开一次 App 就能调出设置：图标告诉你盒子在不在线、什么模式、今天干了多少。设置窗有五页：通用（含界面语言）、角色（小助手是谁，以及音量）、接入、设备（固件更新、截图）、高级。固件单独发布：有 App 能运行的新固件时，Vibe Buddy 会自动下载，设置 → 设备会提示更新盒子，由你确认。
+之后 VibeBuddy 住在菜单栏，随时再打开一次 App 就能调出设置：图标告诉你盒子在不在线、什么模式、今天干了多少。设置窗有五页：通用（含界面语言）、角色（小助手是谁，以及音量）、接入、设备（固件更新、截图）、高级。固件单独发布：有 App 能运行的新固件时，VibeBuddy 会自动下载，设置 → 设备会提示更新盒子，由你确认。
 
 Release 若还没签名，macOS 会拦下第一次打开，到「系统设置 → 隐私与安全性」里放行即可。
 
@@ -79,9 +79,9 @@ cd vibebuddy/packaging/aur/vibebuddy-bin && makepkg -si
 systemctl --user enable --now vibebuddyd && vibebuddy-hook install
 ```
 
-等 AUR 重新开放注册后，它会以 `vibebuddy-bin` 上架。想从源码编译的话，在装好 Rust 工具链的仓库里运行 `packaging/linux/install.sh`，它会编译所有程序。两种方式都一样：脚本把程序装进 `~/.local/bin`，把 `vibebuddyd` 注册成 systemd 用户服务，把 Vibe Buddy App 放进启动器并设为登录时启动，再给本机有的 Claude Code 和 Codex 加上 Hook（Codex 之后需要你在 `/hooks` 里信任它们）。升级时重新运行即可。daemon 要在 `/dev/ttyACM*` 所属的组里（Arch 是 `uucp`，Debian 和 Ubuntu 是 `dialout`），不在的话脚本会提示。配置放在 `~/.config/vibebuddy`，统计放在 `~/.local/state/vibebuddy`；盒子断开 30 秒后会通过 `notify-send` 弹一条桌面通知。
+等 AUR 重新开放注册后，它会以 `vibebuddy-bin` 上架。想从源码编译的话，在装好 Rust 工具链的仓库里运行 `packaging/linux/install.sh`，它会编译所有程序。两种方式都一样：脚本把程序装进 `~/.local/bin`，把 `vibebuddyd` 注册成 systemd 用户服务，把 VibeBuddy App 放进启动器并设为登录时启动，再给本机有的 Claude Code 和 Codex 加上 Hook（Codex 之后需要你在 `/hooks` 里信任它们）。升级时重新运行即可。daemon 要在 `/dev/ttyACM*` 所属的组里（Arch 是 `uucp`，Debian 和 Ubuntu 是 `dialout`），不在的话脚本会提示。配置放在 `~/.config/vibebuddy`，统计放在 `~/.local/state/vibebuddy`；盒子断开 30 秒后会通过 `notify-send` 弹一条桌面通知。
 
-在 Hyprland 上，K2 会切回会话所在的终端窗口，不管它在哪个工作区；跑在 tmux 里的会话，会先把你的 tmux 客户端切到它所在的 pane。通过 SSH 的会话没有窗口可回。App 是一个托盘图标（氛围小助手的脸，点一下打开设置）加一个设置窗口，标签页和 Mac 版一样。它从 Omarchy 主题取配色和字体，切换主题时会跟着变。它只是个客户端：退出它，daemon 和盒子照常在线。设备页点「刷新」能看到盒子当前的屏幕，「保存图片」会存进你的图片文件夹。角色页列出脚本装好的角色，每个都能试听，选中的会写进盒子；Agents 页显示每个 Agent 的 hook 状态，连接、修复或移除前会先给你看要写的内容；daemon 下载好更新的固件后，设备页会提供更新（每个版本发一次通知），也能从文件刷入固件 zip，和 Mac 上一样。通用页有「登录时启动」开关。首次启动会打开设置窗口，App 运行时再次启动它也会打开；没有单独的首次引导，那些事脚本已经做了。Omarchy 把托盘图标收在状态栏箭头后面的抽屉里，所以 App 第一次运行时会把它的脸固定（Pin）到状态栏上；之后你在那里（右键那个箭头）取消固定或隐藏它，App 不会再改回来。在 Omarchy 4 上，脚本还会装上 Vibe Buddy 的[顶栏插件](https://github.com/second-state/omarchy-vibebuddy-plugin)（用 pacman 包安装的话，自己运行 `omarchy plugin add https://github.com/second-state/omarchy-vibebuddy-plugin --enable`）：顶栏上显示氛围小助手的脸，点开是盒子状态、当日战绩和音量。插件在顶栏上时，App 不再显示自己的托盘图标；停用插件，托盘图标会回来。和 Mac 版一样，可以在「通用 → 语言」里改用和系统不同的语言。想让设置窗口在 Omarchy 上浮动显示，在 `~/.config/hypr/hyprland.lua` 里加一行 `o.window("^vibebuddy$", { float = true, center = true, tag = "-default-opacity", opacity = "1.0 1.0" })`：浮动、居中、不透明，大小按 App 自己要的来。用 Omarchy 自带的 `floating-window` 标签的话，窗口会被固定成 875 × 600；和所有 Hyprland 窗口一样，按住 Super 拖动就能移动它。卸载时先运行 `vibebuddy-hook uninstall`，再运行 `systemctl --user disable --now vibebuddyd`，然后删掉脚本装的文件。
+在 Hyprland 上，K2 会切回会话所在的终端窗口，不管它在哪个工作区；跑在 tmux 里的会话，会先把你的 tmux 客户端切到它所在的 pane。通过 SSH 的会话没有窗口可回。App 是一个托盘图标（氛围小助手的脸，点一下打开设置）加一个设置窗口，标签页和 Mac 版一样。它从 Omarchy 主题取配色和字体，切换主题时会跟着变。它只是个客户端：退出它，daemon 和盒子照常在线。设备页点「刷新」能看到盒子当前的屏幕，「保存图片」会存进你的图片文件夹。角色页列出脚本装好的角色，每个都能试听，选中的会写进盒子；Agents 页显示每个 Agent 的 hook 状态，连接、修复或移除前会先给你看要写的内容；daemon 下载好更新的固件后，设备页会提供更新（每个版本发一次通知），也能从文件刷入固件 zip，和 Mac 上一样。通用页有「登录时启动」开关。首次启动会打开设置窗口，App 运行时再次启动它也会打开；没有单独的首次引导，那些事脚本已经做了。Omarchy 把托盘图标收在状态栏箭头后面的抽屉里，所以 App 第一次运行时会把它的脸固定（Pin）到状态栏上；之后你在那里（右键那个箭头）取消固定或隐藏它，App 不会再改回来。在 Omarchy 4 上，脚本还会装上 VibeBuddy 的[顶栏插件](https://github.com/second-state/omarchy-vibebuddy-plugin)（用 pacman 包安装的话，自己运行 `omarchy plugin add https://github.com/second-state/omarchy-vibebuddy-plugin --enable`）：顶栏上显示氛围小助手的脸，点开是盒子状态、当日战绩和音量。插件在顶栏上时，App 不再显示自己的托盘图标；停用插件，托盘图标会回来。和 Mac 版一样，可以在「通用 → 语言」里改用和系统不同的语言。想让设置窗口在 Omarchy 上浮动显示，在 `~/.config/hypr/hyprland.lua` 里加一行 `o.window("^vibebuddy$", { float = true, center = true, tag = "-default-opacity", opacity = "1.0 1.0" })`：浮动、居中、不透明，大小按 App 自己要的来。用 Omarchy 自带的 `floating-window` 标签的话，窗口会被固定成 875 × 600；和所有 Hyprland 窗口一样，按住 Super 拖动就能移动它。卸载时先运行 `vibebuddy-hook uninstall`，再运行 `systemctl --user disable --now vibebuddyd`，然后删掉脚本装的文件。
 
 ## 工作原理
 
@@ -104,8 +104,8 @@ Local programs / agents / Codex / scripts
 
 - `vibebuddyd`：本机守护进程，负责事件接入、设备连接、重连、路由和状态。
 - `beacon`：只调用 `vibebuddyd` 的命令行客户端，不直接占用串口（计划中）。
-- `vibebuddy-fw`：ESP32-S3 固件，仅负责设备 I/O 和 Vibe Buddy Protocol 消息处理。
-- Vibe Buddy Protocol：与 transport 解耦的可扩展 NDJSON 协议。
+- `vibebuddy-fw`：ESP32-S3 固件，仅负责设备 I/O 和 VibeBuddy Protocol 消息处理。
+- VibeBuddy Protocol：与 transport 解耦的可扩展 NDJSON 协议。
 
 ### Agent 接入
 
@@ -115,11 +115,11 @@ Hook 是一个 Rust 二进制 [`hook/`](hook/)（`vibebuddy-hook codex` / `vibeb
 
 - Codex：`~/.codex/hooks.json` 的六个事件，写入后要在 Codex 的 `/hooks` 页面审查、信任一次；详见 [`docs/codex-adapter.md`](docs/codex-adapter.md)。
 - Claude Code：`~/.claude/settings.json` 的八个事件；详见 [`docs/claude-adapter.md`](docs/claude-adapter.md)。
-- OpenCode：Vibe Buddy 自己的插件 `~/.config/opencode/plugins/vibebuddy.js`，把每个事件交给 hook。
-- GitHub Copilot CLI：Vibe Buddy 自己的 hooks 文件 `~/.copilot/hooks/vibebuddy.json`。Copilot 在一轮结束时不给出回复内容，所以结尾留了问题的一轮也会播报为完成。
-- Pi（1.1.0 及以上）：Vibe Buddy 自己的扩展 `~/.pi/agent/extensions/vibebuddy.js`，把每个事件交给 hook。运行中扩展弹出的对话框算作在等你。
+- OpenCode：VibeBuddy 自己的插件 `~/.config/opencode/plugins/vibebuddy.js`，把每个事件交给 hook。
+- GitHub Copilot CLI：VibeBuddy 自己的 hooks 文件 `~/.copilot/hooks/vibebuddy.json`。Copilot 在一轮结束时不给出回复内容，所以结尾留了问题的一轮也会播报为完成。
+- Pi（1.1.0 及以上）：VibeBuddy 自己的扩展 `~/.pi/agent/extensions/vibebuddy.js`，把每个事件交给 hook。运行中扩展弹出的对话框算作在等你。
 
-OpenCode、Copilot 和 Pi 的这几个文件只属于 Vibe Buddy：接入时整份写入，移除时直接删除，不动你自己的配置。
+OpenCode、Copilot 和 Pi 的这几个文件只属于 VibeBuddy：接入时整份写入，移除时直接删除，不动你自己的配置。
 
 **隐私：** Hook 只转发会话与回合标识、事件名和工作目录，不转发 prompt、助手回复、transcript 或工具结果。判断助手是否在等待回答的规则两个 Agent 共用。
 
@@ -141,7 +141,7 @@ curl -H 'content-type: application/json' \
 
 ### 更新
 
-App 和盒子固件分开发布，Vibe Buddy 会检查两者有没有新版本（[ADR-0010](docs/adr/0010-firmware-and-app-release-separately-behind-an-update-manifest.md)）。这是它唯一会联网的地方：
+App 和盒子固件分开发布，VibeBuddy 会检查两者有没有新版本（[ADR-0010](docs/adr/0010-firmware-and-app-release-separately-behind-an-update-manifest.md)）。这是它唯一会联网的地方：
 
 - **什么时候**：启动时、每天一次，以及你在设置 → 通用里点「立即检查」时。
 - **发送什么**：你的平台（`macos-arm64` 或 `linux-x86_64`）、App 版本和盒子的固件版本。别的都不发：没有任何标识，没有 Hook 数据，不涉及你的 Agent 和项目。在 Mac 上，Sparkle 还会拉取 App 的更新源，带上常规的 User-Agent（App 名称和版本），它的系统信息收集保持关闭。
@@ -160,7 +160,7 @@ app/       # macOS 菜单栏 App（SwiftPM）
 desktop/   # Linux 托盘 App 和设置窗口（iced）
 daemon/    # vibebuddyd
 hook/      # vibebuddy-hook，Codex 与 Claude Code 的 Hook
-protocol/  # Vibe Buddy Protocol 类型与编解码
+protocol/  # VibeBuddy Protocol 类型与编解码
 firmware-rs/  # Rust 版 vibebuddy-fw：core（不碰硬件）与 device（硬件胶水）
 firmware/  # 之前的 C 固件（ESP-IDF），保留作退路
 voices/    # 播报音色，一个音色一个目录
@@ -235,7 +235,7 @@ App 用 SwiftPM 构建，只需要命令行工具；`swift run --package-path ap
 cargo run -p vibebuddyd
 ```
 
-默认只监听 `127.0.0.1:7331`，并按 Espressif USB Serial/JTAG 的 `VID:PID 303A:1001` 自动发现设备。可用 `VIBEBUDDY_BIND` 修改监听地址、`VIBEBUDDY_SERIAL_PORT` 显式指定串口，或用 `VIBEBUDDY_USB_SERIAL` 在多块相同设备中选择目标；不指定时，daemon 连之前报出过 Vibe Buddy 固件的那块；插着好几块、又都不是那块时，App 会问哪一块是盒子。这两个变量设了都会显示在 App 的设备页上，免得忘了撤的固定被当成找不到盒子。运行其他固件（比如 Muse）的盒子，daemon 不会往里写任何东西。HTTP `202 Accepted` 表示事件进入有界发送队列；设备实际接收结果以 daemon 记录的设备响应为准。
+默认只监听 `127.0.0.1:7331`，并按 Espressif USB Serial/JTAG 的 `VID:PID 303A:1001` 自动发现设备。可用 `VIBEBUDDY_BIND` 修改监听地址、`VIBEBUDDY_SERIAL_PORT` 显式指定串口，或用 `VIBEBUDDY_USB_SERIAL` 在多块相同设备中选择目标；不指定时，daemon 连之前报出过 VibeBuddy 固件的那块；插着好几块、又都不是那块时，App 会问哪一块是盒子。这两个变量设了都会显示在 App 的设备页上，免得忘了撤的固定被当成找不到盒子。运行其他固件（比如 Muse）的盒子，daemon 不会往里写任何东西。HTTP `202 Accepted` 表示事件进入有界发送队列；设备实际接收结果以 daemon 记录的设备响应为准。
 
 daemon 平时由 App 看管。没有 App 的开发机可以用 [`packaging/com.vibebuddy.vibebuddyd.plist`](packaging/com.vibebuddy.vibebuddyd.plist) 装成 LaunchAgent，但两者不能同时跑，会抢串口。daemon 还为 App 提供 `GET /v1/status`、SSE `/v1/status/stream`、`/v1/config`、`/v1/device/{identify,volume,choice,screenshot,voice-pack,firmware}` 与 `/v1/daemon/restart`。
 
@@ -263,4 +263,4 @@ daemon 平时由 App 看管。没有 App 的开发机可以用 [`packaging/com.v
 
 我们拥有权利的播报音频，以及日后加入的美术素材，以 [CC BY-SA 4.0](LICENSE-ASSETS) 授权。`voices/` 里的两个中文音色出自火山引擎的语音服务，不在此列；具体范围以 [`LICENSE-ASSETS`](LICENSE-ASSETS) 为准。
 
-两份许可证都不授予「Vibe Buddy」名称或氛围小助手角色的商标权利。
+两份许可证都不授予「VibeBuddy」名称或氛围小助手角色的商标权利。

@@ -10,7 +10,7 @@ Photos of the hardware taken on 2026-09-14 show the PCB silkscreen `V1.1`, an AT
 
 The vendor schematic/BSP for this older BOX V1.1 still has not been obtained from the current official site or GitHub organization. This gap does not block Stage 1, which uses only the chip's native USB Serial/JTAG and touches no peripheral GPIOs; it still blocks the LCD, audio, buzzer and button implementation. Until vendor evidence is in hand, the GPIOs for these peripherals stay unfrozen.
 
-The minimal USB prerequisites for Stage 1 are met: a single USB-C cable can supply power, read runtime logs and get `esptool` into the ESP32-S3 ROM download link. "Download link confirmed" here does not mean "Vibe Buddy firmware flashed"; this stage neither erased nor wrote Flash.
+The minimal USB prerequisites for Stage 1 are met: a single USB-C cable can supply power, read runtime logs and get `esptool` into the ESP32-S3 ROM download link. "Download link confirmed" here does not mean "VibeBuddy firmware flashed"; this stage neither erased nor wrote Flash.
 
 ## Host identity
 
@@ -111,7 +111,7 @@ Opening `/dev/cu.usbmodem8401` at 115200 baud caused a `USB_UART_CHIP_RESET` on 
 - AP 64 Mbit (8 MB) Octal PSRAM, 80 MHz.
 - Current application project `xiaozhi`, version 1.9.4, ESP-IDF v5.5.
 - Current firmware board identifier `atk-dnesp32s3-box`.
-- The current firmware successfully initialized LCD/LVGL, the ES8311 codec and Wi-Fi; these logs only prove the existing firmware can drive the device, not that Vibe Buddy can reuse all of its board parameters.
+- The current firmware successfully initialized LCD/LVGL, the ES8311 codec and Wi-Fi; these logs only prove the existing firmware can drive the device, not that VibeBuddy can reuse all of its board parameters.
 
 A read-only `esptool flash_id` probe followed:
 
@@ -120,7 +120,7 @@ A read-only `esptool flash_id` probe followed:
 - Flash manufacturer/device `68:4018`, detected capacity 16 MB, 3.3 V.
 - RAM stub upload, switch to 460800 baud and hard reset all succeeded.
 
-This probe proves the ROM download path works, but no erase, write or Vibe Buddy firmware flash was performed. Re-enumeration after an actual write and runtime communication remain part of Stage 1 on-device acceptance.
+This probe proves the ROM download path works, but no erase, write or VibeBuddy firmware flash was performed. Re-enumeration after an actual write and runtime communication remain part of Stage 1 on-device acceptance.
 
 ## Corroboration from the current firmware source
 
@@ -135,7 +135,7 @@ The `xiaozhi` 1.9.4 and board identifier in the boot log map to a pinned source 
 - [x] Snapshot after connecting and the USB diff before and after plugging in.
 - [x] VID/PID and device name.
 - [x] Evidence of native USB versus a USB-UART bridge.
-- [x] ROM download path and the current firmware's runtime serial path; must be re-verified after actually flashing Vibe Buddy.
+- [x] ROM download path and the current firmware's runtime serial path; must be re-verified after actually flashing VibeBuddy.
 - [x] Full PCB model/revision: ATK-DNESP32S3-BOX V1.1.
 - [x] Collected the two candidate sets of official material, DNESP32S3 development board and BOX3, and made clear they must not be mixed.
 - [x] Determined the device revision; the vendor schematic, BSP and examples are still missing and continue to block the peripheral stages.

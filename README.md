@@ -1,16 +1,16 @@
-# Vibe Buddy
+# VibeBuddy
 
 English | [简体中文](README.zh-CN.md)
 
-Vibe Buddy is a desk pet for your AI coding agents. It lives in a small ESP32-S3 box next to your keyboard and keeps an eye on Codex, Claude Code, OpenCode, GitHub Copilot CLI, Pi and your GitHub Actions runs, so you don't have to. When an agent needs you, finishes, or fails, the buddy tells you with an animation, a task card and a short spoken line.
+VibeBuddy is a desk pet for your AI coding agents. It lives in a small ESP32-S3 box next to your keyboard and keeps an eye on Codex, Claude Code, OpenCode, GitHub Copilot CLI, Pi and your GitHub Actions runs, so you don't have to. When an agent needs you, finishes, or fails, the buddy tells you with an animation, a task card and a short spoken line.
 
 The buddy is an original character. Codex was the first agent it supported, but the device protocol isn't tied to any one client: any local program or script can send it events.
 
-(The project used to be called VibeBuddy; the repository, the `vibebuddyd` daemon and the Vibe Buddy Protocol keep that name.)
+(The project used to be called VibeBuddy; the repository, the `vibebuddyd` daemon and the VibeBuddy Protocol keep that name.)
 
 [![Watch the 2-minute intro](docs/images/intro-poster.jpg)](https://www.youtube.com/watch?v=lLEFGSrcwDA)
 
-**Rather not build one?** A ready-to-use Vibe Buddy, assembled, flashed and tested, is in stock at [vibekeys.dev](https://vibekeys.dev/vibebuddy.html?utm_source=github&utm_medium=readme&utm_campaign=vibe-buddy-launch). Everything it runs is the open-source code in this repository.
+**Rather not build one?** A ready-to-use VibeBuddy, assembled, flashed and tested, is in stock at [vibekeys.dev](https://vibekeys.dev/vibebuddy.html?utm_source=github&utm_medium=readme&utm_campaign=vibe-buddy-launch). Everything it runs is the open-source code in this repository.
 
 ## On the box
 
@@ -44,21 +44,21 @@ Pomodoro runs entirely on the box: its timer and today's tally keep going withou
 
 ## What you need
 
-- **The box:** a Vibe Buddy (ESP32-S3, 16 MB flash, 8 MB PSRAM), with LCD, speaker and three buttons. One USB-C cable powers it, flashes it and carries events. [Order one](https://vibekeys.dev/vibebuddy.html?utm_source=github&utm_medium=readme&utm_campaign=vibe-buddy-launch) that ships assembled and flashed, or see [`docs/hardware.md`](docs/hardware.md) to build your own.
+- **The box:** a VibeBuddy (ESP32-S3, 16 MB flash, 8 MB PSRAM), with LCD, speaker and three buttons. One USB-C cable powers it, flashes it and carries events. [Order one](https://vibekeys.dev/vibebuddy.html?utm_source=github&utm_medium=readme&utm_campaign=vibe-buddy-launch) that ships assembled and flashed, or see [`docs/hardware.md`](docs/hardware.md) to build your own.
 - **A Mac** with Apple silicon and macOS 14 or later, or a Linux machine (experimental, see below).
 - **At least one agent:** Codex or Claude Code. GitHub Actions support uses the `gh` CLI you're already signed in to.
 
 ## Getting started
 
-1. Download `VibeBuddy-<version>-arm64.dmg` from the [latest release](https://github.com/second-state/vibebuddy/releases/latest) and drag Vibe Buddy to Applications.
+1. Download `VibeBuddy-<version>-arm64.dmg` from the [latest release](https://github.com/second-state/vibebuddy/releases/latest) and drag VibeBuddy to Applications.
 2. Plug the box into the Mac.
-3. Open Vibe Buddy. First-run setup walks you through:
+3. Open VibeBuddy. First-run setup walks you through:
    - finding the box (it blinks so you know it's the right one);
    - connecting Codex and Claude Code (you see the exact change to their hook config before it's written);
    - picking an announcement voice and writing it to the box;
    - launching at login.
 
-After that Vibe Buddy lives in the menu bar; open the app again any time to bring up Settings. Its icon tells you whether the box is online, which mode it's in and how much got done today. Settings has five tabs: General (including the interface language), Character (who the buddy is, and the volume), Agents, Device (firmware updates, screenshots) and Advanced. Firmware is released on its own: when a newer one the app can run is out, Vibe Buddy downloads it and Settings → Device offers to update the box, which you confirm.
+After that VibeBuddy lives in the menu bar; open the app again any time to bring up Settings. Its icon tells you whether the box is online, which mode it's in and how much got done today. Settings has five tabs: General (including the interface language), Character (who the buddy is, and the volume), Agents, Device (firmware updates, screenshots) and Advanced. Firmware is released on its own: when a newer one the app can run is out, VibeBuddy downloads it and Settings → Device offers to update the box, which you confirm.
 
 If a release isn't signed yet, macOS blocks the first launch; allow it under System Settings → Privacy & Security.
 
@@ -79,9 +79,9 @@ cd vibebuddy/packaging/aur/vibebuddy-bin && makepkg -si
 systemctl --user enable --now vibebuddyd && vibebuddy-hook install
 ```
 
-It will be on the AUR as `vibebuddy-bin` once AUR registration reopens. To build from source instead, run `packaging/linux/install.sh` in a checkout with a Rust toolchain; it builds everything. Either way, the script installs the binaries into `~/.local/bin`, runs `vibebuddyd` as a systemd user service, puts the Vibe Buddy app in the launcher and at login, and adds the hooks to Claude Code and Codex, whichever this machine has (Codex then wants you to trust them in `/hooks`). Run it again to upgrade. The daemon needs to be in the group that owns `/dev/ttyACM*` (`uucp` on Arch, `dialout` on Debian and Ubuntu); the script tells you if it isn't. Config lives in `~/.config/vibebuddy`, stats in `~/.local/state/vibebuddy`, and when the box is gone for 30 seconds you get a desktop notification through `notify-send`.
+It will be on the AUR as `vibebuddy-bin` once AUR registration reopens. To build from source instead, run `packaging/linux/install.sh` in a checkout with a Rust toolchain; it builds everything. Either way, the script installs the binaries into `~/.local/bin`, runs `vibebuddyd` as a systemd user service, puts the VibeBuddy app in the launcher and at login, and adds the hooks to Claude Code and Codex, whichever this machine has (Codex then wants you to trust them in `/hooks`). Run it again to upgrade. The daemon needs to be in the group that owns `/dev/ttyACM*` (`uucp` on Arch, `dialout` on Debian and Ubuntu); the script tells you if it isn't. Config lives in `~/.config/vibebuddy`, stats in `~/.local/state/vibebuddy`, and when the box is gone for 30 seconds you get a desktop notification through `notify-send`.
 
-On Hyprland, K2 brings back the terminal window the session runs in, on whatever workspace it is; inside tmux it first switches your tmux client to the session's pane. A session over SSH has no window to go back to. The app is a tray icon (the buddy's face; click it for settings) plus a settings window with the same tabs as on the Mac. It takes its colors and font from the Omarchy theme and follows theme switches. It is only a client: quitting it leaves the daemon, and the box, running. Device → Refresh shows what the box's screen shows, and Save image puts it in your Pictures folder. Character lists the Characters the script installed, plays a preview of each, and writes the one you pick to the box; Agents shows each agent's hook and connects, repairs or removes it after showing what it will write; Device offers newer firmware once the daemon has downloaded it (with a notification, once per version) and flashes a firmware zip from a file, as on the Mac. General has Launch at login. The first launch opens the settings window, and so does launching the app again while it runs; there is no separate onboarding, since the script does that work. Omarchy keeps tray icons in a drawer behind the bar's chevron, so the app pins its face to the bar the first time it runs; unpin or hide it there (right-click the chevron) and it stays that way. On Omarchy 4 the script also adds Vibe Buddy's [bar plugin](https://github.com/second-state/omarchy-vibebuddy-plugin) (with the pacman package, run `omarchy plugin add https://github.com/second-state/omarchy-vibebuddy-plugin --enable` yourself): the face in the bar, with a panel for the box's status, today's stats and the volume. While the plugin is in the bar the app leaves out its tray icon, and brings it back if you disable the plugin. General → Language overrides the system language, as on the Mac. To make the settings window float on Omarchy, add `o.window("^vibebuddy$", { float = true, center = true, tag = "-default-opacity", opacity = "1.0 1.0" })` to `~/.config/hypr/hyprland.lua`: floating, centred and opaque, at the size the app asks for. Omarchy's own `floating-window` tag would pin it to 875 × 600 instead; like every Hyprland window it moves with Super + drag. To remove everything, run `vibebuddy-hook uninstall`, then `systemctl --user disable --now vibebuddyd`, then delete the files the script installed.
+On Hyprland, K2 brings back the terminal window the session runs in, on whatever workspace it is; inside tmux it first switches your tmux client to the session's pane. A session over SSH has no window to go back to. The app is a tray icon (the buddy's face; click it for settings) plus a settings window with the same tabs as on the Mac. It takes its colors and font from the Omarchy theme and follows theme switches. It is only a client: quitting it leaves the daemon, and the box, running. Device → Refresh shows what the box's screen shows, and Save image puts it in your Pictures folder. Character lists the Characters the script installed, plays a preview of each, and writes the one you pick to the box; Agents shows each agent's hook and connects, repairs or removes it after showing what it will write; Device offers newer firmware once the daemon has downloaded it (with a notification, once per version) and flashes a firmware zip from a file, as on the Mac. General has Launch at login. The first launch opens the settings window, and so does launching the app again while it runs; there is no separate onboarding, since the script does that work. Omarchy keeps tray icons in a drawer behind the bar's chevron, so the app pins its face to the bar the first time it runs; unpin or hide it there (right-click the chevron) and it stays that way. On Omarchy 4 the script also adds VibeBuddy's [bar plugin](https://github.com/second-state/omarchy-vibebuddy-plugin) (with the pacman package, run `omarchy plugin add https://github.com/second-state/omarchy-vibebuddy-plugin --enable` yourself): the face in the bar, with a panel for the box's status, today's stats and the volume. While the plugin is in the bar the app leaves out its tray icon, and brings it back if you disable the plugin. General → Language overrides the system language, as on the Mac. To make the settings window float on Omarchy, add `o.window("^vibebuddy$", { float = true, center = true, tag = "-default-opacity", opacity = "1.0 1.0" })` to `~/.config/hypr/hyprland.lua`: floating, centred and opaque, at the size the app asks for. Omarchy's own `floating-window` tag would pin it to 875 × 600 instead; like every Hyprland window it moves with Super + drag. To remove everything, run `vibebuddy-hook uninstall`, then `systemctl --user disable --now vibebuddyd`, then delete the files the script installed.
 
 ## How it works
 
@@ -104,8 +104,8 @@ Local programs / agents / Codex / scripts
 
 - `vibebuddyd`: the local daemon. It takes in events, connects to the box, reconnects, routes and keeps state.
 - `beacon`: a command-line client that only talks to `vibebuddyd` and never opens the serial port itself (planned).
-- `vibebuddy-fw`: the ESP32-S3 firmware. It only handles device I/O and Vibe Buddy Protocol messages.
-- Vibe Buddy Protocol: an extensible NDJSON protocol, independent of the transport.
+- `vibebuddy-fw`: the ESP32-S3 firmware. It only handles device I/O and VibeBuddy Protocol messages.
+- VibeBuddy Protocol: an extensible NDJSON protocol, independent of the transport.
 
 ### Agents
 
@@ -115,11 +115,11 @@ The hook is a Rust binary in [`hook/`](hook/) (`vibebuddy-hook codex` / `vibebud
 
 - Codex: six events in `~/.codex/hooks.json`. After they're written, review and trust them once on Codex's `/hooks` page. See [`docs/codex-adapter.md`](docs/codex-adapter.md).
 - Claude Code: eight events in `~/.claude/settings.json`. See [`docs/claude-adapter.md`](docs/claude-adapter.md).
-- OpenCode: a plugin of Vibe Buddy's own at `~/.config/opencode/plugins/vibebuddy.js`, which hands each event to the hook.
-- GitHub Copilot CLI: a hooks file of Vibe Buddy's own at `~/.copilot/hooks/vibebuddy.json`. Copilot passes no reply at the end of a turn, so a question left at the end is announced as done.
-- Pi (1.1.0 or later): an extension of Vibe Buddy's own at `~/.pi/agent/extensions/vibebuddy.js`, which hands each event to the hook. A dialog an extension opens mid-run counts as waiting on you.
+- OpenCode: a plugin of VibeBuddy's own at `~/.config/opencode/plugins/vibebuddy.js`, which hands each event to the hook.
+- GitHub Copilot CLI: a hooks file of VibeBuddy's own at `~/.copilot/hooks/vibebuddy.json`. Copilot passes no reply at the end of a turn, so a question left at the end is announced as done.
+- Pi (1.1.0 or later): an extension of VibeBuddy's own at `~/.pi/agent/extensions/vibebuddy.js`, which hands each event to the hook. A dialog an extension opens mid-run counts as waiting on you.
 
-OpenCode's, Copilot's and Pi's files belong to Vibe Buddy alone: connecting writes the whole file and removing deletes it, without touching your own config.
+OpenCode's, Copilot's and Pi's files belong to VibeBuddy alone: connecting writes the whole file and removing deletes it, without touching your own config.
 
 **Privacy:** the hook only forwards session and turn IDs, event names and the working directory. It never forwards prompts, assistant replies, transcripts or tool results. Both agents share the same rule for deciding whether the assistant is waiting for your answer.
 
@@ -141,7 +141,7 @@ See [`docs/protocol.md`](docs/protocol.md) for the events.
 
 ### Updates
 
-The App and the box's firmware are released separately, and Vibe Buddy looks for new versions of both ([ADR-0010](docs/adr/0010-firmware-and-app-release-separately-behind-an-update-manifest.md)). This is the only time it contacts anything on the internet:
+The App and the box's firmware are released separately, and VibeBuddy looks for new versions of both ([ADR-0010](docs/adr/0010-firmware-and-app-release-separately-behind-an-update-manifest.md)). This is the only time it contacts anything on the internet:
 
 - **When**: when it starts, once a day, and when you click Check now in Settings → General.
 - **What it sends**: your platform (`macos-arm64` or `linux-x86_64`), the App's version and the box's firmware version. Nothing else: no ID, no hook data, nothing about your agents or projects. On the Mac, Sparkle also fetches the App's update feed, sending the usual User-Agent with the App's name and version; its system profiling stays off.
@@ -160,7 +160,7 @@ app/       # the macOS menu bar app (SwiftPM)
 desktop/   # the Linux tray app and settings window (iced)
 daemon/    # vibebuddyd
 hook/      # vibebuddy-hook, the Codex and Claude Code hook
-protocol/  # Vibe Buddy Protocol types and codec
+protocol/  # VibeBuddy Protocol types and codec
 firmware-rs/  # vibebuddy-fw in Rust: core (no hardware) and device (hardware glue)
 firmware/  # the previous C firmware (ESP-IDF), kept as a fallback
 voices/    # announcement voices, one directory per voice
@@ -235,7 +235,7 @@ Run `vibebuddyd` on its own:
 cargo run -p vibebuddyd
 ```
 
-By default it only listens on `127.0.0.1:7331` and finds the box by its Espressif USB Serial/JTAG ID, `VID:PID 303A:1001`. `VIBEBUDDY_BIND` changes the listen address, `VIBEBUDDY_SERIAL_PORT` names a serial port explicitly, and `VIBEBUDDY_USB_SERIAL` picks one box among several identical ones; without it, the daemon connects to the box that has reported Vibe Buddy firmware to it before, and when none of several devices is that box, the app asks which one is. Either variable shows up in the app's Device tab, so a pin left set can't pass for a missing box. A box running other firmware, such as Muse, is written nothing. HTTP `202 Accepted` means the event entered the bounded send queue; whether the box actually received it is what the daemon logs from the box's reply.
+By default it only listens on `127.0.0.1:7331` and finds the box by its Espressif USB Serial/JTAG ID, `VID:PID 303A:1001`. `VIBEBUDDY_BIND` changes the listen address, `VIBEBUDDY_SERIAL_PORT` names a serial port explicitly, and `VIBEBUDDY_USB_SERIAL` picks one box among several identical ones; without it, the daemon connects to the box that has reported VibeBuddy firmware to it before, and when none of several devices is that box, the app asks which one is. Either variable shows up in the app's Device tab, so a pin left set can't pass for a missing box. A box running other firmware, such as Muse, is written nothing. HTTP `202 Accepted` means the event entered the bounded send queue; whether the box actually received it is what the daemon logs from the box's reply.
 
 The app normally supervises the daemon. On a development machine without the app you can install it as a LaunchAgent with [`packaging/com.vibebuddy.vibebuddyd.plist`](packaging/com.vibebuddy.vibebuddyd.plist), but don't run both: they'd fight over the serial port. For the app, the daemon also serves `GET /v1/status`, SSE `/v1/status/stream`, `/v1/config`, `/v1/device/{identify,volume,choice,screenshot,voice-pack,firmware}` and `/v1/daemon/restart`.
 
@@ -263,4 +263,4 @@ The source code is licensed under the [GNU General Public License v3.0 or later]
 
 The voice audio we hold the rights to, and any artwork added later, is licensed under [CC BY-SA 4.0](LICENSE-ASSETS). The two Chinese voices in `voices/` come from Volcano Engine's speech service and aren't covered; [`LICENSE-ASSETS`](LICENSE-ASSETS) lists exactly what is.
 
-Neither license grants rights to the name "Vibe Buddy" or the buddy character as a trademark.
+Neither license grants rights to the name "VibeBuddy" or the buddy character as a trademark.

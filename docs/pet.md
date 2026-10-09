@@ -1,8 +1,8 @@
-# The buddy: Vibe Buddy's physical pet
+# The buddy: VibeBuddy's physical pet
 
 ## Product definition
 
-The buddy is not a copy of the Codex pet; it is Vibe Buddy's own original pixel character. Codex, other local agents, training jobs, and CI can all drive the same pet. The character's animation, expressions, and voice run on the box; the Mac only sends sparse state events.
+The buddy is not a copy of the Codex pet; it is VibeBuddy's own original pixel character. Codex, other local agents, training jobs, and CI can all drive the same pet. The character's animation, expressions, and voice run on the box; the Mac only sends sparse state events.
 
 ## State language
 

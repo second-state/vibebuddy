@@ -1,4 +1,4 @@
-# Vibe Buddy
+# VibeBuddy
 
 See `CONTEXT.md` for domain vocabulary, `docs/architecture.md` for implementation boundaries, and `LESSONS.md` for lessons learned.
 

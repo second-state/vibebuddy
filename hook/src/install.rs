@@ -1,6 +1,6 @@
 //! `vibebuddy-hook install` / `uninstall`: where there is no app (Linux), the hook registers itself in the
 //! user-level config of Claude Code and Codex, and writes or deletes the file it owns for OpenCode, Copilot and Pi
-//! (`cli_agents`). Same rules as the app's `HookConfig.swift`: only Vibe Buddy's own
+//! (`cli_agents`). Same rules as the app's `HookConfig.swift`: only VibeBuddy's own
 //! entries are added or removed, a `.bak` is kept, and the new file is swapped in whole.
 //!
 //! An install that changes nothing leaves the file untouched: Codex keys its trust to a hash of each hook, so
@@ -164,8 +164,8 @@ fn commands(group: &Value) -> impl Iterator<Item = &str> {
         .filter_map(|entry| entry.get("command").and_then(Value::as_str))
 }
 
-/// One agent Vibe Buddy connects to: entries merged into a config the agent shares with the user, or a whole file
-/// of Vibe Buddy's own. In the Mac app's order.
+/// One agent VibeBuddy connects to: entries merged into a config the agent shares with the user, or a whole file
+/// of VibeBuddy's own. In the Mac app's order.
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Target {
     Merged(Agent),
@@ -359,7 +359,7 @@ pub fn run(installing: bool, only: Option<&str>) -> Result<(), String> {
         }
         if installing && change.target == Target::Merged(Agent::Codex) {
             println!(
-                "  Codex runs changed hooks only after you trust them: open /hooks in Codex and trust the Vibe Buddy entries."
+                "  Codex runs changed hooks only after you trust them: open /hooks in Codex and trust the VibeBuddy entries."
             );
         }
     }

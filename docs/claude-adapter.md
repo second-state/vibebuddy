@@ -2,9 +2,9 @@
 
 ## Scope
 
-Claude Code's public lifecycle hooks provide everything Vibe Buddy needs, so the approach matches Codex: use only the official hooks, don't scrape the UI, don't parse the transcript.
+Claude Code's public lifecycle hooks provide everything VibeBuddy needs, so the approach matches Codex: use only the official hooks, don't scrape the UI, don't parse the transcript.
 
-| Claude Code Hook | Vibe Buddy state |
+| Claude Code Hook | VibeBuddy state |
 | --- | --- |
 | `UserPromptSubmit` | Working; replaces the session's previous turn, but subagents still running keep their cards |
 | `PermissionRequest` | Needs input |

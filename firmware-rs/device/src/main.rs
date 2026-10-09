@@ -1,4 +1,4 @@
-//! Vibe Buddy firmware entry point: wires the ATK-DNESP32S3-BOX hardware to firmware-core.
+//! VibeBuddy firmware entry point: wires the ATK-DNESP32S3-BOX hardware to firmware-core.
 //!
 //! Board wiring (same as the C firmware):
 //! - LCD: ST7789, 8-bit parallel. CS GPIO1, DC GPIO2, RD GPIO41, WR GPIO42,

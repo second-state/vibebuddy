@@ -9,7 +9,7 @@ Users want to make their own Character, for example by having an image model dra
 ## Considered options
 
 - **Generate inside the App with the user's API key.** One-click, but it brings key management, provider choice, cost, failures and content moderation into the App, and the resulting sheet still has to pass the same validation.
-- **Generate through a Vibe Buddy server.** That adds accounts, billing and abuse handling, and makes a local, open-source tool depend on a service.
+- **Generate through a VibeBuddy server.** That adds accounts, billing and abuse handling, and makes a local, open-source tool depend on a service.
 
 ## Consequences
 

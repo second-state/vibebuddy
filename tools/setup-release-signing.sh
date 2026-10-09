@@ -200,7 +200,7 @@ CSR="${WORK}/developer-id.csr"
 P12="${WORK}/developer-id.p12"
 mkdir -p "${WORK}"; chmod 700 "${WORK}"
 
-banner "Vibe Buddy release signing setup"
+banner "VibeBuddy release signing setup"
 
 stage "Generate a private key and certificate signing request (CSR)"
 say "A Developer ID certificate is requested with a private key only you hold. It lives in ${WORK};"
@@ -211,9 +211,9 @@ else
   ask CSR_EMAIL "Apple Developer account email (only written into the CSR):"
   "${OPENSSL}" genrsa -out "${KEY}" 2048 2>/dev/null
   chmod 600 "${KEY}"
-  "${OPENSSL}" req -new -key "${KEY}" -out "${CSR}" -subj "/emailAddress=${CSR_EMAIL}/CN=Vibe Buddy Developer ID/C=CN"
+  "${OPENSSL}" req -new -key "${KEY}" -out "${CSR}" -subj "/emailAddress=${CSR_EMAIL}/CN=VibeBuddy Developer ID/C=CN"
 fi
-[[ -f "${CSR}" ]] || "${OPENSSL}" req -new -key "${KEY}" -out "${CSR}" -subj "/CN=Vibe Buddy Developer ID/C=CN"
+[[ -f "${CSR}" ]] || "${OPENSSL}" req -new -key "${KEY}" -out "${CSR}" -subj "/CN=VibeBuddy Developer ID/C=CN"
 printf '  %s✓%s CSR: %s\n' "$GREEN" "$RESET" "${CSR}"
 pause "Press Enter to request the certificate"
 

@@ -48,7 +48,7 @@ The review fixes applied before bring-up (see the PR) were in place, so it can't
 
 ## Steps
 
-1. **Quit the Vibe Buddy app** so it releases the serial port.
+1. **Quit the VibeBuddy app** so it releases the serial port.
 2. **Connect the native USB port** (`USB-SLAVE`, `/dev/cu.usbmodem…`) and flash:
 
    ```bash

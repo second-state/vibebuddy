@@ -1,33 +1,33 @@
-# Vibe Buddy
+# VibeBuddy
 
-Vibe Buddy turns the state of local AI agents into the picture and sound of a physical pet. This document defines domain vocabulary only and records no implementation decisions; for implementation boundaries see [`docs/architecture.md`](docs/architecture.md).
+VibeBuddy turns the state of local AI agents into the picture and sound of a physical pet. This document defines domain vocabulary only and records no implementation decisions; for implementation boundaries see [`docs/architecture.md`](docs/architecture.md).
 
 ## Language
 
 ### Roles and components
 
-**Vibe Buddy**:
-The product name, in use since 2026-09-15; it was previously called AgentBeacon. From 2026-09-16 all internal names followed: the repo `vibe-buddy`, the daemon `vibebuddyd`, the hook `vibebuddy-hook`, the CLI `vibebuddy`, the Vibe Buddy Protocol, the bundle id `com.vibebuddy.app`, and the local directory `VibeBuddy`.
-_Avoid_: AgentBeacon, beacond, beacon-hook (old names, only when talking about history), 氛围助手 ("vibe assistant"; that is a description, not a name)
+**VibeBuddy**:
+The product name, in use since 2026-09-15 and written as one word since 2026-10-09; it was previously called AgentBeacon. From 2026-09-16 all internal names followed: the repo `vibe-buddy`, the daemon `vibebuddyd`, the hook `vibebuddy-hook`, the CLI `vibebuddy`, the VibeBuddy Protocol, the bundle id `com.vibebuddy.app`, and the local directory `VibeBuddy`.
+_Avoid_: Vibe Buddy (two words, the spelling until 2026-10-09; the Mac app's bundle is still `Vibe Buddy.app`), AgentBeacon, beacond, beacon-hook (old names, only when talking about history), 氛围助手 ("vibe assistant"; that is a description, not a name)
 
 **The buddy (氛围小助手)**:
 The only anthropomorphic presence on the device: the one who watches the Agents and speaks up for you. It is a role, not a look; at any moment it wears exactly one Character. Before 2026-09-15 it was called 小灯灵 ("little lamp sprite"); in code it is `buddy`.
 _Avoid_: 小灯灵 (old name), pet (fine as a generic word, not when referring to this role), Pet, Codex pet, assistant (on its own it means an Agent, see below)
 
 **Character (角色)**:
-The identity the buddy currently wears: its look, its voice, its persona and its lines, which always travel together. Only one Character is active at a time. The default Character is the original pixel robot, also named Vibe Buddy.
+The identity the buddy currently wears: its look, its voice, its persona and its lines, which always travel together. Only one Character is active at a time. The default Character is the original pixel robot, also named VibeBuddy.
 _Avoid_: skin, theme, avatar (the look alone), pet
 
 **Agent**:
-A local AI assistant observed by Vibe Buddy, such as Codex or Claude Code. An Agent is the thing being observed, not part of Vibe Buddy.
+A local AI assistant observed by VibeBuddy, such as Codex or Claude Code. An Agent is the thing being observed, not part of VibeBuddy.
 _Avoid_: client, AI, assistant; also never means a subagent inside Claude Code
 
 **Adapter**:
-The layer that translates one Agent's events into Vibe Buddy domain concepts, consisting of the local privacy-filtering script and the event mapping inside the daemon. There is one Adapter per Agent; aggregation logic does not belong to the Adapter.
+The layer that translates one Agent's events into VibeBuddy domain concepts, consisting of the local privacy-filtering script and the event mapping inside the daemon. There is one Adapter per Agent; aggregation logic does not belong to the Adapter.
 _Avoid_: integration, plugin, connector
 
 **App**:
-Vibe Buddy's graphical interface on the Mac: a menu bar icon plus a settings window. It handles onboarding, settings, characters and firmware, and supervises the daemon. It is not a second reminder channel; everything about Agents is said by the buddy.
+VibeBuddy's graphical interface on the Mac: a menu bar icon plus a settings window. It handles onboarding, settings, characters and firmware, and supervises the daemon. It is not a second reminder channel; everything about Agents is said by the buddy.
 _Avoid_: client, panel, console, companion app
 
 **Firmware version (固件版本)**:
@@ -43,7 +43,7 @@ The connection between the Mac and the device. When the link drops, the buddy cl
 _Avoid_: connection, USB, serial port (those are one implementation of the link)
 
 **Connection (接入)**:
-The hook connection between an Agent and Vibe Buddy, and its status: whether it is installed, and when the last event arrived.
+The hook connection between an Agent and VibeBuddy, and its status: whether it is installed, and when the last event arrived.
 _Avoid_: integration, installation, configuration
 
 **Host (运行处)**:
@@ -121,7 +121,7 @@ Fixed wording for the App's English UI and English logs. Use these words when wr
 | Chinese | English | Notes |
 |---|---|---|
 | 盒子 | box | The device itself; lowercase in the UI, capitalized at the start of a sentence |
-| 氛围小助手 | the buddy | The character; the product name is still Vibe Buddy |
+| 氛围小助手 | the buddy | The character; the product name is still VibeBuddy |
 | 链路 | link | The "Link" section of the settings window; when it drops, say disconnected |
 | 接入 / 修复 / 移除 | Connect / Repair / Remove | The three hook actions; the settings tab is called Agents, and an agent that isn't connected shows Not set up |
 | 角色 | character | Where you pick who the buddy is |
@@ -142,7 +142,7 @@ Fixed wording for the App's English UI and English logs. Use these words when wr
 ### Activity lifecycle
 
 **Session**:
-One complete session within an Agent process. Its identifier comes from the Agent; Vibe Buddy never generates one itself.
+One complete session within an Agent process. Its identifier comes from the Agent; VibeBuddy never generates one itself.
 _Avoid_: connection, session instance
 
 **Turn**:
@@ -150,11 +150,11 @@ The unit of work from the moment the user submits an input until the assistant s
 _Avoid_: round, prompt, request
 
 **Activity**:
-A piece of work Vibe Buddy is currently tracking, together with its current state; the smallest unit worth its own announcement. For conversational Agents, an Activity's identity is determined by the Session and Turn together; producers with no Turn, such as training jobs or CI, supply their own identifier. An Activity disappears when it ends or expires.
+A piece of work VibeBuddy is currently tracking, together with its current state; the smallest unit worth its own announcement. For conversational Agents, an Activity's identity is determined by the Session and Turn together; producers with no Turn, such as training jobs or CI, supply their own identifier. An Activity disappears when it ends or expires.
 _Avoid_: task, Job, Task (Task refers specifically to the on-device presentation, see below)
 
 **Task card (任务卡)**:
-How an Activity is presented on the device screen. At most 3 are shown at once, with the most recently active on top. In the Vibe Buddy Protocol the field that carries them is named `tasks`, a historical name from v1; it doesn't change the fact that the Activity is the domain object.
+How an Activity is presented on the device screen. At most 3 are shown at once, with the most recently active on top. In the VibeBuddy Protocol the field that carries them is named `tasks`, a historical name from v1; it doesn't change the fact that the Activity is the domain object.
 _Avoid_: card, entry, Task item
 
 ### State and notifications

@@ -48,7 +48,7 @@ final class AppModel: ObservableObject {
             self.refreshMenu()
             // With "Notify me" off, not even this one shows; without a daemon there's no config, so default to on.
             if self.status?.config.notifyLink ?? true {
-                Notifier.notify(title: "Vibe Buddy", body: String(localized: "The daemon failed to start three times in a row. Click the menu bar icon to restart it."))
+                Notifier.notify(title: "VibeBuddy", body: String(localized: "The daemon failed to start three times in a row. Click the menu bar icon to restart it."))
             }
         }
         refreshHookStates()
@@ -64,7 +64,7 @@ final class AppModel: ObservableObject {
             // as changed and silently disabled them, and the box announced nothing from Codex for four hours. This one ignores the
             // link-notification switch: the app itself made the change, so a person has to finish the job.
             Notifier.notify(title: String(localized: "Codex hook config updated"),
-                            body: String(localized: "Vibe Buddy rewrote ~/.codex/hooks.json. Codex silently disables hooks that change: type /hooks in Codex and re-trust them so the box keeps getting Codex events."))
+                            body: String(localized: "VibeBuddy rewrote ~/.codex/hooks.json. Codex silently disables hooks that change: type /hooks in Codex and re-trust them so the box keeps getting Codex events."))
         }
         refreshHookStates()
         if managesDaemon { supervisor.start() }
@@ -138,7 +138,7 @@ final class AppModel: ObservableObject {
         if linkLostSince == nil { linkLostSince = Date() }
         if !linkNotified, let since = linkLostSince, Date().timeIntervalSince(since) >= 30 {
             linkNotified = true
-            Notifier.notify(title: String(localized: "Box disconnected"), body: String(localized: "Vibe Buddy hasn't seen the box for 30 seconds. Check the USB cable."))
+            Notifier.notify(title: String(localized: "Box disconnected"), body: String(localized: "VibeBuddy hasn't seen the box for 30 seconds. Check the USB cable."))
         }
     }
 

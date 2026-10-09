@@ -1,4 +1,4 @@
-// Vibe Buddy: tells the box what Pi is doing. Written by Vibe Buddy; remove it from its Agents settings.
+// VibeBuddy: tells the box what Pi is doing. Written by VibeBuddy; remove it from its Agents settings.
 // Everything goes through vibebuddy-hook, which keeps only session ids, the working directory and its own
 // verdict on the last reply: prompts and replies never leave this machine.
 import { spawn } from "node:child_process";
@@ -30,7 +30,7 @@ export default function (pi) {
             hook.stdin.on("error", () => {});
             hook.stdin.end(payload);
           } catch {
-            // Vibe Buddy isn't installed any more, or can't run: Pi carries on regardless.
+            // VibeBuddy isn't installed any more, or can't run: Pi carries on regardless.
             resolve();
           }
         }),
