@@ -5,6 +5,8 @@ post_install() {
       systemctl --user enable --now vibebuddyd
       vibebuddy-hook install
     The tray app starts at your next login, or run vibebuddy-desktop now.
+    On Omarchy 4, put the buddy's face in the bar instead of the tray:
+      omarchy plugin add https://github.com/second-state/omarchy-vibebuddy-plugin --enable
     Codex runs new hooks only after you trust them: open /hooks in Codex.
     The box is usable by whoever is logged in at the seat; no group needed.
 MSG

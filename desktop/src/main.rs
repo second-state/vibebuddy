@@ -33,6 +33,8 @@ const OMARCHY_FONT: &str = "JetBrainsMono Nerd Font";
 const RESTARTED: &str = "--restarted";
 /// Followed by a voice id: written once the restarted copy sees the box answer, then forgotten.
 const WRITE_VOICE: &str = "--write-voice";
+/// Passed by the Omarchy bar plugin: open Settings, even from a launch that would otherwise stay in the background.
+const SETTINGS: &str = "--settings";
 
 /// The running copy's socket, handed to the subscription that listens on it.
 #[cfg(target_os = "linux")]
@@ -177,6 +179,9 @@ struct App {
     tray_host: bool,
     #[cfg(target_os = "linux")]
     tray: Option<TrayHandle>,
+    /// Vibe Buddy's Omarchy plugin is in the bar, showing the face; the tray icon would be a second one.
+    #[cfg(target_os = "linux")]
+    plugin: bool,
 }
 
 struct RestartOffer {
@@ -211,6 +216,8 @@ impl App {
             tray_host: true,
             #[cfg(target_os = "linux")]
             tray: None,
+            #[cfg(target_os = "linux")]
+            plugin: plugin_in_omarchy_bar(),
         };
         // The first launch shows the window, so it's clear where the app went; later ones stay in the tray, unless a
         // language change restarted the app from its window. Without a tray (macOS builds, for development) the
@@ -232,7 +239,7 @@ impl App {
         app.custom_look = custom::custom_look_file()
             .and_then(|path| std::fs::read(path).ok())
             .and_then(|look| character::look_frames(&look).map(|frames| (look, frames.iter().map(|frame| handle(frame, 2)).collect())));
-        let restarted = std::env::args().any(|arg| arg == RESTARTED);
+        let restarted = std::env::args().any(|arg| arg == RESTARTED || arg == SETTINGS);
         let open = first_launch() || restarted || !cfg!(target_os = "linux");
         let task = if open { Task::done(Message::OpenSettings) } else { Task::none() };
         (app, task)
@@ -248,7 +255,10 @@ impl App {
 
     fn subscription(&self) -> Subscription<Message> {
         #[cfg(target_os = "linux")]
-        let (tray, instance) = (Subscription::run(run_tray), Subscription::run(run_instance));
+        let (tray, instance) = (
+            if self.plugin { Subscription::none() } else { Subscription::run(run_tray) },
+            Subscription::run(run_instance),
+        );
         #[cfg(not(target_os = "linux"))]
         let (tray, instance) = (Subscription::none(), Subscription::none());
         Subscription::batch([
@@ -298,6 +308,18 @@ impl App {
                 }
             }
             Message::ThemeTick => {
+                // The plugin can be enabled or disabled while the app runs: the tray icon gives way, or comes back
+                // when the subscription starts it again.
+                #[cfg(target_os = "linux")]
+                {
+                    let plugin = plugin_in_omarchy_bar();
+                    if plugin != self.plugin {
+                        self.plugin = plugin;
+                        if let Some(TrayHandle(handle)) = self.tray.take() {
+                            return Task::future(async move { handle.shutdown().await }).discard();
+                        }
+                    }
+                }
                 let stamp = theme::stamp();
                 if stamp != self.theme_stamp {
                     self.theme_stamp = stamp;
@@ -1244,6 +1266,15 @@ fn state_dir() -> Option<std::path::PathBuf> {
 
 fn config_dir() -> Option<std::path::PathBuf> {
     xdg_dir("XDG_CONFIG_HOME", ".config")
+}
+
+/// Read from the shell's own config, which `omarchy plugin enable` and `disable` rewrite.
+#[cfg(target_os = "linux")]
+fn plugin_in_omarchy_bar() -> bool {
+    // `config_dir` is ours, inside the XDG config directory; Omarchy's sits next to it.
+    config_dir()
+        .and_then(|dir| std::fs::read_to_string(dir.parent()?.join("omarchy/shell.json")).ok())
+        .is_some_and(|text| tray::plugin_in_bar(&text))
 }
 
 fn xdg_dir(variable: &str, default: &str) -> Option<std::path::PathBuf> {

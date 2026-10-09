@@ -105,6 +105,19 @@ impl ksni::Tray for Tray {
     }
 }
 
+/// The id of Vibe Buddy's Omarchy shell plugin (github.com/second-state/omarchy-vibebuddy-plugin).
+pub const OMARCHY_PLUGIN: &str = "io.github.second-state.vibebuddy";
+
+/// Whether Omarchy's `shell.json` places our plugin in the bar. Enabling a bar widget adds it to the bar's layout
+/// and disabling it takes it out, so the layout is the answer.
+pub fn plugin_in_bar(shell_json: &str) -> bool {
+    let Ok(config) = serde_json::from_str::<serde_json::Value>(shell_json) else { return false };
+    let Some(sections) = config.pointer("/bar/layout").and_then(serde_json::Value::as_object) else { return false };
+    sections.values().filter_map(serde_json::Value::as_array).flatten().any(|entry| {
+        entry.as_str().or_else(|| entry.get("id").and_then(serde_json::Value::as_str)) == Some(OMARCHY_PLUGIN)
+    })
+}
+
 /// Omarchy keeps tray icons in a drawer behind a chevron until they're pinned, while the Mac's icon always shows in the
 /// menu bar; so pin ours, once. The edit goes through Omarchy's own `omarchy-shell-config`, which writes `shell.json`
 /// atomically and reloads the bar. Once means the marker: unpinning or hiding it later is the user's call, and an icon
@@ -131,5 +144,25 @@ commit "$NORMALIZE"' | .bar.layout[] |= map(
         Ok(status) if status.code() == Some(3) => {}
         Ok(status) => eprintln!("vibebuddy-desktop: pinning the tray icon in Omarchy's bar failed ({status})"),
         Err(error) => eprintln!("vibebuddy-desktop: cannot run bash to pin the tray icon ({error})"),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_plugin_counts_in_any_section_of_the_bar() {
+        let shell = r#"{"bar": {"layout": {"left": ["omarchy.menu"],
+            "right": [{"id": "omarchy.tray", "pinned": ["vibebuddy"]}, {"id": "io.github.second-state.vibebuddy"}]}}}"#;
+        assert!(plugin_in_bar(shell));
+        assert!(plugin_in_bar(r#"{"bar": {"layout": {"center": ["io.github.second-state.vibebuddy"]}}}"#));
+    }
+
+    #[test]
+    fn a_pinned_tray_icon_or_a_broken_file_is_not_the_plugin() {
+        assert!(!plugin_in_bar(r#"{"bar": {"layout": {"right": [{"id": "omarchy.tray", "pinned": ["vibebuddy"]}]}}}"#));
+        assert!(!plugin_in_bar(r#"{"plugins": ["io.github.second-state.vibebuddy"]}"#));
+        assert!(!plugin_in_bar("not json"));
     }
 }
