@@ -1,4 +1,4 @@
-# Vibe Buddy hardware notes
+# VibeBuddy hardware notes
 
 This document records only hardware facts with an evidence boundary. Similar names or boards from the same series cannot serve as the basis for GPIO, codec, LCD, or USB paths.
 
@@ -10,7 +10,7 @@ This document records only hardware facts with an evidence boundary. Similar nam
 - Peripherals: LCD, speaker, microphone, buzzer, K0/K1/K2, TF/microSD, USB-C, USB-A host, UART.
 - Expectation: a single USB-C cable handles power, flashing, and runtime communication at once.
 
-Using the same USB-C cable for power, the runtime serial port, ROM download, writing the Vibe Buddy firmware, and re-enumeration after writing has been verified in practice.
+Using the same USB-C cable for power, the runtime serial port, ROM download, writing the VibeBuddy firmware, and re-enumeration after writing has been verified in practice.
 
 ## Current host confirmed
 
@@ -40,8 +40,8 @@ Therefore, no BSP is chosen and no GPIOs are frozen until the PCB silkscreen is 
 - A photo of the back taken on 2026-09-14 shows the PCB silkscreen `V1.1`, an ATK-MWS3S `N16R8` module, `B0/K1/K2`, `USB-SLAVE`, `HOST`, `UART`, the microphone, speaker, buzzer, and TF card slot.
 - The physical layout together with the current firmware's self-reported identifier confirm the board is the **ATK-DNESP32S3-BOX V1.1**; it is not the DNESP32S3 development board, BOX0, BOX2, or BOX3.
 - In Stage 2, after physically unplugging `USB-SLAVE`, `vibebuddyd` logged `Device not configured`; after plugging it back in, it automatically rediscovered the same serial node and resumed communication.
-- After fully cutting USB power, the leftover screen from the original xiaozhi firmware disappeared and the screen stayed black; this proves the old image was residual LCD state, not a sign the old firmware was still running, nor proof that Vibe Buddy already had an LCD driver.
-- The LCD is now driven by Vibe Buddy on the hardware and has passed visual acceptance: 320×240 ST7789, 8-bit i80, bus data on GPIO40/39/38/12/11/10/9/46, CS/DC/RD/WR on GPIO1/2/41/42, backlight controlled by XL9555 P0.7.
+- After fully cutting USB power, the leftover screen from the original xiaozhi firmware disappeared and the screen stayed black; this proves the old image was residual LCD state, not a sign the old firmware was still running, nor proof that VibeBuddy already had an LCD driver.
+- The LCD is now driven by VibeBuddy on the hardware and has passed visual acceptance: 320×240 ST7789, 8-bit i80, bus data on GPIO40/39/38/12/11/10/9/46, CS/DC/RD/WR on GPIO1/2/41/42, backlight controlled by XL9555 P0.7.
 - The ES8311 was detected over I2C at 7-bit address `0x18`; audio I2S BCLK/WS/DOUT are GPIO21/13/14, sample rate 24 kHz, and speaker enable is controlled by XL9555 P0.5.
 - Firmware startup has reported `AUDIO READY` and `AUDIO CODEC ES8311`; the user has actually heard the "需要你确认" ("I need you to confirm") voice line.
 - On 2026-09-14 the disconnection indicator was verified on the hardware: after stopping `vibebuddyd` for more than 15 seconds, the device closed its eyes, the screen went gray, and it showed `NO LINK`, with the task cards kept but also grayed out; after the daemon was restored it left that state automatically. Confirmed by the user on the hardware.

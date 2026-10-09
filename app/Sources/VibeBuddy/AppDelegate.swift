@@ -36,7 +36,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         model.$menu.receive(on: RunLoop.main).sink { [weak self] menu in self?.render(menu) }.store(in: &subscriptions)
         model.$lastError.receive(on: RunLoop.main).compactMap { $0 }.sink { message in
             let alert = NSAlert()
-            alert.messageText = "Vibe Buddy"
+            alert.messageText = "VibeBuddy"
             alert.informativeText = message
             alert.runModal()
         }.store(in: &subscriptions)
@@ -97,9 +97,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         settings.target = self
         app.addItem(settings)
         app.addItem(.separator())
-        app.addItem(NSMenuItem(title: String(localized: "Hide Vibe Buddy"), action: #selector(NSApplication.hide(_:)), keyEquivalent: "h"))
+        app.addItem(NSMenuItem(title: String(localized: "Hide VibeBuddy"), action: #selector(NSApplication.hide(_:)), keyEquivalent: "h"))
         app.addItem(.separator())
-        let quit = NSMenuItem(title: String(localized: "Quit Vibe Buddy (the box goes offline)"), action: #selector(quit), keyEquivalent: "q")
+        let quit = NSMenuItem(title: String(localized: "Quit VibeBuddy (the box goes offline)"), action: #selector(quit), keyEquivalent: "q")
         quit.target = self
         app.addItem(quit)
         let edit = NSMenu(title: String(localized: "Edit"))
@@ -144,7 +144,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         report.target = self
         menu.addItem(report)
         menu.addItem(.separator())
-        let quit = NSMenuItem(title: String(localized: "Quit Vibe Buddy (the box goes offline)"), action: #selector(quit), keyEquivalent: "q")
+        let quit = NSMenuItem(title: String(localized: "Quit VibeBuddy (the box goes offline)"), action: #selector(quit), keyEquivalent: "q")
         quit.target = self
         menu.addItem(quit)
         statusItem.menu = menu
@@ -158,7 +158,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if settingsWindow == nil {
             // Roomy enough for the whole Character tab at first sight, and resizable down to the old size.
             let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 760, height: 640), styleMask: [.titled, .closable, .miniaturizable, .resizable], backing: .buffered, defer: false)
-            window.title = String(localized: "Vibe Buddy Settings")
+            window.title = String(localized: "VibeBuddy Settings")
             let hosting = NSHostingView(rootView: SettingsView(model: model))
             // Only the minimum comes from SwiftUI; otherwise the view's ideal size would pin the window.
             hosting.sizingOptions = [.minSize]
@@ -175,7 +175,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func showOnboarding() {
         if onboardingWindow == nil {
             let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 560, height: 440), styleMask: [.titled, .closable], backing: .buffered, defer: false)
-            window.title = String(localized: "Welcome to Vibe Buddy")
+            window.title = String(localized: "Welcome to VibeBuddy")
             window.contentView = NSHostingView(rootView: OnboardingView(model: model, finish: { [weak self] in
                 UserDefaults.standard.set(true, forKey: "onboardingDone")
                 self?.onboardingWindow?.close()
@@ -231,7 +231,7 @@ enum LegacyLaunchAgent {
         guard hasPlist || occupied else { return }
         let alert = NSAlert()
         alert.messageText = hasPlist ? String(localized: "Found an old vibebuddyd background service") : String(localized: "A daemon is already running on port 7331")
-        alert.informativeText = String(localized: "Vibe Buddy now manages its own daemon, and two daemons would fight over the serial port. Remove the old one and take over?")
+        alert.informativeText = String(localized: "VibeBuddy now manages its own daemon, and two daemons would fight over the serial port. Remove the old one and take over?")
         alert.addButton(withTitle: String(localized: "Remove and take over"))
         alert.addButton(withTitle: String(localized: "Later"))
         NSApp.activate(ignoringOtherApps: true)

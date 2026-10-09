@@ -4,9 +4,9 @@
 
 Codex's built-in pet assets, animation state machine and task card rendering are not exposed as a pet API, so they can't be reliably mirrored frame by frame to an external device. The public interface we can depend on is Codex's lifecycle hooks.
 
-Vibe Buddy uses this mapping:
+VibeBuddy uses this mapping:
 
-| Codex Hook | Vibe Buddy state |
+| Codex Hook | VibeBuddy state |
 | --- | --- |
 | `UserPromptSubmit` | Working |
 | `PermissionRequest` | Needs input |

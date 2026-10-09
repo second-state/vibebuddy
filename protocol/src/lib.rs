@@ -89,7 +89,7 @@ impl fmt::Display for ProtocolError {
             }
             Self::Serialize(error) => write!(formatter, "JSON encoding failed: {error}"),
             Self::UnsupportedVersion(version) => {
-                write!(formatter, "unsupported Vibe Buddy Protocol version {version}")
+                write!(formatter, "unsupported VibeBuddy Protocol version {version}")
             }
         }
     }

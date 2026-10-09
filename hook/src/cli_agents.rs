@@ -2,7 +2,7 @@
 //! events; the hook turns them into five that mean the same for every such agent (`working`, `needs_input`,
 //! `done`, `stopped`, `session_end`), so the daemon needs one adapter for all of them, not one per agent.
 //!
-//! No config is merged into the user's own: Vibe Buddy owns a whole file in each agent's directory, the
+//! No config is merged into the user's own: VibeBuddy owns a whole file in each agent's directory, the
 //! OpenCode plugin, the Copilot hooks file or the Pi extension, so connecting writes it and removing deletes it. Their contents are
 //! made here and nowhere else; the Mac app asks this binary for them (`vibebuddy-hook agent-file`).
 
@@ -79,7 +79,7 @@ impl Agent {
         }
     }
 
-    /// The file Vibe Buddy owns in that directory.
+    /// The file VibeBuddy owns in that directory.
     pub fn file(self, home: &Path) -> PathBuf {
         match self {
             Agent::OpenCode => self.dir(home).join("plugins/vibebuddy.js"),

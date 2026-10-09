@@ -59,7 +59,7 @@ struct OnboardingView: View {
         HStack(alignment: .top, spacing: 24) {
             Image(nsImage: PixelFace.largeImage()).interpolation(.none)
             VStack(alignment: .leading, spacing: 10) {
-                Text("Vibe Buddy turns what Codex and Claude Code are doing into pictures and sounds on the box.").font(.title3)
+                Text("VibeBuddy turns what Codex and Claude Code are doing into pictures and sounds on the box.").font(.title3)
                 Text("Next: plug in the box, connect your agents, pick an announcement voice, and choose whether to launch at login. Everything can be changed or skipped.")
                     .foregroundStyle(.secondary)
             }
@@ -73,7 +73,7 @@ struct OnboardingView: View {
                 // As soon as flashing starts the daemon releases the serial port and the box shows as "not connected"; progress must
                 // come before the connection check, or this page falls back to "no box yet" and the user thinks nothing started
                 // (a colleague clicked Next exactly like that on their first flash, 2026-09-22).
-                Label("Flashing Vibe Buddy firmware…", systemImage: "arrow.down.circle").foregroundStyle(.orange)
+                Label("Flashing VibeBuddy firmware…", systemImage: "arrow.down.circle").foregroundStyle(.orange)
                 OperationRow(operation: operation)
                 if operation.state == .failed {
                     Text("Hold K0 on the box and replug the cable to put it in download mode, then retry.").font(.caption).foregroundStyle(.secondary)
@@ -87,12 +87,12 @@ struct OnboardingView: View {
                 }
             } else if let device = model.status?.device, device.connected, model.foreignFirmware {
                 // Factory box: the serial port is there but the firmware isn't ours. Flashing uses the same path as an upgrade.
-                Label("Found a box (\(device.port ?? "")), but it isn't running Vibe Buddy firmware.", systemImage: "exclamationmark.triangle")
+                Label("Found a box (\(device.port ?? "")), but it isn't running VibeBuddy firmware.", systemImage: "exclamationmark.triangle")
                     .foregroundStyle(.orange)
                 if !model.firmwareDownloaded {
                     FirmwareUnavailable(model: model)
                 } else {
-                    Button("Flash Vibe Buddy firmware") { FlashConfirm.foreign(then: model.updateFirmware) }
+                    Button("Flash VibeBuddy firmware") { FlashConfirm.foreign(then: model.updateFirmware) }
                     Text("This erases the box's current firmware and data for good. If the native USB port doesn't find the box, use its UART port instead.")
                         .font(.caption).foregroundStyle(.secondary)
                 }
@@ -143,7 +143,7 @@ struct OnboardingView: View {
 
     private var loginItem: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text("Start Vibe Buddy automatically when you log in?").font(.title3)
+            Text("Start VibeBuddy automatically when you log in?").font(.title3)
             Toggle("Launch at login", isOn: Binding(get: { model.launchAtLogin }, set: { model.setLaunchAtLogin($0) }))
             Text("macOS may say a background item was added — that's expected.").font(.caption).foregroundStyle(.secondary)
         }
@@ -152,7 +152,7 @@ struct OnboardingView: View {
     private var done: some View {
         VStack(alignment: .leading, spacing: 12) {
             Text("All set.").font(.title3)
-            Text("Vibe Buddy lives in the menu bar: the icon is the buddy's face, with its eyes open while the box is online. To change anything, choose Settings… from its menu, or open Vibe Buddy again.")
+            Text("VibeBuddy lives in the menu bar: the icon is the buddy's face, with its eyes open while the box is online. To change anything, choose Settings… from its menu, or open VibeBuddy again.")
                 .foregroundStyle(.secondary)
         }
     }

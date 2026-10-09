@@ -18,5 +18,5 @@ ditto "${bundle}/Contents/Resources/licenses" "${staging}/Licenses"
 ln -s /Applications "${staging}/Applications"
 
 rm -f "${output}"
-hdiutil create -volname "Vibe Buddy" -srcfolder "${staging}" -fs HFS+ -format UDZO -ov "${output}" >/dev/null
+hdiutil create -volname "VibeBuddy" -srcfolder "${staging}" -fs HFS+ -format UDZO -ov "${output}" >/dev/null
 echo "== Done: ${output}"

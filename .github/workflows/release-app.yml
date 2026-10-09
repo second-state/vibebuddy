@@ -197,7 +197,7 @@ jobs:
           [[ -f "${summary}" ]] || { echo "missing ${summary}: say what this release does" >&2; exit 1; }
           { cat "${summary}"; printf '\n## Downloads\n\n'; } > notes.md
           cat >> notes.md <<NOTES
-          - **macOS** (Apple silicon, macOS 14+): open the DMG and drag Vibe Buddy into Applications.
+          - **macOS** (Apple silicon, macOS 14+): open the DMG and drag VibeBuddy into Applications.
           - **Linux** (x86_64, tested on Omarchy): \`tar xf VibeBuddy-${label}-linux-x86_64.tar.gz && cd VibeBuddy-${label}-linux-x86_64 && ./install.sh\`
           - **Firmware** comes in its own releases (\`firmware-v…\`); the app downloads it and offers it on the Device tab.
           NOTES
@@ -210,7 +210,7 @@ jobs:
           gh release create "${label}" --repo "${GITHUB_REPOSITORY}" \
             "VibeBuddy-${label}-arm64.dmg" \
             "VibeBuddy-${label}-linux-x86_64.tar.gz" \
-            --title "Vibe Buddy ${label}" \
+            --title "VibeBuddy ${label}" \
             --notes-file notes.md
 
   manifest:

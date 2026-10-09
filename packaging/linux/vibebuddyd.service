@@ -1,5 +1,5 @@
 [Unit]
-Description=Vibe Buddy daemon
+Description=VibeBuddy daemon
 Documentation=https://github.com/second-state/vibebuddy
 
 [Service]

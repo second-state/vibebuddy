@@ -3,7 +3,7 @@ name = "vibebuddy-desktop"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
-description = "Vibe Buddy's tray icon and settings window outside macOS"
+description = "VibeBuddy's tray icon and settings window outside macOS"
 
 [[bin]]
 name = "vibebuddy-desktop"

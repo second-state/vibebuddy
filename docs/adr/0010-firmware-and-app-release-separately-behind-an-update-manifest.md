@@ -39,6 +39,6 @@ Until now the firmware shipped only inside the App: one `vX.Y.Z` tag built both,
 
 - Reverses "no update checks and no downloading firmware from the internet" and the hash-only comparison in `docs/app.md`; that doc changes as each piece lands.
 - Flashing a factory box during onboarding now needs the network once.
-- The App contacts a Vibe Buddy service. The README says what is sent and how to turn it off.
+- The App contacts a VibeBuddy service. The README says what is sent and how to turn it off.
 - Breaking changes between the App and the firmware (partition layout, Character pack format, event meaning) must raise the firmware's `min_app`. Additive protocol changes don't, because receivers ignore unknown fields and events.
 - If the box gets its own Wi-Fi link (#3), it can read the same manifest.

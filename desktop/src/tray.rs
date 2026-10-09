@@ -38,7 +38,7 @@ impl ksni::Tray for Tray {
     }
 
     fn title(&self) -> String {
-        "Vibe Buddy".to_owned()
+        "VibeBuddy".to_owned()
     }
 
     fn icon_pixmap(&self) -> Vec<Icon> {
@@ -60,7 +60,7 @@ impl ksni::Tray for Tray {
 
     fn tool_tip(&self) -> ToolTip {
         ToolTip {
-            title: "Vibe Buddy".to_owned(),
+            title: "VibeBuddy".to_owned(),
             description: self.menu.device_line.clone(),
             ..Default::default()
         }
@@ -108,7 +108,7 @@ impl ksni::Tray for Tray {
     }
 }
 
-/// The id of Vibe Buddy's Omarchy shell plugin (github.com/second-state/omarchy-vibebuddy-plugin).
+/// The id of VibeBuddy's Omarchy shell plugin (github.com/second-state/omarchy-vibebuddy-plugin).
 pub const OMARCHY_PLUGIN: &str = "io.github.second-state.vibebuddy";
 
 /// Whether Omarchy's `shell.json` places our plugin in the bar. Enabling a bar widget adds it to the bar's layout

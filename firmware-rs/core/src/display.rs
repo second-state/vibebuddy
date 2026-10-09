@@ -893,7 +893,7 @@ impl Display {
             count += 1;
         }
         if count == 0 {
-            canvas.draw_text_centered(195, b"YOUR VIBE BUDDY", 2, COLOR_MUTED);
+            canvas.draw_text_centered(195, b"YOUR VIBEBUDDY", 2, COLOR_MUTED);
             return;
         }
         let slot = (self.animation_frame / IDLE_ROTATE_FRAMES) as usize % count;
@@ -1144,7 +1144,7 @@ impl Display {
         let mut canvas = Canvas::new(screen.frame());
         canvas.fill_rect(0, 0, WIDTH, HEIGHT, COLOR_BACKGROUND);
         canvas.fill_rect(0, 0, WIDTH, 4, status_color);
-        canvas.draw_text_centered(12, b"Vibe Buddy", 2, COLOR_TEXT);
+        canvas.draw_text_centered(12, b"VibeBuddy", 2, COLOR_TEXT);
         if self.muted {
             canvas.draw_text(8, 15, b"MUTE", 1, COLOR_INPUT, 4);
         }

@@ -1,12 +1,12 @@
 import Foundation
 
-/// Hook config for both agents: only adds or removes Vibe Buddy's own entries, never anyone else's hooks.
+/// Hook config for both agents: only adds or removes VibeBuddy's own entries, never anyone else's hooks.
 /// Claude Code's user-level settings.json and Codex's hooks.json share one shape:
 /// `hooks.<event>: [ { hooks: [ { type: "command", command, timeout } ] } ]`.
 public enum HookAgent: String, CaseIterable {
     case codex, claude, opencode, copilot, pi
 
-    /// The events merged into a shared config; empty for agents whose whole file Vibe Buddy owns.
+    /// The events merged into a shared config; empty for agents whose whole file VibeBuddy owns.
     public var events: [String] {
         switch self {
         case .codex: return ["UserPromptSubmit", "PermissionRequest", "PostToolUse", "Stop", "Interrupt", "SessionEnd"]
@@ -15,7 +15,7 @@ public enum HookAgent: String, CaseIterable {
         }
     }
 
-    /// OpenCode, Copilot and Pi get a file of Vibe Buddy's own in their config directory, instead of entries merged
+    /// OpenCode, Copilot and Pi get a file of VibeBuddy's own in their config directory, instead of entries merged
     /// into the user's: connecting writes it, removing deletes it. The hook binary makes its contents.
     public var ownsFile: Bool { events.isEmpty }
 
@@ -44,7 +44,7 @@ public enum CodexTrustHint: Equatable {
 }
 
 public enum HookConfig {
-    /// The change shown before writing a file Vibe Buddy owns: the whole file, added or removed.
+    /// The change shown before writing a file VibeBuddy owns: the whole file, added or removed.
     public static func describeOwnedFile(from before: String?, to after: String?) -> [String] {
         guard before != after else { return [] }
         let removed = (before ?? "").split(separator: "\n", omittingEmptySubsequences: false).filter { !$0.isEmpty }.map { "- \($0)" }
@@ -70,7 +70,7 @@ public enum HookConfig {
         "\"\(binary)\" \(agent.rawValue)"
     }
 
-    /// Merges Vibe Buddy's hooks into the config and returns the new config.
+    /// Merges VibeBuddy's hooks into the config and returns the new config.
     public static func install(into root: [String: Any], agent: HookAgent, binary: String) -> [String: Any] {
         var root = removed(from: root)
         var hooks = root["hooks"] as? [String: Any] ?? [:]
@@ -84,7 +84,7 @@ public enum HookConfig {
         return root
     }
 
-    /// Removes Vibe Buddy's entries, along with any events and hooks objects left empty.
+    /// Removes VibeBuddy's entries, along with any events and hooks objects left empty.
     public static func removed(from root: [String: Any]) -> [String: Any] {
         var root = root
         guard var hooks = root["hooks"] as? [String: Any] else { return root }

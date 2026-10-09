@@ -413,7 +413,7 @@ async fn run_session<P: AsyncRead + AsyncWrite + Unpin>(
                                 info!(port = %port_name, "the box restarted, listening before writing to it");
                             }
                             (Firmware::Listening { .. } | Firmware::Asked { .. } | Firmware::Foreign, Firmware::Ours) => {
-                                info!(port = %port_name, "the box runs Vibe Buddy firmware");
+                                info!(port = %port_name, "the box runs VibeBuddy firmware");
                             }
                             _ => {}
                         }

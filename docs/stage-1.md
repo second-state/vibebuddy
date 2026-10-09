@@ -6,7 +6,7 @@ Accepted: 2026-09-14 (Asia/Singapore)
 
 Stage 1 **has passed on-device acceptance**. The evidence chain is Mac Studio → `/dev/cu.usbmodem8401` → ESP32-S3 native USB Serial/JTAG → `vibebuddy-fw` → cJSON parse → result returned over USB; not a local simulation, and not merely a successful build.
 
-This stage did not initialize the LCD, audio, microphone, buzzer or buttons. After flashing, the LCD kept showing the Wi-Fi setup page last left by the original Xiaozhi firmware. This does not mean the old firmware is still running: the LCD controller's frame memory and the backlight persist across an ESP32 software reset, and the Stage 1 firmware does not overwrite the screen. Repeating Serial Hello afterwards still passed, which directly proves the Vibe Buddy firmware is what is running. Clearing the LCD and the new UI must wait for Stage 3 and vendor hardware evidence.
+This stage did not initialize the LCD, audio, microphone, buzzer or buttons. After flashing, the LCD kept showing the Wi-Fi setup page last left by the original Xiaozhi firmware. This does not mean the old firmware is still running: the LCD controller's frame memory and the backlight persist across an ESP32 software reset, and the Stage 1 firmware does not overwrite the screen. Repeating Serial Hello afterwards still passed, which directly proves the VibeBuddy firmware is what is running. Clearing the LCD and the new UI must wait for Stage 3 and vendor hardware evidence.
 
 ## Build
 
@@ -25,7 +25,7 @@ Build and flash entry point:
 
 ## Factory firmware backup
 
-Before writing Vibe Buddy, the full 16 MiB Flash was read out with `esptool read_flash`:
+Before writing VibeBuddy, the full 16 MiB Flash was read out with `esptool read_flash`:
 
 - Local file: `.probe/factory/atk-dnesp32s3-box-v1.1-xiaozhi-1.9.4-2026-09-14.bin`
 - Size: 16,777,216 bytes.
@@ -83,6 +83,6 @@ PASS protocol error, version, extension, CRLF, and size handling
 
 ## Not proven
 
-- This acceptance does not prove that Vibe Buddy can drive the LCD, audio, buzzer, buttons or TF card.
+- This acceptance does not prove that VibeBuddy can drive the LCD, audio, buzzer, buttons or TF card.
 - This acceptance did not implement `vibebuddyd`, the HTTP API or serial reconnect; those belong to Stage 2.
 - The serial node number may change with macOS enumeration, so the future daemon must not hard-code `usbmodem8401`; it should discover the device by VID/PID and USB serial.

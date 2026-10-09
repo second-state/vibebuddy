@@ -1,4 +1,4 @@
-//! The hardware-independent part of the Vibe Buddy firmware.
+//! The hardware-independent part of the VibeBuddy firmware.
 //!
 //! The device layer (`firmware-rs/device`, esp-hal + embassy) only wires pins, I2C, I2S, the LCD,
 //! the serial port and flash onto [`firmware::Board`]; the state machine, drawing, protocol handling,

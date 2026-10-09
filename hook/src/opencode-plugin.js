@@ -1,4 +1,4 @@
-// Vibe Buddy: tells the box what OpenCode is doing. Written by Vibe Buddy; remove it from its Agents settings.
+// VibeBuddy: tells the box what OpenCode is doing. Written by VibeBuddy; remove it from its Agents settings.
 // Everything goes through vibebuddy-hook, which keeps only session ids, the working directory and its own
 // verdict on the last reply: prompts and replies never leave this machine.
 const HOOK = __HOOK__;
@@ -18,7 +18,7 @@ export const VibeBuddy = async ({ directory }) => {
       hook.stdin.write(JSON.stringify({ event, session_id: sessionID, turn_id: turns.get(sessionID), cwd: directory, ...extra }));
       hook.stdin.end();
     } catch {
-      // Vibe Buddy isn't installed any more, or can't run: OpenCode carries on regardless.
+      // VibeBuddy isn't installed any more, or can't run: OpenCode carries on regardless.
     }
   };
 

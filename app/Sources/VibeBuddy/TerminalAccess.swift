@@ -2,7 +2,7 @@ import AppKit
 import CoreServices
 
 /// Automation access to the terminals whose tabs K2 can go to: the daemon drives them with AppleScript, and macOS
-/// asks about that on Vibe Buddy's behalf. Asking from the Agents tab first keeps the prompt from popping up the
+/// asks about that on VibeBuddy's behalf. Asking from the Agents tab first keeps the prompt from popping up the
 /// first time the user presses K2, on the box, away from the Mac.
 enum TerminalAccess {
     enum State {

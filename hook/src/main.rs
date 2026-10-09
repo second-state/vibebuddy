@@ -75,7 +75,7 @@ fn main() {
         }
         return;
     }
-    // `vibebuddy-hook agent-file opencode [hook path]`: prints the file Vibe Buddy owns in that agent's config, for
+    // `vibebuddy-hook agent-file opencode [hook path]`: prints the file VibeBuddy owns in that agent's config, for
     // the Mac app to show and write. The hook path defaults to this binary.
     if agent == "agent-file" {
         let mut args = std::env::args().skip(2);
@@ -121,7 +121,7 @@ fn main() {
         },
         _ => {
             eprintln!("usage: vibebuddy-hook codex|claude|opencode|copilot|pi <event>  (reads the hook payload from stdin)");
-            eprintln!("       vibebuddy-hook agent-file opencode|copilot|pi [hook path]  (prints the file Vibe Buddy owns there)");
+            eprintln!("       vibebuddy-hook agent-file opencode|copilot|pi [hook path]  (prints the file VibeBuddy owns there)");
             eprintln!("       vibebuddy-hook install|uninstall  (adds or removes the hooks, where there is no app)");
             return;
         }

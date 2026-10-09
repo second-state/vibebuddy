@@ -1,6 +1,6 @@
-# Contributing to Vibe Buddy
+# Contributing to VibeBuddy
 
-Thanks for your interest in Vibe Buddy. Bug reports, fixes, new agent integrations, voices and translations are all welcome.
+Thanks for your interest in VibeBuddy. Bug reports, fixes, new agent integrations, voices and translations are all welcome.
 
 ## Reporting bugs and ideas
 

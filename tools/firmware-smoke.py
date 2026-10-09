@@ -2,7 +2,7 @@
 """Smoke check for new firmware on a real box: what the serial line can decide is checked automatically; what
 needs eyes or ears is asked one item at a time.
 
-Usage (quit the Vibe Buddy app first so it releases the serial port):
+Usage (quit the VibeBuddy app first so it releases the serial port):
     uv run --with pyserial python tools/firmware-smoke.py /dev/cu.usbmodemXXXX
 
 It checks, in order: the handshake and build ID, serial integrity on a long line, how the four states are shown

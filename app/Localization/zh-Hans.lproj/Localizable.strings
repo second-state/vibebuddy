@@ -11,7 +11,7 @@
 "This is the box" = "就是这台";
 "Choosing the box was rejected (%lld)" = "选择盒子未被接受（%lld）";
 "Only looking at %@, set by %@." = "只在 %@ 上找盒子（由 %@ 指定）。";
-"To find the box on its own again, run `launchctl unsetenv %@` in Terminal, then restart Vibe Buddy." = "要让它重新自动找盒子，在终端里运行 `launchctl unsetenv %@`，然后重启 Vibe Buddy。";
+"To find the box on its own again, run `launchctl unsetenv %@` in Terminal, then restart VibeBuddy." = "要让它重新自动找盒子，在终端里运行 `launchctl unsetenv %@`，然后重启 VibeBuddy。";
 "To find the box on its own again, unset %@ and restart the daemon." = "要让它重新自动找盒子，取消 %@ 后重启 daemon。";
 "On duty" = "值班";
 "Pomodoro" = "番茄钟";
@@ -23,7 +23,7 @@
 "Settings…" = "设置…";
 "Check for Updates…" = "检查更新…";
 "Report a Problem…" = "报告问题…";
-"Hide Vibe Buddy" = "隐藏 Vibe Buddy";
+"Hide VibeBuddy" = "隐藏 VibeBuddy";
 "Edit" = "编辑";
 "Cut" = "剪切";
 "Copy" = "拷贝";
@@ -32,24 +32,24 @@
 "Window" = "窗口";
 "Close" = "关闭";
 "Minimize" = "最小化";
-"Quit Vibe Buddy (the box goes offline)" = "退出 Vibe Buddy（盒子将离线）";
+"Quit VibeBuddy (the box goes offline)" = "退出 VibeBuddy（盒子将离线）";
 "Quit" = "退出";
 
 /* Windows and alerts */
-"Vibe Buddy Settings" = "Vibe Buddy 设置";
-"Welcome to Vibe Buddy" = "欢迎使用 Vibe Buddy";
+"VibeBuddy Settings" = "VibeBuddy 设置";
+"Welcome to VibeBuddy" = "欢迎使用 VibeBuddy";
 "Found an old vibebuddyd background service" = "发现旧的 vibebuddyd 后台服务";
 "A daemon is already running on port 7331" = "7331 端口已经有 daemon 在跑";
-"Vibe Buddy now manages its own daemon, and two daemons would fight over the serial port. Remove the old one and take over?" = "Vibe Buddy 现在自己看管 daemon，两个 daemon 会抢串口。卸掉旧的并接管吗？";
+"VibeBuddy now manages its own daemon, and two daemons would fight over the serial port. Remove the old one and take over?" = "VibeBuddy 现在自己看管 daemon，两个 daemon 会抢串口。卸掉旧的并接管吗？";
 "Remove and take over" = "卸载并接管";
 "Later" = "稍后";
 
 /* Notifications and errors */
 "The daemon failed to start three times in a row. Click the menu bar icon to restart it." = "daemon 连续三次启动失败，点菜单栏图标重启。";
 "Codex hook config updated" = "Codex 的 Hook 配置更新了";
-"Vibe Buddy rewrote ~/.codex/hooks.json. Codex silently disables hooks that change: type /hooks in Codex and re-trust them so the box keeps getting Codex events." = "Vibe Buddy 改写了 ~/.codex/hooks.json。Codex 会静默停用改过的 hook，请在 Codex 里输入 /hooks 重新信任，盒子才收得到 Codex 的事。";
+"VibeBuddy rewrote ~/.codex/hooks.json. Codex silently disables hooks that change: type /hooks in Codex and re-trust them so the box keeps getting Codex events." = "VibeBuddy 改写了 ~/.codex/hooks.json。Codex 会静默停用改过的 hook，请在 Codex 里输入 /hooks 重新信任，盒子才收得到 Codex 的事。";
 "Box disconnected" = "盒子断开了";
-"Vibe Buddy hasn't seen the box for 30 seconds. Check the USB cable." = "Vibe Buddy 已经 30 秒没找到盒子，检查一下 USB 线。";
+"VibeBuddy hasn't seen the box for 30 seconds. Check the USB cable." = "VibeBuddy 已经 30 秒没找到盒子，检查一下 USB 线。";
 "Couldn't change Launch at login: %@" = "登录时启动设置失败：%@";
 "This app has no voice pack for %@" = "App 里没有 %@ 的语音包";
 "Couldn't unzip %@" = "解不开 %@";
@@ -104,7 +104,7 @@
 
 /* Settings: Agents */
 "Connect agents" = "接入 Agent";
-"Vibe Buddy only forwards session IDs, event names and working directories — never prompts or replies." = "Vibe Buddy 只转发会话标识、事件名和工作目录，不转发 prompt 与回复。";
+"VibeBuddy only forwards session IDs, event names and working directories — never prompts or replies." = "VibeBuddy 只转发会话标识、事件名和工作目录，不转发 prompt 与回复。";
 "This writes user-level config, so one install covers both the desktop app's sessions and the same agent running in a terminal." = "写的是用户级配置，装一次两处都算数：桌面应用里的会话，和终端里跑的同一个 Agent。";
 "Repair" = "修复";
 "Remove" = "移除";
@@ -112,7 +112,7 @@
 "%@ wasn't found on this Mac" = "这台 Mac 上没找到 %@";
 "%@ wasn't found on this computer" = "这台电脑上没找到 %@";
 "Not set up" = "未接入";
-"The config changed at %@ and no Codex event has arrived since. Codex silently disables hooks that change: type /hooks in Codex and re-trust Vibe Buddy's six hooks." = "配置在 %@ 改过，之后没收到过 Codex 事件。Codex 会静默停用改过的 hook：在 Codex 里输入 /hooks，把 Vibe Buddy 的六条重新信任。";
+"The config changed at %@ and no Codex event has arrived since. Codex silently disables hooks that change: type /hooks in Codex and re-trust VibeBuddy's six hooks." = "配置在 %@ 改过，之后没收到过 Codex 事件。Codex 会静默停用改过的 hook：在 Codex 里输入 /hooks，把 VibeBuddy 的六条重新信任。";
 "Last event %@" = "最近一次事件 %@";
 "Waiting for the first event… (Codex only runs this config after you trust it in /hooks)" = "等待第一次事件…（Codex 要先在 /hooks 里信任这份配置才会运行它）";
 "Waiting for the first event…" = "等待第一次事件…";
@@ -125,8 +125,8 @@
 /* Settings: Device */
 "Link" = "链路";
 "Box firmware" = "盒子固件";
-"The box isn't running Vibe Buddy firmware." = "盒子跑的不是 Vibe Buddy 固件。";
-"Flash Vibe Buddy firmware" = "刷入 Vibe Buddy 固件";
+"The box isn't running VibeBuddy firmware." = "盒子跑的不是 VibeBuddy 固件。";
+"Flash VibeBuddy firmware" = "刷入 VibeBuddy 固件";
 "Before retrying, hold K0 on the box and replug the cable to put it in download mode." = "重试前可以按住盒子的 K0 再插一次线，让它进入下载模式。";
 "Retry" = "重试";
 "Flash from file…" = "从文件刷入…";
@@ -147,7 +147,7 @@
 "Flash" = "刷入";
 "The box restarts once; its voice pack and today's stats are kept. Over the UART bridge this takes a few minutes." = "盒子会重启一次，语音包和当日战绩都保留。UART 桥上大约要几分钟。";
 "Update" = "更新";
-"Flash the box with Vibe Buddy?" = "把盒子刷成 Vibe Buddy？";
+"Flash the box with VibeBuddy?" = "把盒子刷成 VibeBuddy？";
 "The box's current firmware and data will be erased and can't be recovered. It restarts on its own when done; over the UART port this takes a few minutes." = "盒子里现有的固件和数据会被清掉，无法恢复。刷完盒子自动重启，UART 口上大约要几分钟。";
 
 /* Settings: Advanced */
@@ -169,22 +169,22 @@
 "Not now" = "先不接";
 "Next" = "下一步";
 "Get started" = "开始使用";
-"Vibe Buddy turns what Codex and Claude Code are doing into pictures and sounds on the box." = "Vibe Buddy 把 Codex 和 Claude Code 的状态变成盒子上的画面和声音。";
+"VibeBuddy turns what Codex and Claude Code are doing into pictures and sounds on the box." = "VibeBuddy 把 Codex 和 Claude Code 的状态变成盒子上的画面和声音。";
 "Next: plug in the box, connect your agents, pick an announcement voice, and choose whether to launch at login. Everything can be changed or skipped." = "接下来几步：插上盒子，接入 Agent，挑一个播报音色，决定要不要开机就启动。都能改，都能跳过。";
 "Connect the box to this Mac with a USB cable." = "把盒子用 USB 线插到这台 Mac。";
-"Flashing Vibe Buddy firmware…" = "正在刷入 Vibe Buddy 固件…";
+"Flashing VibeBuddy firmware…" = "正在刷入 VibeBuddy 固件…";
 "Hold K0 on the box and replug the cable to put it in download mode, then retry." = "按住盒子的 K0 再插一次线，让它进入下载模式，然后重试。";
 "The box screen stays dark for a few minutes — don't unplug it. It restarts on its own when done, and this page will show it as found." = "盒子屏幕会黑几分钟，别拔线。刷完它自动重启，这里会变成「找到了」。";
-"Found a box (%@), but it isn't running Vibe Buddy firmware." = "找到盒子（%@），但它跑的不是 Vibe Buddy 固件。";
+"Found a box (%@), but it isn't running VibeBuddy firmware." = "找到盒子（%@），但它跑的不是 VibeBuddy 固件。";
 "This erases the box's current firmware and data for good. If the native USB port doesn't find the box, use its UART port instead." = "会清掉盒子里现有的固件与数据，无法恢复。原生 USB 口找不到盒子时，改接盒子的 UART 口。";
 "Found it: %@" = "找到了：%@";
 "Make it blink" = "让它眨一下眼";
 "If the backlight flashes, that's the one." = "盒子背光闪了就是它。";
 "Not showing up? Use a cable that carries data, not just power, and click Allow if macOS asks whether to let the accessory connect." = "没出现？换一根能传数据的线（有的线只能充电），macOS 问是否允许配件连接时点「允许」。";
-"Still nothing? Hold K0 on the box while you plug in the cable, then click Allow. The box starts in download mode with a dark screen, ready to be flashed with Vibe Buddy firmware." = "还是不行？按住盒子的 K0 再插线，然后点「允许」。盒子会以下载模式启动，屏幕不亮，接着刷入 Vibe Buddy 固件即可。";
+"Still nothing? Hold K0 on the box while you plug in the cable, then click Allow. The box starts in download mode with a dark screen, ready to be flashed with VibeBuddy firmware." = "还是不行？按住盒子的 K0 再插线，然后点「允许」。盒子会以下载模式启动，屏幕不亮，接着刷入 VibeBuddy 固件即可。";
 "Not showing up? Use a cable that carries data, not just power." = "没出现？换一根能传数据的线（有的线只能充电）。";
 "If the daemon log on the Advanced tab says “Permission denied”, your account can't open the box's port yet: restart the computer once, then replug the box." = "如果「高级」页的 daemon 日志里有 “Permission denied”，说明你的账户还打不开盒子的串口：重启一次电脑，再重新插上盒子。";
-"Still nothing? Hold K0 on the box while you plug in the cable. The box starts in download mode with a dark screen, ready to be flashed with Vibe Buddy firmware." = "还是不行？按住盒子的 K0 再插线。盒子会以下载模式启动，屏幕不亮，接着刷入 Vibe Buddy 固件即可。";
+"Still nothing? Hold K0 on the box while you plug in the cable. The box starts in download mode with a dark screen, ready to be flashed with VibeBuddy firmware." = "还是不行？按住盒子的 K0 再插线。盒子会以下载模式启动，屏幕不亮，接着刷入 VibeBuddy 固件即可。";
 "No box yet — this updates once you plug it in." = "还没找到盒子，插上后这里会变。";
 "Starting the daemon…" = "daemon 正在启动…";
 "Connect your agents so their progress shows up on the box." = "接入 Agent：让它们的进展传到盒子上。";
@@ -192,15 +192,15 @@
 "Pick an announcement voice." = "挑一个播报音色。";
 "The box's built-in voice speaks English (Jessica); pick a Chinese voice above to hear announcements in Chinese." = "盒子内置的是英文音色（Jessica）；想听中文播报，在上面挑一个中文音色。";
 "If you skip this, the box uses its built-in voice, Jessica (English)." = "不选就用盒子内置的英文音色 Jessica。";
-"Start Vibe Buddy automatically when you log in?" = "登录时自动启动 Vibe Buddy？";
+"Start VibeBuddy automatically when you log in?" = "登录时自动启动 VibeBuddy？";
 "macOS may say a background item was added — that's expected." = "系统可能会提示「已添加后台项目」，那是 macOS 的正常提示。";
 "All set." = "好了。";
-"Vibe Buddy lives in the menu bar: the icon is the buddy's face, with its eyes open while the box is online. To change anything, choose Settings… from its menu, or open Vibe Buddy again." = "Vibe Buddy 住在菜单栏里：图标是氛围小助手的脸，盒子在线时睁着眼。想改什么，点菜单里的「设置…」，或者再打开一次 Vibe Buddy。";
+"VibeBuddy lives in the menu bar: the icon is the buddy's face, with its eyes open while the box is online. To change anything, choose Settings… from its menu, or open VibeBuddy again." = "VibeBuddy 住在菜单栏里：图标是氛围小助手的脸，盒子在线时睁着眼。想改什么，点菜单里的「设置…」，或者再打开一次 VibeBuddy。";
 
 /* Language */
 "Language" = "语言";
 "System" = "跟随系统";
-"Restart Vibe Buddy to change the language?" = "重启 Vibe Buddy 以切换语言？";
+"Restart VibeBuddy to change the language?" = "重启 VibeBuddy 以切换语言？";
 "The box goes offline for a few seconds while the app restarts." = "重启期间盒子会离线几秒。";
 "Also switch the box's voice to %@ (a few minutes over the UART bridge; keep it plugged in)" = "同时把盒子的播报音色换成 %@（走 UART 桥要几分钟，期间别拔线）";
 "Also switch the box's voice to %@" = "同时把盒子的播报音色换成 %@";
@@ -229,12 +229,12 @@
 "Check now" = "立即检查";
 "Off" = "已关闭";
 "Last check failed: %@" = "上次检查失败：%@";
-"Vibe Buddy %@ is available" = "Vibe Buddy %@ 已发布";
+"VibeBuddy %@ is available" = "VibeBuddy %@ 已发布";
 "Not checked yet" = "还没检查过";
 "Up to date · checked %@" = "已是最新 · %@检查";
 "Download %@" = "下载 %@";
 "Update check was rejected (%@)" = "检查更新被拒绝（%@）";
-"This version of Vibe Buddy is no longer supported. Update it to keep getting firmware for the box." = "这个版本的 Vibe Buddy 已不再受支持。请更新，才能继续为盒子获取固件。";
+"This version of VibeBuddy is no longer supported. Update it to keep getting firmware for the box." = "这个版本的 VibeBuddy 已不再受支持。请更新，才能继续为盒子获取固件。";
 "Latest firmware" = "最新固件";
 "Update to %@" = "更新到 %@";
 "Update the box firmware to %@?" = "把盒子固件更新到 %@？";
@@ -245,7 +245,7 @@
 "Downloading the firmware…" = "正在下载固件…";
 "Looking for firmware…" = "正在查找固件…";
 "Check again" = "再检查一次";
-"Update checks are off, so Vibe Buddy can't download firmware." = "检查更新已关闭，Vibe Buddy 没法下载固件。";
+"Update checks are off, so VibeBuddy can't download firmware." = "检查更新已关闭，VibeBuddy 没法下载固件。";
 "Or download the firmware zip yourself and use Flash from file… on the Device tab:" = "也可以自己下载固件 zip，然后在设备页用「从文件刷入…」：";
 "Releases" = "发布页";
 "To upgrade, download the new release and run its install.sh again." = "升级方法：下载新版本，再运行一次它的 install.sh。";
@@ -260,6 +260,6 @@
 "Allow…" = "允许…";
 "Allowed" = "已允许";
 "Not allowed yet" = "尚未允许";
-"Denied. Turn Vibe Buddy back on for %@ under Privacy & Security → Automation." = "已被拒绝。请在“隐私与安全性 → 自动化”里，重新打开 Vibe Buddy 对 %@ 的权限。";
+"Denied. Turn VibeBuddy back on for %@ under Privacy & Security → Automation." = "已被拒绝。请在“隐私与安全性 → 自动化”里，重新打开 VibeBuddy 对 %@ 的权限。";
 "Not checked yet: macOS only answers while %@ is running" = "尚未检查：%@ 运行时 macOS 才会给出结果";
 "Default" = "默认";

@@ -1,4 +1,4 @@
-# Vibe Buddy Stage 0: ALIENTEK ESP32-S3 hardware fact check
+# VibeBuddy Stage 0: ALIENTEK ESP32-S3 hardware fact check
 
 > Research date: 2026-09-13  
 > Evidence scope: the ALIENTEK website, official wiki and official GitHub, plus Espressif's official docs and repositories. Third-party projects appear only under "Unofficial implementation references" and are not used to confirm any hardware fact.
@@ -40,7 +40,7 @@ Everything below holds only for the development board covered by ALIENTEK's offi
 
 - The official repository contains the schematic, ESP-IDF/Arduino/MicroPython examples, firmware and tools. [Repository README](https://github.com/openedv/ATK-DNESP32S3-Board/blob/c7434a3da5b9e6feda05added5d6a686f1c95f13/README.md)
 - The official schematic revision is `ATK_DNESP32S3 V1.2`. [Schematic PDF](https://github.com/openedv/ATK-DNESP32S3-Board/blob/c7434a3da5b9e6feda05added5d6a686f1c95f13/1_docs/1_sch/ATK_DNESP32S3%20V1.2.pdf)
-- The repository is not a centralized board package like those in Espressif's `esp-bsp`; its ESP-IDF examples keep the vendor drivers under each example's `components/BSP`. These can be extracted into a Vibe Buddy board adaptation layer, but we would have to settle versions, dependencies and test boundaries ourselves. [BSP directory of the I2C expander example](https://github.com/openedv/ATK-DNESP32S3-Board/tree/c7434a3da5b9e6feda05added5d6a686f1c95f13/2_examples/1_ESP_IDF/1_basic_routines/09_iic_exio/components/BSP)
+- The repository is not a centralized board package like those in Espressif's `esp-bsp`; its ESP-IDF examples keep the vendor drivers under each example's `components/BSP`. These can be extracted into a VibeBuddy board adaptation layer, but we would have to settle versions, dependencies and test boundaries ourselves. [BSP directory of the I2C expander example](https://github.com/openedv/ATK-DNESP32S3-Board/tree/c7434a3da5b9e6feda05added5d6a686f1c95f13/2_examples/1_ESP_IDF/1_basic_routines/09_iic_exio/components/BSP)
 
 ### Buttons and buzzer
 
@@ -113,7 +113,7 @@ These are ESP32-S3 chip capabilities; they do not by themselves prove that a giv
 - ESP-IDF's TinyUSB device stack can implement CDC, HID, MIDI, MSC, Vendor and composite devices; CDC-ACM is an application-level USB serial implementation. [Espressif USB Device Stack docs](https://docs.espressif.com/projects/esp-idf/en/stable/esp32s3/api-reference/peripherals/usb_device.html)
 - When flashing over the chip's native USB for the first time, if automatic download does not kick in, the official procedure is to hold BOOT, press RESET once, then release BOOT. [Espressif serial connection docs](https://docs.espressif.com/projects/esp-idf/en/stable/esp32s3/get-started/establish-serial-connection.html)
 
-For Vibe Buddy, "one USB-C cable handling power, flashing, logs and the runtime NDJSON serial link" is feasible as far as the chip goes, provided that:
+For VibeBuddy, "one USB-C cable handling power, flashing, logs and the runtime NDJSON serial link" is feasible as far as the chip goes, provided that:
 
 1. the device's USB-C really connects to the native USB on GPIO19/20, not only to a CH340C;
 2. the firmware picks one explicit link, either the USB Serial/JTAG console or TinyUSB CDC;
@@ -131,7 +131,7 @@ Neither repository in this section is official ALIENTEK or Espressif material, s
 Worth borrowing:
 
 - It organizes device firmware with Rust + ESP-IDF and selects an integrated BOX configuration through a Cargo feature; the README shows the `espflash` build/flash flow. [Project README](https://github.com/second-state/echokit_box/blob/4484efca885c2ffd01ffb1acdbb5817421583bd8/README.md)
-- `atom_box.rs` gathers the screen, audio, buttons, I2C/I/O expander and so on into a single board implementation. Vibe Buddy can borrow this structure: business logic never references raw GPIOs, and board differences are encapsulated in a board profile. [Board implementation](https://github.com/second-state/echokit_box/blob/4484efca885c2ffd01ffb1acdbb5817421583bd8/src/boards/atom_box.rs)
+- `atom_box.rs` gathers the screen, audio, buttons, I2C/I/O expander and so on into a single board implementation. VibeBuddy can borrow this structure: business logic never references raw GPIOs, and board differences are encapsulated in a board profile. [Board implementation](https://github.com/second-state/echokit_box/blob/4484efca885c2ffd01ffb1acdbb5817421583bd8/src/boards/atom_box.rs)
 - Its concurrency layout for the framebuffer, audio task and button task is worth referencing, but timing, buffers and pins must be re-verified against the target board's official material and on-device tests.
 
 Not usable as a source: the HAL drivers the project bundles or modifies, and the I2C, I2S, LCD and I/O expander pins in `atom_box.rs`. Even where comments mention ALIENTEK or ESP32S3 BOX, these are only a third-party implementation's claims. They differ clearly from the confirmed BOX3/DNESP32S3 pins above, which is exactly why the name "ESP32S3 BOX" is not enough to identify the hardware.
@@ -140,7 +140,7 @@ Not usable as a source: the HAL drivers the project bundles or modifies, and the
 
 Worth borrowing: the device/server layering, WebSocket sessions, and the engineering organization of ASR→LLM→TTS orchestration with configurable providers. [Project README](https://github.com/second-state/echokit_server/blob/d1d976596f122976095b7da4df3e946baf152b96/README.md)
 
-Not usable as a source: this is a higher-level voice agent server and provides no official hardware evidence for ALIENTEK carrier boards. If Vibe Buddy v1 uses a local daemon + USB NDJSON, WebSocket and a full cloud voice pipeline should not be brought in without validated requirements.
+Not usable as a source: this is a higher-level voice agent server and provides no official hardware evidence for ALIENTEK carrier boards. If VibeBuddy v1 uses a local daemon + USB NDJSON, WebSocket and a full cloud voice pipeline should not be brought in without validated requirements.
 
 ## Pending confirmation on the device / silkscreen
 
@@ -169,7 +169,7 @@ Until the device is confirmed, keep the following items **unconfirmed**:
 
 - **If confirmed as BOX3**: ALIENTEK's official environment docs explicitly require ESP-IDF `v5.3.x` or later for its ESP32-S3 examples, and the current documentation package ships a `v5.5.3` offline installer. [Official BOX3 installation notes](https://github.com/openedv/openedv-wiki-boards-dnesp32s3b3/blob/c6f9797b64aef2666547206b4b274017d6d28a3d/set-up-development-environment/esp-idf-install.md)
 - **If confirmed as the DNESP32S3 development board or the older BOX**: the official DNESP32S3 repository we found does not declare a reproducible minimum or pinned ESP-IDF version, and the exact package for the older BOX has not been obtained. So BOX3's `>=5.3.x` requirement cannot be extrapolated to them. [Official DNESP32S3 development notes](https://github.com/openedv/ATK-DNESP32S3-Board/blob/c7434a3da5b9e6feda05added5d6a686f1c95f13/1_docs/Developing_With_ESP_IDF.md)
-- **Vibe Buddy's selection rule**: do not track `latest` or `master`. First pick a pinned release tag within the exact board's official minimum supported line; a candidate version can be locked only after both the vendor's original examples and Vibe Buddy's minimal probe pass "build, flash, reboot, USB re-enumeration, LCD, touch, buttons, audio capture and playback". Espressif also explicitly recommends that projects depending on ESP-IDF follow that project's own compatibility notes first. [Espressif ESP-IDF versions](https://docs.espressif.com/projects/esp-idf/en/latest/esp32/versions.html)
+- **VibeBuddy's selection rule**: do not track `latest` or `master`. First pick a pinned release tag within the exact board's official minimum supported line; a candidate version can be locked only after both the vendor's original examples and VibeBuddy's minimal probe pass "build, flash, reboot, USB re-enumeration, LCD, touch, buttons, audio capture and playback". Espressif also explicitly recommends that projects depending on ESP-IDF follow that project's own compatibility notes first. [Espressif ESP-IDF versions](https://docs.espressif.com/projects/esp-idf/en/latest/esp32/versions.html)
 - **Current recommendation**: if the device is BOX3, use `v5.5.3` from the official material as the first reproduction baseline, then separately verify the latest bugfix tag in the same `release/v5.5` series; do not move to ESP-IDF 6.x without a full regression. If it is not BOX3, do not freeze the IDF version until the matching documentation package is in hand.
 
 ## Suggested next steps
@@ -179,4 +179,4 @@ Until the device is confirmed, keep the following items **unconfirmed**:
 3. **Do a read-only enumeration**: on the Mac Studio, record each USB port's VID/PID, product name, serial node and re-enumeration behavior, then decide on the flashing/runtime link.
 4. **Build a minimal hardware probe firmware**: verify only serial, the three buttons, buzzer, LCD color blocks, touch coordinates, MIC level, speaker sine wave and TF mount; for each item, start with the candidate BSP, then cross-check with a logic analyzer/oscilloscope and on-device behavior.
 5. **Set up board isolation**: the code must distinguish at least `dnesp32s3_devboard`, `dnesp32s3_box3` and `unknown_legacy_box`, and must refuse to pick a default GPIO table while the model is unconfirmed.
-6. **Freeze the Vibe Buddy interface last**: only after the hardware probe passes, settle the flashing, logging and NDJSON lifecycle over the single USB cable, and transcribe the verified pin table into `docs/hardware.md`.
+6. **Freeze the VibeBuddy interface last**: only after the hardware probe passes, settle the flashing, logging and NDJSON lifecycle over the single USB cable, and transcribe the verified pin table into `docs/hardware.md`.

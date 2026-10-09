@@ -39,9 +39,9 @@ fn render(app: &Download, min_supported_app: &str, signature: &str, length: usiz
         r#"<?xml version="1.0" encoding="utf-8"?>
 <rss version="2.0" xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle">
   <channel>
-    <title>Vibe Buddy</title>
+    <title>VibeBuddy</title>
     <item>
-      <title>Vibe Buddy {short}</title>
+      <title>VibeBuddy {short}</title>
       <sparkle:version>{version}</sparkle:version>
       <sparkle:shortVersionString>{short}</sparkle:shortVersionString>
       <sparkle:minimumSystemVersion>{MINIMUM_SYSTEM}</sparkle:minimumSystemVersion>

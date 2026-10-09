@@ -107,12 +107,12 @@ jobs:
 
           ## Download
 
-          Vibe Buddy downloads this firmware by itself and offers it on the Device tab. To flash it by hand, pick \`VibeBuddy-firmware-${{ needs.build.outputs.label }}.zip\` with Settings → Device → Flash from file….
+          VibeBuddy downloads this firmware by itself and offers it on the Device tab. To flash it by hand, pick \`VibeBuddy-firmware-${{ needs.build.outputs.label }}.zip\` with Settings → Device → Flash from file….
           NOTES
           # Never "latest": the README's download links point at the latest release, which must stay the App's.
           gh release create "${tag}" --repo "${GITHUB_REPOSITORY}" \
             "VibeBuddy-firmware-${{ needs.build.outputs.label }}.zip" \
-            --title "Vibe Buddy firmware ${{ needs.build.outputs.label }}" \
+            --title "VibeBuddy firmware ${{ needs.build.outputs.label }}" \
             --notes-file notes.md \
             --latest=false
 
