@@ -17,6 +17,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // A second copy of the app (another path, a dev build) would start a second daemon that fights over
         // the port and the serial port. Hand off to the running one and quit before starting anything.
         if SingleInstance.handOffToRunningCopy() { exit(0) }
+        // An installed copy with the old file name renames itself (or gives way to a new copy) and starts again.
+        if BundleRename.migrateIfNeeded() { exit(0) }
         DistributedNotificationCenter.default().addObserver(forName: SingleInstance.showSettings, object: nil, queue: .main) { [weak self] _ in
             MainActor.assumeIsolated { self?.showMainWindow() }
         }
@@ -195,16 +197,81 @@ enum SingleInstance {
     static let showSettings = Notification.Name("com.vibebuddy.app.showSettings")
 
     /// If another copy is already running, ask it to open Settings and return true: this one should quit.
+    /// A copy still running under the old bundle name is outdated instead: it is asked to quit (stopping its daemon),
+    /// and this one takes over.
     @MainActor
     static func handOffToRunningCopy() -> Bool {
         guard let bundleID = Bundle.main.bundleIdentifier,
               let other = NSRunningApplication.runningApplications(withBundleIdentifier: bundleID)
                 .first(where: { $0.processIdentifier != getpid() }) else { return false }
+        if other.bundleURL?.lastPathComponent == BundleName.old, Bundle.main.bundleURL.lastPathComponent == BundleName.current {
+            other.terminate()
+            let deadline = Date().addingTimeInterval(10)
+            while !other.isTerminated, Date() < deadline { RunLoop.current.run(until: Date().addingTimeInterval(0.1)) }
+            if other.isTerminated { return false }
+        }
         DistributedNotificationCenter.default().postNotificationName(showSettings, object: nil, userInfo: nil, deliverImmediately: true)
         // We were just launched by the user, so we may pass activation on to the running copy.
         NSApp.yieldActivation(to: other)
         other.activate()
         return true
+    }
+}
+
+/// Carries out `BundleName.step` for the running copy. The login item is registered by path, so it is moved over:
+/// unregistered before the bundle moves, registered again by the copy that starts from the new place.
+enum BundleRename {
+    private static let reregisterLoginItem = "reregisterLoginItemAfterRename"
+
+    /// True when this process should quit because another copy is being started.
+    @MainActor
+    static func migrateIfNeeded() -> Bool {
+        let defaults = UserDefaults.standard
+        if defaults.bool(forKey: reregisterLoginItem) {
+            defaults.removeObject(forKey: reregisterLoginItem)
+            try? LoginItem.set(enabled: true)
+        }
+        let manager = FileManager.default
+        let bundle = Bundle.main.bundleURL
+        switch BundleName.step(for: bundle, exists: { manager.fileExists(atPath: $0.path) }) {
+        case .none:
+            return false
+        case .rename(let target):
+            let login = LoginItem.isEnabled
+            if login { try? LoginItem.set(enabled: false) }
+            do {
+                try manager.moveItem(at: bundle, to: target)
+            } catch {
+                // Not ours to rename (another owner, a read-only volume): keep running under the old name.
+                if login { try? LoginItem.set(enabled: true) }
+                return false
+            }
+            defaults.set(login, forKey: reregisterLoginItem)
+            AppRelaunch.openOnceGone(target.path)
+            return true
+        case .replaceWith(let target):
+            guard isUs(target) else { return false }
+            let login = LoginItem.isEnabled
+            if login { try? LoginItem.set(enabled: false) }
+            defaults.set(login, forKey: reregisterLoginItem)
+            try? manager.trashItem(at: bundle, resultingItemURL: nil)
+            AppRelaunch.openOnceGone(target.path)
+            return true
+        case .removeOld(let stale):
+            guard isUs(stale) else { return false }
+            // The login item may still name the old copy; point it at this one before the old one goes.
+            if LoginItem.isEnabled {
+                try? LoginItem.set(enabled: false)
+                try? LoginItem.set(enabled: true)
+            }
+            try? manager.trashItem(at: stale, resultingItemURL: nil)
+            return false
+        }
+    }
+
+    /// Only a copy of this app is ever moved to the Trash, never something else that happens to have the name.
+    private static func isUs(_ url: URL) -> Bool {
+        Bundle(url: url)?.bundleIdentifier == Bundle.main.bundleIdentifier
     }
 }
 

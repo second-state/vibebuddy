@@ -280,6 +280,17 @@ let reportBody = URLComponents(url: report, resolvingAgainstBaseURL: false)?.que
 check(report.absoluteString.hasPrefix("https://github.com/second-state/vibebuddy/issues/new?body="), "report: a new issue on GitHub")
 check(reportBody?.contains("App 0.3.5 (12)\nmacOS 15.1+beta") == true && !report.absoluteString.contains("+"), "report: the versions survive the URL")
 
+// The bundle's file name moved from "Vibe Buddy.app" to "VibeBuddy.app"; only installed copies follow.
+let applications = URL(fileURLWithPath: "/Applications")
+let oldBundle = applications.appendingPathComponent(BundleName.old)
+let newBundle = applications.appendingPathComponent(BundleName.current)
+check(BundleName.step(for: oldBundle, exists: { _ in false }) == .rename(to: newBundle), "bundle: an old copy alone is renamed")
+check(BundleName.step(for: oldBundle, exists: { $0 == newBundle }) == .replaceWith(newBundle), "bundle: an old copy gives way to a new one")
+check(BundleName.step(for: newBundle, exists: { $0 == oldBundle }) == .removeOld(oldBundle), "bundle: a new copy removes the old one")
+check(BundleName.step(for: newBundle, exists: { _ in false }) == .none, "bundle: a new copy alone stays")
+let devBuild = URL(fileURLWithPath: "/Users/me/vibe-buddy/app/build").appendingPathComponent(BundleName.old)
+check(BundleName.step(for: devBuild, exists: { _ in false }) == .none, "bundle: a build outside Applications is left alone")
+
 if failures > 0 {
     print("\(failures) failure(s)")
     exit(1)

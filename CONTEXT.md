@@ -8,7 +8,7 @@ VibeBuddy turns the state of local AI agents into the picture and sound of a phy
 
 **VibeBuddy**:
 The product name, in use since 2026-09-15 and written as one word since 2026-10-09; it was previously called AgentBeacon. From 2026-09-16 all internal names followed: the repo `vibe-buddy`, the daemon `vibebuddyd`, the hook `vibebuddy-hook`, the CLI `vibebuddy`, the VibeBuddy Protocol, the bundle id `com.vibebuddy.app`, and the local directory `VibeBuddy`.
-_Avoid_: Vibe Buddy (two words, the spelling until 2026-10-09; the Mac app's bundle is still `Vibe Buddy.app`), AgentBeacon, beacond, beacon-hook (old names, only when talking about history), 氛围助手 ("vibe assistant"; that is a description, not a name)
+_Avoid_: Vibe Buddy (two words, the spelling until 2026-10-09), AgentBeacon, beacond, beacon-hook (old names, only when talking about history), 氛围助手 ("vibe assistant"; that is a description, not a name)
 
 **The buddy (氛围小助手)**:
 The only anthropomorphic presence on the device: the one who watches the Agents and speaks up for you. It is a role, not a look; at any moment it wears exactly one Character. Before 2026-09-15 it was called 小灯灵 ("little lamp sprite"); in code it is `buddy`.

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Assembles Vibe Buddy.app: the two Rust helpers, the Swift app with Sparkle, and the Character packs. Firmware isn't bundled: it is
+# Assembles VibeBuddy.app: the two Rust helpers, the Swift app with Sparkle, and the Character packs. Firmware isn't bundled: it is
 # released on its own and the daemon downloads it (ADR-0010).
 #
 # Usage: app/scripts/build-app.sh [--debug] [--install]
@@ -52,7 +52,7 @@ else
     swift_bin="${app_dir}/.build/release/VibeBuddy"
 fi
 
-bundle="${app_dir}/build/Vibe Buddy.app"
+bundle="${app_dir}/build/VibeBuddy.app"
 contents="${bundle}/Contents"
 rm -rf "${bundle}"
 mkdir -p "${contents}/MacOS" "${contents}/Frameworks" "${contents}/Resources/voices"
@@ -138,7 +138,10 @@ fi
 echo "== Done: ${bundle} (${version}, ${build_number})"
 
 if [[ ${install} -eq 1 ]]; then
-    installed="/Applications/Vibe Buddy.app"
+    # A copy installed under the bundle's old name is replaced where it is: the app renames itself on launch and
+    # moves the login item along (BundleName in VibeBuddyCore).
+    installed="/Applications/VibeBuddy.app"
+    [[ -d "/Applications/Vibe Buddy.app" && ! -d "${installed}" ]] && installed="/Applications/Vibe Buddy.app"
     echo "== Installing to ${installed}"
     # Ask a running instance to quit first (which also stops its daemon), swap the bundle, then relaunch.
     if pgrep -xq VibeBuddy; then

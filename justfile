@@ -33,7 +33,7 @@ test-firmware-c:
     tools/test-leisure.sh
     tools/test-voice-pack.sh
 
-# Build app/build/Vibe Buddy.app (needs the three firmware images first)
+# Build app/build/VibeBuddy.app (needs the three firmware images first)
 app:
     app/scripts/build-app.sh
 
