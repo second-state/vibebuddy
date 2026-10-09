@@ -1,4 +1,4 @@
-//! Maps the agents without a desktop app of their own (OpenCode, GitHub Copilot CLI) onto the generic activity
+//! Maps the agents without a desktop app of their own (OpenCode, GitHub Copilot CLI, Pi) onto the generic activity
 //! model. Their hook already turned each agent's events into the same five, so one adapter serves them all.
 
 use serde::Deserialize;
@@ -14,7 +14,7 @@ use crate::session_titles::git_branch;
 pub struct AgentHook {
     pub agent: String,
     pub session_id: String,
-    /// The turn, when the agent names it (OpenCode's prompt message); otherwise a turn is the session's latest.
+    /// The turn, when the agent names it (OpenCode's prompt message, Pi's agent run); otherwise a turn is the session's latest.
     #[serde(default)]
     pub turn_id: Option<String>,
     pub event: String,
@@ -44,6 +44,7 @@ fn card_names(agent: &str) -> Option<(&'static str, &'static str)> {
     match agent {
         "opencode" => Some(("OC:", "OPENCODE")),
         "copilot" => Some(("CP:", "COPILOT")),
+        "pi" => Some(("PI:", "PI")),
         _ => None,
     }
 }

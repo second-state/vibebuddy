@@ -140,7 +140,7 @@ check(removedHooks.keys.sorted() == ["PreToolUse"], "after removal only other ho
 let diff = HookConfig.describeChange(from: existing, to: installed, agent: .codex)
 check(diff.contains("- Stop: /usr/bin/python3 /old/codex-hook.py") && diff.contains("+ Stop: \"\(binary)\" codex"), "change description: \(diff)")
 check(HookAgent.claude.events.count == 8, "Claude has eight events")
-check(HookAgent.opencode.ownsFile && HookAgent.copilot.ownsFile && !HookAgent.codex.ownsFile, "OpenCode and Copilot get a file of their own")
+check(HookAgent.opencode.ownsFile && HookAgent.copilot.ownsFile && HookAgent.pi.ownsFile && !HookAgent.codex.ownsFile, "OpenCode, Copilot and Pi get a file of their own")
 check(HookConfig.describeOwnedFile(from: nil, to: "a\nb\n") == ["+ a", "+ b"], "writing an owned file shows every line")
 check(HookConfig.describeOwnedFile(from: "a\n", to: nil) == ["- a"], "removing an owned file shows what goes")
 check(HookConfig.describeOwnedFile(from: "a\n", to: "a\n").isEmpty, "an unchanged owned file needs no write")

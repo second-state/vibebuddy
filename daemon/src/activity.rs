@@ -139,7 +139,7 @@ pub enum ActivitySource {
         repo: String,
         run_id: u64,
     },
-    /// An agent with no desktop app to deeplink into (OpenCode, GitHub Copilot CLI): K2 can only go to where it runs.
+    /// An agent with no desktop app to deeplink into (OpenCode, GitHub Copilot CLI, Pi): K2 can only go to where it runs.
     Cli {
         agent: String,
         session_id: String,

@@ -1,5 +1,5 @@
 //! `vibebuddy-hook install` / `uninstall`: where there is no app (Linux), the hook registers itself in the
-//! user-level config of Claude Code and Codex, and writes or deletes the file it owns for OpenCode and Copilot
+//! user-level config of Claude Code and Codex, and writes or deletes the file it owns for OpenCode, Copilot and Pi
 //! (`cli_agents`). Same rules as the app's `HookConfig.swift`: only Vibe Buddy's own
 //! entries are added or removed, a `.bak` is kept, and the new file is swapped in whole.
 //!
@@ -237,7 +237,7 @@ pub fn run(installing: bool) -> Result<(), String> {
     }
     if !found {
         println!(
-            "None of Claude Code, Codex, OpenCode or GitHub Copilot CLI has run here yet. Run one once, then run this again."
+            "None of Claude Code, Codex, OpenCode, GitHub Copilot CLI or Pi has run here yet. Run one once, then run this again."
         );
     }
     Ok(())

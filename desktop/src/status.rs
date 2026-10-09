@@ -181,6 +181,7 @@ pub struct Hooks {
     pub claude: Option<String>,
     pub opencode: Option<String>,
     pub copilot: Option<String>,
+    pub pi: Option<String>,
 }
 
 /// The daemon owns this; the app only reads it and writes it back whole through `PUT /v1/config`.

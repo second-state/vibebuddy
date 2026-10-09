@@ -4,18 +4,18 @@ import Foundation
 /// Claude Code's user-level settings.json and Codex's hooks.json share one shape:
 /// `hooks.<event>: [ { hooks: [ { type: "command", command, timeout } ] } ]`.
 public enum HookAgent: String, CaseIterable {
-    case codex, claude, opencode, copilot
+    case codex, claude, opencode, copilot, pi
 
     /// The events merged into a shared config; empty for agents whose whole file Vibe Buddy owns.
     public var events: [String] {
         switch self {
         case .codex: return ["UserPromptSubmit", "PermissionRequest", "PostToolUse", "Stop", "Interrupt", "SessionEnd"]
         case .claude: return ["UserPromptSubmit", "PermissionRequest", "PostToolUse", "Stop", "StopFailure", "SubagentStart", "SubagentStop", "SessionEnd"]
-        case .opencode, .copilot: return []
+        case .opencode, .copilot, .pi: return []
         }
     }
 
-    /// OpenCode and Copilot get a file of Vibe Buddy's own in their config directory, instead of entries merged
+    /// OpenCode, Copilot and Pi get a file of Vibe Buddy's own in their config directory, instead of entries merged
     /// into the user's: connecting writes it, removing deletes it. The hook binary makes its contents.
     public var ownsFile: Bool { events.isEmpty }
 
@@ -25,6 +25,7 @@ public enum HookAgent: String, CaseIterable {
         case .claude: return "Claude Code"
         case .opencode: return "OpenCode"
         case .copilot: return "GitHub Copilot CLI"
+        case .pi: return "Pi"
         }
     }
 }
