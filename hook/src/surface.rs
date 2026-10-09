@@ -41,8 +41,9 @@ pub enum Surface {
     /// No host app: sessions started over SSH, by a daemon, or by launchd. K2 has nowhere to go.
     Headless,
     /// Outside macOS there are no bundle ids: the hook's ancestor process ids, nearest first. The daemon
-    /// looks for a window owned by one of them when K2 is pressed; finding none means headless.
-    Window(Vec<u32>),
+    /// looks for a window owned by one of them when K2 is pressed; finding none means headless. Inside tmux
+    /// those pids end at the tmux server, so the pane is reported too, and the window is the one its client runs in.
+    Window(Vec<u32>, Option<Tab>),
 }
 
 /// Where in a terminal host the session sits.
@@ -57,7 +58,8 @@ pub enum Tab {
 
 pub fn detect(own_bundle_id: &str) -> Surface {
     if !cfg!(target_os = "macos") {
-        return Surface::Window(ancestor_pids());
+        let tmux = std::env::var("TMUX").ok().zip(std::env::var("TMUX_PANE").ok());
+        return Surface::Window(ancestor_pids(), tmux.and_then(|(tmux, pane)| tmux_tab(&tmux, &pane)));
     }
     let found = std::env::var(BUNDLE_ID)
         .ok()
@@ -235,8 +237,12 @@ pub fn write_into(payload: &mut Map<String, Value>, surface: &Surface) {
             "host"
         }
         Surface::Headless => "headless",
-        Surface::Window(pids) => {
+        Surface::Window(pids, tab) => {
             payload.insert("host_pids".to_owned(), Value::from(pids.clone()));
+            if let Some(Tab::Tmux { socket, pane }) = tab {
+                payload.insert("tmux_socket".to_owned(), Value::String(socket.clone()));
+                payload.insert("tmux_pane".to_owned(), Value::String(pane.clone()));
+            }
             "window"
         }
     };
@@ -307,9 +313,13 @@ mod tests {
     #[test]
     fn window_pids_are_reported_for_the_daemon() {
         let mut payload = Map::new();
-        write_into(&mut payload, &Surface::Window(vec![3620, 3534]));
+        write_into(&mut payload, &Surface::Window(vec![3620, 3534], None));
         assert_eq!(payload["surface"], "window");
         assert_eq!(payload["host_pids"], serde_json::json!([3620, 3534]));
+        assert!(!payload.contains_key("tmux_pane"));
+        let tab = tmux_tab("/tmp/tmux-1000/default,4242,0", "%3");
+        write_into(&mut payload, &Surface::Window(vec![3620], tab));
+        assert_eq!((payload["tmux_socket"].as_str(), payload["tmux_pane"].as_str()), (Some("/tmp/tmux-1000/default"), Some("%3")));
     }
 
     #[test]

@@ -221,7 +221,8 @@ impl MenuState {
         let Some(status) = status else {
             return Self {
                 icon: Icon::DaemonDown,
-                device_line: tr("daemon isn't running", &[]),
+                // The tray offers to start it again: systemd may have given up after it failed to start.
+                device_line: tr("daemon not responding · click to restart", &[]),
                 mode_line: "—".to_owned(),
                 today_line: "—".to_owned(),
             };

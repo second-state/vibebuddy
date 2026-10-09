@@ -62,8 +62,13 @@ pub enum Surface {
     /// No host app: SSH, daemons, sessions started by launchd. K2 has nowhere to go.
     Headless,
     /// Outside macOS: the agent's ancestor pids, nearest first. K2 focuses the window owned by the first of
-    /// them that has one; with none (SSH, tmux) it is headless after all.
-    Window { pids: Vec<u32> },
+    /// them that has one; with none (SSH) it is headless after all. Inside tmux the pids end at the tmux server:
+    /// the pane is switched to first, and the window is the one its tmux client runs in.
+    Window {
+        pids: Vec<u32>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        tmux: Option<TmuxPane>,
+    },
 }
 
 /// A tmux pane, by the server's socket and the pane id (`%3`), as the hook read them from `$TMUX` and `$TMUX_PANE`.
@@ -105,7 +110,7 @@ impl Surface {
             },
             Some("headless") => Self::Headless,
             Some("window") => match host_pids {
-                Some(pids) if !pids.is_empty() => Self::Window { pids },
+                Some(pids) if !pids.is_empty() => Self::Window { pids, tmux },
                 _ => Self::Headless,
             },
             // Unrecognized values come from a hook newer than the daemon; treat them the old way.

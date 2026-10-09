@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Installs Vibe Buddy for the current Linux user: the binaries in ~/.local/bin, the daemon as a systemd user service,
-# the tray app in the launcher and at login, the hooks for whichever of Claude Code and Codex this machine has, and the
-# voice packs the app offers to write to the box. Run it again to upgrade.
+# the tray app in the launcher and at login, the hooks for whichever agents this machine has (Claude Code, Codex,
+# OpenCode, GitHub Copilot CLI, Pi), and the Character packs the app offers to write to the box. Run it again to upgrade.
 #
 # It works in two places. In an unpacked release (VibeBuddy-vX.Y.Z-linux-x86_64.tar.gz) everything is prebuilt and
 # nothing is downloaded. In a source checkout (packaging/linux/install.sh) it builds with cargo.
@@ -50,6 +50,8 @@ systemctl --user enable --now vibebuddyd.service
 # installed; the daemon downloads it (ADR-0010).
 assets="${data}/vibebuddy"
 mkdir -p "${assets}/voices"
+# Characters a release retired go away with it, rather than sitting next to the new ones.
+rm -f "${assets}"/voices/*.bin
 if [[ ${release} -eq 1 ]]; then
     cp "${share}"/voices/*.bin "${assets}/voices/"
 else

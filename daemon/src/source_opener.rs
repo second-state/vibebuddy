@@ -106,7 +106,15 @@ struct CommandSpec {
 
 /// On success returns the link actually opened, so the log can say where K2 went.
 pub async fn open(source: ActivitySource) -> Result<String, String> {
-    if let Some(Surface::Window { pids }) = surface_of(&source) {
+    if let Some(Surface::Window { pids, tmux }) = surface_of(&source) {
+        // Inside tmux, switch the user's client to the session's pane, then bring forward the window that client
+        // runs in; the agent's own ancestors end at the tmux server, which has none.
+        if let Some(tmux) = tmux {
+            match switch_tmux_client(tmux).await {
+                Ok((_, client)) => return focus_window(&ancestor_pids(client)).await,
+                Err(error) => tracing::info!(%error, "cannot switch tmux to the session's pane"),
+            }
+        }
         return focus_window(pids).await;
     }
     if let Some(Surface::Host { bundle_id, ttys, tmux, focus_url }) = surface_of(&source) {
@@ -351,6 +359,13 @@ fn valid_tty(tty: &str) -> bool {
 /// terminal tab the user sees tmux in, nearest first, as the hook reports them outside tmux. A client already showing the pane's session is preferred, so a
 /// client watching some other session isn't pulled away from it; otherwise the one used most recently.
 async fn focus_tmux_pane(tmux: &TmuxPane) -> Result<Vec<String>, String> {
+    let (client, pid) = switch_tmux_client(tmux).await?;
+    let ttys = controlling_ttys(pid);
+    Ok(if ttys.is_empty() { vec![client.trim_start_matches("/dev/").to_owned()] } else { ttys })
+}
+
+/// Switches a tmux client to the pane and returns that client's tty and pid.
+async fn switch_tmux_client(tmux: &TmuxPane) -> Result<(String, u32), String> {
     if !valid_tmux_pane(&tmux.pane) {
         return Err("invalid tmux pane".to_owned());
     }
@@ -365,8 +380,26 @@ async fn focus_tmux_pane(tmux: &TmuxPane) -> Result<Vec<String>, String> {
     let clients = run(program, &["-S", socket, "list-clients", "-F", "#{client_activity} #{client_tty} #{session_id} #{client_pid}"]).await?;
     let (client, pid) = tmux_client_for(&clients, session.trim()).ok_or_else(|| "no tmux client is attached".to_owned())?;
     run(program, &["-S", socket, "switch-client", "-c", &client, "-t", pane]).await?;
-    let ttys = controlling_ttys(pid);
-    Ok(if ttys.is_empty() { vec![client.trim_start_matches("/dev/").to_owned()] } else { ttys })
+    Ok((client, pid))
+}
+
+/// `pid` and its ancestors, nearest first, from `/proc`: what the hook reports for itself, here for a tmux client.
+fn ancestor_pids(mut pid: u32) -> Vec<u32> {
+    let mut pids = Vec::new();
+    while pid > 1 && pids.len() < 16 {
+        pids.push(pid);
+        let Some(parent) = std::fs::read_to_string(format!("/proc/{pid}/stat")).ok().and_then(|stat| parent_from_stat(&stat)) else {
+            break;
+        };
+        pid = parent;
+    }
+    pids
+}
+
+/// The parent pid in `/proc/<pid>/stat`. The command name in parentheses may hold spaces and parentheses, so the
+/// fields are counted from the last `)`.
+fn parent_from_stat(stat: &str) -> Option<u32> {
+    stat.rsplit_once(')')?.1.split_whitespace().nth(1)?.parse().ok()
 }
 
 /// The controlling terminals from `pid` up, nearest first: the daemon's twin of the hook's walk, for a tmux
@@ -1064,7 +1097,7 @@ mod tests {
         let source = ActivitySource::ClaudeCode {
             session_id: "s".to_owned(),
             cwd: None,
-            surface: Surface::Window { pids: vec![3534] },
+            surface: Surface::Window { pids: vec![3534], tmux: None },
         };
         assert!(command_for(&source, None).is_err());
     }
