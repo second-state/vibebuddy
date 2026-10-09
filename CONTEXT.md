@@ -202,3 +202,7 @@ _Avoid_: statistics, metrics, history
 **Needs input (需要确认)**:
 The state of an Activity that is waiting for the user to respond. It ranks above working in the global priority, because it answers "what do I most need you to do right now".
 _Avoid_: blocked, waiting, pending
+
+**Program status (程序状态)**:
+What a program says about itself to its terminal through OSC 7501: idle, working, done, blocked or error. It is a vocabulary at the edge, translated rather than adopted: blocked is Needs input (whatever its kind: permission, question or auth), working and done keep their meaning, and error, like an interrupted run's idle, ends an Activity without success.
+_Avoid_: blocked, idle or error for VibeBuddy's own states
