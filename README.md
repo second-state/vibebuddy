@@ -50,7 +50,7 @@ Pomodoro runs entirely on the box: its timer and today's tally keep going withou
 
 ## Getting started
 
-1. Download `VibeBuddy-<version>-arm64.dmg` from the [latest release](https://github.com/second-state/vibebuddy/releases/latest) and drag VibeBuddy to Applications.
+1. Install with Homebrew: `brew install --cask second-state/tap/vibebuddy`. Or download `VibeBuddy-<version>-arm64.dmg` from the [latest release](https://github.com/second-state/vibebuddy/releases/latest) and drag VibeBuddy to Applications. Either way the app then updates itself.
 2. Plug the box into the Mac.
 3. Open VibeBuddy. First-run setup walks you through:
    - finding the box (it blinks so you know it's the right one);
@@ -251,7 +251,8 @@ CI builds releases. The App and the firmware release separately (ADR-0010). [`re
 - Then releasing is one command on a clean main: `just release 0.3.0` checks that file, updates the versions in `Cargo.toml` and both lockfiles, commits, tags and pushes.
 - [`release-firmware`](.github/workflows/release-firmware.yml) builds the firmware on Linux. A `firmware-vX.Y.Z` tag publishes its own Release, never marked latest, with `VibeBuddy-firmware-vX.Y.Z.zip`: the three images, `build.txt`, `version.txt` and the firmware's license notices. That zip is what the daemon downloads, and anyone can flash it from Settings → Device → Flash from file…. The tag must match `version` in `firmware-rs/device/Cargo.toml`.
 - Before a firmware release, write `docs/releases/firmware-vX.Y.Z.md`: front matter naming the oldest App it runs with (`min_app: 0.4.0` between two `---` lines), then what it does. `just release-firmware 0.3.3` checks that file, bumps the version, commits, tags and pushes.
-- Builds are arm64 for the Mac and x86_64 for Linux. After a release, `packaging/aur/README.md` says how to update the AUR package.
+- Releasing the App and the firmware together: commit both sets of notes before either tag. Each release's manifest job checks out its own tag and needs notes for every published release, so a firmware Release whose notes came after the App's tag fails the App's manifest (v0.4.1 did; rerun `update-manifest` by hand from main to recover).
+- Builds are arm64 for the Mac and x86_64 for Linux. After a release, `packaging/aur/README.md` says how to update the AUR package. The Homebrew cask in [second-state/homebrew-tap](https://github.com/second-state/homebrew-tap) follows new releases on its own within the hour.
 
 With the five signing secrets set on the repository, releases are signed with a Developer ID and notarized, so they open straight after download. Without them the build falls back to ad-hoc signing, and the first launch has to be allowed under Privacy & Security. [`tools/setup-release-signing.sh`](tools/setup-release-signing.sh) sets the secrets up: it walks you through requesting the certificate, packing the p12 and creating an app-specific password, then checks each one before writing it to GitHub.
 

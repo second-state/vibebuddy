@@ -298,3 +298,9 @@ When one firmware line runs on more than one board, every offer to flash has to 
 Testing on the Omarchy box, `ssh box '...; pkill -f fake_daemon.py; ...'` killed the remote bash itself: `-f` matches the whole command line, and the command line of the shell running the script contains the pattern. The SSH session died with exit 255 halfway through, leaving the daemon stopped. It happened twice in one session.
 
 Over SSH, match by something the shell's own command line can't contain: a PID kept from when you started the process (`cmd & PID=$!`, then `kill $PID`), an exact executable with `pkill -x` on the process name, or put the steps in a script file and run that. After a 255, check what state the box was left in before going on.
+
+## Install from up-to-date main, not from whatever the worktree happens to hold
+
+On 2026-10-09 I had dragon run `just install` in a worktree branched before #99, which renamed the bundle to `VibeBuddy.app`. The worktree's `build-app.sh` still installed to `/Applications/Vibe Buddy.app`, so the new build landed next to the app in daily use instead of replacing it, and two copies fought over the box and port 7331.
+
+Before installing anything meant for daily use, fetch and check out `origin/main` (or confirm the branch contains it). `git log -1 origin/main` against `HEAD` takes a second; cleaning up a second app bundle does not.
