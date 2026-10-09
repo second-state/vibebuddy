@@ -204,7 +204,7 @@ jobs:
           if [[ "${SIGNED}" != "true" ]]; then
             cat >> notes.md <<'NOTES'
 
-          The macOS build isn't notarized, so Gatekeeper blocks the first launch: allow it under System Settings → Privacy & Security, or run `xattr -dr com.apple.quarantine "/Applications/Vibe Buddy.app"`.
+          The macOS build isn't notarized, so Gatekeeper blocks the first launch: allow it under System Settings → Privacy & Security, or run `xattr -dr com.apple.quarantine "/Applications/VibeBuddy.app"`.
           NOTES
           fi
           gh release create "${label}" --repo "${GITHUB_REPOSITORY}" \

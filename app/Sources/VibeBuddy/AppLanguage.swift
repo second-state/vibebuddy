@@ -49,10 +49,16 @@ enum AppRelaunch {
     /// Quit, and open this bundle again once this process is gone (a second copy started earlier would hand off to us and quit).
     @MainActor
     static func relaunch() {
+        openOnceGone(Bundle.main.bundlePath, arguments: [showSettingsArgument])
+        NSApp.terminate(nil)
+    }
+
+    /// Opens the bundle at `path` once this process has exited; the caller then quits.
+    static func openOnceGone(_ path: String, arguments: [String] = []) {
         let waiter = Process()
         waiter.executableURL = URL(fileURLWithPath: "/bin/sh")
-        waiter.arguments = ["-c", "while kill -0 \(getpid()) 2>/dev/null; do sleep 0.2; done; /usr/bin/open \"$0\" --args \(showSettingsArgument)", Bundle.main.bundlePath]
+        let args = arguments.isEmpty ? "" : " --args " + arguments.joined(separator: " ")
+        waiter.arguments = ["-c", "while kill -0 \(getpid()) 2>/dev/null; do sleep 0.2; done; /usr/bin/open \"$0\"\(args)", path]
         try? waiter.run()
-        NSApp.terminate(nil)
     }
 }
