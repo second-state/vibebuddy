@@ -180,7 +180,7 @@ public struct VoiceCatalogEntry: Equatable, Identifiable, Sendable {
                           summary: String(localized: "Late-night lofi calm. Never rushes you."), language: .en),
         VoiceCatalogEntry(id: "kai", name: "Kai", tag: String(localized: "English · California accent"),
                           summary: String(localized: "A laid-back San Diego surfer and developer. Nothing stresses him out."), language: .en),
-        VoiceCatalogEntry(id: "niels", name: "Niels", tag: String(localized: "English · Danish accent"),
+        VoiceCatalogEntry(id: "dave", name: "Dave", tag: String(localized: "English · Danish accent"),
                           summary: String(localized: "An opinionated Danish developer. Hates complexity, keeps it simple."), language: .en),
         VoiceCatalogEntry(id: "mei", name: "Mei", tag: String(localized: "English · Bay Area"),
                           summary: String(localized: "An upbeat Bay Area engineer who cheers you on, sometimes in Chinese."), language: .en),

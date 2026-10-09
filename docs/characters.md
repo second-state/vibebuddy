@@ -74,7 +74,7 @@ With no Character pack on the box, the built-in default Character speaks Jessica
 
 ### Characters added later
 
-VibeBuddy is mainly for programmers in Europe and North America, so three English-speaking women followed, each with a distinct personality, then three men, Hank, Kai and Niels, so the line-up isn't all women. Their voices come from ElevenLabs Voice Design (described in words, auditioned through the box's 16 kHz ADPCM path, then saved to the account) and are synthesized with `eleven_multilingual_v2`, steadier across 55 lines than `eleven_v3`. ElevenLabs sounds native in English where Doubao's English voices don't; Chinese stays with Doubao.
+VibeBuddy is mainly for programmers in Europe and North America, so three English-speaking women followed, each with a distinct personality, then three men, Hank, Kai and Dave, so the line-up isn't all women. Their voices come from ElevenLabs Voice Design (described in words, auditioned through the box's 16 kHz ADPCM path, then saved to the account) and are synthesized with `eleven_multilingual_v2`, steadier across 55 lines than `eleven_v3`. ElevenLabs sounds native in English where Doubao's English voices don't; Chinese stays with Doubao.
 
 | Character id | Language | Voice |
 | --- | --- | --- |
@@ -83,7 +83,7 @@ VibeBuddy is mainly for programmers in Europe and North America, so three Englis
 | `mei` | en | ElevenLabs, an upbeat Chinese-American from the Bay Area who says "jiayou" now and then |
 | `hank` | en | ElevenLabs, a greybeard engineer in his fifties: low, dry, few words |
 | `kai` | en | ElevenLabs, a laid-back surfer and developer from San Diego |
-| `niels` | en | ElevenLabs, an opinionated Danish developer in his forties: fast, punchy, a light Danish accent |
+| `dave` | en | ElevenLabs, an opinionated Danish developer in his forties: fast, punchy, a light Danish accent |
 
 Each Character card in the App carries a one-sentence summary of who they are, so users can choose between them.
 
