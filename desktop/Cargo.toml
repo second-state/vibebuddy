@@ -10,6 +10,8 @@ name = "vibebuddy-desktop"
 path = "src/main.rs"
 
 [dependencies]
+# Comparing the time a hook config was written with the last event, for the Codex trust hint.
+chrono.workspace = true
 futures = "0.3"
 # Decoding the user's drawings for a Character of their own; already in the tree through iced.
 image = { version = "0.25", default-features = false, features = ["png", "jpeg"] }
@@ -18,7 +20,9 @@ iced = { version = "0.14", default-features = false, features = ["crisp", "image
 reqwest = { version = "0.13", default-features = false, features = ["json", "stream"] }
 serde.workspace = true
 serde_json.workspace = true
-tokio = { workspace = true, features = ["process"] }
+tokio = { workspace = true, features = ["io-util", "process"] }
+# Firmware zips picked with Flash from file…; the daemon unpacks the ones it downloads with the same crate.
+zip = { version = "2", default-features = false, features = ["deflate"] }
 
 [target.'cfg(target_os = "linux")'.dependencies]
 ksni = "0.3"

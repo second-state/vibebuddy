@@ -55,14 +55,25 @@ fn log_dir() -> Option<PathBuf> {
 
 fn main() {
     let agent = std::env::args().nth(1).unwrap_or_default();
-    if let "install" | "uninstall" = agent.as_str() {
-        match install::run(agent == "install") {
-            Ok(()) => return,
-            Err(error) => {
-                eprintln!("vibebuddy-hook: {error}");
-                std::process::exit(1);
+    // Setting up the agents where there is no app to do it, and the Linux app's Agents tab:
+    // `install|uninstall [agent]`, `status`, and `plan install|uninstall <agent>` (the change, unwritten).
+    let setup = match agent.as_str() {
+        "install" | "uninstall" => Some(install::run(agent == "install", std::env::args().nth(2).as_deref())),
+        "status" => Some(install::status().map(|json| println!("{json}"))),
+        "plan" => Some(match (std::env::args().nth(2).as_deref(), std::env::args().nth(3)) {
+            (Some(action @ ("install" | "uninstall")), Some(target)) => {
+                install::preview(action == "install", &target).map(|json| println!("{json}"))
             }
+            _ => Err("usage: vibebuddy-hook plan install|uninstall <agent>".to_owned()),
+        }),
+        _ => None,
+    };
+    if let Some(result) = setup {
+        if let Err(error) = result {
+            eprintln!("vibebuddy-hook: {error}");
+            std::process::exit(1);
         }
+        return;
     }
     // `vibebuddy-hook agent-file opencode [hook path]`: prints the file Vibe Buddy owns in that agent's config, for
     // the Mac app to show and write. The hook path defaults to this binary.

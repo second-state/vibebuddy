@@ -5,14 +5,17 @@
 // The tray, and the face it draws, exist only on Linux; other builds are for working on the window.
 #![cfg_attr(not(target_os = "linux"), allow(dead_code))]
 
+mod agents;
 mod assets;
 mod character;
 mod client;
 mod custom;
 mod face;
+mod firmware_file;
 mod i18n;
 #[cfg(target_os = "linux")]
 mod instance;
+mod preview;
 mod status;
 mod theme;
 #[cfg(target_os = "linux")]
@@ -66,15 +69,6 @@ enum Tab {
     Advanced,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum Agent {
-    Claude,
-    Codex,
-    OpenCode,
-    Copilot,
-    Pi,
-}
-
 #[derive(Clone, Debug)]
 enum Message {
     Daemon(client::Update),
@@ -116,11 +110,31 @@ enum Message {
     CopyPrompt,
     AskFirmwareUpdate(bool),
     FlashFirmware,
+    FlashFromFile,
+    FirmwareFile(Result<Option<firmware_file::Package>, String>),
+    /// Flash the package picked from a file, or (false) forget it.
+    FlashFile(bool),
     TakeScreenshot,
     Screenshot(Result<Vec<u8>, String>),
     SaveScreenshot,
     RestartDaemon,
-    Hooks(&'static str),
+    LaunchAtLogin(bool),
+    /// Through systemd, which works when the daemon isn't answering, unlike its own restart endpoint.
+    StartDaemon,
+    /// The tray's Check for Updates…: check, and show General, where the answer appears (the Mac shows Sparkle's).
+    CheckFromMenu,
+    /// Play a Character's preview lines here, or stop the one playing.
+    TogglePreview(&'static str),
+    PreviewDone(String, Result<(), String>),
+    /// Ask `vibebuddy-hook` for each agent's state again.
+    RefreshAgents,
+    Agents(Result<Vec<agents::Setup>, String>),
+    /// Connect or Repair (true) or Remove (false) one agent: first see what would change.
+    PlanHooks(String, bool),
+    HookPlan(Result<agents::Plan, String>),
+    /// Write the plan shown, or (false) drop it.
+    ApplyHooks(bool),
+    HooksWritten(Result<String, String>),
     /// A finished action whose outcome is worth a line at the bottom of the window.
     Notice(Result<String, String>),
     OpenLogsFolder,
@@ -167,6 +181,16 @@ struct App {
     robot_face: Option<image::Handle>,
     /// The firmware update waits for a second click, since the box restarts.
     confirm_firmware: bool,
+    /// A firmware zip picked with Flash from file…, waiting for the user to confirm.
+    file_firmware: Option<firmware_file::Package>,
+    /// Read from the autostart entry at start, then kept as the toggle writes it.
+    launch_at_login: bool,
+    /// The Character being previewed, and how to stop it.
+    previewing: Option<(String, std::sync::Arc<tokio::sync::Notify>)>,
+    /// Each agent's hook config, as `vibebuddy-hook status` last reported it.
+    agents: Vec<agents::Setup>,
+    /// A change to an agent's config, shown before it's written.
+    hook_plan: Option<agents::Plan>,
     /// The outcome of the last action, shown at the bottom of the window.
     notice: Option<Result<String, String>>,
     /// The language picked in Settings, and, while it differs from the UI's, the offer to restart.
@@ -209,6 +233,11 @@ impl App {
             custom_problem: None,
             robot_face: None,
             confirm_firmware: false,
+            file_firmware: None,
+            launch_at_login: launch_at_login(),
+            previewing: None,
+            agents: Vec::new(),
+            hook_plan: None,
             notice: None,
             language: UiLanguage::saved(),
             restart_offer: None,
@@ -279,6 +308,7 @@ impl App {
                 let voice = (device.connected && device.firmware_build.is_some() && !busy)
                     .then(|| self.pending_voice.take())
                     .flatten();
+                notify_new_firmware(&status);
                 self.status = Some(*status);
                 return Task::batch([self.refresh_tray(), voice.map_or_else(Task::none, |id| Task::done(Message::UseVoice(id)))]);
             }
@@ -343,15 +373,25 @@ impl App {
                     ..Default::default()
                 });
                 self.settings = Some(id);
-                return open.discard();
+                // The Agents tab reads each agent's config from disk; have it ready, whichever tab shows first.
+                return Task::batch([open.discard(), Task::done(Message::RefreshAgents)]);
             }
             Message::WindowClosed(id) => {
                 if self.settings == Some(id) {
                     self.settings = None;
+                    if let Some((_, stop)) = self.previewing.take() {
+                        stop.notify_one();
+                    }
                     self.notice = None;
                 }
             }
-            Message::Tab(tab) => self.tab = tab,
+            Message::Tab(tab) => {
+                self.tab = tab;
+                // Agents can be installed or set up behind the app's back; look again whenever the tab opens.
+                if tab == Tab::Agents {
+                    return Task::done(Message::RefreshAgents);
+                }
+            }
             Message::NotifyLink(enabled) => {
                 let mut config = self.status.as_ref().map(|status| status.config.clone()).unwrap_or_default();
                 config.notify_link = enabled;
@@ -494,6 +534,14 @@ impl App {
                     return Task::perform(client::flash_firmware(directory.to_path_buf()), Message::Done);
                 }
             }
+            Message::FlashFromFile => return Task::perform(firmware_file::pick(), Message::FirmwareFile),
+            Message::FirmwareFile(Ok(package)) => self.file_firmware = package,
+            Message::FirmwareFile(Err(error)) => self.notice = Some(Err(error)),
+            Message::FlashFile(flash) => {
+                if let Some(package) = self.file_firmware.take().filter(|_| flash) {
+                    return Task::perform(client::flash_firmware(package.directory), Message::Done);
+                }
+            }
             Message::TakeScreenshot => {
                 self.screenshot_busy = true;
                 return Task::perform(client::screenshot(), Message::Screenshot);
@@ -511,7 +559,62 @@ impl App {
                 }
             }
             Message::RestartDaemon => return Task::perform(client::restart_daemon(), Message::Done),
-            Message::Hooks(action) => return Task::perform(run_hook_tool(action), Message::Notice),
+            Message::CheckFromMenu => {
+                self.tab = Tab::General;
+                return Task::batch([Task::done(Message::OpenSettings), Task::done(Message::CheckForUpdatesNow)]);
+            }
+            Message::StartDaemon => {
+                let args = ["--user", "restart", "vibebuddyd"].map(std::ffi::OsStr::new);
+                if let Err(error) = launch("systemctl", &args) {
+                    self.notice = Some(Err(error));
+                }
+            }
+            Message::LaunchAtLogin(enabled) => {
+                match set_launch_at_login(enabled) {
+                    Ok(()) => self.launch_at_login = enabled,
+                    Err(error) => self.notice = Some(Err(tr("Couldn't change Launch at login: %@", &[&error]))),
+                }
+            }
+            Message::TogglePreview(id) => {
+                let playing = self.previewing.take();
+                if let Some((_, stop)) = &playing {
+                    stop.notify_one();
+                }
+                if playing.is_some_and(|(playing, _)| playing == id) {
+                    return Task::none();
+                }
+                let stop = std::sync::Arc::new(tokio::sync::Notify::new());
+                self.previewing = Some((id.to_owned(), stop.clone()));
+                let play = async move {
+                    let pack = assets::read_pack(id).await?;
+                    let pcm = preview::pcm(&pack).ok_or_else(|| format!("{id} has no lines to preview"))?;
+                    preview::play(pcm, stop).await
+                };
+                return Task::perform(play, move |result| Message::PreviewDone(id.to_owned(), result));
+            }
+            Message::PreviewDone(id, result) => {
+                if self.previewing.as_ref().is_some_and(|(playing, _)| *playing == id) {
+                    self.previewing = None;
+                }
+                if let Err(error) = result {
+                    self.notice = Some(Err(error));
+                }
+            }
+            Message::RefreshAgents => return Task::perform(agents::status(), Message::Agents),
+            Message::Agents(Ok(setups)) => self.agents = setups,
+            Message::Agents(Err(error)) => self.notice = Some(Err(error)),
+            Message::PlanHooks(agent, installing) => return Task::perform(agents::plan(agent, installing), Message::HookPlan),
+            Message::HookPlan(Ok(plan)) => self.hook_plan = Some(plan),
+            Message::HookPlan(Err(error)) => self.notice = Some(Err(error)),
+            Message::ApplyHooks(write) => {
+                if let Some(plan) = self.hook_plan.take().filter(|_| write) {
+                    return Task::perform(agents::apply(plan), Message::HooksWritten);
+                }
+            }
+            Message::HooksWritten(result) => {
+                self.notice = Some(result);
+                return Task::done(Message::RefreshAgents);
+            }
             Message::Notice(result) => self.notice = Some(result),
             Message::OpenLogsFolder => {
                 if let Err(error) = state_dir().ok_or("HOME is not set".to_owned()).and_then(|dir| launch("xdg-open", &[dir.as_os_str()])) {
@@ -609,7 +712,7 @@ impl App {
             Some(updates) if updates.enabled => match (&updates.error, &updates.app, &updates.last_check) {
                 (Some(error), _, _) => tr("Last check failed: %@", &[error]),
                 (None, Some(app), _) => tr("Vibe Buddy %@ is available", &[&app.version]),
-                (None, None, Some(_)) => tr("Up to date", &[]),
+                (None, None, Some(checked)) => tr("Up to date · checked %@", &[&short_time(checked)]),
                 (None, None, None) => tr("Not checked yet", &[]),
             },
             _ => tr("Off", &[]),
@@ -628,6 +731,7 @@ impl App {
             .push(text(menu.mode_line))
             .push(text(menu.today_line))
             .push(space().height(8))
+            .push(toggler(self.launch_at_login).label(tr("Launch at login", &[])).on_toggle(Message::LaunchAtLogin))
             .push(
                 toggler(notify)
                     .label(tr("Notify me when the box disconnects or the daemon fails", &[]))
@@ -650,6 +754,14 @@ impl App {
                 .align_y(iced::Alignment::Center),
             )
             .push(upgrade)
+            .push(row![text("App").width(140), text(env!("CARGO_PKG_VERSION"))].spacing(12))
+            .push(
+                row![
+                    text("daemon").width(140),
+                    text(self.status.as_ref().map_or_else(|| tr("Not connected", &[]), |status| status.daemon.build.clone())),
+                ]
+                .spacing(12),
+            )
             .push(space().height(8))
             .push(
                 row![text(tr("Language", &[])), pick_list(UiLanguage::ALL, Some(self.language), Message::PickLanguage)]
@@ -696,12 +808,12 @@ impl App {
         let box_volume = self.status.as_ref().and_then(|status| status.device.volume);
         let level = self.volume.or(box_volume).unwrap_or(60);
         let online = self.status.as_ref().is_some_and(|status| status.device.connected);
-        let mut volume = slider(20..=100, level, Message::VolumeDragged).step(5u8);
-        if online {
-            volume = volume.on_release(Message::VolumeReleased);
-        }
         let operation = self.status.as_ref().and_then(|status| status.operation.as_ref());
         let busy = operation.is_some_and(status::Operation::running);
+        let mut volume = slider(20..=100, level, Message::VolumeDragged).step(5u8);
+        if online && !busy {
+            volume = volume.on_release(Message::VolumeReleased);
+        }
         let current = self.status.as_ref().and_then(|status| status.device.voice.clone());
         let cards = self.voices.iter().zip(&self.faces).map(|(voice, face)| {
             let in_use = current.as_deref() == Some(voice.id);
@@ -712,7 +824,7 @@ impl App {
                     .on_press_maybe((online && !busy).then_some(Message::UseVoice(voice.id)))
                     .into()
             };
-            let card = row![]
+            let card = row![self.preview_button(voice.id, busy)]
                 .push(face.clone().map(image))
                 .push(column![
                     text(voice.name.clone()),
@@ -751,7 +863,7 @@ impl App {
         } else {
             button(text(tr("Use", &[]))).on_press_maybe((online && !busy).then_some(Message::UseRobot)).into()
         };
-        let robot_card = row![]
+        let robot_card = row![self.preview_button(ROBOT, busy)]
             .push(self.robot_face.clone().map(image))
             .push(column![
                 row![text("Vibe Buddy"), text(tr("Default", &[])).size(13).style(text::primary)]
@@ -810,12 +922,12 @@ impl App {
         let using = assets::voice_name(current.as_deref().filter(|&id| id != BUILTIN).unwrap_or(ROBOT));
         let page = column![
             row![text(tr("Volume", &[])), volume, text(level.to_string())].spacing(12),
-            button(text(tr("Play a line on the box", &[]))).on_press_maybe(online.then_some(Message::PlayLine)),
+            button(text(tr("Play a line on the box", &[]))).on_press_maybe((online && !busy).then_some(Message::PlayLine)),
             text(tr("Saved on the box and kept across restarts. To mute, long-press K2 on the box.", &[])).size(13),
             space().height(8),
             text(tr("Character", &[])).size(18),
             text(tr(
-                "The box is speaking as “%@”. Each character has its own voice and lines. Click Use to write another one to it — no firmware flash needed. Over the UART port this takes a few minutes; when it's done the box says a line as the new character.",
+                "The box is speaking as “%@”. Each character has its own voice and lines. Preview one, then click Use to write it to the box — no firmware flash needed. Over the UART port this takes a few minutes; when it's done the box says a line as the new character.",
                 &[&using]
             ))
             .size(13),
@@ -829,42 +941,119 @@ impl App {
         scrollable(page).into()
     }
 
+    /// ▶ plays a Character's lines here, ■ stops them; not while the box is being written, as on the Mac.
+    fn preview_button(&self, id: &'static str, busy: bool) -> Element<'_, Message> {
+        let playing = self.previewing.as_ref().is_some_and(|(playing, _)| playing == id);
+        button(text(if playing { "■" } else { "▶" }))
+            .style(button::secondary)
+            .on_press_maybe((!busy).then_some(Message::TogglePreview(id)))
+            .into()
+    }
+
     fn agents(&self) -> Element<'_, Message> {
-        let line = |agent: Agent| {
-            let (name, last) = match agent {
-                Agent::Claude => ("Claude Code", self.status.as_ref().and_then(|s| s.hooks.claude.as_deref())),
-                Agent::Codex => ("Codex", self.status.as_ref().and_then(|s| s.hooks.codex.as_deref())),
-                Agent::OpenCode => ("OpenCode", self.status.as_ref().and_then(|s| s.hooks.opencode.as_deref())),
-                Agent::Copilot => ("Copilot CLI", self.status.as_ref().and_then(|s| s.hooks.copilot.as_deref())),
-                Agent::Pi => ("Pi", self.status.as_ref().and_then(|s| s.hooks.pi.as_deref())),
+        let hooks = self.status.as_ref().map(|status| &status.hooks);
+        let row_for = |setup: &agents::Setup| -> Element<'_, Message> {
+            let last = hooks.and_then(|hooks| match setup.agent.as_str() {
+                "claude" => hooks.claude.as_deref(),
+                "codex" => hooks.codex.as_deref(),
+                "opencode" => hooks.opencode.as_deref(),
+                "copilot" => hooks.copilot.as_deref(),
+                "pi" => hooks.pi.as_deref(),
+                _ => None,
+            });
+            // Only Codex has a trust step; the others pick up config changes in their next session.
+            let codex = (setup.agent == "codex" && setup.installed)
+                .then(|| agents::codex_trust(setup.modified.as_deref(), last));
+            let (dot, state) = if !setup.present {
+                (DOT_OFF, tr("%@ wasn't found on this computer", &[&setup.name]))
+            } else if !setup.installed {
+                (DOT_OFF, tr("Not set up", &[]))
+            } else if let Some(agents::CodexTrust::ChangedSinceLastEvent(changed)) = &codex {
+                (DOT_BAD, tr(
+                    "The config changed at %@ and no Codex event has arrived since. Codex silently disables hooks that change: type /hooks in Codex and re-trust Vibe Buddy's six hooks.",
+                    &[&short_time(changed)],
+                ))
+            } else if let Some(time) = last {
+                (DOT_GOOD, tr("Last event %@", &[&short_time(time)]))
+            } else if setup.agent == "codex" {
+                (DOT_WAIT, tr("Waiting for the first event… (Codex only runs this config after you trust it in /hooks)", &[]))
+            } else {
+                (DOT_WAIT, tr("Waiting for the first event…", &[]))
             };
-            let state = match last {
-                Some(time) => tr("Last event %@", &[&short_time(time)]),
-                None => tr("Waiting for the first event…", &[]),
+            let id = setup.agent.clone();
+            let actions: Element<'_, Message> = if setup.installed {
+                row![
+                    button(text(tr("Repair", &[]))).on_press(Message::PlanHooks(id.clone(), true)),
+                    button(text(tr("Remove", &[]))).style(button::secondary).on_press(Message::PlanHooks(id, false)),
+                ]
+                .spacing(8)
+                .into()
+            } else {
+                button(text(tr("Connect", &[]))).on_press_maybe(setup.present.then_some(Message::PlanHooks(id, true))).into()
             };
-            row![text(name).width(140), text(state)].spacing(12).into()
+            container(
+                row![
+                    text("●").color(dot),
+                    column![text(setup.name.clone()), text(state).size(13)].spacing(2).width(Length::Fill),
+                    actions,
+                ]
+                .spacing(12)
+                .align_y(iced::Alignment::Center),
+            )
+            .padding(10)
+            .style(container::rounded_box)
+            .into()
         };
-        column![
+        // Before anything is written, what it would change, as the Mac's sheet shows it.
+        let plan = self.hook_plan.as_ref().map(|plan| {
+            let lines: Element<'_, Message> = if plan.lines.is_empty() {
+                text(tr("Nothing to change.", &[])).size(13).into()
+            } else {
+                scrollable(column(plan.lines.iter().map(|line| {
+                    let color = if line.starts_with('+') { DOT_GOOD } else { DOT_BAD };
+                    text(line.clone()).size(12).font(Font::MONOSPACE).color(color).into()
+                })))
+                .height(Length::Fixed(200.0))
+                .into()
+            };
+            container(
+                column![text(tr("Will change %@", &[&plan.config.display()])), lines]
+                    .push((plan.agent == "codex").then(|| {
+                        text(tr(
+                            "After writing, open /hooks in Codex to review and trust this config — the app can't do that for you.",
+                            &[],
+                        ))
+                        .size(13)
+                    }))
+                    .push(
+                        row![
+                            button(text(tr("Write", &[]))).on_press_maybe((!plan.lines.is_empty()).then_some(Message::ApplyHooks(true))),
+                            button(text(tr("Cancel", &[]))).style(button::secondary).on_press(Message::ApplyHooks(false)),
+                        ]
+                        .spacing(8),
+                    )
+                    .spacing(8),
+            )
+            .padding(10)
+            .style(container::bordered_box)
+        });
+        let page = column![
             text(tr("Connect agents", &[])).size(18),
             text(tr(
                 "Vibe Buddy only forwards session IDs, event names and working directories — never prompts or replies.",
                 &[]
             ))
             .size(13),
-            column([line(Agent::Claude), line(Agent::Codex), line(Agent::OpenCode), line(Agent::Copilot), line(Agent::Pi)]).spacing(8),
-            row![
-                button(text(tr("Connect", &[]))).on_press(Message::Hooks("install")),
-                button(text(tr("Remove", &[]))).style(button::secondary).on_press(Message::Hooks("uninstall")),
-            ]
-            .spacing(8),
             text(tr(
-                "After writing, open /hooks in Codex to review and trust this config — the app can't do that for you.",
+                "This writes user-level config, so one install covers both the desktop app's sessions and the same agent running in a terminal.",
                 &[]
             ))
             .size(13),
         ]
-        .spacing(12)
-        .into()
+        .push(plan)
+        .push(column(self.agents.iter().map(row_for)).spacing(8))
+        .spacing(12);
+        scrollable(page).into()
     }
 
     fn device(&self) -> Element<'_, Message> {
@@ -922,20 +1111,22 @@ impl App {
         });
         // Either offer asks once more before flashing, since the box restarts.
         let confirm = |title: String, detail: String, action: String| -> Element<'_, Message> {
-            column![
-                text(title),
-                text(detail).size(13),
-                row![
-                    button(text(action)).on_press_maybe((!busy).then_some(Message::FlashFirmware)),
-                    button(text(tr("Cancel", &[])))
-                        .style(button::secondary)
-                        .on_press(Message::AskFirmwareUpdate(false)),
-                ]
-                .spacing(8),
-            ]
-            .spacing(8)
-            .into()
+            confirm_flash(title, detail, action, (!busy).then_some(Message::FlashFirmware), Message::AskFirmwareUpdate(false))
         };
+        // A package from a file is confirmed the same way, with what it holds next to what the box runs.
+        let from_file = self.file_firmware.as_ref().map(|package| {
+            let current = device.and_then(|device| device.firmware_label()).unwrap_or_else(|| tr("unknown", &[]));
+            confirm_flash(
+                tr("Flash this firmware?", &[]),
+                tr(
+                    "Firmware package: %@\nBox now: %@\nThe box restarts once; its voice pack and today's stats are kept. Over the UART bridge this takes a few minutes.",
+                    &[&package.label(), &current],
+                ),
+                tr("Flash", &[]),
+                (online && !busy).then_some(Message::FlashFile(true)),
+                Message::FlashFile(false),
+            )
+        });
         let update: Option<Element<'_, Message>> = match (foreign, outdated && online, self.confirm_firmware) {
             (true, _, true) => Some(confirm(
                 tr("Flash the box with Vibe Buddy?", &[]),
@@ -1059,8 +1250,16 @@ impl App {
             .push(update)
             .push(unavailable)
             .push(flashing)
+            .push(from_file)
             .push(column![
-                button(text(tr("Make the box blink", &[]))).on_press_maybe(online.then_some(Message::Identify)),
+                // Separately distributed firmware (VibeBuddy-firmware-*.zip on Releases) comes in here.
+                row![
+                    button(text(tr("Flash from file…", &[])))
+                        .on_press_maybe((online && !busy).then_some(Message::FlashFromFile)),
+                    button(text(tr("Make the box blink", &[])))
+                        .on_press_maybe((online && !busy).then_some(Message::Identify)),
+                ]
+                .spacing(8),
                 row![
                     text(tr("Box screen", &[])),
                     space::horizontal(),
@@ -1259,6 +1458,76 @@ impl std::fmt::Display for AddressChoice {
     }
 }
 
+/// The Agents tab's status dots: not set up, waiting for the first event, working, and Codex needing trust again.
+const DOT_OFF: iced::Color = iced::Color::from_rgb(0.55, 0.55, 0.55);
+const DOT_WAIT: iced::Color = iced::Color::from_rgb(0.95, 0.6, 0.15);
+const DOT_GOOD: iced::Color = iced::Color::from_rgb(0.3, 0.75, 0.35);
+const DOT_BAD: iced::Color = iced::Color::from_rgb(0.9, 0.3, 0.3);
+
+/// The app starts at login through an XDG autostart entry: install.sh writes one in the user's autostart folder, the
+/// pacman package one in /etc/xdg/autostart. A user entry decides when there is one; `Hidden=true` there turns a
+/// system-wide one off, as the spec says.
+fn autostart_entry() -> Option<std::path::PathBuf> {
+    Some(config_dir()?.parent()?.join("autostart/vibebuddy.desktop"))
+}
+
+fn launch_at_login() -> bool {
+    match autostart_entry().and_then(|path| std::fs::read_to_string(path).ok()) {
+        Some(entry) => !entry.lines().any(|line| line.trim() == "Hidden=true"),
+        None => std::path::Path::new("/etc/xdg/autostart/vibebuddy.desktop").is_file(),
+    }
+}
+
+fn set_launch_at_login(enabled: bool) -> Result<(), String> {
+    let path = autostart_entry().ok_or("HOME is not set")?;
+    let exe = std::env::current_exe().map_err(|error| error.to_string())?;
+    let entry = if enabled {
+        format!(
+            "[Desktop Entry]\nType=Application\nName=Vibe Buddy\nComment=Tray icon and settings for the Vibe Buddy box\nExec={}\nIcon=vibebuddy\nTerminal=false\nCategories=Utility;\nStartupWMClass=vibebuddy\n",
+            exe.display()
+        )
+    } else {
+        "[Desktop Entry]\nType=Application\nName=Vibe Buddy\nHidden=true\n".to_owned()
+    };
+    std::fs::create_dir_all(path.parent().unwrap_or(&path)).map_err(|error| error.to_string())?;
+    std::fs::write(&path, entry).map_err(|error| format!("{}: {error}", path.display()))
+}
+
+/// One notification per new firmware version, only while the box is there to take it and once it's downloaded, as on
+/// the Mac; the version last told about is kept in the state directory.
+fn notify_new_firmware(status: &Status) {
+    let Some(offer) = status.updates.as_ref().filter(|updates| updates.firmware_update_available()).and_then(|updates| updates.firmware.as_ref())
+    else {
+        return;
+    };
+    let Some(marker) = state_dir().map(|dir| dir.join("notified-firmware")) else { return };
+    if !status.device.connected || std::fs::read_to_string(&marker).is_ok_and(|told| told.trim() == offer.version) {
+        return;
+    }
+    let _ = std::fs::create_dir_all(marker.parent().unwrap_or(&marker));
+    let _ = std::fs::write(&marker, &offer.version);
+    let title = tr("Box firmware %@ is available", &[&offer.version]);
+    let body = tr("Open Settings → Device to update the box.", &[]);
+    if let Err(error) = launch("notify-send", &["--app-name=Vibe Buddy".as_ref(), title.as_ref(), body.as_ref()]) {
+        eprintln!("vibebuddy-desktop: {error}");
+    }
+}
+
+/// Asks once more before flashing, since the box restarts: a title, what will happen, and the two buttons.
+fn confirm_flash<'a>(title: String, detail: String, action: String, flash: Option<Message>, cancel: Message) -> Element<'a, Message> {
+    column![
+        text(title),
+        text(detail).size(13),
+        row![
+            button(text(action)).on_press_maybe(flash),
+            button(text(tr("Cancel", &[]))).style(button::secondary).on_press(cancel),
+        ]
+        .spacing(8),
+    ]
+    .spacing(8)
+    .into()
+}
+
 /// The daemon's XDG directories (see `daemon/src/config.rs`), where it keeps state and config and the hook its log.
 fn state_dir() -> Option<std::path::PathBuf> {
     xdg_dir("XDG_STATE_HOME", ".local/state")
@@ -1359,25 +1628,6 @@ fn short_time(rfc3339: &str) -> String {
     rfc3339.get(..16).map(|prefix| prefix.replacen('T', " ", 1)).unwrap_or_else(|| rfc3339.to_owned())
 }
 
-/// Hook config is written by `vibebuddy-hook install|uninstall`, installed next to this binary; the rules for
-/// merging into other programs' config live there and only there.
-async fn run_hook_tool(action: &'static str) -> Result<String, String> {
-    let hook = std::env::current_exe()
-        .map_err(|error| error.to_string())?
-        .with_file_name("vibebuddy-hook");
-    let output = tokio::process::Command::new(&hook)
-        .arg(action)
-        .output()
-        .await
-        .map_err(|error| format!("cannot run {}: {error}", hook.display()))?;
-    let stdout = String::from_utf8_lossy(&output.stdout).trim().to_owned();
-    if output.status.success() {
-        Ok(stdout)
-    } else {
-        Err(String::from_utf8_lossy(&output.stderr).trim().to_owned())
-    }
-}
-
 #[cfg(target_os = "linux")]
 fn run_tray() -> impl futures::Stream<Item = Message> {
     use futures::{SinkExt, StreamExt};
@@ -1401,7 +1651,8 @@ fn run_tray() -> impl futures::Stream<Item = Message> {
         while let Some(event) = clicks.next().await {
             let message = match event {
                 tray::TrayEvent::OpenSettings => Message::OpenSettings,
-                tray::TrayEvent::CheckForUpdates => Message::CheckForUpdatesNow,
+                tray::TrayEvent::RestartDaemon => Message::StartDaemon,
+                tray::TrayEvent::CheckForUpdates => Message::CheckFromMenu,
                 tray::TrayEvent::ReportProblem => Message::ReportProblem,
                 tray::TrayEvent::Quit => Message::Quit,
                 tray::TrayEvent::HostGone => Message::TrayHost(false),

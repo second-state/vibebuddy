@@ -15,6 +15,8 @@ use crate::status::{Icon as FaceIcon, MenuState};
 #[derive(Clone, Copy, Debug)]
 pub enum TrayEvent {
     OpenSettings,
+    /// The daemon isn't answering: have systemd start it again.
+    RestartDaemon,
     CheckForUpdates,
     ReportProblem,
     Quit,
@@ -91,8 +93,9 @@ impl ksni::Tray for Tray {
             }
             .into()
         };
+        let daemon_down = self.menu.icon == FaceIcon::DaemonDown;
         vec![
-            line(&self.menu.device_line),
+            if daemon_down { action(self.menu.device_line.clone(), TrayEvent::RestartDaemon) } else { line(&self.menu.device_line) },
             line(&self.menu.mode_line),
             line(&self.menu.today_line),
             MenuItem::Separator,
