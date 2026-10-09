@@ -292,3 +292,9 @@ An override that changes what the product does must show where the user looks fo
 On 2026-10-08 the app offered firmware 0.3.3 to the breadboard devkit (a GoouuuTech S3-N16R8 with an ST7789 SPI screen and a MAX98357A amp), because it ran our firmware at 0.1.0 and the offer compared versions only. Released firmware is built for the box; on the devkit the screen, speaker and buttons all failed to start. The devkit's firmware had said `BOARD goouuu-s3-spi` at every boot, and nothing read it.
 
 When one firmware line runs on more than one board, every offer to flash has to know the board first, and any board it doesn't know is a reason to hold back, not to go ahead. Also: the devkit's board support lived only as uncommitted changes in a Codex worktree. That is how a working setup gets lost. Commit such work on a branch, even one that is never pushed.
+
+## `pkill -f` over SSH can match the shell running it
+
+Testing on the Omarchy box, `ssh box '...; pkill -f fake_daemon.py; ...'` killed the remote bash itself: `-f` matches the whole command line, and the command line of the shell running the script contains the pattern. The SSH session died with exit 255 halfway through, leaving the daemon stopped. It happened twice in one session.
+
+Over SSH, match by something the shell's own command line can't contain: a PID kept from when you started the process (`cmd & PID=$!`, then `kill $PID`), an exact executable with `pkill -x` on the process name, or put the steps in a script file and run that. After a 255, check what state the box was left in before going on.
