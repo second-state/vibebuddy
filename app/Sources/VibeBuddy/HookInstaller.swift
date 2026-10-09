@@ -2,8 +2,8 @@ import Foundation
 import VibeBuddyCore
 
 /// Hook setup: copies vibebuddy-hook to Application Support, then merges the hook entries into
-/// the user-level config. Only our own entries are added or removed (VibeBuddyCore.HookConfig). OpenCode and
-/// Copilot get a whole file of Vibe Buddy's own instead, made by the hook binary.
+/// the user-level config. Only our own entries are added or removed (VibeBuddyCore.HookConfig). OpenCode,
+/// Copilot and Pi get a whole file of Vibe Buddy's own instead, made by the hook binary.
 struct HookInstaller {
     struct Plan {
         let agent: HookAgent
@@ -14,7 +14,8 @@ struct HookInstaller {
     }
 
     /// The agent's own directory, which exists once it has run here. The hook binary looks in the same places
-    /// (`cli_agents.rs`); `XDG_CONFIG_HOME` and `COPILOT_HOME` aren't seen here, set as they are in shells.
+    /// (`cli_agents.rs`); `XDG_CONFIG_HOME`, `COPILOT_HOME` and `PI_CODING_AGENT_DIR` aren't seen here, set as they
+    /// are in shells.
     private static func directory(_ agent: HookAgent) -> URL {
         let home = FileManager.default.homeDirectoryForCurrentUser
         switch agent {
@@ -22,6 +23,7 @@ struct HookInstaller {
         case .claude: return home.appendingPathComponent(".claude")
         case .opencode: return home.appendingPathComponent(".config/opencode")
         case .copilot: return home.appendingPathComponent(".copilot")
+        case .pi: return home.appendingPathComponent(".pi/agent")
         }
     }
 
@@ -31,6 +33,7 @@ struct HookInstaller {
         case .claude: return directory(agent).appendingPathComponent("settings.json")
         case .opencode: return directory(agent).appendingPathComponent("plugins/vibebuddy.js")
         case .copilot: return directory(agent).appendingPathComponent("hooks/vibebuddy.json")
+        case .pi: return directory(agent).appendingPathComponent("extensions/vibebuddy.js")
         }
     }
 

@@ -2,7 +2,7 @@
 
 [English](README.md) | 简体中文
 
-Vibe Buddy 是给 AI 编程 Agent 配的桌面宠物。它住在键盘旁一个小小的 ESP32-S3 盒子里，替你盯着 Codex、Claude Code、OpenCode、GitHub Copilot CLI 和 GitHub Actions：Agent 需要你、做完了或者失败了，氛围小助手会用动画、任务卡片和一句短语音告诉你。
+Vibe Buddy 是给 AI 编程 Agent 配的桌面宠物。它住在键盘旁一个小小的 ESP32-S3 盒子里，替你盯着 Codex、Claude Code、OpenCode、GitHub Copilot CLI、Pi 和 GitHub Actions：Agent 需要你、做完了或者失败了，氛围小助手会用动画、任务卡片和一句短语音告诉你。
 
 氛围小助手是原创角色。Codex 是第一个接入的 Agent，但设备协议不绑定某个客户端，本机任何程序或脚本都能给它发事件。
 
@@ -28,7 +28,7 @@ Vibe Buddy 是给 AI 编程 Agent 配的桌面宠物。它住在键盘旁一个�
 
 ## 它做什么
 
-- **盯着你的 Agent。** Codex、Claude Code 与 GitHub Actions 共用同一个任务卡栈，最多 3 张，最新在最上。每张卡标明是哪个 Agent（Codex 为 `CX:`，Claude Code 为 `CC:`，GitHub Actions 为 `CI:`）、会话名和项目，以及它在当前状态里待了多久。
+- **盯着你的 Agent。** Codex、Claude Code 与 GitHub Actions 共用同一个任务卡栈，最多 3 张，最新在最上。每张卡标明是哪个 Agent（Codex 为 `CX:`，Claude Code 为 `CC:`，OpenCode 为 `OC:`，GitHub Copilot CLI 为 `CP:`，Pi 为 `PI:`，GitHub Actions 为 `CI:`）、会话名和项目，以及它在当前状态里待了多久。
 - **有事才开口。** 氛围小助手有空闲、工作中、需要确认、完成、失败和失联几种状态。需要确认、完成和失败各播报一次短语音，工作中保持安静。
 - **记着当日战绩。** 没事的时候轮播今天干了多少，偶尔做个小动作。
 
@@ -117,8 +117,9 @@ Hook 是一个 Rust 二进制 [`hook/`](hook/)（`vibebuddy-hook codex` / `vibeb
 - Claude Code：`~/.claude/settings.json` 的八个事件；详见 [`docs/claude-adapter.md`](docs/claude-adapter.md)。
 - OpenCode：Vibe Buddy 自己的插件 `~/.config/opencode/plugins/vibebuddy.js`，把每个事件交给 hook。
 - GitHub Copilot CLI：Vibe Buddy 自己的 hooks 文件 `~/.copilot/hooks/vibebuddy.json`。Copilot 在一轮结束时不给出回复内容，所以结尾留了问题的一轮也会播报为完成。
+- Pi（1.1.0 及以上）：Vibe Buddy 自己的扩展 `~/.pi/agent/extensions/vibebuddy.js`，把每个事件交给 hook。运行中扩展弹出的对话框算作在等你。
 
-OpenCode 和 Copilot 的这两个文件只属于 Vibe Buddy：接入时整份写入，移除时直接删除，不动你自己的配置。
+OpenCode、Copilot 和 Pi 的这几个文件只属于 Vibe Buddy：接入时整份写入，移除时直接删除，不动你自己的配置。
 
 **隐私：** Hook 只转发会话与回合标识、事件名和工作目录，不转发 prompt、助手回复、transcript 或工具结果。判断助手是否在等待回答的规则两个 Agent 共用。
 

@@ -982,6 +982,7 @@ async fn post_agent_hook(
         match hook.agent.as_str() {
             "opencode" => seen.opencode = now,
             "copilot" => seen.copilot = now,
+            "pi" => seen.pi = now,
             _ => {}
         }
     }

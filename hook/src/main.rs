@@ -69,7 +69,7 @@ fn main() {
     if agent == "agent-file" {
         let mut args = std::env::args().skip(2);
         let Some(target) = args.next().as_deref().and_then(cli_agents::Agent::from_argument) else {
-            eprintln!("usage: vibebuddy-hook agent-file opencode|copilot [hook path]");
+            eprintln!("usage: vibebuddy-hook agent-file opencode|copilot|pi [hook path]");
             std::process::exit(2);
         };
         let hook = args.next().or_else(|| std::env::current_exe().ok().map(|path| path.display().to_string()));
@@ -97,17 +97,20 @@ fn main() {
             Some(payload) => (claude::ENDPOINT, payload),
             None => return,
         },
-        "opencode" => match cli_agents::opencode_payload(&source) {
-            Some(payload) => (cli_agents::ENDPOINT, payload),
-            None => return,
-        },
+        "opencode" | "pi" => {
+            let plugin = cli_agents::Agent::from_argument(&agent).expect("a plugin agent");
+            match cli_agents::plugin_payload(plugin, &source) {
+                Some(payload) => (cli_agents::ENDPOINT, payload),
+                None => return,
+            }
+        }
         "copilot" => match std::env::args().nth(2).and_then(|event| cli_agents::copilot_payload(&event, &source)) {
             Some(payload) => (cli_agents::ENDPOINT, payload),
             None => return,
         },
         _ => {
-            eprintln!("usage: vibebuddy-hook codex|claude|opencode|copilot <event>  (reads the hook payload from stdin)");
-            eprintln!("       vibebuddy-hook agent-file opencode|copilot [hook path]  (prints the file Vibe Buddy owns there)");
+            eprintln!("usage: vibebuddy-hook codex|claude|opencode|copilot|pi <event>  (reads the hook payload from stdin)");
+            eprintln!("       vibebuddy-hook agent-file opencode|copilot|pi [hook path]  (prints the file Vibe Buddy owns there)");
             eprintln!("       vibebuddy-hook install|uninstall  (adds or removes the hooks, where there is no app)");
             return;
         }

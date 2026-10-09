@@ -1,9 +1,9 @@
-//! Agents with no desktop app of their own to jump back into: OpenCode and GitHub Copilot CLI. Each speaks its own
+//! Agents with no desktop app of their own to jump back into: OpenCode, GitHub Copilot CLI and Pi. Each speaks its own
 //! events; the hook turns them into five that mean the same for every such agent (`working`, `needs_input`,
 //! `done`, `stopped`, `session_end`), so the daemon needs one adapter for all of them, not one per agent.
 //!
-//! Neither config is merged into the user's own: Vibe Buddy owns a whole file in each agent's directory, the
-//! OpenCode plugin or the Copilot hooks file, so connecting writes it and removing deletes it. Their contents are
+//! No config is merged into the user's own: Vibe Buddy owns a whole file in each agent's directory, the
+//! OpenCode plugin, the Copilot hooks file or the Pi extension, so connecting writes it and removing deletes it. Their contents are
 //! made here and nowhere else; the Mac app asks this binary for them (`vibebuddy-hook agent-file`).
 
 use std::path::{Path, PathBuf};
@@ -16,6 +16,7 @@ use crate::surface;
 pub const ENDPOINT: &str = "http://127.0.0.1:7331/v1/agent-hooks";
 const EVENTS: [&str; 5] = ["working", "needs_input", "done", "stopped", "session_end"];
 const OPENCODE_PLUGIN: &str = include_str!("opencode-plugin.js");
+const PI_EXTENSION: &str = include_str!("pi-extension.js");
 /// The Copilot events subscribed to, and the normalized event each one becomes.
 const COPILOT_EVENTS: [(&str, &str); 6] = [
     ("userPromptSubmitted", "working"),
@@ -32,15 +33,17 @@ const COPILOT_WAITING: &str = "permission_prompt|elicitation_dialog";
 pub enum Agent {
     OpenCode,
     Copilot,
+    Pi,
 }
 
 impl Agent {
-    pub const ALL: [Agent; 2] = [Agent::OpenCode, Agent::Copilot];
+    pub const ALL: [Agent; 3] = [Agent::OpenCode, Agent::Copilot, Agent::Pi];
 
     pub fn argument(self) -> &'static str {
         match self {
             Agent::OpenCode => "opencode",
             Agent::Copilot => "copilot",
+            Agent::Pi => "pi",
         }
     }
 
@@ -52,10 +55,12 @@ impl Agent {
         match self {
             Agent::OpenCode => "OpenCode",
             Agent::Copilot => "GitHub Copilot CLI",
+            Agent::Pi => "Pi",
         }
     }
 
-    /// The agent's own directory, which exists once it has run here. Copilot honours `COPILOT_HOME`.
+    /// The agent's own directory, which exists once it has run here. Copilot honours `COPILOT_HOME`, Pi
+    /// `PI_CODING_AGENT_DIR`.
     pub fn dir(self, home: &Path) -> PathBuf {
         match self {
             Agent::OpenCode => std::env::var_os("XDG_CONFIG_HOME")
@@ -67,6 +72,10 @@ impl Agent {
                 .map(PathBuf::from)
                 .filter(|dir| dir.is_absolute())
                 .unwrap_or_else(|| home.join(".copilot")),
+            Agent::Pi => std::env::var_os("PI_CODING_AGENT_DIR")
+                .map(PathBuf::from)
+                .filter(|dir| dir.is_absolute())
+                .unwrap_or_else(|| home.join(".pi/agent")),
         }
     }
 
@@ -75,6 +84,7 @@ impl Agent {
         match self {
             Agent::OpenCode => self.dir(home).join("plugins/vibebuddy.js"),
             Agent::Copilot => self.dir(home).join("hooks/vibebuddy.json"),
+            Agent::Pi => self.dir(home).join("extensions/vibebuddy.js"),
         }
     }
 
@@ -83,6 +93,7 @@ impl Agent {
         let hook_literal = Value::String(hook.to_owned()).to_string();
         match self {
             Agent::OpenCode => OPENCODE_PLUGIN.replace("__HOOK__", &hook_literal),
+            Agent::Pi => PI_EXTENSION.replace("__HOOK__", &hook_literal),
             Agent::Copilot => {
                 let hooks: Map<String, Value> = COPILOT_EVENTS
                     .iter()
@@ -103,11 +114,12 @@ impl Agent {
     }
 }
 
-/// The plugin already speaks the normalized events; only the fields that may leave are kept.
-pub fn opencode_payload(source: &Value) -> Option<Map<String, Value>> {
+/// The OpenCode plugin and the Pi extension already speak the normalized events; only the fields that may leave
+/// are kept.
+pub fn plugin_payload(agent: Agent, source: &Value) -> Option<Map<String, Value>> {
     let event = source.get("event")?.as_str()?;
     let reply = source.get("last_assistant_message").and_then(Value::as_str);
-    payload(Agent::OpenCode, event, source.get("session_id"), source.get("turn_id"), source.get("cwd"), reply)
+    payload(agent, event, source.get("session_id"), source.get("turn_id"), source.get("cwd"), reply)
 }
 
 /// Copilot doesn't name the event in camelCase payloads, so the hooks file passes it as an argument.
@@ -164,7 +176,7 @@ mod tests {
             "event": "working", "session_id": "ses_1", "turn_id": "msg_1", "cwd": "/work/vibe-buddy",
             "prompt": "never forwarded"
         });
-        let payload = opencode_payload(&source).expect("payload");
+        let payload = plugin_payload(Agent::OpenCode, &source).expect("payload");
         assert_eq!(payload["agent"], "opencode");
         assert_eq!(payload["event"], "working");
         assert_eq!(payload["turn_id"], "msg_1");
@@ -174,12 +186,12 @@ mod tests {
     #[test]
     fn a_reply_ending_in_a_question_is_waiting_and_the_reply_stays_behind() {
         let source = json!({ "event": "done", "session_id": "ses_1", "last_assistant_message": "Which database should I use?" });
-        let payload = opencode_payload(&source).expect("payload");
+        let payload = plugin_payload(Agent::OpenCode, &source).expect("payload");
         assert_eq!(payload["response_kind"], "input_required");
         assert!(!payload.contains_key("last_assistant_message"));
 
         let done = json!({ "event": "done", "session_id": "ses_1", "last_assistant_message": "All tests pass." });
-        assert!(!opencode_payload(&done).expect("payload").contains_key("response_kind"));
+        assert!(!plugin_payload(Agent::OpenCode, &done).expect("payload").contains_key("response_kind"));
     }
 
     #[test]
@@ -189,7 +201,7 @@ mod tests {
         let answer = "我检测到简单（trivial）意图 — 用户要求一个单词回复。我的方法：直接回答。\nok";
         let judged = |reply: &str| {
             let source = json!({ "event": "done", "session_id": "ses_1", "last_assistant_message": reply });
-            opencode_payload(&source).expect("payload").contains_key("response_kind")
+            plugin_payload(Agent::OpenCode, &source).expect("payload").contains_key("response_kind")
         };
         assert!(judged(question));
         assert!(!judged(answer));
@@ -197,8 +209,8 @@ mod tests {
 
     #[test]
     fn unknown_events_and_missing_sessions_are_dropped() {
-        assert!(opencode_payload(&json!({ "event": "rm -rf", "session_id": "ses_1" })).is_none());
-        assert!(opencode_payload(&json!({ "event": "done" })).is_none());
+        assert!(plugin_payload(Agent::OpenCode, &json!({ "event": "rm -rf", "session_id": "ses_1" })).is_none());
+        assert!(plugin_payload(Agent::OpenCode, &json!({ "event": "done" })).is_none());
         assert!(copilot_payload("preToolUse", &json!({ "sessionId": "s1" })).is_none());
     }
 
@@ -234,9 +246,22 @@ mod tests {
     }
 
     #[test]
-    fn the_opencode_plugin_points_at_the_hook_as_a_string_literal() {
-        let text = Agent::OpenCode.file_contents("/odd \"path\"/vibebuddy-hook");
-        assert!(text.contains(r#"const HOOK = "/odd \"path\"/vibebuddy-hook";"#));
-        assert!(!text.contains("__HOOK__"));
+    fn the_plugin_and_the_extension_point_at_the_hook_as_a_string_literal() {
+        for agent in [Agent::OpenCode, Agent::Pi] {
+            let text = agent.file_contents("/odd \"path\"/vibebuddy-hook");
+            assert!(text.contains(r#"const HOOK = "/odd \"path\"/vibebuddy-hook";"#));
+            assert!(!text.contains("__HOOK__"));
+        }
+    }
+
+    #[test]
+    fn a_pi_event_is_filed_under_pi() {
+        let source = json!({ "event": "done", "session_id": "019a", "turn_id": "1760000000000", "cwd": "/work/app",
+            "last_assistant_message": "Done, all tests pass." });
+        let payload = plugin_payload(Agent::Pi, &source).expect("payload");
+        assert_eq!(payload["agent"], "pi");
+        assert_eq!(payload["session_id"], "019a");
+        assert!(!payload.contains_key("last_assistant_message"));
+        assert!(!payload.contains_key("response_kind"));
     }
 }
