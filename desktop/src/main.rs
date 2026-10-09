@@ -755,13 +755,6 @@ impl App {
             )
             .push(upgrade)
             .push(row![text("App").width(140), text(env!("CARGO_PKG_VERSION"))].spacing(12))
-            .push(
-                row![
-                    text("daemon").width(140),
-                    text(self.status.as_ref().map_or_else(|| tr("Not connected", &[]), |status| status.daemon.build.clone())),
-                ]
-                .spacing(12),
-            )
             .push(space().height(8))
             .push(
                 row![text(tr("Language", &[])), pick_list(UiLanguage::ALL, Some(self.language), Message::PickLanguage)]
@@ -1284,7 +1277,7 @@ impl App {
 
     fn advanced(&self) -> Element<'_, Message> {
         let daemon = match &self.status {
-            Some(status) => tr("Running · %@", &[&status.daemon.build]),
+            Some(status) => tr("Running · %@", &[&status.daemon.short_build()]),
             None => tr("Not running", &[]),
         };
         let config = config_dir()

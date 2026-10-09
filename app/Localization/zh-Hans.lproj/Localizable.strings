@@ -68,7 +68,6 @@
 "Advanced" = "高级";
 "Launch at login" = "登录时启动";
 "Notify me when the box disconnects or the daemon fails" = "盒子断开或 daemon 异常时通知我";
-"Not connected" = "未连接";
 
 /* Settings: Sound */
 "Volume" = "音量";

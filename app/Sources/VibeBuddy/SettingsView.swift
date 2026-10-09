@@ -57,7 +57,6 @@ struct GeneralView: View {
             }
             Section {
                 LabeledContent("App", value: Resources.displayVersion)
-                LabeledContent("daemon", value: model.status?.daemon.build ?? String(localized: "Not connected"))
                 Button("Report a Problem…") { model.reportProblem() }
             }
         }
@@ -658,7 +657,7 @@ struct AdvancedView: View {
             Button("Open logs folder") {
                 NSWorkspace.shared.activateFileViewerSelecting([Resources.logsDirectory.appendingPathComponent("vibebuddyd.log")])
             }
-            LabeledContent("daemon", value: model.daemonAlive ? String(localized: "Running · \(model.status?.daemon.build ?? "")") : String(localized: "Not running"))
+            LabeledContent("daemon", value: model.daemonAlive ? String(localized: "Running · \(model.status?.daemon.shortBuild ?? "")") : String(localized: "Not running"))
             Button("Restart daemon") { model.restartDaemon() }
             Button("Export diagnostics…") { exportDiagnostics() }
             Section {
