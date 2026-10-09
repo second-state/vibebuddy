@@ -24,9 +24,15 @@ public struct Status: Codable, Equatable {
 
 public struct DaemonInfo: Codable, Equatable {
     public var build: String
+    /// The git description alone; nil from a daemon older than the field.
+    public var revision: String?
     public var appVersion: String?
-    enum CodingKeys: String, CodingKey { case build, appVersion = "app_version" }
-    public init(build: String, appVersion: String?) { self.build = build; self.appVersion = appVersion }
+    enum CodingKeys: String, CodingKey { case build, revision, appVersion = "app_version" }
+    public init(build: String, revision: String? = nil, appVersion: String?) {
+        self.build = build; self.revision = revision; self.appVersion = appVersion
+    }
+    /// What the settings window shows: the revision, or the whole build line from an older daemon.
+    public var shortBuild: String { revision ?? build }
 }
 
 /// An environment variable that narrows the daemon's search to one port or device.

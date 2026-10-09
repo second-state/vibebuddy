@@ -159,6 +159,8 @@ pub enum OperationState {
 #[derive(Clone, Debug, Serialize)]
 pub struct DaemonInfo {
     pub build: String,
+    /// The git description alone, for the settings window; `build` adds the app version and the build time.
+    pub revision: String,
     pub app_version: Option<String>,
 }
 

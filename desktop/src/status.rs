@@ -116,6 +116,15 @@ impl Operation {
 #[serde(default)]
 pub struct DaemonInfo {
     pub build: String,
+    /// The git description alone; empty from a daemon older than the field.
+    pub revision: String,
+}
+
+impl DaemonInfo {
+    /// What the settings window shows: the revision, or the whole build line from an older daemon.
+    pub fn short_build(&self) -> &str {
+        if self.revision.is_empty() { &self.build } else { &self.revision }
+    }
 }
 
 #[derive(Clone, Debug, Default, Deserialize, PartialEq)]
@@ -288,6 +297,17 @@ mod tests {
         assert_eq!(status.device.volume, Some(40));
         assert_eq!(status.today.busy_seconds, 2217);
         assert!(status.config.notify_link);
+    }
+
+    #[test]
+    fn the_settings_window_shows_the_revision_alone() {
+        let status: Status = serde_json::from_str(LIVE).expect("status");
+        assert_eq!(status.daemon.short_build(), "v0.2.2 2026-10-01 13:23", "an older daemon has no revision");
+        let newer: DaemonInfo = serde_json::from_str(
+            r#"{"build": "0.4.0 v0.4.0-19-gcb7f43c 2026-10-09 17:28", "revision": "v0.4.0-19-gcb7f43c"}"#,
+        )
+        .expect("daemon");
+        assert_eq!(newer.short_build(), "v0.4.0-19-gcb7f43c");
     }
 
     #[test]

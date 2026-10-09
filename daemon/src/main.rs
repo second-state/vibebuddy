@@ -129,6 +129,7 @@ impl AppState {
         Status {
             daemon: DaemonInfo {
                 build: build_identity(self.app_version.as_deref()),
+                revision: BUILD_REVISION.to_owned(),
                 app_version: self.app_version.clone(),
             },
             device,
