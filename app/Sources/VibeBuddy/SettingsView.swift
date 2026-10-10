@@ -409,6 +409,32 @@ struct PlanSheet: View {
     }
 }
 
+/// The computers the box is paired with (ADR-0012). Every computer it's plugged into pairs on its own, so
+/// this computer has no Remove: it would only pair again.
+struct PairedComputersSection: View {
+    @ObservedObject var model: AppModel
+    let device: DeviceState
+
+    var body: some View {
+        Section {
+            ForEach(device.pairedComputers ?? []) { computer in
+                LabeledContent(computer.name.isEmpty ? String(localized: "Unnamed computer") : computer.name) {
+                    if computer.key == device.computerKey {
+                        Text("This computer").foregroundStyle(.secondary)
+                    } else {
+                        Button("Remove") { model.unpair(key: computer.key) }.disabled(model.operationRunning)
+                    }
+                }
+            }
+        } header: {
+            Text("Paired computers")
+        } footer: {
+            Text("A computer pairs with the box when it's plugged in. To forget them all, use COMPUTERS in the box's menu.")
+                .font(.caption).foregroundStyle(.secondary)
+        }
+    }
+}
+
 struct DeviceView: View {
     @ObservedObject var model: AppModel
 
@@ -458,6 +484,9 @@ struct DeviceView: View {
                     Button("Make the box blink") { model.identify() }
                 }
                 .disabled(model.operationRunning || !connected)
+            }
+            if connected, let device = model.status?.device, device.boxKey != nil {
+                PairedComputersSection(model: model, device: device)
             }
             Section {
                 ZStack {

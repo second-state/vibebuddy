@@ -569,7 +569,10 @@ impl Firmware {
     }
 
     fn menu_context(&self, now: u32) -> MenuContext {
-        MenuContext { phase_active: !self.pomodoro.view(now).is_idle() }
+        MenuContext {
+            phase_active: !self.pomodoro.view(now).is_idle(),
+            paired: self.link.as_ref().map_or(0, |(_, link)| link.paired.len()),
+        }
     }
 
     fn on_menu_action<B: Board>(&mut self, board: &mut B, action: MenuAction) {
@@ -588,6 +591,7 @@ impl Firmware {
                 self.announce(board, Occasion::Done);
             }
             MenuAction::ToggleMute => self.toggle_mute(board),
+            MenuAction::ForgetComputers => self.forget_computers(board),
         }
         self.show_menu(board);
     }
@@ -616,6 +620,7 @@ impl Firmware {
                 let rows = Menu::rows(context);
                 let selected = self.menu.selected(context);
                 let volume = text!(4, "{}", self.volume % 1000);
+                let paired = text!(4, "{}", context.paired % 100);
                 let lines = rows
                     .iter()
                     .map(|row| match row {
@@ -623,6 +628,7 @@ impl Firmware {
                         Row::StopPhase => line(b"STOP FOCUS", b"", Tone::Plain),
                         Row::Volume => line(b"VOLUME", volume.as_bytes(), Tone::Accent),
                         Row::Mute => line(b"MUTE", if self.muted { b"ON" } else { b"OFF" }, Tone::Accent),
+                        Row::Computers => line(b"COMPUTERS", paired.as_bytes(), Tone::Accent),
                         Row::Status => line(b"STATUS", b"OPEN", Tone::Dim),
                     })
                     .collect();
@@ -630,6 +636,7 @@ impl Firmware {
                     Row::StopPhase => b"STOP",
                     Row::Volume => b"CHANGE",
                     Row::Mute => b"TOGGLE",
+                    Row::Computers => b"FORGET",
                     Row::Status => b"OPEN",
                 };
                 Panel {
@@ -638,6 +645,20 @@ impl Firmware {
                     lines,
                     selected: Some(selected),
                     hints: alloc::vec![(b"K1", b"NEXT"), (b"K0", verb), (b"K2", b"CLOSE")],
+                }
+            }
+            // The names are the computers' own and may not fit the 5x7 ASCII font, so only the count shows.
+            View::Forget => {
+                let paired = text!(4, "{}", self.menu_context(now).paired % 100);
+                Panel {
+                    kind: PanelKind::Facts,
+                    title: b"FORGET ALL?".to_vec(),
+                    lines: alloc::vec![
+                        line(b"COMPUTERS", paired.as_bytes(), Tone::Plain),
+                        line(b"TO PAIR AGAIN", b"PLUG IN", Tone::Dim),
+                    ],
+                    selected: None,
+                    hints: alloc::vec![(b"K0", b"FORGET"), (b"K1", b"BACK"), (b"K2", b"CLOSE")],
                 }
             }
             View::Status => {
@@ -1028,6 +1049,17 @@ impl Firmware {
         }
         let label = if event == "device.pair" { "PAIRED " } else { "UNPAIRED " };
         Self::write_value_line(board, label, link::encode_key(&key).as_bytes());
+    }
+
+    /// From the box's menu: forget every paired computer, for a box changing hands. Each pairs
+    /// again the next time it is plugged in.
+    fn forget_computers<B: Board>(&mut self, board: &mut B) {
+        let Some((store, link)) = self.link.as_mut() else { return };
+        link.paired.clear();
+        if store.save(board.flash(), link).is_err() {
+            return Self::write_literal(board, "LINK SAVE ERROR\n");
+        }
+        Self::write_literal(board, "UNPAIRED ALL\n");
     }
 
     /// Reports the device's whole static state: firmware build and version, its key, mode, voice and volume.

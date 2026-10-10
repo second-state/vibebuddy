@@ -98,6 +98,8 @@ enum Message {
     PlayLine,
     /// The user says which of several devices is the box, by its USB serial number.
     ChooseBox(String),
+    /// Forget another computer on the box, by its key.
+    Unpair(String),
     Identify,
     UseVoice(&'static str),
     /// A form of address for a language, or none.
@@ -472,6 +474,7 @@ impl App {
                 return Task::perform(client::set_volume(level, true), Message::Done);
             }
             Message::ChooseBox(usb_serial) => return Task::perform(client::choose_box(usb_serial), Message::Done),
+            Message::Unpair(key) => return Task::perform(client::unpair(key), Message::Done),
             Message::Identify => return Task::perform(client::identify(), Message::Done),
             Message::UseVoice(id) => {
                 let form = assets::language_of(id).and_then(|language| self.characters.address(language)).map(str::to_owned);
@@ -1219,6 +1222,29 @@ impl App {
             ]
             .spacing(4)
         });
+        // The computers the box is paired with (ADR-0012). Every computer it's plugged into pairs on its own, so this
+        // one has no Remove: it would only pair again.
+        let paired = device.filter(|device| online && device.box_key.is_some()).map(|device| {
+            let rows = device.paired_computers.iter().map(|computer| {
+                let name = if computer.name.is_empty() { tr("Unnamed computer", &[]) } else { computer.name.clone() };
+                let action: Element<'_, Message> = if device.computer_key.as_ref() == Some(&computer.key) {
+                    text(tr("This computer", &[])).size(13).style(text::secondary).into()
+                } else {
+                    button(text(tr("Remove", &[])))
+                        .style(button::secondary)
+                        .on_press_maybe((!busy).then_some(Message::Unpair(computer.key.clone())))
+                        .into()
+                };
+                row![text(name).size(13), space::horizontal(), action].spacing(12).into()
+            });
+            column![text(tr("Paired computers", &[]))]
+                .extend(rows)
+                .push(
+                    text(tr("A computer pairs with the box when it's plugged in. To forget them all, use COMPUTERS in the box's menu.", &[]))
+                        .size(13),
+                )
+                .spacing(6)
+        });
         // The frame is dark whatever the theme, so its text is light: in a light theme the theme's own text color
         // vanished there, and a grab in progress looked like a button that did nothing.
         let on_frame = |label: String| text(label).size(13).color(iced::Color::from_rgb8(0xd0, 0xd0, 0xd0));
@@ -1244,6 +1270,7 @@ impl App {
             .push(unavailable)
             .push(flashing)
             .push(from_file)
+            .push(paired)
             .push(column![
                 // Separately distributed firmware (VibeBuddy-firmware-*.zip on Releases) comes in here.
                 row![

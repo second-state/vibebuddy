@@ -264,3 +264,10 @@
 "Denied. Turn VibeBuddy back on for %@ under Privacy & Security → Automation." = "已被拒绝。请在“隐私与安全性 → 自动化”里，重新打开 VibeBuddy 对 %@ 的权限。";
 "Not checked yet: macOS only answers while %@ is running" = "尚未检查：%@ 运行时 macOS 才会给出结果";
 "Default" = "默认";
+
+/* Pairing (ADR-0012) */
+"Paired computers" = "已配对的电脑";
+"This computer" = "本机";
+"Unnamed computer" = "未命名的电脑";
+"A computer pairs with the box when it's plugged in. To forget them all, use COMPUTERS in the box's menu." = "电脑插上盒子就会自动配对。要忘记所有电脑，在盒子菜单里选 COMPUTERS。";
+"Removing the computer was rejected (%lld)" = "移除电脑被拒绝（%lld）";

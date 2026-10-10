@@ -19,6 +19,8 @@ pub enum Row {
     StopPhase,
     Volume,
     Mute,
+    /// The computers paired with the box; K0 asks whether to forget them all.
+    Computers,
     Status,
 }
 
@@ -26,6 +28,8 @@ pub enum Row {
 pub enum View {
     List,
     Status,
+    /// Asks before forgetting every paired computer: K0 forgets, K1 goes back.
+    Forget,
 }
 
 /// What decides which rows show, read afresh on every key.
@@ -33,6 +37,8 @@ pub enum View {
 pub struct Context {
     /// A Pomodoro phase is running or paused.
     pub phase_active: bool,
+    /// How many computers are paired with the box.
+    pub paired: usize,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -47,6 +53,8 @@ pub enum Action {
     /// These keep it open.
     StepVolume,
     ToggleMute,
+    /// Forget every paired computer; back on the list afterwards.
+    ForgetComputers,
 }
 
 pub struct Menu {
@@ -76,11 +84,15 @@ impl Menu {
     }
 
     pub fn rows(context: Context) -> Vec<Row> {
-        let mut rows = Vec::with_capacity(4);
+        let mut rows = Vec::with_capacity(5);
         if context.phase_active {
             rows.push(Row::StopPhase);
         }
-        rows.extend([Row::Volume, Row::Mute, Row::Status]);
+        rows.extend([Row::Volume, Row::Mute]);
+        if context.paired > 0 {
+            rows.push(Row::Computers);
+        }
+        rows.push(Row::Status);
         rows
     }
 
@@ -122,9 +134,14 @@ impl Menu {
                 }
                 Row::Volume => Action::StepVolume,
                 Row::Mute => Action::ToggleMute,
+                Row::Computers => self.show(View::Forget),
                 Row::Status => self.show(View::Status),
             },
-            (View::Status, ButtonEvent::K0Short) => self.show(View::List),
+            (View::Status, ButtonEvent::K0Short) | (View::Forget, ButtonEvent::K1Short) => self.show(View::List),
+            (View::Forget, ButtonEvent::K0Short) => {
+                self.view = Some(View::List);
+                Action::ForgetComputers
+            }
             _ => Action::None,
         }
     }
@@ -223,13 +240,31 @@ mod tests {
         assert_eq!(short(""), pair("?", ""));
     }
 
-    const PLAIN: Context = Context { phase_active: false };
-    const FULL: Context = Context { phase_active: true };
+    const PLAIN: Context = Context { phase_active: false, paired: 0 };
+    const FULL: Context = Context { phase_active: true, paired: 2 };
 
     #[test]
     fn rows_follow_the_context() {
         assert_eq!(Menu::rows(PLAIN), [Row::Volume, Row::Mute, Row::Status]);
-        assert_eq!(Menu::rows(FULL), [Row::StopPhase, Row::Volume, Row::Mute, Row::Status]);
+        assert_eq!(Menu::rows(FULL), [Row::StopPhase, Row::Volume, Row::Mute, Row::Computers, Row::Status]);
+    }
+
+    #[test]
+    fn forgetting_computers_asks_first() {
+        let paired = Context { phase_active: false, paired: 1 };
+        let mut menu = Menu::new();
+        menu.open(paired, 0);
+        menu.key(ButtonEvent::K1Short, paired, 0);
+        menu.key(ButtonEvent::K1Short, paired, 0);
+        assert_eq!(menu.key(ButtonEvent::K0Short, paired, 0), Action::Redraw);
+        assert_eq!(menu.view(), Some(View::Forget));
+        assert_eq!(menu.key(ButtonEvent::K1Short, paired, 0), Action::Redraw, "K1 backs out");
+        assert_eq!(menu.view(), Some(View::List));
+        menu.key(ButtonEvent::K0Short, paired, 0);
+        assert_eq!(menu.key(ButtonEvent::K0Short, paired, 0), Action::ForgetComputers);
+        assert_eq!(menu.view(), Some(View::List));
+        let after = Context { phase_active: false, paired: 0 };
+        assert_eq!(Menu::rows(after)[menu.selected(after)], Row::Volume, "the row is gone");
     }
 
     #[test]
@@ -270,7 +305,7 @@ mod tests {
         menu.open(FULL, 0);
         assert_eq!(menu.key(ButtonEvent::K0Short, FULL, 0), Action::StopPhase);
         assert!(!menu.is_open());
-        let after = Context { phase_active: false };
+        let after = Context { phase_active: false, paired: 2 };
         menu.open(after, 0);
         assert_eq!(Menu::rows(after)[menu.selected(after)], Row::Volume);
     }

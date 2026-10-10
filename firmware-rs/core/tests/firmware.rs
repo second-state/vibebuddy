@@ -740,3 +740,18 @@ fn a_box_without_the_link_partition_has_no_key() {
     let lines = send(&mut firmware, &mut board, &format!(r#"{{"version":1,"event":"device.pair","key":"{COMPUTER}"}}"#));
     assert_eq!(lines, ["PAIR UNAVAILABLE"]);
 }
+
+#[test]
+fn the_menu_forgets_every_computer_after_asking() {
+    let (mut firmware, mut board, _) = booted(blank_flash());
+    send(&mut firmware, &mut board, &format!(r#"{{"version":1,"event":"device.pair","key":"{COMPUTER}","name":"x"}}"#));
+    assert_eq!(press(&mut firmware, &mut board, Key::K1, 1100), ["MENU OPEN"]);
+    // VOLUME, MUTE, then COMPUTERS.
+    press(&mut firmware, &mut board, Key::K1, 50);
+    press(&mut firmware, &mut board, Key::K1, 50);
+    assert!(press(&mut firmware, &mut board, Key::K0, 50).is_empty(), "the first K0 only asks");
+    assert_eq!(press(&mut firmware, &mut board, Key::K0, 50), ["UNPAIRED ALL"]);
+
+    let (mut firmware, mut board, _) = booted(board.flash);
+    assert_eq!(send(&mut firmware, &mut board, r#"{"version":1,"event":"device.pairs"}"#), ["PAIRS 0"]);
+}

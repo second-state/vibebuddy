@@ -147,6 +147,18 @@ pub struct Device {
     pub pin: Option<Pin>,
     /// Devices that could be the box when there are several and none is the remembered one.
     pub candidates: Vec<Candidate>,
+    /// The box's key (ADR-0012); none for firmware that can't pair, or from an older daemon.
+    pub box_key: Option<String>,
+    /// This computer's key, to tell it apart in `paired_computers`.
+    pub computer_key: Option<String>,
+    pub paired_computers: Vec<PairedComputer>,
+}
+
+#[derive(Clone, Debug, Default, Deserialize, PartialEq)]
+#[serde(default)]
+pub struct PairedComputer {
+    pub key: String,
+    pub name: String,
 }
 
 #[derive(Clone, Debug, Default, Deserialize, PartialEq)]

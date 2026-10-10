@@ -64,6 +64,13 @@ struct DaemonClient {
         guard code == 202 else { throw DaemonError(message: DaemonClient.message(in: data) ?? String(localized: "Choosing the box was rejected (\(code))")) }
     }
 
+    /// Forgets another computer on the box; the daemon refuses this computer, which pairs again whenever it's plugged in.
+    func unpair(key: String) async throws {
+        let body = try JSONSerialization.data(withJSONObject: ["key": key])
+        let (code, data) = try await post("/v1/device/unpair", body: body, contentType: "application/json")
+        guard code == 202 else { throw DaemonError(message: DaemonClient.message(in: data) ?? String(localized: "Removing the computer was rejected (\(code))")) }
+    }
+
     func writeVoicePack(_ pack: Data) async throws {
         let (code, data) = try await post("/v1/device/voice-pack", body: pack, contentType: "application/octet-stream")
         guard code == 202 else { throw DaemonError(message: DaemonClient.message(in: data) ?? String(localized: "Voice pack write was rejected (\(code))")) }

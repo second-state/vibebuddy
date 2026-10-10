@@ -204,7 +204,10 @@ async fn main() {
     );
     state.serial = Some(serial_transport);
     state.identity = match identity::identity_file().map(|path| identity::Identity::load_or_create(&path, identity::computer_name())) {
-        Some(Ok(identity)) => Some(Arc::new(identity)),
+        Some(Ok(identity)) => {
+            state.device.lock().await.computer_key = Some(identity.public_key());
+            Some(Arc::new(identity))
+        }
         Some(Err(error)) => {
             warn!(%error, "no pairing key; boxes won't be paired with this computer");
             None
@@ -276,6 +279,7 @@ async fn publish_device_message(state: &AppState, message: DeviceMessage) {
         && let Some(identity) = &state.identity
     {
         send_event(state, pair_command(identity));
+        send_event(state, device_command("device.pairs"));
     }
     let _ = state.device_bus.send(message.clone());
     // Ask right after connecting; the device reports its mode, firmware build and voice again.
@@ -399,6 +403,7 @@ fn app(state: AppState) -> Router {
         .route("/v1/config", get(get_config).put(put_config))
         .route("/v1/device/identify", post(post_identify))
         .route("/v1/device/volume", post(post_volume))
+        .route("/v1/device/unpair", post(post_unpair))
         .route("/v1/device/choice", post(post_choice))
         .route(
             "/v1/device/voice-pack",
@@ -604,6 +609,34 @@ async fn post_volume(
     if request.preview {
         event.extra.insert("preview".to_owned(), true.into());
     }
+    post_event(State(state), Json(event)).await
+}
+
+#[derive(serde::Deserialize)]
+struct UnpairRequest {
+    key: String,
+}
+
+/// Forget another computer on the box. Not this one: it pairs again whenever it is plugged in.
+async fn post_unpair(
+    State(state): State<AppState>,
+    Json(request): Json<UnpairRequest>,
+) -> (StatusCode, Json<ApiResponse>) {
+    let refusal = {
+        let device = state.device.lock().await;
+        if device.computer_key.as_deref() == Some(request.key.as_str()) {
+            Some("this computer pairs again whenever it is plugged in")
+        } else if !device.connected || device.box_key.is_none() {
+            Some("no box that can pair is connected")
+        } else {
+            None
+        }
+    };
+    if let Some(message) = refusal {
+        return (StatusCode::CONFLICT, Json(ApiResponse { accepted: false, message: message.to_owned() }));
+    }
+    let mut event = device_command("device.unpair");
+    event.extra.insert("key".to_owned(), request.key.into());
     post_event(State(state), Json(event)).await
 }
 

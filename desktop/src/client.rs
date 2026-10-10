@@ -100,6 +100,11 @@ pub async fn choose_box(usb_serial: String) -> Result<(), String> {
     post("/v1/device/choice", Some(serde_json::json!({ "usb_serial": usb_serial }))).await
 }
 
+/// Forgets another computer on the box; the daemon refuses this computer, which pairs again whenever it's plugged in.
+pub async fn unpair(key: String) -> Result<(), String> {
+    post("/v1/device/unpair", Some(serde_json::json!({ "key": key }))).await
+}
+
 pub async fn identify() -> Result<(), String> {
     post("/v1/device/identify", None).await
 }
