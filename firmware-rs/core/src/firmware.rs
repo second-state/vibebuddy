@@ -21,7 +21,8 @@ use crate::storage::{Flash, Settings, SettingsStore, find_partition};
 use crate::text;
 use crate::voice_pack::crc32;
 use crate::lines::LinePicker;
-use crate::link::{self, Link, LinkStore, PairError};
+use crate::lan::{Conn, Lan, Output as LanOutput};
+use crate::link::{self, Link, LinkStore, PairError, Wifi};
 use crate::look::Look;
 use crate::voices::{Pick, Voices, VoiceError};
 
@@ -79,6 +80,12 @@ pub trait Board: Screen {
     /// Still making sound: something is queued, playing, or not yet flushed to silence in DMA.
     fn audio_busy(&self) -> bool;
     fn set_volume(&mut self, level: u32) -> Result<(), VolumeError>;
+
+    /// Writes a line to one network connection; the device layer owns the sockets ([`crate::lan`]).
+    fn lan_send(&mut self, _conn: Conn, _bytes: &[u8]) {}
+    fn lan_close(&mut self, _conn: Conn) {}
+    /// From now on [`Board::write`] also goes to this connection, the computer linked over the network.
+    fn lan_peer(&mut self, _conn: Option<Conn>) {}
 }
 
 pub struct Firmware {
@@ -93,6 +100,12 @@ pub struct Firmware {
     link: Option<(LinkStore, Link)>,
     /// Hardware entropy for making the box's key on its first boot.
     entropy: [u8; 32],
+    /// Connections over the local network and which computer is linked through one.
+    lan: Lan,
+    /// The line being handled came over the network rather than the cable: pairing and Wi-Fi are refused.
+    remote: bool,
+    /// The Wi-Fi network changed and the device layer hasn't picked it up yet.
+    wifi_changed: bool,
     volume: u32,
     audio_ready: bool,
     build: Vec<u8>,
@@ -205,6 +218,9 @@ impl Firmware {
             link: None,
             // Good enough for tests and the simulator; the device passes hardware entropy.
             entropy: core::array::from_fn(|index| (seed.rotate_left(index as u32 % 32) >> (index % 4 * 8)) as u8 ^ index as u8),
+            lan: Lan::new(),
+            remote: false,
+            wifi_changed: false,
             volume: VOLUME_DEFAULT,
             audio_ready: false,
             build: build.to_vec(),
@@ -327,6 +343,9 @@ impl Firmware {
                         self.last_message_ms = board.now_ms();
                         self.set_link_lost(board, false);
                         let line = core::mem::take(&mut self.line);
+                        // A computer on the cable has the box (ADR-0011).
+                        let outputs = self.lan.usb_line(board.now_ms());
+                        self.apply_lan(board, outputs);
                         self.handle_line(board, &line);
                         self.line = line;
                     }
@@ -346,8 +365,61 @@ impl Firmware {
     }
 
     /// Called once per main loop pass: link-loss detection, delayed return to idle, keys, pomodoro, leisure, animation.
+    /// A new network connection; `nonce` must be fresh randomness.
+    pub fn lan_opened<B: Board>(&mut self, board: &mut B, conn: Conn, nonce: [u8; 32]) {
+        let Some((_, link)) = &self.link else {
+            // A box with no key can't prove itself or check anyone.
+            return board.lan_close(conn);
+        };
+        let outputs = self.lan.opened(link, conn, nonce, board.now_ms());
+        self.apply_lan(board, outputs);
+    }
+
+    pub fn lan_received<B: Board>(&mut self, board: &mut B, conn: Conn, bytes: &[u8]) {
+        let Some((_, link)) = &self.link else { return };
+        let outputs = self.lan.received(link, conn, bytes, board.now_ms());
+        self.apply_lan(board, outputs);
+    }
+
+    pub fn lan_closed<B: Board>(&mut self, board: &mut B, conn: Conn) {
+        let outputs = self.lan.closed(conn, board.now_ms());
+        self.apply_lan(board, outputs);
+    }
+
+    /// The network to join, for the device layer.
+    pub fn wifi(&self) -> Option<&Wifi> {
+        self.link.as_ref().and_then(|(_, link)| link.wifi.as_ref())
+    }
+
+    /// True once after the network was set or forgotten: the device layer should reconnect.
+    pub fn take_wifi_change(&mut self) -> bool {
+        core::mem::take(&mut self.wifi_changed)
+    }
+
+    fn apply_lan<B: Board>(&mut self, board: &mut B, outputs: Vec<LanOutput>) {
+        for output in outputs {
+            match output {
+                LanOutput::Send(conn, mut line) => {
+                    line.push('\n');
+                    board.lan_send(conn, line.as_bytes());
+                }
+                LanOutput::Close(conn) => board.lan_close(conn),
+                LanOutput::Peer(conn) => board.lan_peer(conn),
+                LanOutput::Line(line) => {
+                    self.last_message_ms = board.now_ms();
+                    self.set_link_lost(board, false);
+                    self.remote = true;
+                    self.handle_line(board, &line);
+                    self.remote = false;
+                }
+            }
+        }
+    }
+
     pub fn poll<B: Board>(&mut self, board: &mut B) {
         let now = board.now_ms();
+        let outputs = self.lan.poll(now);
+        self.apply_lan(board, outputs);
         if now.wrapping_sub(self.last_message_ms) as i32 >= LINK_TIMEOUT_MS as i32 {
             self.set_link_lost(board, true);
         }
@@ -967,7 +1039,12 @@ impl Firmware {
             }
             _ if event.starts_with("voice.") => self.handle_voice_event(board, fields, event),
             // Pairing is the computer at the other end of the cable telling the box who it is (ADR-0012).
+            // Only over the cable: whoever is at the box decides who may link and which network it joins.
+            "device.pair" | "device.unpair" | "device.pairs" | "device.wifi.set" | "device.wifi.forget" if self.remote => {
+                Self::write_literal(board, "ERROR cable_only\n");
+            }
             "device.pair" | "device.unpair" | "device.pairs" => self.handle_pairing(board, fields, event),
+            "device.wifi.set" | "device.wifi.forget" => self.handle_wifi(board, fields, event),
             // Link self-test: send the received string's length and CRC back to the Mac to check for corrupted serial bytes.
             "device.echo" => {
                 if let Some(data) = string(fields, "data") {
@@ -1016,6 +1093,10 @@ impl Firmware {
     fn announce_key<B: Board>(&self, board: &mut B) {
         if let Some((_, link)) = &self.link {
             Self::write_value_line(board, "BOX KEY ", link::encode_key(&link.public_key()).as_bytes());
+            // The network's name only; the password never leaves the box.
+            if let Some(wifi) = &link.wifi {
+                Self::write_value_line(board, "WIFI NETWORK ", wifi.ssid.as_bytes());
+            }
         }
     }
 
@@ -1049,6 +1130,34 @@ impl Firmware {
         }
         let label = if event == "device.pair" { "PAIRED " } else { "UNPAIRED " };
         Self::write_value_line(board, label, link::encode_key(&key).as_bytes());
+        if event == "device.unpair" {
+            let outputs = self.lan.unpaired(&key, board.now_ms());
+            self.apply_lan(board, outputs);
+        }
+    }
+
+    fn handle_wifi<B: Board>(&mut self, board: &mut B, fields: &BTreeMap<alloc::string::String, Value>, event: &str) {
+        let Some((store, link)) = self.link.as_mut() else {
+            return Self::write_literal(board, "WIFI UNAVAILABLE\n");
+        };
+        if event == "device.wifi.set" {
+            let ssid = string(fields, "ssid").unwrap_or("");
+            let password = string(fields, "password").unwrap_or("");
+            if ssid.is_empty() || ssid.len() > link::MAX_SSID_BYTES || password.len() > link::MAX_PASSWORD_BYTES {
+                return Self::write_literal(board, "WIFI INVALID\n");
+            }
+            link.wifi = Some(Wifi { ssid: ssid.into(), password: password.into() });
+        } else {
+            link.wifi = None;
+        }
+        if store.save(board.flash(), link).is_err() {
+            return Self::write_literal(board, "LINK SAVE ERROR\n");
+        }
+        self.wifi_changed = true;
+        match &link.wifi {
+            Some(wifi) => Self::write_value_line(board, "WIFI NETWORK ", wifi.ssid.as_bytes()),
+            None => Self::write_literal(board, "WIFI FORGOTTEN\n"),
+        }
     }
 
     /// From the box's menu: forget every paired computer, for a box changing hands. Each pairs
@@ -1060,6 +1169,10 @@ impl Firmware {
             return Self::write_literal(board, "LINK SAVE ERROR\n");
         }
         Self::write_literal(board, "UNPAIRED ALL\n");
+        if let Some(key) = self.lan.linked_key() {
+            let outputs = self.lan.unpaired(&key, board.now_ms());
+            self.apply_lan(board, outputs);
+        }
     }
 
     /// Reports the device's whole static state: firmware build and version, its key, mode, voice and volume.

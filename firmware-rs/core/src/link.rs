@@ -9,7 +9,7 @@
 use alloc::string::String;
 use alloc::vec::Vec;
 
-use ed25519_dalek::SigningKey;
+use ed25519_dalek::{Signature, Signer, SigningKey, VerifyingKey};
 
 use crate::storage::{Flash, FlashError, Region, SECTOR_BYTES};
 use crate::voice_pack::crc32;
@@ -34,7 +34,19 @@ pub struct Link {
     /// The secret seed of the box's key.
     seed: [u8; 32],
     pub paired: Vec<Paired>,
+    /// The Wi-Fi network to join, name and password; set only over USB.
+    pub wifi: Option<Wifi>,
 }
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Wifi {
+    pub ssid: String,
+    pub password: String,
+}
+
+/// Wi-Fi's own limits: a network name is at most 32 bytes, a WPA passphrase at most 63.
+pub const MAX_SSID_BYTES: usize = 32;
+pub const MAX_PASSWORD_BYTES: usize = 63;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum PairError {
@@ -44,12 +56,21 @@ pub enum PairError {
 impl Link {
     /// A box with a new key and nobody paired.
     pub fn new(entropy: [u8; 32]) -> Self {
-        Self { seed: entropy, paired: Vec::new() }
+        Self { seed: entropy, paired: Vec::new(), wifi: None }
     }
 
     /// The box's public key, which is also its id on the Relay.
     pub fn public_key(&self) -> [u8; 32] {
         SigningKey::from_bytes(&self.seed).verifying_key().to_bytes()
+    }
+
+    /// Signs with the box's key.
+    pub fn sign(&self, message: &[u8]) -> [u8; 64] {
+        SigningKey::from_bytes(&self.seed).sign(message).to_bytes()
+    }
+
+    pub fn is_paired(&self, key: &[u8; 32]) -> bool {
+        self.paired.iter().any(|paired| &paired.key == key)
     }
 
     /// Adds a computer, or renames one already paired. Returns whether anything changed.
@@ -85,6 +106,13 @@ impl Link {
             payload.push(paired.name.len() as u8);
             payload.extend_from_slice(paired.name.as_bytes());
         }
+        // The network is an optional tail, so a record written before it existed still reads.
+        if let Some(wifi) = &self.wifi {
+            for field in [&wifi.ssid, &wifi.password] {
+                payload.push(field.len() as u8);
+                payload.extend_from_slice(field.as_bytes());
+            }
+        }
         payload
     }
 
@@ -100,7 +128,17 @@ impl Link {
             paired.push(Paired { key, name: String::from(name) });
             at += 33 + length;
         }
-        Some(Self { seed, paired })
+        let mut field = || -> Option<String> {
+            let length = *payload.get(at)? as usize;
+            let text = core::str::from_utf8(payload.get(at + 1..at + 1 + length)?).ok()?;
+            at += 1 + length;
+            Some(String::from(text))
+        };
+        let wifi = match (field(), field()) {
+            (Some(ssid), Some(password)) => Some(Wifi { ssid, password }),
+            _ => None,
+        };
+        Some(Self { seed, paired, wifi })
     }
 }
 
@@ -180,11 +218,11 @@ impl LinkStore {
     }
 }
 
-/// Unpadded base64url, the way keys travel in messages and lines.
-pub fn encode_key(key: &[u8; 32]) -> String {
+/// Unpadded base64url, the way keys, nonces and signatures travel in messages and lines.
+pub fn encode(bytes: &[u8]) -> String {
     const ALPHABET: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
-    let mut out = String::with_capacity(43);
-    for chunk in key.chunks(3) {
+    let mut out = String::with_capacity(bytes.len().div_ceil(3) * 4);
+    for chunk in bytes.chunks(3) {
         let bits = chunk.iter().enumerate().fold(0u32, |acc, (index, &byte)| acc | u32::from(byte) << (16 - 8 * index));
         for index in 0..=chunk.len() {
             out.push(ALPHABET[(bits >> (18 - 6 * index) & 63) as usize] as char);
@@ -193,8 +231,9 @@ pub fn encode_key(key: &[u8; 32]) -> String {
     out
 }
 
-pub fn decode_key(text: &str) -> Option<[u8; 32]> {
-    if text.len() != 43 {
+/// Decodes exactly `N` bytes of canonical unpadded base64url.
+pub fn decode<const N: usize>(text: &str) -> Option<[u8; N]> {
+    if text.len() != N.div_ceil(3) * 4 - (3 - N % 3) % 3 {
         return None;
     }
     let value = |byte: u8| match byte {
@@ -205,20 +244,33 @@ pub fn decode_key(text: &str) -> Option<[u8; 32]> {
         b'_' => Some(63),
         _ => None,
     };
-    let mut key = [0u8; 32];
-    let mut out = 0;
+    let mut out = [0u8; N];
+    let mut at = 0;
     for chunk in text.as_bytes().chunks(4) {
         let mut bits = 0u32;
         for (index, &byte) in chunk.iter().enumerate() {
             bits |= u32::from(value(byte)?) << (18 - 6 * index);
         }
         for index in 0..chunk.len() - 1 {
-            key[out] = (bits >> (16 - 8 * index)) as u8;
-            out += 1;
+            out[at] = (bits >> (16 - 8 * index)) as u8;
+            at += 1;
         }
     }
-    // The last character carries 2 spare bits, which must be zero for the text to be canonical.
-    (encode_key(&key) == text).then_some(key)
+    // The last character's spare bits must be zero for the text to be canonical.
+    (encode(&out) == text).then_some(out)
+}
+
+pub fn encode_key(key: &[u8; 32]) -> String {
+    encode(key)
+}
+
+pub fn decode_key(text: &str) -> Option<[u8; 32]> {
+    decode(text)
+}
+
+/// Checks `signature` by `key` over `message`.
+pub fn verify(key: &[u8; 32], message: &[u8], signature: &[u8; 64]) -> bool {
+    VerifyingKey::from_bytes(key).is_ok_and(|key| key.verify_strict(message, &Signature::from_bytes(signature)).is_ok())
 }
 
 #[cfg(test)]
@@ -240,6 +292,17 @@ mod tests {
         assert!(text.bytes().all(|byte| byte.is_ascii_alphanumeric() || byte == b'-' || byte == b'_'));
         assert_eq!(decode_key(&text), Some(key));
         assert_eq!(encode_key(&[0; 32]), "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA");
+    }
+
+    #[test]
+    fn signatures_round_trip_through_base64url_and_verify() {
+        let link = Link::new([3; 32]);
+        let signature = link.sign(b"hello");
+        let text = encode(&signature);
+        assert_eq!(text.len(), 86);
+        assert_eq!(decode::<64>(&text), Some(signature));
+        assert!(verify(&link.public_key(), b"hello", &signature));
+        assert!(!verify(&link.public_key(), b"hellO", &signature));
     }
 
     #[test]
@@ -302,6 +365,18 @@ mod tests {
         store.save(&mut flash, &link).unwrap();
         assert_eq!(flash.erases, [(0x2000, 0x3000), (0x3000, 0x4000), (0x2000, 0x3000)]);
 
+        let (_, found) = LinkStore::open(&mut flash, REGION).unwrap();
+        assert_eq!(found, Some(link));
+    }
+
+    #[test]
+    fn the_wifi_network_is_kept_with_the_rest() {
+        let mut flash = flash();
+        let (mut store, _) = LinkStore::open(&mut flash, REGION).unwrap();
+        let mut link = Link::new([7; 32]);
+        link.pair([8; 32], "a").unwrap();
+        link.wifi = Some(Wifi { ssid: String::from("Home 5G"), password: String::from("secret pass") });
+        store.save(&mut flash, &link).unwrap();
         let (_, found) = LinkStore::open(&mut flash, REGION).unwrap();
         assert_eq!(found, Some(link));
     }
