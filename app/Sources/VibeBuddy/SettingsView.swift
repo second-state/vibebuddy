@@ -531,6 +531,7 @@ struct DeviceView: View {
         guard device.connected else {
             return device.candidates?.isEmpty == false ? String(localized: "Several devices found") : String(localized: "Box not found")
         }
+        if device.network == true { return "\(device.port ?? "") · \(String(localized: "Wi-Fi"))" }
         return "\(device.port ?? "") · \(device.bridge ? String(localized: "UART bridge") : String(localized: "native USB"))"
     }
 

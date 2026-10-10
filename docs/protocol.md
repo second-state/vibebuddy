@@ -164,6 +164,8 @@ The computer signs `vibebuddy-lan-v1\ncomputer\n<box key>\n<box nonce>`, and the
 
 A box links to one computer at a time (ADR-0011). A paired computer gets the box when it is free, when it was the last one linked, or once the last one has been gone 10 minutes. `"takeover":true`, which the user asked for, always gets it unless the cable is in use. Whoever loses the box gets `link.unlinked` with `reason` `takeover`, `usb` or `unpaired`, and is closed. Pairing and Wi-Fi messages that come over the network are refused with `ERROR cable_only`.
 
+On the computer's side, `vibebuddyd` remembers the box's key when it sees `BOX KEY` over USB (`box-key` in its state directory), and the address the box reports over USB once it is on Wi-Fi, `WIFI ADDRESS <ip>` (`box-address`). It connects to port 7340 there; `VIBEBUDDY_LAN_ADDR=host:port` fixes the address instead, as for the simulator (`tools/simulate-device.py --tcp 7340`). It tries the network only while no box is on the cable, and checks the cable every 2 s while linked over the network. Moving between the two is not a drop: `/v1/status` goes from one connection to the other with no `connected: false` in between, and `device.network` says which it is. Flashing needs the cable.
+
 There is no encryption on the local network: like the USB link, the bytes are readable by anyone who can see them, and the handshake only decides who may drive the box.
 
 ## Stage 1 error output

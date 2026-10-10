@@ -1059,7 +1059,11 @@ impl App {
             Some(device) if !device.connected && !device.candidates.is_empty() => tr("Several devices found", &[]),
             Some(device) if !device.connected => tr("Box not found", &[]),
             Some(device) => {
-                let kind = if device.bridge { tr("UART bridge", &[]) } else { tr("native USB", &[]) };
+                let kind = match (device.network, device.bridge) {
+                    (true, _) => tr("Wi-Fi", &[]),
+                    (false, true) => tr("UART bridge", &[]),
+                    (false, false) => tr("native USB", &[]),
+                };
                 format!("{} · {kind}", device.port.as_deref().unwrap_or("?"))
             }
         };

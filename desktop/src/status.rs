@@ -139,6 +139,8 @@ pub struct Device {
     pub firmware_version: Option<String>,
     pub voice: Option<String>,
     pub volume: Option<u8>,
+    /// Linked over the local network; `port` is then the box's address.
+    pub network: bool,
     /// Connected but running other firmware, as the daemon judged it (docs/architecture.md, decision 17).
     pub foreign_firmware: bool,
     /// Our firmware built for other hardware (the breadboard devkit); released firmware isn't offered to it.

@@ -25,6 +25,8 @@ pub struct DeviceState {
     pub port: Option<String>,
     /// Connected through the UART bridge (rather than Espressif's native USB port).
     pub bridge: bool,
+    /// Linked over the local network rather than the cable; `port` is then the box's address.
+    pub network: bool,
     /// duty / pomodoro / leisure
     pub mode: Option<String>,
     pub firmware_build: Option<String>,
@@ -78,6 +80,7 @@ impl DeviceState {
                 // entirely), and the app offers to flash it. Nothing left by the previous device may pass for this one: on
                 // 2026-10-06 a leftover voice made another product look like the box, and it nearly got flashed.
                 self.usb_serial = usb_serial.clone();
+                self.network = false;
                 self.unsupported_board = None;
                 self.candidates.clear();
                 self.foreign_firmware = false;
@@ -89,6 +92,10 @@ impl DeviceState {
                 self.box_key = None;
                 self.paired = false;
                 self.paired_computers.clear();
+            }
+            DeviceMessage::ConnectedNetwork { address } => {
+                self.apply(&DeviceMessage::Connected { port: address.clone(), bridge: false, usb_serial: None });
+                self.network = true;
             }
             DeviceMessage::ForeignFirmware => {
                 // Over the bridge the port survives a reset into other firmware, so what ours reported must go too.
@@ -270,6 +277,7 @@ mod tests {
                 connected: true,
                 port: Some("/dev/cu.x".to_owned()),
                 bridge: true,
+                network: false,
                 mode: Some("pomodoro".to_owned()),
                 firmware_build: Some("21a8360-dirty 2026-09-16 10:23".to_owned()),
                 firmware_version: Some("0.2.2".to_owned()),
@@ -298,6 +306,16 @@ mod tests {
         assert!(state.paired);
         state.apply(&DeviceMessage::Connected { port: "/dev/cu.y".to_owned(), bridge: false, usb_serial: None });
         assert_eq!((state.box_key, state.paired), (None, false));
+    }
+
+    #[test]
+    fn a_network_link_is_a_connection_with_an_address() {
+        let mut state = DeviceState::default();
+        state.apply(&DeviceMessage::ConnectedNetwork { address: "192.168.1.23:7340".to_owned() });
+        assert!(state.connected && state.network);
+        assert_eq!(state.port.as_deref(), Some("192.168.1.23:7340"));
+        state.apply(&DeviceMessage::Connected { port: "/dev/cu.x".to_owned(), bridge: false, usb_serial: None });
+        assert!(state.connected && !state.network, "back on the cable, with no drop in between");
     }
 
     #[test]
