@@ -139,6 +139,8 @@ pub struct Device {
     pub firmware_version: Option<String>,
     pub voice: Option<String>,
     pub volume: Option<u8>,
+    /// Linked over the local network; `port` is then the box's address.
+    pub network: bool,
     /// Connected but running other firmware, as the daemon judged it (docs/architecture.md, decision 17).
     pub foreign_firmware: bool,
     /// Our firmware built for other hardware (the breadboard devkit); released firmware isn't offered to it.
@@ -152,6 +154,9 @@ pub struct Device {
     /// This computer's key, to tell it apart in `paired_computers`.
     pub computer_key: Option<String>,
     pub paired_computers: Vec<PairedComputer>,
+    /// The Wi-Fi network the box is set to join, and the address it got there.
+    pub wifi_network: Option<String>,
+    pub wifi_address: Option<String>,
 }
 
 #[derive(Clone, Debug, Default, Deserialize, PartialEq)]

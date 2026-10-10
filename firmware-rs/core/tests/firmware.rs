@@ -77,6 +77,10 @@ struct FakeBoard {
     k0: bool,
     k1: bool,
     k2: bool,
+    /// What went to each network connection, which ones were closed, and the linked one.
+    lan_sent: Vec<(u32, String)>,
+    lan_closed: Vec<u32>,
+    lan_peer: Option<u32>,
 }
 
 impl FakeBoard {
@@ -95,6 +99,9 @@ impl FakeBoard {
             k0: false,
             k1: false,
             k2: false,
+            lan_sent: Vec::new(),
+            lan_closed: Vec::new(),
+            lan_peer: None,
         }
     }
 
@@ -123,6 +130,15 @@ impl Screen for FakeBoard {
 }
 
 impl Board for FakeBoard {
+    fn lan_send(&mut self, conn: u32, bytes: &[u8]) {
+        self.lan_sent.push((conn, String::from_utf8(bytes.to_vec()).unwrap()));
+    }
+    fn lan_close(&mut self, conn: u32) {
+        self.lan_closed.push(conn);
+    }
+    fn lan_peer(&mut self, conn: Option<u32>) {
+        self.lan_peer = conn;
+    }
     fn now_ms(&self) -> u32 {
         self.now.get()
     }
@@ -754,4 +770,91 @@ fn the_menu_forgets_every_computer_after_asking() {
 
     let (mut firmware, mut board, _) = booted(board.flash);
     assert_eq!(send(&mut firmware, &mut board, r#"{"version":1,"event":"device.pairs"}"#), ["PAIRS 0"]);
+}
+
+mod lan {
+    use super::*;
+    use ed25519_dalek::{Signer, SigningKey};
+    use serde_json::Value;
+    use vibebuddy_firmware_core::lan::{USB_QUIET_MS, signed_message};
+    use vibebuddy_firmware_core::link;
+
+    fn computer() -> SigningKey {
+        SigningKey::from_bytes(&[2; 32])
+    }
+
+    /// A box with the computer paired over the cable, the cable then gone quiet.
+    fn paired_box() -> (Firmware, FakeBoard) {
+        let (mut firmware, mut board, _) = booted(blank_flash());
+        let key = link::encode(&computer().verifying_key().to_bytes());
+        send(&mut firmware, &mut board, &format!(r#"{{"version":1,"event":"device.pair","key":"{key}","name":"a"}}"#));
+        board.advance(USB_QUIET_MS);
+        (firmware, board)
+    }
+
+    /// Opens connection `conn` and answers the challenge.
+    fn link_up(firmware: &mut Firmware, board: &mut FakeBoard, conn: u32) {
+        firmware.lan_opened(board, conn, [5; 32]);
+        let (_, challenge) = board.lan_sent.pop().unwrap();
+        let value: Value = serde_json::from_str(&challenge).unwrap();
+        let box_key = link::decode::<32>(value["box"].as_str().unwrap()).unwrap();
+        let nonce = link::decode::<32>(value["nonce"].as_str().unwrap()).unwrap();
+        let sig = computer().sign(&signed_message("computer", &box_key, &nonce)).to_bytes();
+        let hello = format!(
+            "{{\"version\":1,\"event\":\"link.hello\",\"key\":\"{}\",\"sig\":\"{}\",\"nonce\":\"{}\"}}\n",
+            link::encode(&computer().verifying_key().to_bytes()),
+            link::encode(&sig),
+            link::encode(&[6; 32])
+        );
+        firmware.lan_received(board, conn, hello.as_bytes());
+        assert!(board.lan_sent.last().unwrap().1.contains("link.welcome"), "{:?}", board.lan_sent);
+        board.take_lines();
+    }
+
+    #[test]
+    fn a_paired_computer_drives_the_box_over_the_network() {
+        let (mut firmware, mut board) = paired_box();
+        link_up(&mut firmware, &mut board, 1);
+        assert_eq!(board.lan_peer, Some(1), "the box's output goes to it");
+        firmware.lan_received(&mut board, 1, b"{\"version\":1,\"event\":\"device.hello\"}\n");
+        assert!(board.take_lines().contains(&"MODE DUTY".to_owned()));
+    }
+
+    #[test]
+    fn pairing_and_wifi_are_cable_only() {
+        let (mut firmware, mut board) = paired_box();
+        link_up(&mut firmware, &mut board, 1);
+        for line in [
+            r#"{"version":1,"event":"device.pair","key":"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"}"#,
+            r#"{"version":1,"event":"device.wifi.set","ssid":"evil","password":"x"}"#,
+        ] {
+            firmware.lan_received(&mut board, 1, format!("{line}\n").as_bytes());
+            assert_eq!(board.take_lines(), ["ERROR cable_only"]);
+        }
+    }
+
+    #[test]
+    fn the_cable_takes_the_box_back() {
+        let (mut firmware, mut board) = paired_box();
+        link_up(&mut firmware, &mut board, 1);
+        send(&mut firmware, &mut board, r#"{"version":1,"event":"device.heartbeat"}"#);
+        assert!(board.lan_closed.contains(&1));
+        assert_eq!(board.lan_peer, None);
+    }
+
+    #[test]
+    fn the_wifi_network_is_set_over_the_cable_and_kept() {
+        let (mut firmware, mut board, _) = booted(blank_flash());
+        let lines = send(&mut firmware, &mut board, r#"{"version":1,"event":"device.wifi.set","ssid":"Home","password":"secret"}"#);
+        assert_eq!(lines, ["WIFI NETWORK Home"]);
+        assert!(firmware.take_wifi_change());
+        assert!(!firmware.take_wifi_change(), "only once");
+
+        let (mut firmware, mut board, lines) = booted(board.flash);
+        assert!(lines.contains(&"WIFI NETWORK Home".to_owned()), "{lines:?}");
+        assert!(!lines.iter().any(|line| line.contains("secret")), "the password never leaves the box");
+        assert_eq!(firmware.wifi().map(|wifi| wifi.password.as_str()), Some("secret"));
+        assert_eq!(send(&mut firmware, &mut board, r#"{"version":1,"event":"device.wifi.forget"}"#), ["WIFI FORGOTTEN"]);
+        assert_eq!(firmware.wifi(), None);
+    }
 }

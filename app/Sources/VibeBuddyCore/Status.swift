@@ -82,7 +82,12 @@ public struct DeviceState: Codable, Equatable {
     /// This computer's key, to tell it apart in `pairedComputers`.
     public var computerKey: String?
     public var pairedComputers: [PairedComputer]?
-    enum CodingKeys: String, CodingKey { case connected, port, bridge, mode, firmwareBuild = "firmware_build", firmwareVersion = "firmware_version", voice, volume, foreignFirmware = "foreign_firmware", pin, candidates, unsupportedBoard = "unsupported_board", boxKey = "box_key", computerKey = "computer_key", pairedComputers = "paired_computers" }
+    /// Linked over the local network; `port` is then the box's address. Absent from older daemons.
+    public var network: Bool?
+    /// The Wi-Fi network the box is set to join, and the address it got there. Absent from older daemons.
+    public var wifiNetwork: String?
+    public var wifiAddress: String?
+    enum CodingKeys: String, CodingKey { case wifiNetwork = "wifi_network", wifiAddress = "wifi_address", connected, port, bridge, network, mode, firmwareBuild = "firmware_build", firmwareVersion = "firmware_version", voice, volume, foreignFirmware = "foreign_firmware", pin, candidates, unsupportedBoard = "unsupported_board", boxKey = "box_key", computerKey = "computer_key", pairedComputers = "paired_computers" }
     public init(connected: Bool, port: String? = nil, bridge: Bool = false, mode: String? = nil, firmwareBuild: String? = nil, firmwareVersion: String? = nil, voice: String? = nil, volume: Int? = nil, foreignFirmware: Bool? = nil) {
         self.connected = connected; self.port = port; self.bridge = bridge; self.mode = mode; self.firmwareBuild = firmwareBuild; self.firmwareVersion = firmwareVersion; self.voice = voice; self.volume = volume
         self.foreignFirmware = foreignFirmware

@@ -5,6 +5,7 @@ mod claude_hooks;
 mod codex_hooks;
 mod config;
 mod identity;
+mod lan;
 mod link_alert;
 mod occasions;
 mod rom_flasher;
@@ -184,7 +185,23 @@ async fn main() {
         .unwrap_or_else(|_| "127.0.0.1:7331".to_owned())
         .parse::<SocketAddr>()
         .unwrap_or_else(|error| panic!("invalid VIBEBUDDY_BIND: {error}"));
-    let serial_config = SerialConfig::from_env(known_box_file());
+    let identity = match identity::identity_file().map(|path| identity::Identity::load_or_create(&path, identity::computer_name())) {
+        Some(Ok(identity)) => Some(Arc::new(identity)),
+        Some(Err(error)) => {
+            warn!(%error, "no pairing key; boxes won't be paired with this computer");
+            None
+        }
+        None => None,
+    };
+    let mut serial_config = SerialConfig::from_env(known_box_file());
+    // Paired, the box can also be reached over the local network when it isn't on the cable (ADR-0012).
+    if let (Some(identity), Some(state_dir)) = (&identity, config::state_dir()) {
+        serial_config = serial_config.with_lan(lan::LanConfig {
+            identity: identity.clone(),
+            state_dir,
+            fixed_address: std::env::var("VIBEBUDDY_LAN_ADDR").ok(),
+        });
+    }
     let pin = serial_config.pin();
     if let Some(pin) = &pin {
         warn!(variable = pin.variable, value = %pin.value, "the serial search is pinned; other boxes are ignored");
@@ -203,17 +220,10 @@ async fn main() {
         config::config_file(),
     );
     state.serial = Some(serial_transport);
-    state.identity = match identity::identity_file().map(|path| identity::Identity::load_or_create(&path, identity::computer_name())) {
-        Some(Ok(identity)) => {
-            state.device.lock().await.computer_key = Some(identity.public_key());
-            Some(Arc::new(identity))
-        }
-        Some(Err(error)) => {
-            warn!(%error, "no pairing key; boxes won't be paired with this computer");
-            None
-        }
-        None => None,
-    };
+    if let Some(identity) = &identity {
+        state.device.lock().await.computer_key = Some(identity.public_key());
+    }
+    state.identity = identity;
     state.device.lock().await.pin = pin;
     state.updates = Arc::new(Mutex::new(Updates::new(
         updates::Source::configured(),
@@ -274,16 +284,30 @@ async fn publish_device_message(state: &AppState, message: DeviceMessage) {
     }
     // A box that reports its key can pair, and one at the end of this cable is ours to pair with
     // (ADR-0012). Pairing again is harmless: the box only writes flash when something changed.
+    // Over the network the box refuses pairing, and what it says there isn't news about the cable.
+    let on_cable = !state.device.lock().await.network;
     if let DeviceMessage::Line(line) = &message
-        && line.starts_with(status::BOX_KEY_PREFIX)
+        && on_cable
+        && let Some(key) = line.strip_prefix(status::BOX_KEY_PREFIX)
         && let Some(identity) = &state.identity
     {
         send_event(state, pair_command(identity));
         send_event(state, device_command("device.pairs"));
+        // Remembered so the box can be found and checked over the network later (ADR-0012).
+        if let Some(dir) = config::state_dir() {
+            lan::remember(&lan::box_key_file(&dir), key.trim());
+        }
+    }
+    if let DeviceMessage::Line(line) = &message
+        && on_cable
+        && let Some(address) = line.strip_prefix(WIFI_ADDRESS_PREFIX)
+        && let Some(dir) = config::state_dir()
+    {
+        lan::remember(&lan::box_address_file(&dir), address.trim());
     }
     let _ = state.device_bus.send(message.clone());
     // Ask right after connecting; the device reports its mode, firmware build and voice again.
-    if matches!(message, DeviceMessage::Connected { .. }) {
+    if matches!(message, DeviceMessage::Connected { .. } | DeviceMessage::ConnectedNetwork { .. }) {
         send_event(state, device_command("device.hello"));
     }
     let DeviceMessage::Event(event) = message else {
@@ -404,6 +428,8 @@ fn app(state: AppState) -> Router {
         .route("/v1/device/identify", post(post_identify))
         .route("/v1/device/volume", post(post_volume))
         .route("/v1/device/unpair", post(post_unpair))
+        .route("/v1/device/wifi", post(post_wifi))
+        .route("/v1/device/wifi/forget", post(post_wifi_forget))
         .route("/v1/device/choice", post(post_choice))
         .route(
             "/v1/device/voice-pack",
@@ -531,6 +557,9 @@ fn device_command(name: &str) -> Event {
     Event::named(name)
 }
 
+/// The address the box got on Wi-Fi, which it reports over the cable.
+const WIFI_ADDRESS_PREFIX: &str = "WIFI ADDRESS ";
+
 fn pair_command(identity: &identity::Identity) -> Event {
     let mut event = device_command("device.pair");
     event.extra.insert("key".to_owned(), identity.public_key().into());
@@ -638,6 +667,49 @@ async fn post_unpair(
     let mut event = device_command("device.unpair");
     event.extra.insert("key".to_owned(), request.key.into());
     post_event(State(state), Json(event)).await
+}
+
+#[derive(serde::Deserialize)]
+struct WifiRequest {
+    ssid: String,
+    password: String,
+}
+
+/// Tells the box which Wi-Fi network to join. Only over the cable: the box refuses it over the network, and
+/// firmware that can't pair would show it as agent activity. The password is passed on, never logged or kept.
+async fn post_wifi(State(state): State<AppState>, Json(request): Json<WifiRequest>) -> (StatusCode, Json<ApiResponse>) {
+    if let Some(refused) = wifi_refusal(&state).await {
+        return refused;
+    }
+    if request.ssid.is_empty() || request.ssid.len() > 32 || request.password.len() > 63 {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(ApiResponse { accepted: false, message: "a network name is 1 to 32 bytes and a password at most 63".to_owned() }),
+        );
+    }
+    let mut event = device_command("device.wifi.set");
+    event.extra.insert("ssid".to_owned(), request.ssid.into());
+    event.extra.insert("password".to_owned(), request.password.into());
+    post_event(State(state), Json(event)).await
+}
+
+async fn post_wifi_forget(State(state): State<AppState>) -> (StatusCode, Json<ApiResponse>) {
+    if let Some(refused) = wifi_refusal(&state).await {
+        return refused;
+    }
+    post_event(State(state), Json(device_command("device.wifi.forget"))).await
+}
+
+async fn wifi_refusal(state: &AppState) -> Option<(StatusCode, Json<ApiResponse>)> {
+    let device = state.device.lock().await;
+    let message = if !device.connected || device.box_key.is_none() {
+        "no box that can join Wi-Fi is connected"
+    } else if device.network {
+        "the box is linked over Wi-Fi; plug in the cable to change its network"
+    } else {
+        return None;
+    };
+    Some((StatusCode::CONFLICT, Json(ApiResponse { accepted: false, message: message.to_owned() })))
 }
 
 #[derive(serde::Deserialize)]
@@ -760,6 +832,12 @@ async fn post_firmware(
     let (port, bridge) = {
         let device = state.device.lock().await;
         match &device.port {
+            Some(_) if device.connected && device.network => {
+                return (
+                    StatusCode::CONFLICT,
+                    Json(ApiResponse { accepted: false, message: "the box is linked over Wi-Fi; plug in the cable to flash it".to_owned() }),
+                );
+            }
             Some(port) if device.connected => (port.clone(), device.bridge),
             _ => {
                 return (
@@ -1172,6 +1250,30 @@ mod tests {
         assert_eq!(pair.extra["key"], key.as_str());
         assert_eq!(pair.extra["name"], "dragon's MacBook");
         std::fs::remove_dir_all(dir).ok();
+    }
+
+    #[tokio::test]
+    async fn wifi_is_set_only_over_the_cable_on_firmware_that_can() {
+        let transport = Arc::new(RecordingTransport::default());
+        let state = test_state(transport.clone());
+        let request = || Json(WifiRequest { ssid: "Home".to_owned(), password: "secret".to_owned() });
+        let (status, _) = post_wifi(State(state.clone()), request()).await;
+        assert_eq!(status, StatusCode::CONFLICT, "nothing connected");
+
+        publish_device_message(&state, DeviceMessage::Connected { port: "/dev/cu.x".to_owned(), bridge: false, usb_serial: None }).await;
+        let (status, _) = post_wifi(State(state.clone()), request()).await;
+        assert_eq!(status, StatusCode::CONFLICT, "firmware that can't pair would show it as agent activity");
+
+        publish_device_message(&state, DeviceMessage::Line("BOX KEY 1Uc4Vh8Aby1bV4I08TphnmbwAm0AzHkw5RelizUGdRE".to_owned())).await;
+        let (status, _) = post_wifi(State(state.clone()), request()).await;
+        assert_eq!(status, StatusCode::ACCEPTED);
+        let set = transport.events().into_iter().find(|event| event.event == "device.wifi.set").expect("sent");
+        assert_eq!((set.extra["ssid"].as_str(), set.extra["password"].as_str()), (Some("Home"), Some("secret")));
+
+        publish_device_message(&state, DeviceMessage::ConnectedNetwork { address: "192.168.1.23:7340".to_owned() }).await;
+        publish_device_message(&state, DeviceMessage::Line("BOX KEY 1Uc4Vh8Aby1bV4I08TphnmbwAm0AzHkw5RelizUGdRE".to_owned())).await;
+        let (status, _) = post_wifi_forget(State(state.clone())).await;
+        assert_eq!(status, StatusCode::CONFLICT, "not over the network");
     }
 
     fn device_event(json: &str) -> DeviceMessage {

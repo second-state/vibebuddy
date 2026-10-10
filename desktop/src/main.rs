@@ -23,7 +23,7 @@ mod tray;
 
 use std::time::{Duration, SystemTime};
 
-use iced::widget::{button, checkbox, column, container, image, pick_list, row, scrollable, slider, space, text, toggler};
+use iced::widget::{button, checkbox, column, container, image, pick_list, row, scrollable, slider, space, text, text_input, toggler};
 use iced::{Element, Font, Length, Subscription, Task, Theme, window};
 
 use i18n::{UiLanguage, tr};
@@ -100,6 +100,10 @@ enum Message {
     ChooseBox(String),
     /// Forget another computer on the box, by its key.
     Unpair(String),
+    WifiSsid(String),
+    WifiPassword(String),
+    JoinWifi,
+    ForgetWifi,
     Identify,
     UseVoice(&'static str),
     /// A form of address for a language, or none.
@@ -185,6 +189,9 @@ struct App {
     confirm_firmware: bool,
     /// A firmware zip picked with Flash from file…, waiting for the user to confirm.
     file_firmware: Option<firmware_file::Package>,
+    /// What is typed into the Wi-Fi fields; the password is cleared once sent.
+    wifi_ssid: String,
+    wifi_password: String,
     /// Read from the autostart entry at start, then kept as the toggle writes it.
     launch_at_login: bool,
     /// The Character being previewed, and how to stop it.
@@ -236,6 +243,8 @@ impl App {
             robot_face: None,
             confirm_firmware: false,
             file_firmware: None,
+            wifi_ssid: String::new(),
+            wifi_password: String::new(),
             launch_at_login: launch_at_login(),
             previewing: None,
             agents: Vec::new(),
@@ -475,6 +484,13 @@ impl App {
             }
             Message::ChooseBox(usb_serial) => return Task::perform(client::choose_box(usb_serial), Message::Done),
             Message::Unpair(key) => return Task::perform(client::unpair(key), Message::Done),
+            Message::WifiSsid(ssid) => self.wifi_ssid = ssid,
+            Message::WifiPassword(password) => self.wifi_password = password,
+            Message::JoinWifi => {
+                let password = std::mem::take(&mut self.wifi_password);
+                return Task::perform(client::set_wifi(self.wifi_ssid.clone(), password), Message::Done);
+            }
+            Message::ForgetWifi => return Task::perform(client::forget_wifi(), Message::Done),
             Message::Identify => return Task::perform(client::identify(), Message::Done),
             Message::UseVoice(id) => {
                 let form = assets::language_of(id).and_then(|language| self.characters.address(language)).map(str::to_owned);
@@ -1059,7 +1075,11 @@ impl App {
             Some(device) if !device.connected && !device.candidates.is_empty() => tr("Several devices found", &[]),
             Some(device) if !device.connected => tr("Box not found", &[]),
             Some(device) => {
-                let kind = if device.bridge { tr("UART bridge", &[]) } else { tr("native USB", &[]) };
+                let kind = match (device.network, device.bridge) {
+                    (true, _) => tr("Wi-Fi", &[]),
+                    (false, true) => tr("UART bridge", &[]),
+                    (false, false) => tr("native USB", &[]),
+                };
                 format!("{} · {kind}", device.port.as_deref().unwrap_or("?"))
             }
         };
@@ -1245,6 +1265,35 @@ impl App {
                 )
                 .spacing(6)
         });
+        // The Wi-Fi network the box joins, so it can be reached without the cable (ADR-0012). Set over the cable only;
+        // the password goes to the box and is kept nowhere else, so it is never shown again.
+        let wifi = device.filter(|device| online && device.box_key.is_some()).map(|device| {
+            let network = device.wifi_network.clone().unwrap_or_else(|| tr("Not set", &[]));
+            let mut wifi = column![
+                text(tr("Wi-Fi", &[])),
+                row![text(tr("Network", &[])).width(140), text(network)].spacing(12),
+            ]
+            .push(device.wifi_address.as_ref().map(|address| row![text(tr("Address", &[])).width(140), text(address.clone())].spacing(12)))
+            .spacing(6);
+            if device.network {
+                wifi = wifi.push(text(tr("Plug in the cable to change the box's network.", &[])).size(13));
+            } else {
+                let valid = !self.wifi_ssid.is_empty() && self.wifi_ssid.len() <= 32 && self.wifi_password.len() <= 63;
+                wifi = wifi
+                    .push(text_input(&tr("Network name", &[]), &self.wifi_ssid).on_input(Message::WifiSsid))
+                    .push(text_input(&tr("Password", &[]), &self.wifi_password).secure(true).on_input(Message::WifiPassword))
+                    .push(
+                        row![button(text(tr("Join", &[]))).on_press_maybe((valid && !busy).then_some(Message::JoinWifi))]
+                            .push(device.wifi_network.as_ref().map(|_| {
+                                button(text(tr("Forget network", &[])))
+                                    .style(button::secondary)
+                                    .on_press_maybe((!busy).then_some(Message::ForgetWifi))
+                            }))
+                            .spacing(8),
+                    );
+            }
+            wifi.push(text(tr("With Wi-Fi, a paired computer on the same network can drive the box without the cable.", &[])).size(13))
+        });
         // The frame is dark whatever the theme, so its text is light: in a light theme the theme's own text color
         // vanished there, and a grab in progress looked like a button that did nothing.
         let on_frame = |label: String| text(label).size(13).color(iced::Color::from_rgb8(0xd0, 0xd0, 0xd0));
@@ -1270,6 +1319,7 @@ impl App {
             .push(unavailable)
             .push(flashing)
             .push(from_file)
+            .push(wifi)
             .push(paired)
             .push(column![
                 // Separately distributed firmware (VibeBuddy-firmware-*.zip on Releases) comes in here.

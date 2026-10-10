@@ -139,6 +139,37 @@ Replies are diagnostic lines. `device.pair` gets `PAIRED <computer key>`, or `PA
 
 After pairing, the daemon asks `device.pairs`, and `/v1/status` reports `device.box_key`, `device.computer_key` (this computer) and `device.paired_computers`. `POST /v1/device/unpair` with `{"key": …}` forgets another computer; this computer is refused, since it pairs again whenever it's plugged in.
 
+## Wi-Fi network
+
+Set only over USB, like pairing. The box keeps the network in the `link` partition and reports only its name: at boot, in answer to hello, and on change as `WIFI NETWORK <ssid>`. The password never leaves the box.
+
+```json
+{"version":1,"event":"device.wifi.set","ssid":"Home","password":"…"}
+{"version":1,"event":"device.wifi.forget"}
+```
+
+The apps set it through `POST /v1/device/wifi` with `{"ssid", "password"}` and `POST /v1/device/wifi/forget`; the daemon refuses both unless a box that reports `BOX KEY` is on the cable, and passes the password on without logging or keeping it. `/v1/status` reports `device.wifi_network` and, once the box reports `WIFI ADDRESS <ip>`, `device.wifi_address`.
+
+Replies: `WIFI NETWORK <ssid>`, `WIFI FORGOTTEN`, `WIFI INVALID` (an empty name, a name over 32 bytes, or a password over 63), or `WIFI UNAVAILABLE` (no `link` partition).
+
+## Local network link
+
+Over the local network the box is the TCP server and the computer connects. The bytes are the same NDJSON as over USB, after a handshake in which both ends prove their keys (`firmware-rs/core/src/lan.rs`):
+
+```json
+{"version":1,"event":"link.challenge","box":"<box key>","nonce":"<32 bytes>"}
+{"version":1,"event":"link.hello","key":"<computer key>","sig":"<signature>","nonce":"<32 bytes>","takeover":false}
+{"version":1,"event":"link.welcome","sig":"<signature>"}
+```
+
+The computer signs `vibebuddy-lan-v1\ncomputer\n<box key>\n<box nonce>`, and the box signs `vibebuddy-lan-v1\nbox\n<box key>\n<computer nonce>`. Keys, nonces and signatures are unpadded base64url. The computer checks the box's key against the `BOX KEY` it learned over USB, so it won't drive another box. The box refuses with `link.error` (`auth`, `bad_message`, `timeout` after 10 s) and closes. If it is linked elsewhere, it sends `link.busy` with `reason` `usb` (a computer talked over the cable in the last 15 s) or `linked` (another computer has the box), and closes.
+
+A box links to one computer at a time (ADR-0011). A paired computer gets the box when it is free, when it was the last one linked, or once the last one has been gone 10 minutes. `"takeover":true`, which the user asked for, always gets it unless the cable is in use. Whoever loses the box gets `link.unlinked` with `reason` `takeover`, `usb` or `unpaired`, and is closed. Pairing and Wi-Fi messages that come over the network are refused with `ERROR cable_only`.
+
+On the computer's side, `vibebuddyd` remembers the box's key when it sees `BOX KEY` over USB (`box-key` in its state directory), and the address the box reports over USB once it is on Wi-Fi, `WIFI ADDRESS <ip>` (`box-address`). It connects to port 7340 there; `VIBEBUDDY_LAN_ADDR=host:port` fixes the address instead, as for the simulator (`tools/simulate-device.py --tcp 7340`). It tries the network only while no box is on the cable, and checks the cable every 2 s while linked over the network. Moving between the two is not a drop: `/v1/status` goes from one connection to the other with no `connected: false` in between, and `device.network` says which it is. Flashing needs the cable.
+
+There is no encryption on the local network: like the USB link, the bytes are readable by anyone who can see them, and the handshake only decides who may drive the box.
+
 ## Stage 1 error output
 
 | Output | Meaning |

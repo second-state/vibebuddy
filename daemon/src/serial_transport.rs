@@ -1,6 +1,7 @@
 use std::collections::VecDeque;
 use std::env;
 use std::path::PathBuf;
+use std::sync::Arc;
 use std::time::Duration;
 
 use vibebuddy_protocol::Event;
@@ -9,6 +10,8 @@ use tokio::sync::{mpsc, watch};
 use tokio::time::Instant;
 use tokio_serial::{ClearBuffer, SerialPort, SerialPortBuilderExt, SerialPortType, SerialStream};
 use tracing::{debug, info, warn};
+
+use crate::lan::{self, LanConfig, LinkError};
 
 const ESPRESSIF_VID: u16 = 0x303a;
 const USB_SERIAL_JTAG_PID: u16 = 0x1001;
@@ -20,6 +23,8 @@ const DEVICE_EVENT_CAPACITY: usize = 512;
 const BAUD_RATE: u32 = 115_200;
 const RECONNECT_DELAY: Duration = Duration::from_millis(500);
 const CONNECT_SETTLE_DELAY: Duration = Duration::from_millis(1_500);
+/// While linked over the network, how often to look for the box on the cable.
+const CABLE_CHECK_EVERY: Duration = Duration::from_secs(2);
 /// The BOX's CH343 UART bridge can't swallow a whole line: push more than one or two hundred bytes at once and
 /// its buffer gets flushed, dropping 32 bytes every 384 and repeating the next 32, so the length stays right but
 /// the content shifts. A control experiment polling the FIFO directly on the device cleared the device side. Over the bridge,
@@ -46,6 +51,9 @@ pub enum DeviceMessage {
     /// `bridge` means we're on the BOX's CH343 UART bridge: writes must be chunked and flashing uses small blocks.
     /// `usb_serial` is the port's USB serial number, when the system knows it.
     Connected { port: String, bridge: bool, usb_serial: Option<String> },
+    /// Linked over the local network, to the box at this address (ADR-0012). Moving between this and the cable
+    /// is not a drop: no Disconnected comes in between.
+    ConnectedNetwork { address: String },
     /// The box runs other firmware (see [`Firmware::Foreign`]): it's there, but gets nothing written.
     ForeignFirmware,
     /// Several devices could be the box and none is the one remembered, so none is connected until the user picks
@@ -75,12 +83,14 @@ pub trait Transport: Send + Sync {
     fn send(&self, frame: Vec<u8>) -> Result<(), TransportError>;
 }
 
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Default)]
 pub struct SerialConfig {
     explicit_port: Option<String>,
     usb_serial: Option<String>,
     /// Where the USB serial number of the last device that proved to be the box is kept; see [`remember_box`].
     known_box: Option<PathBuf>,
+    /// How to reach the box without the cable; None when this computer has no pairing key.
+    lan: Option<Arc<LanConfig>>,
 }
 
 impl SerialConfig {
@@ -89,7 +99,14 @@ impl SerialConfig {
             explicit_port: env::var("VIBEBUDDY_SERIAL_PORT").ok(),
             usb_serial: env::var("VIBEBUDDY_USB_SERIAL").ok(),
             known_box,
+            lan: None,
         }
+    }
+
+    /// Lets the worker fall back to the local network when no box is on the cable.
+    pub fn with_lan(mut self, lan: LanConfig) -> Self {
+        self.lan = Some(Arc::new(lan));
+        self
     }
 
     pub fn pin(&self) -> Option<Pin> {
@@ -161,6 +178,10 @@ async fn serial_worker(
     let mut pending: VecDeque<Vec<u8>> = VecDeque::new();
     // What the status last heard about candidates, so a choice that stays open is reported (and logged) once.
     let mut offered: Vec<Candidate> = Vec::new();
+    // A Connected went out and no Disconnected since. A session that ends only says Disconnected once neither the
+    // cable nor the network brings the box back, so moving from one to the other isn't a drop.
+    let mut linked = false;
+    let mut busy_logged: Option<String> = None;
 
     loop {
         if *suspend.borrow() {
@@ -196,17 +217,58 @@ async fn serial_worker(
             let _ = device_event_sender.send(DeviceMessage::Candidates(candidates.clone())).await;
             offered = candidates;
         }
-        let PortChoice { name: port_name, paced, usb_serial } = match found {
-            Ok(Found::One(choice)) => choice,
-            Ok(Found::None | Found::Several(_)) => {
-                tokio::time::sleep(RECONNECT_DELAY).await;
-                continue;
-            }
+        let choice = match found {
+            Ok(Found::One(choice)) => Some(choice),
+            Ok(Found::None | Found::Several(_)) => None,
             Err(error) => {
                 warn!(%error, "serial port discovery failed, retrying later");
-                tokio::time::sleep(RECONNECT_DELAY).await;
-                continue;
+                None
             }
+        };
+        let Some(PortChoice { name: port_name, paced, usb_serial }) = choice else {
+            // No box on the cable: try the network, if this computer is paired and knows where the box is.
+            if let Some(lan) = &config.lan
+                && let Some(target) = lan.target()
+            {
+                match lan::connect(&target, &lan.identity, false).await {
+                    Ok(mut stream) => {
+                        info!(address = %target.address, "linked over the local network");
+                        busy_logged = None;
+                        let _ = device_event_sender.send(DeviceMessage::ConnectedNetwork { address: target.address.clone() }).await;
+                        linked = true;
+                        let end = run_session(
+                            &mut stream,
+                            &target.address,
+                            false,
+                            Firmware::Ours,
+                            Some(&config),
+                            &mut pending,
+                            &mut receiver,
+                            &device_event_sender,
+                            &mut suspend,
+                        )
+                        .await;
+                        match end {
+                            SessionEnd::Shutdown => return,
+                            SessionEnd::Usb => info!("the box is on the cable, leaving the local network link"),
+                            SessionEnd::Reconnect | SessionEnd::Released => {}
+                        }
+                        continue;
+                    }
+                    Err(LinkError::Busy(reason)) if busy_logged.as_ref() != Some(&reason) => {
+                        info!(%reason, "the box is linked elsewhere");
+                        busy_logged = Some(reason);
+                    }
+                    Err(LinkError::Busy(_)) => {}
+                    Err(error) => debug!(?error, address = %target.address, "no local network link"),
+                }
+            }
+            if linked {
+                let _ = device_event_sender.send(DeviceMessage::Disconnected).await;
+                linked = false;
+            }
+            tokio::time::sleep(RECONNECT_DELAY).await;
+            continue;
         };
 
         let mut port = match open_port(&port_name) {
@@ -222,18 +284,33 @@ async fn serial_worker(
         let _ = device_event_sender
             .send(DeviceMessage::Connected { port: port_name.clone(), bridge: paced, usb_serial })
             .await;
+        linked = true;
 
-        match run_session(&mut port, &port_name, paced, &mut pending, &mut receiver, &device_event_sender, &mut suspend)
-            .await
-        {
+        let end = run_session(
+            &mut port,
+            &port_name,
+            paced,
+            Firmware::Listening { since: Instant::now() },
+            None,
+            &mut pending,
+            &mut receiver,
+            &device_event_sender,
+            &mut suspend,
+        )
+        .await;
+        match end {
             SessionEnd::Shutdown => return,
-            SessionEnd::Reconnect => {}
+            SessionEnd::Reconnect | SessionEnd::Usb => {}
             // Closing a tty waits for unsent output to drain, which never happens if the peer doesn't read.
             SessionEnd::Released => drop(port.clear(ClearBuffer::Output)),
         }
 
         drop(port);
-        let _ = device_event_sender.send(DeviceMessage::Disconnected).await;
+        // Flashing takes the box away for real; otherwise the next look around decides whether it's gone.
+        if end == SessionEnd::Released {
+            let _ = device_event_sender.send(DeviceMessage::Disconnected).await;
+            linked = false;
+        }
         tokio::time::sleep(RECONNECT_DELAY).await;
     }
 }
@@ -246,6 +323,8 @@ enum SessionEnd {
     Released,
     /// The daemon is shutting down.
     Shutdown,
+    /// A box turned up on the cable while linked over the network.
+    Usb,
 }
 
 /// What the box on the other end runs, judged from what it prints. No port is opened just to ask, since opening
@@ -324,10 +403,13 @@ fn is_hello(frame: &[u8]) -> bool {
 }
 
 /// Shuttles frames and device output over one open port until it fails or is handed to the flasher.
+#[allow(clippy::too_many_arguments, reason = "one session's whole context; a struct would only rename the list")]
 async fn run_session<P: AsyncRead + AsyncWrite + Unpin>(
     port: &mut P,
     port_name: &str,
     paced: bool,
+    mut firmware: Firmware,
+    watch_cable: Option<&SerialConfig>,
     pending: &mut VecDeque<Vec<u8>>,
     receiver: &mut mpsc::Receiver<Vec<u8>>,
     device_event_sender: &mpsc::Sender<DeviceMessage>,
@@ -335,7 +417,9 @@ async fn run_session<P: AsyncRead + AsyncWrite + Unpin>(
 ) -> SessionEnd {
     let mut read_buffer = [0_u8; 256];
     let mut line_buffer = Vec::new();
-    let mut firmware = Firmware::Listening { since: Instant::now() };
+    // Over the network the cable wins: look for the box on it now and then.
+    let mut cable_check = tokio::time::interval(CABLE_CHECK_EVERY);
+    cable_check.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
 
     loop {
         // Frames wait, in order, until the box is known to run our firmware; only hello may go first.
@@ -392,6 +476,11 @@ async fn run_session<P: AsyncRead + AsyncWrite + Unpin>(
                 if *suspend.borrow() {
                     info!(port = %port_name, "serial port released for flashing");
                     return SessionEnd::Released;
+                }
+            }
+            _ = cable_check.tick(), if watch_cable.is_some() => {
+                if watch_cable.is_some_and(|config| matches!(find_port(config), Ok(Found::One(_)))) {
+                    return SessionEnd::Usb;
                 }
             }
             result = port.read(&mut read_buffer) => {
@@ -487,6 +576,10 @@ enum Found {
 fn find_port(config: &SerialConfig) -> Result<Found, String> {
     let ports = tokio_serial::available_ports().map_err(|error| error.to_string())?;
     if let Some(port) = &config.explicit_port {
+        // A pinned port that isn't there is no box on the cable, so the network may be tried.
+        if !std::path::Path::new(port).exists() {
+            return Ok(Found::None);
+        }
         // An explicitly given port still has its VID/PID looked up to choose pacing; if the system can't find it, assume the bridge, the most conservative case.
         let paced = ports
             .iter()
@@ -730,7 +823,7 @@ mod tests {
         let (device_sender, _device_receiver) = mpsc::channel(1);
         let (suspend_sender, mut suspend) = watch::channel(false);
 
-        let session = run_session(&mut port, "test", false, &mut pending, &mut receiver, &device_sender, &mut suspend);
+        let session = run_session(&mut port, "test", false, Firmware::Listening { since: Instant::now() }, None, &mut pending, &mut receiver, &device_sender, &mut suspend);
         let release = async {
             tokio::time::sleep(LISTEN_FIRST + Duration::from_millis(50)).await;
             suspend_sender.send(true).unwrap();
@@ -778,7 +871,7 @@ mod tests {
         frames.send(heartbeat_frame()).await.unwrap();
         let task = tokio::spawn(async move {
             let mut pending = VecDeque::new();
-            run_session(&mut port, "test", false, &mut pending, &mut receiver, &device_sender, &mut suspend).await
+            run_session(&mut port, "test", false, Firmware::Listening { since: Instant::now() }, None, &mut pending, &mut receiver, &device_sender, &mut suspend).await
         });
         Session { peer, frames, device, _suspend: suspend_sender, task }
     }

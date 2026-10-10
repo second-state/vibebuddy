@@ -34,6 +34,11 @@ impl Identity {
         Ok(Self { key: SigningKey::from_bytes(&seed), name })
     }
 
+    pub fn sign(&self, message: &[u8]) -> [u8; 64] {
+        use ed25519_dalek::Signer;
+        self.key.sign(message).to_bytes()
+    }
+
     /// The public key as the box and the Relay see it: 43 characters of base64url.
     pub fn public_key(&self) -> String {
         URL_SAFE_NO_PAD.encode(self.key.verifying_key().to_bytes())

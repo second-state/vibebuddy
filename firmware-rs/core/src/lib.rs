@@ -19,6 +19,7 @@ pub mod canvas;
 pub mod character_pack;
 pub mod display;
 pub mod firmware;
+pub mod lan;
 pub mod lcd;
 pub mod leisure;
 pub mod lines;
