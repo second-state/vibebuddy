@@ -13,6 +13,8 @@ const VERSION_MARKER: &str = "FIRMWARE VERSION ";
 /// The board our firmware says it was built for. Released firmware is built for the box alone and says nothing;
 /// a build for other hardware (the breadboard devkit, `goouuu-s3-spi`) says which.
 const BOARD_PREFIX: &str = "BOARD ";
+/// The box's public key; firmware that can pair reports it with its build.
+pub const BOX_KEY_PREFIX: &str = "BOX KEY ";
 /// What a build for the box itself calls it, when it does say.
 const RELEASE_BOARD: &str = "alientek-box";
 
@@ -34,6 +36,10 @@ pub struct DeviceState {
     pub volume: Option<u8>,
     /// The connected port's USB serial number, which tells this device from another ESP32-S3.
     pub usb_serial: Option<String>,
+    /// The box's public key, its id on the Relay (ADR-0012); None for firmware that can't pair.
+    pub box_key: Option<String>,
+    /// The box has confirmed it is paired with this computer.
+    pub paired: bool,
     /// Connected, but running other firmware (a factory unit, or Muse on a box that runs it): it's there, not
     /// offline, and the daemon writes it nothing until it resets and reports our build.
     pub foreign_firmware: bool,
@@ -70,6 +76,8 @@ impl DeviceState {
                 self.mode = None;
                 self.voice = None;
                 self.volume = None;
+                self.box_key = None;
+                self.paired = false;
             }
             DeviceMessage::ForeignFirmware => {
                 // Over the bridge the port survives a reset into other firmware, so what ours reported must go too.
@@ -80,6 +88,8 @@ impl DeviceState {
                 self.mode = None;
                 self.voice = None;
                 self.volume = None;
+                self.box_key = None;
+                self.paired = false;
             }
             DeviceMessage::Disconnected => {
                 self.connected = false;
@@ -98,6 +108,10 @@ impl DeviceState {
                 } else if let Some((_, build)) = line.split_once(BUILD_MARKER) {
                     self.foreign_firmware = false;
                     self.firmware_build = Some(build.trim().to_owned());
+                } else if let Some(key) = line.strip_prefix(BOX_KEY_PREFIX) {
+                    self.box_key = Some(key.trim().to_owned());
+                } else if line.starts_with("PAIRED ") {
+                    self.paired = true;
                 } else if let Some((_, version)) = line.split_once(VERSION_MARKER) {
                     self.firmware_version = Some(version.trim().to_owned());
                 } else if let Some(voice) = line.strip_prefix("VOICES ") {
@@ -235,12 +249,26 @@ mod tests {
                 voice: Some("builtin".to_owned()),
                 volume: Some(65),
                 usb_serial: None,
+                box_key: None,
+                paired: false,
                 foreign_firmware: false,
                 unsupported_board: None,
                 pin: None,
                 candidates: Vec::new(),
             }
         );
+    }
+
+    #[test]
+    fn the_box_key_and_pairing_belong_to_the_box_now_connected() {
+        let mut state = DeviceState::default();
+        state.apply(&DeviceMessage::Connected { port: "/dev/cu.x".to_owned(), bridge: false, usb_serial: None });
+        state.apply(&line("BOX KEY 1Uc4Vh8Aby1bV4I08TphnmbwAm0AzHkw5RelizUGdRE"));
+        state.apply(&line("PAIRED AgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgI"));
+        assert_eq!(state.box_key.as_deref(), Some("1Uc4Vh8Aby1bV4I08TphnmbwAm0AzHkw5RelizUGdRE"));
+        assert!(state.paired);
+        state.apply(&DeviceMessage::Connected { port: "/dev/cu.y".to_owned(), bridge: false, usb_serial: None });
+        assert_eq!((state.box_key, state.paired), (None, false));
     }
 
     #[test]

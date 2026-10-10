@@ -4706,6 +4706,7 @@ dependencies = [
 name = "vibebuddy-firmware-core"
 version = "0.4.1"
 dependencies = [
+ "ed25519-dalek",
  "libm",
  "serde_json",
  "vibebuddy-protocol",
@@ -4752,6 +4753,8 @@ dependencies = [
  "base64 0.22.1",
  "chrono",
  "crc32fast",
+ "ed25519-dalek",
+ "getrandom 0.3.4",
  "http-body-util",
  "libc",
  "md-5",

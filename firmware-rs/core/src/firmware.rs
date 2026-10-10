@@ -21,6 +21,7 @@ use crate::storage::{Flash, Settings, SettingsStore, find_partition};
 use crate::text;
 use crate::voice_pack::crc32;
 use crate::lines::LinePicker;
+use crate::link::{self, Link, LinkStore, PairError};
 use crate::look::Look;
 use crate::voices::{Pick, Voices, VoiceError};
 
@@ -88,6 +89,10 @@ pub struct Firmware {
     picker: LinePicker,
     buttons: Option<Buttons>,
     settings: Option<SettingsStore>,
+    /// The box's key and paired computers, and where they are kept; None without a link partition.
+    link: Option<(LinkStore, Link)>,
+    /// Hardware entropy for making the box's key on its first boot.
+    entropy: [u8; 32],
     volume: u32,
     audio_ready: bool,
     build: Vec<u8>,
@@ -197,6 +202,9 @@ impl Firmware {
             picker: LinePicker::new(seed ^ 0x9E37_79B9),
             buttons: None,
             settings: None,
+            link: None,
+            // Good enough for tests and the simulator; the device passes hardware entropy.
+            entropy: core::array::from_fn(|index| (seed.rotate_left(index as u32 % 32) >> (index % 4 * 8)) as u8 ^ index as u8),
             volume: VOLUME_DEFAULT,
             audio_ready: false,
             build: build.to_vec(),
@@ -216,6 +224,12 @@ impl Firmware {
             reported_hour: -1,
             reported_look: alloc::string::String::from("ROBOT"),
         }
+    }
+
+    /// Hardware entropy for the box's key, which is made on the first boot that finds none.
+    pub fn with_entropy(mut self, entropy: [u8; 32]) -> Self {
+        self.entropy = entropy;
+        self
     }
 
     fn write_literal<B: Board>(board: &mut B, text: &str) {
@@ -256,6 +270,7 @@ impl Firmware {
             }
             _ => Self::write_literal(board, "TALLY LOAD ERROR\n"),
         }
+        self.load_link(board);
 
         let display_ok = board.init_display() && self.display.start(board, &scene!(self, now)).is_ok();
         if display_ok {
@@ -264,6 +279,7 @@ impl Firmware {
             Self::write_literal(board, "DISPLAY ERROR\n");
         }
         Self::write_value_line(board, "FIRMWARE VERSION ", self.version.as_bytes());
+        self.announce_key(board);
 
         let voices_region = find_partition(board.flash(), "voices");
         match self.voices.init(board.flash(), voices_region) {
@@ -929,6 +945,8 @@ impl Firmware {
                 }
             }
             _ if event.starts_with("voice.") => self.handle_voice_event(board, fields, event),
+            // Pairing is the computer at the other end of the cable telling the box who it is (ADR-0012).
+            "device.pair" | "device.unpair" | "device.pairs" => self.handle_pairing(board, fields, event),
             // Link self-test: send the received string's length and CRC back to the Mac to check for corrupted serial bytes.
             "device.echo" => {
                 if let Some(data) = string(fields, "data") {
@@ -955,10 +973,68 @@ impl Firmware {
         }
     }
 
-    /// Reports the device's whole static state: firmware build and version, mode, voice and volume.
+    /// Opens the link partition, making the box's key if this is its first boot with one. A box
+    /// without the partition (the single-slot layout) has no key and can't be paired; it says nothing,
+    /// and the missing `BOX KEY` line tells the computer so.
+    fn load_link<B: Board>(&mut self, board: &mut B) {
+        let Some(region) = find_partition(board.flash(), "link") else { return };
+        match LinkStore::open(board.flash(), region) {
+            Ok((store, Some(link))) => self.link = Some((store, link)),
+            Ok((mut store, None)) => {
+                let link = Link::new(self.entropy);
+                if store.save(board.flash(), &link).is_err() {
+                    return Self::write_literal(board, "LINK SAVE ERROR\n");
+                }
+                self.link = Some((store, link));
+            }
+            Err(_) => Self::write_literal(board, "LINK LOAD ERROR\n"),
+        }
+    }
+
+    /// `BOX KEY`: the box's public key. Its presence also tells the computer this firmware can pair.
+    fn announce_key<B: Board>(&self, board: &mut B) {
+        if let Some((_, link)) = &self.link {
+            Self::write_value_line(board, "BOX KEY ", link::encode_key(&link.public_key()).as_bytes());
+        }
+    }
+
+    fn handle_pairing<B: Board>(&mut self, board: &mut B, fields: &BTreeMap<alloc::string::String, Value>, event: &str) {
+        let Some((store, link)) = self.link.as_mut() else {
+            return Self::write_literal(board, "PAIR UNAVAILABLE\n");
+        };
+        if event == "device.pairs" {
+            let line = text!(16, "PAIRS {}\n", link.paired.len());
+            board.write(line.as_bytes());
+            for paired in &link.paired {
+                let mut line = alloc::format!("PAIR {} ", link::encode_key(&paired.key));
+                line.push_str(&paired.name);
+                Self::write_value_line(board, "", line.as_bytes());
+            }
+            return;
+        }
+        let Some(key) = string(fields, "key").and_then(link::decode_key) else {
+            return Self::write_literal(board, "PAIR INVALID\n");
+        };
+        let changed = if event == "device.pair" {
+            match link.pair(key, string(fields, "name").unwrap_or("")) {
+                Ok(changed) => changed,
+                Err(PairError::Full) => return Self::write_literal(board, "PAIR FULL\n"),
+            }
+        } else {
+            link.unpair(&key)
+        };
+        if changed && store.save(board.flash(), link).is_err() {
+            return Self::write_literal(board, "LINK SAVE ERROR\n");
+        }
+        let label = if event == "device.pair" { "PAIRED " } else { "UNPAIRED " };
+        Self::write_value_line(board, label, link::encode_key(&key).as_bytes());
+    }
+
+    /// Reports the device's whole static state: firmware build and version, its key, mode, voice and volume.
     fn announce_state<B: Board>(&self, board: &mut B) {
         Self::write_value_line(board, "DISPLAY READY BUILD ", &self.build);
         Self::write_value_line(board, "FIRMWARE VERSION ", self.version.as_bytes());
+        self.announce_key(board);
         Self::write_value_line(board, "MODE ", self.display.mode().name().as_bytes());
         Self::write_value_line(board, "VOICES ", self.voices.current_id().as_bytes());
         self.announce_volume(board);
