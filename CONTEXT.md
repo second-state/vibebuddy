@@ -39,8 +39,20 @@ The signed list of what can be installed: the latest App per platform and every 
 _Avoid_: appcast (Sparkle's feed for the macOS App only), update server, feed
 
 **Link (链路)**:
-The connection between the Mac and the device. When the link drops, the buddy closes its eyes and turns gray; a link failure is the only thing the App announces on its own.
-_Avoid_: connection, USB, serial port (those are one implementation of the link)
+The connection between one computer and the box. A box has at most one link at a time, to one computer, and a computer links to at most one box. A link is carried over USB, over the local network, or through the Relay; when more than one is available, USB wins, then the local network, then the Relay. Moving the link from one way to another is not a drop; the link drops only when no way is left. When the link drops, the buddy closes its eyes and turns gray; a link failure is the only thing the App announces on its own.
+_Avoid_: connection, USB, serial port, Wi-Fi (those are ways of carrying the link)
+
+**Relay (中转)**:
+VibeBuddy's online service that carries a link when the computer and the box can't reach each other directly, such as when they are on different networks. It passes the link along and decides nothing about Agents. It is never required: a box works over USB or the local network without it.
+_Avoid_: cloud, server, backend (too broad: later online features are not the Relay)
+
+**Pairing (配对)**:
+The lasting permission for a computer to link to a box. Pairing is done once per computer and box and needs no account; the paired computers of a box are the only ones that may link to it or take it over.
+_Avoid_: binding, registration, login (an account is a separate, later thing)
+
+**Takeover (接管)**:
+A paired computer becoming the one the box links to, ending the previous computer's link. Plugging in USB always takes over; otherwise the user takes over from the App, or another paired computer links on its own once the previous one has been gone long enough. Agent activity never moves the box between computers by itself.
+_Avoid_: switch, handoff, steal
 
 **Connection (接入)**:
 The hook connection between an Agent and VibeBuddy, and its status: whether it is installed, and when the last event arrived.
