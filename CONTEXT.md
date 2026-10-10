@@ -137,6 +137,7 @@ Fixed wording for the App's English UI and English logs. Use these words when wr
 | 需要确认 | needs input | The voice line is Hey, I need you for a sec.; counted as asks in the stats |
 | 任务卡 | task card | |
 | 固件 / 刷入 | firmware / flash | |
+| 配对 / 已配对的电脑 | pair / paired computers | On the box's menu the row is COMPUTERS; "this computer" marks the one the App runs on |
 | UART 桥 / 原生 USB | UART bridge / native USB | |
 
 ### Activity lifecycle

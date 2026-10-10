@@ -51,6 +51,14 @@ public struct BoxCandidate: Codable, Equatable, Identifiable {
     public init(port: String, usbSerial: String?) { self.port = port; self.usbSerial = usbSerial }
 }
 
+/// A computer the box is paired with (ADR-0012).
+public struct PairedComputer: Codable, Equatable, Identifiable {
+    public var key: String
+    public var name: String
+    public var id: String { key }
+    public init(key: String, name: String) { self.key = key; self.name = name }
+}
+
 public struct DeviceState: Codable, Equatable {
     public var connected: Bool
     public var port: String?
@@ -69,7 +77,12 @@ public struct DeviceState: Codable, Equatable {
     public var candidates: [BoxCandidate]?
     /// Our firmware built for other hardware (the breadboard devkit); released firmware isn't offered to it. Absent from older daemons.
     public var unsupportedBoard: String?
-    enum CodingKeys: String, CodingKey { case connected, port, bridge, mode, firmwareBuild = "firmware_build", firmwareVersion = "firmware_version", voice, volume, foreignFirmware = "foreign_firmware", pin, candidates, unsupportedBoard = "unsupported_board" }
+    /// The box's key; nil for firmware that can't pair. Absent from older daemons, like the two below.
+    public var boxKey: String?
+    /// This computer's key, to tell it apart in `pairedComputers`.
+    public var computerKey: String?
+    public var pairedComputers: [PairedComputer]?
+    enum CodingKeys: String, CodingKey { case connected, port, bridge, mode, firmwareBuild = "firmware_build", firmwareVersion = "firmware_version", voice, volume, foreignFirmware = "foreign_firmware", pin, candidates, unsupportedBoard = "unsupported_board", boxKey = "box_key", computerKey = "computer_key", pairedComputers = "paired_computers" }
     public init(connected: Bool, port: String? = nil, bridge: Bool = false, mode: String? = nil, firmwareBuild: String? = nil, firmwareVersion: String? = nil, voice: String? = nil, volume: Int? = nil, foreignFirmware: Bool? = nil) {
         self.connected = connected; self.port = port; self.bridge = bridge; self.mode = mode; self.firmwareBuild = firmwareBuild; self.firmwareVersion = firmwareVersion; self.voice = voice; self.volume = volume
         self.foreignFirmware = foreignFirmware

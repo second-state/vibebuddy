@@ -33,7 +33,7 @@ use esp_hal::i2s::master::{Channels, DataFormat, I2s, TdmConfig};
 use esp_hal::lcd_cam::LcdCam;
 use esp_hal::lcd_cam::lcd::{ClockMode, Phase, Polarity};
 use esp_hal::lcd_cam::lcd::i8080::{Config as I8080Config, I8080};
-use esp_hal::rng::Rng;
+use esp_hal::rng::{Rng, Trng, TrngSource};
 use esp_hal::time::Rate;
 use esp_hal::timer::timg::TimerGroup;
 use esp_hal::uart::{Config as UartConfig, Uart};
@@ -327,7 +327,14 @@ async fn main(spawner: Spawner) -> ! {
     Timer::after_millis(20).await;
 
     let seed = Rng::new().random();
-    let mut firmware = Firmware::new(seed, board.now_ms(), BUILD.as_bytes(), env!("CARGO_PKG_VERSION"));
+    // The box's pairing key is made from this on its first boot, so it must be true randomness: the
+    // RNG only gets that with the radio on or the ADC sampling noise, and nothing else uses ADC1.
+    let mut entropy = [0u8; 32];
+    {
+        let _source = TrngSource::new(peripherals.RNG, peripherals.ADC1);
+        Trng::try_new().expect("TRNG with the ADC entropy source").read(&mut entropy);
+    }
+    let mut firmware = Firmware::new(seed, board.now_ms(), BUILD.as_bytes(), env!("CARGO_PKG_VERSION")).with_entropy(entropy);
     firmware.boot(&mut board);
     // Booting got this far, so an image installed over the air keeps its slot.
     storage::confirm_running_image();

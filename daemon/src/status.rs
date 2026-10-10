@@ -13,6 +13,8 @@ const VERSION_MARKER: &str = "FIRMWARE VERSION ";
 /// The board our firmware says it was built for. Released firmware is built for the box alone and says nothing;
 /// a build for other hardware (the breadboard devkit, `goouuu-s3-spi`) says which.
 const BOARD_PREFIX: &str = "BOARD ";
+/// The box's public key; firmware that can pair reports it with its build.
+pub const BOX_KEY_PREFIX: &str = "BOX KEY ";
 /// What a build for the box itself calls it, when it does say.
 const RELEASE_BOARD: &str = "alientek-box";
 
@@ -34,6 +36,14 @@ pub struct DeviceState {
     pub volume: Option<u8>,
     /// The connected port's USB serial number, which tells this device from another ESP32-S3.
     pub usb_serial: Option<String>,
+    /// The box's public key, its id on the Relay (ADR-0012); None for firmware that can't pair.
+    pub box_key: Option<String>,
+    /// The box has confirmed it is paired with this computer.
+    pub paired: bool,
+    /// This computer's own key, so the app can tell it apart in `paired_computers`. Set once at start.
+    pub computer_key: Option<String>,
+    /// Every computer the box is paired with, as it last listed them.
+    pub paired_computers: Vec<PairedComputer>,
     /// Connected, but running other firmware (a factory unit, or Muse on a box that runs it): it's there, not
     /// offline, and the daemon writes it nothing until it resets and reports our build.
     pub foreign_firmware: bool,
@@ -46,6 +56,12 @@ pub struct DeviceState {
     pub pin: Option<Pin>,
     /// Devices that could be the box when there are several and none is the remembered one; the user picks.
     pub candidates: Vec<Candidate>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+pub struct PairedComputer {
+    pub key: String,
+    pub name: String,
 }
 
 impl DeviceState {
@@ -70,6 +86,9 @@ impl DeviceState {
                 self.mode = None;
                 self.voice = None;
                 self.volume = None;
+                self.box_key = None;
+                self.paired = false;
+                self.paired_computers.clear();
             }
             DeviceMessage::ForeignFirmware => {
                 // Over the bridge the port survives a reset into other firmware, so what ours reported must go too.
@@ -80,6 +99,9 @@ impl DeviceState {
                 self.mode = None;
                 self.voice = None;
                 self.volume = None;
+                self.box_key = None;
+                self.paired = false;
+                self.paired_computers.clear();
             }
             DeviceMessage::Disconnected => {
                 self.connected = false;
@@ -98,6 +120,25 @@ impl DeviceState {
                 } else if let Some((_, build)) = line.split_once(BUILD_MARKER) {
                     self.foreign_firmware = false;
                     self.firmware_build = Some(build.trim().to_owned());
+                } else if let Some(key) = line.strip_prefix(BOX_KEY_PREFIX) {
+                    self.box_key = Some(key.trim().to_owned());
+                } else if line.starts_with("PAIRED ") {
+                    self.paired = true;
+                } else if line.starts_with("PAIRS ") {
+                    self.paired_computers.clear();
+                } else if let Some((key, name)) = line.strip_prefix("PAIR ").and_then(|rest| rest.split_once(' '))
+                    && key.len() == 43
+                {
+                    self.paired_computers.push(PairedComputer { key: key.to_owned(), name: name.trim().to_owned() });
+                } else if line.trim() == "UNPAIRED ALL" {
+                    self.paired = false;
+                    self.paired_computers.clear();
+                } else if let Some(key) = line.strip_prefix("UNPAIRED ") {
+                    let key = key.trim();
+                    self.paired_computers.retain(|computer| computer.key != key);
+                    if self.computer_key.as_deref() == Some(key) {
+                        self.paired = false;
+                    }
                 } else if let Some((_, version)) = line.split_once(VERSION_MARKER) {
                     self.firmware_version = Some(version.trim().to_owned());
                 } else if let Some(voice) = line.strip_prefix("VOICES ") {
@@ -235,12 +276,47 @@ mod tests {
                 voice: Some("builtin".to_owned()),
                 volume: Some(65),
                 usb_serial: None,
+                box_key: None,
+                paired: false,
+                computer_key: None,
+                paired_computers: Vec::new(),
                 foreign_firmware: false,
                 unsupported_board: None,
                 pin: None,
                 candidates: Vec::new(),
             }
         );
+    }
+
+    #[test]
+    fn the_box_key_and_pairing_belong_to_the_box_now_connected() {
+        let mut state = DeviceState::default();
+        state.apply(&DeviceMessage::Connected { port: "/dev/cu.x".to_owned(), bridge: false, usb_serial: None });
+        state.apply(&line("BOX KEY 1Uc4Vh8Aby1bV4I08TphnmbwAm0AzHkw5RelizUGdRE"));
+        state.apply(&line("PAIRED AgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgI"));
+        assert_eq!(state.box_key.as_deref(), Some("1Uc4Vh8Aby1bV4I08TphnmbwAm0AzHkw5RelizUGdRE"));
+        assert!(state.paired);
+        state.apply(&DeviceMessage::Connected { port: "/dev/cu.y".to_owned(), bridge: false, usb_serial: None });
+        assert_eq!((state.box_key, state.paired), (None, false));
+    }
+
+    #[test]
+    fn the_paired_list_follows_what_the_box_reports() {
+        let mine = "A".repeat(43);
+        let other = "B".repeat(43);
+        let mut state = DeviceState { computer_key: Some(mine.clone()), ..DeviceState::default() };
+        state.apply(&line(&format!("PAIRED {mine}")));
+        state.apply(&line("PAIRS 2"));
+        state.apply(&line(&format!("PAIR {mine} dragon's MacBook")));
+        state.apply(&line(&format!("PAIR {other} omarchy")));
+        assert_eq!(state.paired_computers.iter().map(|c| c.name.as_str()).collect::<Vec<_>>(), ["dragon's MacBook", "omarchy"]);
+        assert!(!state.apply(&line("PAIR FULL")), "not a list entry");
+        state.apply(&line(&format!("UNPAIRED {other}")));
+        assert_eq!(state.paired_computers.len(), 1);
+        assert!(state.paired);
+        state.apply(&line("UNPAIRED ALL"));
+        assert!(state.paired_computers.is_empty());
+        assert!(!state.paired);
     }
 
     #[test]

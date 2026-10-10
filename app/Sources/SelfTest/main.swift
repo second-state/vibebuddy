@@ -68,6 +68,13 @@ do {
     """.utf8))
     check(choosing.pin == SerialPin(variable: "VIBEBUDDY_SERIAL_PORT", value: "/dev/cu.usbmodem8401"), "pin decodes")
     check(choosing.candidates?.map(\.usbSerial) == ["30:ED:A0:A4:0D:08", nil], "candidates decode, with or without a serial")
+    check(status.device.pairedComputers == nil && status.device.boxKey == nil, "an older daemon: no pairing")
+    let paired = try StatusCoding.decoder().decode(DeviceState.self, from: Data("""
+    {"connected":true,"bridge":false,"box_key":"BOX","computer_key":"MINE",
+     "paired_computers":[{"key":"MINE","name":"dragon's MacBook"},{"key":"OTHER","name":"omarchy"}]}
+    """.utf8))
+    check(paired.boxKey == "BOX" && paired.computerKey == "MINE", "pairing keys decode")
+    check(paired.pairedComputers?.map(\.name) == ["dragon's MacBook", "omarchy"], "paired computers decode")
 } catch {
     check(false, "status decoding threw: \(error)")
 }

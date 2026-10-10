@@ -156,6 +156,8 @@ final class AppModel: ObservableObject {
 
     func chooseBox(usbSerial: String) { run { try await self.client.chooseBox(usbSerial: usbSerial) } }
 
+    func unpair(key: String) { run { try await self.client.unpair(key: key) } }
+
     func setNotifyLink(_ enabled: Bool) {
         guard var config = status?.config else { return }
         config.notifyLink = enabled

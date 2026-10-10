@@ -38,8 +38,16 @@ impl Flash for MemoryFlash {
 
 /// 16 MB flash, with a partition table matching partitions.csv.
 fn blank_flash() -> MemoryFlash {
-    let mut flash = MemoryFlash { bytes: vec![0xFF; 0x610000] };
-    let entries = [("nvs", 1u8, 2u8, 0x9000u32, 0x6000u32), ("phy_init", 1, 1, 0xF000, 0x1000), ("factory", 0, 0, 0x10000, 0x400000), ("voices", 1, 0x40, 0x410000, 0x200000)];
+    let mut flash = MemoryFlash { bytes: vec![0xFF; 0xA14000] };
+    let entries = [
+        ("nvs", 1u8, 2u8, 0x9000u32, 0x6000u32),
+        ("phy_init", 1, 1, 0xF000, 0x1000),
+        ("ota_0", 0, 0x10, 0x10000, 0x400000),
+        ("voices", 1, 0x40, 0x410000, 0x200000),
+        ("ota_1", 0, 0x11, 0x610000, 0x400000),
+        ("otadata", 1, 0, 0xA10000, 0x2000),
+        ("link", 1, 0x41, 0xA12000, 0x2000),
+    ];
     for (index, (label, kind, subtype, offset, size)) in entries.iter().enumerate() {
         let at = 0x8000 + index * 32;
         let entry = &mut flash.bytes[at..at + 32];
@@ -158,6 +166,9 @@ impl Board for FakeBoard {
     }
 }
 
+/// The key the box makes from the entropy `Firmware::new(7, …)` derives.
+const BOX_KEY: &str = "BOX KEY 1Uc4Vh8Aby1bV4I08TphnmbwAm0AzHkw5RelizUGdRE";
+
 fn booted(flash: MemoryFlash) -> (Firmware, FakeBoard, Vec<String>) {
     let mut board = FakeBoard::new(flash);
     let mut firmware = Firmware::new(7, board.now_ms(), b"abc1234 2026-09-26 10:00", "1.2.3");
@@ -181,6 +192,7 @@ fn boot_reports_like_the_c_firmware() {
             "TALLY LOADED 0 0S DAY 0",
             "DISPLAY READY BUILD abc1234 2026-09-26 10:00",
             "FIRMWARE VERSION 1.2.3",
+            BOX_KEY,
             "VOICES builtin",
             "AUDIO READY",
             "AUDIO CODEC ES8311",
@@ -431,7 +443,7 @@ fn echo_reports_length_and_crc() {
 fn hello_repeats_the_static_state() {
     let (mut firmware, mut board, _) = booted(blank_flash());
     let lines = send(&mut firmware, &mut board, r#"{"version":1,"event":"device.hello"}"#);
-    assert_eq!(lines, ["DISPLAY READY BUILD abc1234 2026-09-26 10:00", "FIRMWARE VERSION 1.2.3", "MODE DUTY", "VOICES builtin", "VOLUME 65"]);
+    assert_eq!(lines, ["DISPLAY READY BUILD abc1234 2026-09-26 10:00", "FIRMWARE VERSION 1.2.3", BOX_KEY, "MODE DUTY", "VOICES builtin", "VOLUME 65"]);
 }
 
 #[test]
@@ -686,4 +698,60 @@ fn a_pack_with_a_look_is_worn_and_survives_a_restart() {
     // begins, which is when LOOK ROBOT is reported.
     write_pack(&mut firmware, &mut board, SAMPLE_PACK);
     assert!(board.frame.chunks(2).any(|pixel| pixel == robot_blue), "the robot is back");
+}
+
+const COMPUTER: &str = "AgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgI";
+
+#[test]
+fn the_box_keeps_its_key_and_pairings_across_restarts() {
+    let (mut firmware, mut board, _) = booted(blank_flash());
+    let pair = format!(r#"{{"version":1,"event":"device.pair","key":"{COMPUTER}","name":"dragon's MacBook"}}"#);
+    assert_eq!(send(&mut firmware, &mut board, &pair), [format!("PAIRED {COMPUTER}")]);
+
+    let (mut firmware, mut board, lines) = booted(board.flash);
+    assert!(lines.contains(&BOX_KEY.to_owned()));
+    let lines = send(&mut firmware, &mut board, r#"{"version":1,"event":"device.pairs"}"#);
+    assert_eq!(lines, ["PAIRS 1".to_owned(), format!("PAIR {COMPUTER} dragon's MacBook")]);
+}
+
+#[test]
+fn unpairing_forgets_a_computer() {
+    let (mut firmware, mut board, _) = booted(blank_flash());
+    send(&mut firmware, &mut board, &format!(r#"{{"version":1,"event":"device.pair","key":"{COMPUTER}","name":"x"}}"#));
+    let lines = send(&mut firmware, &mut board, &format!(r#"{{"version":1,"event":"device.unpair","key":"{COMPUTER}"}}"#));
+    assert_eq!(lines, [format!("UNPAIRED {COMPUTER}")]);
+    assert_eq!(send(&mut firmware, &mut board, r#"{"version":1,"event":"device.pairs"}"#), ["PAIRS 0"]);
+}
+
+#[test]
+fn pairing_rejects_a_bad_key_and_isnt_agent_activity() {
+    let (mut firmware, mut board, _) = booted(blank_flash());
+    let lines = send(&mut firmware, &mut board, r#"{"version":1,"event":"device.pair","key":"nope"}"#);
+    assert_eq!(lines, ["PAIR INVALID"]);
+}
+
+#[test]
+fn a_box_without_the_link_partition_has_no_key() {
+    let mut flash = blank_flash();
+    // Drop the link entry, as on the single-slot layout.
+    flash.bytes[0x8000 + 6 * 32..0x8000 + 7 * 32].fill(0xFF);
+    let (mut firmware, mut board, lines) = booted(flash);
+    assert!(!lines.iter().any(|line| line.starts_with("BOX KEY")));
+    let lines = send(&mut firmware, &mut board, &format!(r#"{{"version":1,"event":"device.pair","key":"{COMPUTER}"}}"#));
+    assert_eq!(lines, ["PAIR UNAVAILABLE"]);
+}
+
+#[test]
+fn the_menu_forgets_every_computer_after_asking() {
+    let (mut firmware, mut board, _) = booted(blank_flash());
+    send(&mut firmware, &mut board, &format!(r#"{{"version":1,"event":"device.pair","key":"{COMPUTER}","name":"x"}}"#));
+    assert_eq!(press(&mut firmware, &mut board, Key::K1, 1100), ["MENU OPEN"]);
+    // VOLUME, MUTE, then COMPUTERS.
+    press(&mut firmware, &mut board, Key::K1, 50);
+    press(&mut firmware, &mut board, Key::K1, 50);
+    assert!(press(&mut firmware, &mut board, Key::K0, 50).is_empty(), "the first K0 only asks");
+    assert_eq!(press(&mut firmware, &mut board, Key::K0, 50), ["UNPAIRED ALL"]);
+
+    let (mut firmware, mut board, _) = booted(board.flash);
+    assert_eq!(send(&mut firmware, &mut board, r#"{"version":1,"event":"device.pairs"}"#), ["PAIRS 0"]);
 }

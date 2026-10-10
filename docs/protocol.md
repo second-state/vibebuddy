@@ -94,7 +94,7 @@ The `READY`, `EVENT`, `TITLE` and `ERROR` lines the firmware prints are diagnost
 
 These messages are the app operating on the device itself. They don't count as agent activity, don't wake Leisure mode, and don't produce `EVENT` diagnostic lines.
 
-`device.hello` is the Mac's greeting right after connecting, sent once the box has been listened to and hasn't given itself away as other firmware (see decision 17 in [`architecture.md`](architecture.md)); a box that runs other firmware is written nothing, hello included, and `/v1/status` reports `device.foreign_firmware: true`. It is needed because mode, firmware build number, voice and volume are otherwise reported only at boot or on change, and the daemon restarts more often than the device, so without asking it would never know. The device replies with five diagnostic lines: `DISPLAY READY BUILD …`, `FIRMWARE VERSION …`, `MODE …`, `VOICES …`, `VOLUME …`. `FIRMWARE VERSION` carries the firmware version (`0.2.2`), which orders releases (ADR-0010); it is also printed at boot, and firmware older than it doesn't print it.
+`device.hello` is the Mac's greeting right after connecting, sent once the box has been listened to and hasn't given itself away as other firmware (see decision 17 in [`architecture.md`](architecture.md)); a box that runs other firmware is written nothing, hello included, and `/v1/status` reports `device.foreign_firmware: true`. It is needed because mode, firmware build number, voice and volume are otherwise reported only at boot or on change, and the daemon restarts more often than the device, so without asking it would never know. The device replies with five diagnostic lines: `DISPLAY READY BUILD …`, `FIRMWARE VERSION …`, `MODE …`, `VOICES …`, `VOLUME …`; firmware that can pair adds `BOX KEY …` after the version (see Pairing below). `FIRMWARE VERSION` carries the firmware version (`0.2.2`), which orders releases (ADR-0010); it is also printed at boot, and firmware older than it doesn't print it.
 
 `device.echo` is a link self-test: the device returns the length and CRC32 of the `data` string as `{"event":"echo","length":…,"crc":…}`, then echoes a line `ECHO …` verbatim. It's used to check whether the serial port is receiving corrupted bytes; that's how the UART bridge problem was tracked down.
 
@@ -120,6 +120,24 @@ The device's acknowledgments:
 ```
 
 `begin` first waits for any line currently playing to finish, then erases the needed range; `size` is the whole pack's byte count, including the header: 1024 bytes for a Character pack, 256 for a voice pack, told apart by the magic in the first chunk. Chunks must arrive consecutively by `seq` starting from 0, each with at most 672 bytes of raw data, so the whole line after base64 still fits within the 1024-byte limit. `crc` is the CRC32 of the chunk's raw bytes (the same as zlib's); the device checks it right after decoding and, on a mismatch, replies `voice.error` and aborts rather than waiting until the end. The header stays in device memory; on `end` the device reads the flash back to verify the payload CRC, writes the header only if that passes, then switches to the new Character. If any step fails it replies `voice.error` and abandons the session; the firmware then sees the partition as empty and announcements fall back to the built-in voice. Announcements during a write use the built-in voice.
+
+## Pairing
+
+A paired computer may later link to the box over the local network or through the Relay (ADR-0012, [`relay-protocol.md`](relay-protocol.md)). Pairing happens over USB only: the cable is the proof that whoever pairs is at the box. Keys are Ed25519 public keys, 32 bytes as unpadded base64url (43 characters).
+
+The box makes its own key the first time it boots firmware that can pair, from hardware entropy, and keeps it, with the computers paired to it, in the `link` partition, which flashing firmware never touches. It reports the key at boot and in answer to `device.hello` as `BOX KEY <key>`; that line is also how the daemon knows the firmware can pair. A box without the `link` partition (the single-slot layout) prints no `BOX KEY` and answers every pairing message with `PAIR UNAVAILABLE`.
+
+Whenever `vibebuddyd` sees `BOX KEY`, it pairs: its own key lives in `identity` next to `config.json`, and `name` is the computer's name. Pairing again is harmless; the box only writes flash when something changed.
+
+```json
+{"version":1,"event":"device.pair","key":"<computer key>","name":"dragon's MacBook"}
+{"version":1,"event":"device.unpair","key":"<computer key>"}
+{"version":1,"event":"device.pairs"}
+```
+
+Replies are diagnostic lines. `device.pair` gets `PAIRED <computer key>`, or `PAIR FULL` once 16 computers are paired. `device.unpair` gets `UNPAIRED <computer key>`. `device.pairs` gets `PAIRS <n>` followed by one `PAIR <computer key> <name>` per computer. A malformed key gets `PAIR INVALID`. Names longer than 32 bytes are cut. None of these is agent activity. When the box's own menu forgets every computer (COMPUTERS, [`device-menu.md`](device-menu.md)), it prints `UNPAIRED ALL`.
+
+After pairing, the daemon asks `device.pairs`, and `/v1/status` reports `device.box_key`, `device.computer_key` (this computer) and `device.paired_computers`. `POST /v1/device/unpair` with `{"key": …}` forgets another computer; this computer is refused, since it pairs again whenever it's plugged in.
 
 ## Stage 1 error output
 

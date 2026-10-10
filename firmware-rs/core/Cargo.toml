@@ -13,6 +13,8 @@ license.workspace = true
 fast-clock = []
 
 [dependencies]
+# The box's pairing key (link.rs). No default features: no std, no OS randomness; the seed comes from the device.
+ed25519-dalek = { version = "2", default-features = false }
 libm = "0.2"
 serde_json = { version = "1", default-features = false, features = ["alloc"] }
 vibebuddy-protocol = { path = "../../protocol", default-features = false }

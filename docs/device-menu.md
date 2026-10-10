@@ -40,6 +40,7 @@ Muse manages with two keys because many of its boards only have two. This box ha
 | STOP FOCUS / END BREAK | only while a phase is running, paused or waiting to start its break | gives up the phase, like K0 long, and closes the menu |
 | VOLUME | always | steps 20 → 35 → 50 → 65 → 80 → 100 → 20 and plays the "All done!" line at the new level, as the app's preview does |
 | MUTE | always | toggles mute, like K2 long |
+| COMPUTERS | only while computers are paired with the box (ADR-0012); shows how many | asks FORGET ALL?; K0 there forgets every paired computer, K1 goes back. For a box changing hands; each computer pairs again the next time it's plugged in |
 | STATUS | always | opens the status view; K0 there goes back |
 
 ![VOLUME stepped to 80](images/menu-volume.png) ![STOP FOCUS during a focus session](images/menu-focus.png)

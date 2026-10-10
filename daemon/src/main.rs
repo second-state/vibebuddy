@@ -4,6 +4,7 @@ mod agent_hooks;
 mod claude_hooks;
 mod codex_hooks;
 mod config;
+mod identity;
 mod link_alert;
 mod occasions;
 mod rom_flasher;
@@ -78,6 +79,8 @@ struct AppState {
     app_version: Option<String>,
     /// The real serial worker, which must give up the port while flashing; absent in tests.
     serial: Option<Arc<SerialTransport>>,
+    /// This computer's pairing key; None when it couldn't be read or made, and then nothing is paired.
+    identity: Option<Arc<identity::Identity>>,
     /// The update manifest and the firmware it offers; with no source, nothing is ever checked.
     updates: Arc<Mutex<Updates>>,
     /// "Check for updates" pressed: checks now instead of waiting for the daily one.
@@ -110,6 +113,7 @@ impl AppState {
             status_changed,
             app_version: env::var("VIBEBUDDY_APP_VERSION").ok().filter(|value| !value.is_empty()),
             serial: None,
+            identity: None,
             updates: Arc::new(Mutex::new(Updates::new(None, None))),
             check_updates: Arc::new(Notify::new()),
         }
@@ -199,6 +203,17 @@ async fn main() {
         config::config_file(),
     );
     state.serial = Some(serial_transport);
+    state.identity = match identity::identity_file().map(|path| identity::Identity::load_or_create(&path, identity::computer_name())) {
+        Some(Ok(identity)) => {
+            state.device.lock().await.computer_key = Some(identity.public_key());
+            Some(Arc::new(identity))
+        }
+        Some(Err(error)) => {
+            warn!(%error, "no pairing key; boxes won't be paired with this computer");
+            None
+        }
+        None => None,
+    };
     state.device.lock().await.pin = pin;
     state.updates = Arc::new(Mutex::new(Updates::new(
         updates::Source::configured(),
@@ -256,6 +271,15 @@ async fn publish_device_message(state: &AppState, message: DeviceMessage) {
     // opens, and a line sent before it is listening would be lost.
     if booted && let Some(greeting) = state.activities.lock().await.daily_greeting() {
         send_event(state, greeting);
+    }
+    // A box that reports its key can pair, and one at the end of this cable is ours to pair with
+    // (ADR-0012). Pairing again is harmless: the box only writes flash when something changed.
+    if let DeviceMessage::Line(line) = &message
+        && line.starts_with(status::BOX_KEY_PREFIX)
+        && let Some(identity) = &state.identity
+    {
+        send_event(state, pair_command(identity));
+        send_event(state, device_command("device.pairs"));
     }
     let _ = state.device_bus.send(message.clone());
     // Ask right after connecting; the device reports its mode, firmware build and voice again.
@@ -379,6 +403,7 @@ fn app(state: AppState) -> Router {
         .route("/v1/config", get(get_config).put(put_config))
         .route("/v1/device/identify", post(post_identify))
         .route("/v1/device/volume", post(post_volume))
+        .route("/v1/device/unpair", post(post_unpair))
         .route("/v1/device/choice", post(post_choice))
         .route(
             "/v1/device/voice-pack",
@@ -506,6 +531,13 @@ fn device_command(name: &str) -> Event {
     Event::named(name)
 }
 
+fn pair_command(identity: &identity::Identity) -> Event {
+    let mut event = device_command("device.pair");
+    event.extra.insert("key".to_owned(), identity.public_key().into());
+    event.extra.insert("name".to_owned(), identity.name.clone().into());
+    event
+}
+
 /// Only one operation can run on the device at a time: returns None once the slot is taken, otherwise a 409 for the caller.
 async fn begin_operation(
     state: &AppState,
@@ -577,6 +609,34 @@ async fn post_volume(
     if request.preview {
         event.extra.insert("preview".to_owned(), true.into());
     }
+    post_event(State(state), Json(event)).await
+}
+
+#[derive(serde::Deserialize)]
+struct UnpairRequest {
+    key: String,
+}
+
+/// Forget another computer on the box. Not this one: it pairs again whenever it is plugged in.
+async fn post_unpair(
+    State(state): State<AppState>,
+    Json(request): Json<UnpairRequest>,
+) -> (StatusCode, Json<ApiResponse>) {
+    let refusal = {
+        let device = state.device.lock().await;
+        if device.computer_key.as_deref() == Some(request.key.as_str()) {
+            Some("this computer pairs again whenever it is plugged in")
+        } else if !device.connected || device.box_key.is_none() {
+            Some("no box that can pair is connected")
+        } else {
+            None
+        }
+    };
+    if let Some(message) = refusal {
+        return (StatusCode::CONFLICT, Json(ApiResponse { accepted: false, message: message.to_owned() }));
+    }
+    let mut event = device_command("device.unpair");
+    event.extra.insert("key".to_owned(), request.key.into());
     post_event(State(state), Json(event)).await
 }
 
@@ -1092,6 +1152,26 @@ mod tests {
         publish_device_message(&state, DeviceMessage::Line("DISPLAY READY BUILD v9 2026-10-01".to_owned())).await;
         waiting.await.unwrap();
         assert_eq!(state.operation.lock().await.as_ref().map(|operation| operation.state), Some(OperationState::Done));
+    }
+
+    #[tokio::test]
+    async fn a_box_that_reports_its_key_is_paired_with_this_computer() {
+        let transport = Arc::new(RecordingTransport::default());
+        let mut state = test_state(transport.clone());
+        let dir = std::env::temp_dir().join(format!("vibebuddy-pair-test-{}", std::process::id()));
+        let identity = identity::Identity::load_or_create(&dir.join("identity"), "dragon's MacBook".to_owned()).unwrap();
+        let key = identity.public_key();
+        state.identity = Some(Arc::new(identity));
+
+        publish_device_message(&state, DeviceMessage::Line("DISPLAY READY BUILD v9 2026-10-01".to_owned())).await;
+        let pairs = || transport.events().into_iter().filter(|event| event.event == "device.pair").collect::<Vec<_>>();
+        assert!(pairs().is_empty(), "firmware that can't pair gets no pair event");
+        publish_device_message(&state, DeviceMessage::Line("BOX KEY 1Uc4Vh8Aby1bV4I08TphnmbwAm0AzHkw5RelizUGdRE".to_owned())).await;
+        let pair = pairs().pop().expect("a pair event");
+        assert_eq!(pair.event, "device.pair");
+        assert_eq!(pair.extra["key"], key.as_str());
+        assert_eq!(pair.extra["name"], "dragon's MacBook");
+        std::fs::remove_dir_all(dir).ok();
     }
 
     fn device_event(json: &str) -> DeviceMessage {
