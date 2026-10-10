@@ -46,6 +46,10 @@ pub struct DeviceState {
     pub computer_key: Option<String>,
     /// Every computer the box is paired with, as it last listed them.
     pub paired_computers: Vec<PairedComputer>,
+    /// The Wi-Fi network the box is set to join, by name; the password stays on the box.
+    pub wifi_network: Option<String>,
+    /// The address the box got on that network.
+    pub wifi_address: Option<String>,
     /// Connected, but running other firmware (a factory unit, or Muse on a box that runs it): it's there, not
     /// offline, and the daemon writes it nothing until it resets and reports our build.
     pub foreign_firmware: bool,
@@ -92,6 +96,8 @@ impl DeviceState {
                 self.box_key = None;
                 self.paired = false;
                 self.paired_computers.clear();
+                self.wifi_network = None;
+                self.wifi_address = None;
             }
             DeviceMessage::ConnectedNetwork { address } => {
                 self.apply(&DeviceMessage::Connected { port: address.clone(), bridge: false, usb_serial: None });
@@ -109,6 +115,8 @@ impl DeviceState {
                 self.box_key = None;
                 self.paired = false;
                 self.paired_computers.clear();
+                self.wifi_network = None;
+                self.wifi_address = None;
             }
             DeviceMessage::Disconnected => {
                 self.connected = false;
@@ -131,6 +139,13 @@ impl DeviceState {
                     self.box_key = Some(key.trim().to_owned());
                 } else if line.starts_with("PAIRED ") {
                     self.paired = true;
+                } else if let Some(network) = line.strip_prefix("WIFI NETWORK ") {
+                    self.wifi_network = Some(network.trim().to_owned());
+                } else if line.trim() == "WIFI FORGOTTEN" {
+                    self.wifi_network = None;
+                    self.wifi_address = None;
+                } else if let Some(address) = line.strip_prefix("WIFI ADDRESS ") {
+                    self.wifi_address = Some(address.trim().to_owned());
                 } else if line.starts_with("PAIRS ") {
                     self.paired_computers.clear();
                 } else if let Some((key, name)) = line.strip_prefix("PAIR ").and_then(|rest| rest.split_once(' '))
@@ -288,6 +303,8 @@ mod tests {
                 paired: false,
                 computer_key: None,
                 paired_computers: Vec::new(),
+                wifi_network: None,
+                wifi_address: None,
                 foreign_firmware: false,
                 unsupported_board: None,
                 pin: None,
@@ -306,6 +323,16 @@ mod tests {
         assert!(state.paired);
         state.apply(&DeviceMessage::Connected { port: "/dev/cu.y".to_owned(), bridge: false, usb_serial: None });
         assert_eq!((state.box_key, state.paired), (None, false));
+    }
+
+    #[test]
+    fn the_wifi_network_follows_the_box() {
+        let mut state = DeviceState::default();
+        state.apply(&line("WIFI NETWORK Home 5G"));
+        state.apply(&line("WIFI ADDRESS 192.168.1.23"));
+        assert_eq!((state.wifi_network.as_deref(), state.wifi_address.as_deref()), (Some("Home 5G"), Some("192.168.1.23")));
+        state.apply(&line("WIFI FORGOTTEN"));
+        assert_eq!((state.wifi_network, state.wifi_address), (None, None));
     }
 
     #[test]

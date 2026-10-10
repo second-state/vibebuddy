@@ -409,6 +409,45 @@ struct PlanSheet: View {
     }
 }
 
+/// The Wi-Fi network the box joins, so it can be reached without the cable (ADR-0012). Set over the cable only;
+/// the password goes to the box and is kept nowhere else, so it is never shown again.
+struct WifiSection: View {
+    @ObservedObject var model: AppModel
+    let device: DeviceState
+    @State private var ssid = ""
+    @State private var password = ""
+
+    var body: some View {
+        Section {
+            LabeledContent("Network", value: device.wifiNetwork ?? String(localized: "Not set"))
+            if let address = device.wifiAddress {
+                LabeledContent("Address", value: address)
+            }
+            if device.network == true {
+                Text("Plug in the cable to change the box's network.").font(.caption).foregroundStyle(.secondary)
+            } else {
+                TextField(String(localized: "Network name"), text: $ssid)
+                SecureField(String(localized: "Password"), text: $password)
+                HStack {
+                    Button("Join") {
+                        model.setWifi(ssid: ssid, password: password)
+                        password = ""
+                    }
+                    .disabled(ssid.isEmpty || ssid.utf8.count > 32 || password.utf8.count > 63 || model.operationRunning)
+                    if device.wifiNetwork != nil {
+                        Button("Forget network") { model.forgetWifi() }.disabled(model.operationRunning)
+                    }
+                }
+            }
+        } header: {
+            Text("Wi-Fi")
+        } footer: {
+            Text("With Wi-Fi, a paired computer on the same network can drive the box without the cable.")
+                .font(.caption).foregroundStyle(.secondary)
+        }
+    }
+}
+
 /// The computers the box is paired with (ADR-0012). Every computer it's plugged into pairs on its own, so
 /// this computer has no Remove: it would only pair again.
 struct PairedComputersSection: View {
@@ -486,6 +525,7 @@ struct DeviceView: View {
                 .disabled(model.operationRunning || !connected)
             }
             if connected, let device = model.status?.device, device.boxKey != nil {
+                WifiSection(model: model, device: device)
                 PairedComputersSection(model: model, device: device)
             }
             Section {

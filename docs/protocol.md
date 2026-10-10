@@ -148,6 +148,8 @@ Set only over USB, like pairing. The box keeps the network in the `link` partiti
 {"version":1,"event":"device.wifi.forget"}
 ```
 
+The apps set it through `POST /v1/device/wifi` with `{"ssid", "password"}` and `POST /v1/device/wifi/forget`; the daemon refuses both unless a box that reports `BOX KEY` is on the cable, and passes the password on without logging or keeping it. `/v1/status` reports `device.wifi_network` and, once the box reports `WIFI ADDRESS <ip>`, `device.wifi_address`.
+
 Replies: `WIFI NETWORK <ssid>`, `WIFI FORGOTTEN`, `WIFI INVALID` (an empty name, a name over 32 bytes, or a password over 63), or `WIFI UNAVAILABLE` (no `link` partition).
 
 ## Local network link

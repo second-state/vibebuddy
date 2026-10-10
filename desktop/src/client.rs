@@ -105,6 +105,15 @@ pub async fn unpair(key: String) -> Result<(), String> {
     post("/v1/device/unpair", Some(serde_json::json!({ "key": key }))).await
 }
 
+/// The password goes to the box over the cable and is kept nowhere else.
+pub async fn set_wifi(ssid: String, password: String) -> Result<(), String> {
+    post("/v1/device/wifi", Some(serde_json::json!({ "ssid": ssid, "password": password }))).await
+}
+
+pub async fn forget_wifi() -> Result<(), String> {
+    post("/v1/device/wifi/forget", None).await
+}
+
 pub async fn identify() -> Result<(), String> {
     post("/v1/device/identify", None).await
 }

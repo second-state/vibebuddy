@@ -272,3 +272,16 @@
 "A computer pairs with the box when it's plugged in. To forget them all, use COMPUTERS in the box's menu." = "电脑插上盒子就会自动配对。要忘记所有电脑，在盒子菜单里选 COMPUTERS。";
 "Removing the computer was rejected (%lld)" = "移除电脑被拒绝（%lld）";
 "Wi-Fi" = "Wi-Fi";
+
+/* Wi-Fi (ADR-0012) */
+"Network" = "网络";
+"Not set" = "未设置";
+"Address" = "地址";
+"Plug in the cable to change the box's network." = "要更换盒子的网络，请插上数据线。";
+"Network name" = "网络名称";
+"Password" = "密码";
+"Join" = "加入";
+"Forget network" = "忘记网络";
+"With Wi-Fi, a paired computer on the same network can drive the box without the cable." = "连上 Wi-Fi 后，同一网络里已配对的电脑不插线也能使用盒子。";
+"Setting Wi-Fi was rejected (%lld)" = "设置 Wi-Fi 被拒绝（%lld）";
+"Forgetting Wi-Fi was rejected (%lld)" = "忘记 Wi-Fi 被拒绝（%lld）";

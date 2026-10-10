@@ -71,6 +71,18 @@ struct DaemonClient {
         guard code == 202 else { throw DaemonError(message: DaemonClient.message(in: data) ?? String(localized: "Removing the computer was rejected (\(code))")) }
     }
 
+    /// The password goes to the box over the cable and is kept nowhere else.
+    func setWifi(ssid: String, password: String) async throws {
+        let body = try JSONSerialization.data(withJSONObject: ["ssid": ssid, "password": password])
+        let (code, data) = try await post("/v1/device/wifi", body: body, contentType: "application/json")
+        guard code == 202 else { throw DaemonError(message: DaemonClient.message(in: data) ?? String(localized: "Setting Wi-Fi was rejected (\(code))")) }
+    }
+
+    func forgetWifi() async throws {
+        let (code, data) = try await post("/v1/device/wifi/forget", body: Data(), contentType: "application/json")
+        guard code == 202 else { throw DaemonError(message: DaemonClient.message(in: data) ?? String(localized: "Forgetting Wi-Fi was rejected (\(code))")) }
+    }
+
     func writeVoicePack(_ pack: Data) async throws {
         let (code, data) = try await post("/v1/device/voice-pack", body: pack, contentType: "application/octet-stream")
         guard code == 202 else { throw DaemonError(message: DaemonClient.message(in: data) ?? String(localized: "Voice pack write was rejected (\(code))")) }
