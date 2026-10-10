@@ -673,7 +673,8 @@ struct FirmwareRequest {
     app: PathBuf,
 }
 
-/// Flash firmware: the app supplies the three image paths (all inside its bundle). The serial worker releases the port,
+/// Flash firmware: the app supplies the three image paths (all inside its bundle); a blank otadata, when the table has
+/// one, goes with them so the box boots the app just written. The serial worker releases the port,
 /// the ROM protocol writes and verifies each segment, then hard-resets and the worker reconnects. Progress goes through the status stream.
 async fn post_firmware(
     State(state): State<AppState>,
@@ -682,7 +683,12 @@ async fn post_firmware(
     let mut segments = Vec::new();
     for (address, path) in [(0x0_u32, &request.bootloader), (0x8000, &request.partition_table), (0x10000, &request.app)] {
         match std::fs::read(path) {
-            Ok(data) if !data.is_empty() => segments.push(rom_flasher::Segment { address, data }),
+            Ok(data) if !data.is_empty() => {
+                if address == 0x8000 {
+                    segments.extend(rom_flasher::blank_otadata(&data));
+                }
+                segments.push(rom_flasher::Segment { address, data });
+            }
             _ => {
                 return (
                     StatusCode::BAD_REQUEST,

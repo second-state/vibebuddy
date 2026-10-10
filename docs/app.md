@@ -118,7 +118,7 @@ The box shows the Mac side's build on the `APP` row of the device menu's STATUS 
 - Once the device connects, the daemon first gets `device.hello`, which re-reports mode, firmware build number and voice; otherwise the daemon would know nothing after restarting.
 - The app passes its own pid to the daemon in `VIBEBUDDY_PARENT_PID`; if the app is force-killed (SIGKILL), the daemon exits on its own within two seconds instead of becoming an orphan that holds the serial port and the network port. SIGTERM is caught by the app, which goes through a normal quit.
 - The packaging script does ad-hoc signing only so the login item and notifications can recognize the bundle's identity; it isn't Developer ID signing and notarization for distribution, which are still under "Explicitly out of scope".
-- The offsets of the firmware trio (0x0, 0x8000, 0x10000) are determined by the partition layout and hard-coded in the daemon; the app only passes file paths.
+- The offsets of the firmware trio (0x0, 0x8000, 0x10000) are determined by the partition layout and hard-coded in the daemon; the app only passes file paths. The daemon also blanks the `otadata` partition it finds in the table being written, so the box boots the app in `ota_0` rather than an older image in `ota_1` (ADR-0013).
 
 ## Explicitly out of scope
 

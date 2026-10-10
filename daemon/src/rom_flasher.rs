@@ -366,6 +366,23 @@ impl RomFlasher {
     }
 }
 
+/// The otadata partition in a partition table image, as a blank segment: writing it makes the bootloader boot
+/// ota_0, where a USB flash puts the app, rather than an older image in ota_1 (ADR-0013). None for a table
+/// without one, such as the single-slot layout before it.
+pub fn blank_otadata(table: &[u8]) -> Option<Segment> {
+    const ENTRY: usize = 32;
+    const MAGIC: [u8; 2] = [0xAA, 0x50];
+    const DATA: u8 = 0x01;
+    const OTA: u8 = 0x00;
+    table.as_chunks::<ENTRY>().0.iter().take_while(|entry| entry[..2] == MAGIC).find_map(|entry| {
+        (entry[2] == DATA && entry[3] == OTA).then(|| {
+            let address = u32::from_le_bytes(entry[4..8].try_into().unwrap());
+            let size = u32::from_le_bytes(entry[8..12].try_into().unwrap());
+            Segment { address, data: vec![0xFF; size as usize] }
+        })
+    })
+}
+
 /// The whole flow: enter download mode, identify the chip, attach flash, write and verify each segment, hard reset.
 pub fn flash(port_name: &str, paced: bool, segments: &[Segment], on_progress: &mut dyn FnMut(f32, &str)) -> Result<(), String> {
     let mut flasher = RomFlasher::open(port_name, paced)?;
@@ -419,5 +436,45 @@ mod tests {
         assert_eq!(checksum(&[]), 0xEF);
         assert_eq!(checksum(&[0xEF]), 0);
         assert_eq!(checksum(&[0x01, 0x02]), 0xEF ^ 0x03);
+    }
+
+    /// One partition table entry the way gen_esp32part.py lays it out.
+    fn entry(kind: u8, subtype: u8, offset: u32, size: u32) -> Vec<u8> {
+        let mut entry = vec![0xAA, 0x50, kind, subtype];
+        entry.extend_from_slice(&offset.to_le_bytes());
+        entry.extend_from_slice(&size.to_le_bytes());
+        entry.resize(32, 0);
+        entry
+    }
+
+    #[test]
+    fn blank_otadata_finds_the_ota_data_partition() {
+        let mut table = [entry(0x01, 0x02, 0x9000, 0x6000), entry(0x00, 0x10, 0x10000, 0x40_0000), entry(0x01, 0x00, 0xA1_0000, 0x2000)].concat();
+        table.extend_from_slice(&[0xEB, 0xEB]);
+        table.resize(0xC00, 0xFF);
+        let segment = blank_otadata(&table).expect("an otadata segment");
+        assert_eq!(segment.address, 0xA1_0000);
+        assert_eq!(segment.data, vec![0xFF; 0x2000]);
+    }
+
+    #[test]
+    fn a_single_slot_table_has_no_otadata() {
+        let mut table = [entry(0x01, 0x02, 0x9000, 0x6000), entry(0x00, 0x00, 0x10000, 0x40_0000), entry(0x01, 0x40, 0x41_0000, 0x20_0000)].concat();
+        table.resize(0xC00, 0xFF);
+        assert!(blank_otadata(&table).is_none());
+    }
+
+    #[test]
+    fn blank_otadata_reads_the_real_table() {
+        let csv = concat!(env!("CARGO_MANIFEST_DIR"), "/../firmware/partitions.csv");
+        let out = std::env::temp_dir().join(format!("vibebuddy-pt-{}.bin", std::process::id()));
+        let status = std::process::Command::new("python3")
+            .args([concat!(env!("CARGO_MANIFEST_DIR"), "/../tools/make-partition-table.py"), csv, out.to_str().unwrap()])
+            .output()
+            .expect("run make-partition-table.py");
+        assert!(status.status.success());
+        let table = std::fs::read(&out).unwrap();
+        std::fs::remove_file(&out).ok();
+        assert_eq!(blank_otadata(&table).map(|segment| (segment.address, segment.data.len())), Some((0xA1_0000, 0x2000)));
     }
 }

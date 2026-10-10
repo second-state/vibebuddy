@@ -187,7 +187,7 @@ just flash /dev/cu.usbmodem8401
 uv run --with pyserial python tools/serial-hello.py /dev/cu.usbmodem8401
 ```
 
-`just flash` 先构建三件套（bootloader、分区表、app）再用一次 esptool `write-flash` 写入（一次连接，最后只复位一次），`voices` 分区与设置区不动，换固件不丢音色。
+`just flash` 先构建三件套（bootloader、分区表、app）再用一次 esptool `write-flash` 写入，同时写一份空白的 `otadata`，让盒子从刚写入的 app 启动（一次连接，最后只复位一次），`voices` 分区与设置区不动，换固件不丢音色。
 
 烧录前可以在 Mac 上验证固件里不依赖硬件的部分：`just test-firmware` 跑 firmware-core 的测试（状态机、绘制、串口协议、存储、codec 序列），并把 Rust 与 C 两份固件的画面逐像素比对。
 
