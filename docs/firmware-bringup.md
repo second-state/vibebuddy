@@ -55,7 +55,7 @@ The review fixes applied before bring-up (see the PR) were in place, so it can't
    just flash /dev/cu.usbmodemXXXX
    ```
 
-   It builds the three images, then writes the bootloader, the partition table and the app. The `voices` partition and the settings area are left alone.
+   It builds the three images, then writes the bootloader, the partition table and the app, plus a blank `otadata` so the box boots that app. The `voices` partition and the settings area are left alone.
 3. **Read the boot report.** This step and step 4 both hold the serial port; exit with Ctrl-C when done:
 
    ```bash

@@ -27,10 +27,11 @@ if ! command -v esptool >/dev/null 2>&1; then
 fi
 
 "${repo_root}/tools/build-firmware.sh"
-# One connection writes all three images and resets once at the end, so a half-updated firmware never runs.
+# One connection writes all four images (the app to ota_0, and a blank otadata so the box boots it) and resets once at the end, so a half-updated firmware never runs.
 # The bootloader header already says 16 MB; keep the flash settings rather than letting esptool patch them.
 esptool --chip esp32s3 --port "${serial_port}" --before default-reset --after hard-reset \
     write-flash --flash-mode keep --flash-freq keep --flash-size keep \
     0x0 "${build_dir}/bootloader.bin" \
     0x8000 "${build_dir}/partition-table.bin" \
-    0x10000 "${build_dir}/vibebuddy-fw.bin"
+    0x10000 "${build_dir}/vibebuddy-fw.bin" \
+    0xa10000 "${build_dir}/ota-data-initial.bin"

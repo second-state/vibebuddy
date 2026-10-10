@@ -14,12 +14,14 @@ if [[ "${C_FIRMWARE:-0}" == "1" ]]; then
     build_dir="${BUILD_DIR:-${repo_root}/firmware/build}"
     partition_bin="${build_dir}/partition_table/partition-table.bin"
     bootloader_bin="${build_dir}/bootloader/bootloader.bin"
+    otadata_bin="${build_dir}/ota_data_initial.bin"
     # flash_mode / flash_size / flash_freq come from the build output rather than being copied here by hand.
     read -r -a flash_args <<< "$(head -n 1 "${build_dir}/flash_args")"
 else
     build_dir="${BUILD_DIR:-${repo_root}/firmware-rs/device/build}"
     partition_bin="${build_dir}/partition-table.bin"
     bootloader_bin="${build_dir}/bootloader.bin"
+    otadata_bin="${build_dir}/ota-data-initial.bin"
     # The Rust firmware's bootloader header already says 16 MB; write it as is and don't let esptool patch it.
     flash_args=(--flash_mode keep --flash_freq keep --flash_size keep)
 fi
@@ -44,7 +46,8 @@ segments=()
 for target in "$@"; do
     case "${target}" in
         partition) segments+=(0x8000 "${partition_bin}") ;;
-        app) segments+=(0x10000 "${build_dir}/vibebuddy-fw.bin") ;;
+        # The app goes to ota_0, and blanking otadata makes the box boot it rather than an older ota_1.
+        app) segments+=(0x10000 "${build_dir}/vibebuddy-fw.bin" 0xa10000 "${otadata_bin}") ;;
         bootloader) segments+=(0x0 "${bootloader_bin}") ;;
         *) echo "unknown target: ${target}" >&2; exit 1 ;;
     esac

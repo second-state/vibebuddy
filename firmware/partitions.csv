@@ -1,9 +1,13 @@
-# 16 MB flash; the default 1 MB app partition can't hold the voice assets. A single
-# factory app, no OTA: firmware is only flashed over USB. voices holds the current
-# announcement voice pack; changing voice writes only it, and flashing firmware
-# leaves it alone (ADR-0003).
-# Name,    Type, SubType, Offset,  Size
-nvs,       data, nvs,     0x9000,  0x6000
-phy_init,  data, phy,     0xf000,  0x1000
-factory,   app,  factory, 0x10000, 4M
-voices,    data, 0x40,    ,        2M
+# 16 MB flash. Two app slots for over-the-air updates (ADR-0013): the bootloader boots the slot otadata names,
+# and ota_0 when otadata is blank, which is how every USB flash leaves it. voices stays at 0x410000, where it
+# was in the single-slot layout, so moving to this layout keeps a box's Character pack. voices holds the
+# Character pack; changing Character writes only it, and flashing firmware leaves it alone (ADR-0003).
+# link holds the box's own key and the computers paired with it (ADR-0012); flashing leaves it alone too.
+# Name,    Type, SubType, Offset,   Size
+nvs,       data, nvs,     0x9000,   0x6000
+phy_init,  data, phy,     0xf000,   0x1000
+ota_0,     app,  ota_0,   0x10000,  4M
+voices,    data, 0x40,    0x410000, 2M
+ota_1,     app,  ota_1,   0x610000, 4M
+otadata,   data, ota,     0xa10000, 0x2000
+link,      data, 0x41,    0xa12000, 0x2000

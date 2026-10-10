@@ -3,14 +3,10 @@ ESP-IDF second-stage bootloader
 
 Copyright Espressif Systems (Shanghai) CO LTD and contributors.
 Licensed under Apache-2.0 (full upstream license below).
-Distributed as bootloader.bin, extracted from espflash 4.6.0's
-esp32s3-bootloader.bin. espflash updates the image header for 16 MB flash.
-Upstream binary and build manifest:
-https://github.com/esp-rs/espflash/tree/c1fb39939c1b5880b2aec7f43063f19689d5b00a/espflash/resources/bootloaders
-Upstream source: https://github.com/espressif/esp-idf/tree/release/v6.1
-The upstream manifest identifies release/v6.1; it does not record a more
-specific ESP-IDF source commit. Rebuild instructions are in espflash's
-resources/README.md at the revision linked above.
+Distributed as bootloader.bin, built from ESP-IDF v6.0.1 with app rollback
+enabled (ADR-0013): the project in firmware-rs/bootloader, rebuilt by
+tools/build-bootloader.sh.
+Upstream source: https://github.com/espressif/esp-idf/tree/8c19b156084a0753687347cca1f5355782893533
 
 
                                  Apache License

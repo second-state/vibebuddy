@@ -329,6 +329,8 @@ async fn main(spawner: Spawner) -> ! {
     let seed = Rng::new().random();
     let mut firmware = Firmware::new(seed, board.now_ms(), BUILD.as_bytes(), env!("CARGO_PKG_VERSION"));
     firmware.boot(&mut board);
+    // Booting got this far, so an image installed over the air keeps its slot.
+    storage::confirm_running_image();
 
     let mut input = [0u8; 256];
     loop {
