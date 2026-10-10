@@ -6,7 +6,7 @@ status: accepted
 
 We want a box to work with a computer on another network, and we want a place for later online features (paid features, Agents, boxes talking to each other). We decided to add the Relay: a service that carries a link when the computer and the box can't reach each other directly. A link prefers USB, then the local network, then the Relay; moving between them is not a drop. The Relay is optional: a box works fully over USB or the local network without it.
 
-- **Built on Cloudflare Workers with one Durable Object per box**, on our own domain beside the update manifest (ADR-0010). The Durable Object is the single place that decides which computer a box is linked to (ADR-0011).
+- **Built on Cloudflare Workers with one Durable Object per box**, on our own domain beside the update manifest (ADR-0010). The Durable Object decides which computer may link through the Relay (ADR-0011); the box reports the links it makes over USB or the local network, so a Relay link never takes the box from a cable.
 - **Closed source.** The App and firmware side of the protocol stay in this repo.
 - **TLS only, no end-to-end encryption.** The Relay can read the protocol messages, including task card titles. The hook's privacy filter is unchanged, and the README must say what the Relay can see.
 - **No accounts.** A computer may link to a box only after pairing with it. Pairing is done over USB in the first version (physical presence is the authorization) and exchanges keys that authenticate the local network and the Relay alike, replacing the separate LAN token of #3. Each box makes its own key pair the first time new firmware boots; nothing is provisioned at the factory. Accounts can be layered on pairing later.
