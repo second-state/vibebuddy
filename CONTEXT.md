@@ -11,7 +11,7 @@ The product name, in use since 2026-09-15 and written as one word since 2026-10-
 _Avoid_: Vibe Buddy (two words, the spelling until 2026-10-09), AgentBeacon, beacond, beacon-hook (old names, only when talking about history), 氛围助手 ("vibe assistant"; that is a description, not a name)
 
 **The buddy (氛围小助手)**:
-The only anthropomorphic presence on the device: the one who watches the Agents and speaks up for you. It is a role, not a look; at any moment it wears exactly one Character. Before 2026-09-15 it was called 小灯灵 ("little lamp sprite"); in code it is `buddy`.
+The only anthropomorphic presence on the device: the one who watches the Agents and speaks up for you. It is a role, not a look; at any moment it wears exactly one Character. It speaks in two ways: lines, written in advance, when an announcement fires; and spoken replies, written on the spot by the resident session in its persona, when the user talks to it. Before 2026-09-15 it was called 小灯灵 ("little lamp sprite"); in code it is `buddy`.
 _Avoid_: 小灯灵 (old name), pet (fine as a generic word, not when referring to this role), Pet, Codex pet, assistant (on its own it means an Agent, see below)
 
 **Character (角色)**:
@@ -23,7 +23,7 @@ A local AI assistant observed by VibeBuddy, such as Codex or Claude Code. An Age
 _Avoid_: client, AI, assistant; also never means a subagent inside Claude Code
 
 **Adapter**:
-The layer that translates one Agent's events into VibeBuddy domain concepts, consisting of the local privacy-filtering script and the event mapping inside the daemon. There is one Adapter per Agent; aggregation logic does not belong to the Adapter.
+The layer that translates between one Agent and VibeBuddy domain concepts, in both directions: the Agent's events into VibeBuddy concepts (the local privacy-filtering script and the event mapping inside the daemon), and voice commands and spoken replies into and out of that Agent's Sessions. There is one Adapter per Agent; aggregation logic does not belong to the Adapter.
 _Avoid_: integration, plugin, connector
 
 **App**:
@@ -65,11 +65,11 @@ _Avoid_: environment, entry point, entrypoint, surface, terminal (a terminal is 
 ### Sound
 
 **Announcement voice (播报音色)**:
-The single voice the buddy speaks with, shared by all its lines. It belongs to the Character and is never picked on its own: changing voice means changing Character.
+The single voice the buddy speaks with, shared by all its lines and spoken replies. It belongs to the Character and is never picked on its own: changing voice means changing Character.
 _Avoid_: sound, speech (speech means the lines themselves), TTS
 
 **Persona (人设)**:
-A Character's personality and way of talking, written down so that its lines can be written in it. A persona never sees what the Agents are working on.
+A Character's personality and way of talking, written down so that its lines can be written in it. Lines written in a persona never see what the Agents are working on; only the resident session, writing spoken replies in it, does.
 _Avoid_: system prompt (that is one way to use a persona), personality setting, style
 
 **Line (台词)**:
@@ -91,6 +91,20 @@ _Avoid_: do not disturb, DND, sound off
 **Volume (音量)**:
 The loudness level of the device speaker, from 20 to 100, stored on the device and kept across reboots; announcements and the Pomodoro chime share it. The App's slider is only a remote control, and it always shows the value the device reports back; the device menu changes it too. The minimum is not zero: the only way to silence the speaker is mute.
 _Avoid_: loudness, volume settings (that is a place in the App's UI, not this concept)
+
+### Voice commands
+
+**Voice command (语音指令)**:
+One sentence the user speaks to the box, turned into text and handed to the resident session as the user's own input. An Agent is the one who understands and acts on it; VibeBuddy only carries it, and never answers or executes a voice command itself.
+_Avoid_: voice assistant (an assistant means an Agent), prompt (that is the Agent's own word), dictation, voice input
+
+**Resident session (常驻会话)**:
+The one long-running Agent Session every voice command goes to, so the user never has to say which work they mean. It answers from what it can see of the Activities and hands work on to other Sessions, but does no work itself: it runs no commands and changes no files. There is only one, and it is never restarted to make room: when its context grows long, it is compacted. It is an Agent that speaks as the buddy, in the persona of the Character the user picked, and changes persona when the Character changes; it is never an Activity: it makes no task cards, announcements or stats.
+_Avoid_: assistant, concierge, dispatcher, main session
+
+**Spoken reply (口头回复)**:
+The short sentence the resident session writes for the user to hear in answer to a voice command, synthesized when it is spoken, in the announcement voice of the Character the user picked. Unlike a line, it is written at the moment it is spoken and may talk about what the Agents are doing.
+_Avoid_: line (lines are written in advance), announcement, TTS, response
 
 ### Modes
 
@@ -151,6 +165,9 @@ Fixed wording for the App's English UI and English logs. Use these words when wr
 | 固件 / 刷入 | firmware / flash | |
 | 配对 / 已配对的电脑 | pair / paired computers | On the box's menu the row is COMPUTERS; "this computer" marks the one the App runs on |
 | UART 桥 / 原生 USB | UART bridge / native USB | |
+| 语音指令 | voice command | |
+| 常驻会话 | resident session | Not shown to users so far; in the UI the buddy is the one you talk to |
+| 口头回复 | spoken reply | |
 
 ### Activity lifecycle
 
