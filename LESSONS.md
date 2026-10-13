@@ -316,3 +316,9 @@ A step that only runs at release time is the one nobody exercises (see the v0.3.
 On 2026-10-12 the first OTA-layout firmware reset in a loop right after READY on a box: confirming the running image went through esp-bootloader-esp-idf's `OtaUpdater`, which parses the whole partition table and panics on our custom data subtypes (voices 0x40, link 0x41). Every host test passed, because the fake boards' flash had no otadata and the device-only code never ran there. The box flickered and clicked until the fix was flashed.
 
 Code that parses partitions or otadata at boot either lives in firmware-core with host tests built from the real `partitions.csv` (as `ota::confirm` now does), or is flashed to a box and watched through one full boot and a reset before the branch is called done. And back the box up first: a full `read-flash` took three minutes and made every later step low-risk.
+
+## On the firmware, every new static in internal RAM comes out of the main stack
+
+On 2026-10-13 the first microphone build boot-looped: `Detected a write to the stack guard value on ProCpu`, inside text drawing while the boot loaded the Character's look. With esp-hal the main task's stack is whatever internal DRAM is left between the end of `.bss` and the fixed start of the reclaimed heap (`_stack_end_cpu0` to `_stack_start_cpu0`). The build had added a 24 KB static DMA ring (`dma_rx_stream_buffer!`) and a 2.6 KB task (an async task's locals live in its static pool), and the stack went from 47,784 bytes to 21,032 with nothing in the build saying so. Host tests and the device build both passed.
+
+Before a firmware change that adds statics or `dma_*_buffer!` macros goes to a box, compare `_stack_start_cpu0 - _stack_end_cpu0` (`xtensa-esp32s3-elf-nm` on the release ELF) with main's. A buffer only one feature uses for a few seconds belongs on the heap for those seconds (internal capabilities if DMA touches it), not in `.bss` for the life of the box.

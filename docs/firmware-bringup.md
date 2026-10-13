@@ -139,7 +139,7 @@ MIC DATA <seq> <base64>        576 bytes of samples per line
 MIC END 288000 <crc32>
 ```
 
-`MIC UNAVAILABLE` means the board has no input; `MIC BUSY`, that a recording is still going out; `MIC ERROR STALLED`, that no samples came for half a second (the receive DMA overflowed, or nothing clocks the receiver); `MIC ERROR MEMORY`, that the capture didn't fit.
+`MIC UNAVAILABLE` means the board has no input; `MIC BUSY`, that a recording is still going out; `MIC ERROR STALLED`, that no samples came for half a second (the receive DMA overflowed, or nothing clocks the receiver); `MIC ERROR MEMORY`, that the capture (PSRAM) or the 12 KB receive ring (internal RAM, taken only while recording) didn't fit.
 
 ### Reading the result
 
@@ -150,7 +150,7 @@ MIC END 288000 <crc32>
 | Both slots stuck at one value, or `SATURATED` with no sound | GPIO47 is floating or isn't the codec's data line |
 | Left `FLAT` with a level above zero | The ADC runs but the microphone isn't reaching it: try `--gain-db 42` and noise right at the mic hole; then suspect the analog path (MIC bias, which input the ES8311 selects in register 0x14) |
 | `LIVE` on the right, not the left | The slots are the other way round from esp_codec_dev's 0x44 setting |
-| `MIC CAPTURED` far longer than asked | Samples were lost on the way in; the DMA buffer (250 ms) is too short for something the main loop did |
+| `MIC CAPTURED` far longer than asked | Samples were lost on the way in; the receive ring (125 ms) is too short for something the main loop did |
 | Any `MIC PROBE 0x4x ID …` | This box has a chip where an ES7210 would be: it differs from the scanned boxes, so stop and look before trusting the ES8311 path |
 
 Boxes of this board differ (some have a touchscreen, some don't), so run it on each box you care about and say which box in the result.

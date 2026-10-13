@@ -30,7 +30,7 @@ use embassy_executor::Spawner;
 use embassy_time::{Instant, Timer};
 use esp_backtrace as _;
 use esp_hal::clock::CpuClock;
-use esp_hal::dma::{DmaRxStreamBuf, DmaTxBuf, DmaTxStreamBuf};
+use esp_hal::dma::{DmaTxBuf, DmaTxStreamBuf};
 use esp_hal::gpio::{Input, InputConfig, Level, Output, OutputConfig, Pull};
 use esp_hal::i2c::master::{AcknowledgeCheckFailedReason, Config as I2cConfig, Error as I2cError, I2c};
 use esp_hal::i2s::master::{Channels, DataFormat, I2s, TdmConfig};
@@ -42,7 +42,7 @@ use esp_hal::time::Rate;
 use esp_hal::timer::timg::TimerGroup;
 use esp_hal::uart::{Config as UartConfig, Uart};
 use esp_hal::usb::usb_serial_jtag::UsbSerialJtag;
-use esp_hal::{Blocking, dma_rx_stream_buffer, dma_tx_buffer, dma_tx_stream_buffer};
+use esp_hal::{Blocking, dma_tx_buffer, dma_tx_stream_buffer};
 use esp_storage::FlashStorage;
 use vibebuddy_firmware_core::audio::{self as codec, ES8311_ADDRESS, Registers, SAMPLE_RATE, Sound};
 use vibebuddy_firmware_core::buttons::Levels;
@@ -389,8 +389,7 @@ async fn main(spawner: Spawner) -> ! {
     let stream: DmaTxStreamBuf = dma_tx_stream_buffer!(STREAM_BYTES, STREAM_CHUNK);
     spawner.spawn(audio::audio_task(i2s_tx, stream).expect("audio task"));
     let i2s_rx = i2s.i2s_rx.with_din(peripherals.GPIO47).build();
-    let mic_stream: DmaRxStreamBuf = dma_rx_stream_buffer!(mic::STREAM_BYTES, mic::STREAM_CHUNK);
-    spawner.spawn(mic::mic_task(i2s_rx, mic_stream).expect("mic task"));
+    spawner.spawn(mic::mic_task(i2s_rx).expect("mic task"));
 
     let k0 = Input::new(peripherals.GPIO0, InputConfig::default().with_pull(Pull::Up));
 
