@@ -28,4 +28,4 @@ The box has a microphone, and with Wi-Fi and the Relay (ADR-0012) it can sit awa
 - app-server and `dynamicTools` are marked experimental, so the daemon pins the Codex versions it supports. OpenAI permits ChatGPT login for local and open-source apps; before commercial launch we apply for Sign in with ChatGPT.
 - K0 long becomes push-to-talk; giving up a Pomodoro phase stays in the device menu, which already has it (amends ADR-0007, device menu).
 - The resident session is one session for good, compacted rather than restarted, so lasting rules belong in a notes file in its working directory. It makes no task cards, announcements or stats.
-- The resident session can be built and used from the command line first; the box side waits until the ES7210 microphone chain works.
+- The resident session can be built and used from the command line first; the box side waits until the microphone works on the box (I2C scans found no ES7210, so it is probably on the ES8311 ADC).
