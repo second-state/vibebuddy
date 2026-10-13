@@ -222,7 +222,7 @@ The box ignores answers for any turn but the one on its screen: after K2 closed 
 The computer also sends each spoken reply's audio, synthesized in the Character's voice, right after its `voice.reply`:
 
 - `voice.audio` with `reply` (0 for the turn's first `voice.reply`, counting up), `seq` (from 0, without gaps) and `data`: base64 of the next bytes of an MP3 stream (MPEG-2 Layer III, 24 kHz mono, 48 kbps, as the voice service returns it), at most 768 base64 characters. Chunks don't follow MP3 frame boundaries; the box buffers and decodes frame by frame.
-- `voice.audio` with `reply`, `seq` and `"end":true` (no `data`): that reply's audio is complete.
+- `voice.audio` with `reply`, `seq` and `"end":true` (no `data`): that reply's audio is over. With `"error":"synthesis"` as well, synthesis failed or was cut short: the box plays what it has, keeps the text, and logs the failure instead of passing it off as a whole reply.
 
 The box plays replies in order, one after another, and starts a reply as soon as it has enough frames, without waiting for its end. If synthesis fails the reply stays text only. While muted the box shows replies without playing them.
 
