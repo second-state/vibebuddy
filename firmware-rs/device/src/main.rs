@@ -52,6 +52,7 @@ use vibebuddy_firmware_core::display::Screen;
 use vibebuddy_firmware_core::firmware::{AudioStatus, Board, Firmware, FrameAction, VolumeError};
 use vibebuddy_firmware_core::noise::{self, SealedLines, Sealer};
 use vibebuddy_firmware_core::relay_box::{self, RelayBox};
+use vibebuddy_firmware_core::spoken_reply::ReplyAudio;
 use vibebuddy_firmware_core::storage::Flash;
 
 use crate::audio::{PLAYING, PlayCommand, QUEUE, STOP, STREAM_BYTES, STREAM_CHUNK};
@@ -365,6 +366,16 @@ impl Board for DeviceBoard {
 
     fn voice_stop(&mut self) {
         mic::stop_stream();
+    }
+
+    fn reply_audio(&mut self, audio: ReplyAudio) {
+        if let Ok(mut replies) = audio::REPLIES.try_lock() {
+            replies.apply(audio);
+        }
+    }
+
+    fn reply_speaking(&self) -> bool {
+        audio::REPLIES.try_lock().is_ok_and(|replies| replies.speaking())
     }
 }
 

@@ -32,6 +32,7 @@ pub mod noise;
 pub mod ota;
 pub mod pomodoro;
 pub mod relay_box;
+pub mod spoken_reply;
 pub mod storage;
 pub mod voice_command;
 pub mod voice_pack;

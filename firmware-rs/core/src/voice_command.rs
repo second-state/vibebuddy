@@ -241,6 +241,11 @@ impl VoiceCommand {
         if on { None } else { self.cancel() }
     }
 
+    /// The last turn's number.
+    pub fn turn(&self) -> u32 {
+        self.turn
+    }
+
     pub fn listening(&self) -> bool {
         matches!(self.stage, Stage::Listening(_))
     }
