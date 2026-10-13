@@ -50,6 +50,25 @@ Therefore, no BSP is chosen and no GPIOs are frozen until the PCB silkscreen is 
 - On 2026-09-15 the user confirmed the buttons on the case are K0, K1, K2, and RST. `B0` on the PCB silkscreen corresponds to K0 on the case: it is the ESP32-S3's BOOT button, wired directly to GPIO0, active-low, with an internal pull-up. The basis is that the same board's upstream firmware `xiaozhi` defines `BOOT_BUTTON_GPIO GPIO_NUM_0` in `atk-dnesp32s3-box/config.h`; a press on the hardware the same day confirmed it: after pressing K0 the device reported `POMODORO PAUSED` / `RESUMED`. Pressing K0 at runtime doesn't affect the boot mode; only holding it at the instant of reset enters download mode. `vibebuddyd` opening the serial port triggers a reset, and the chance of K0 being held at exactly that instant is negligible, but it's worth knowing this can happen.
 - On 2026-09-15 a hardware probe confirmed K1 is wired to XL9555 P0.4, active-low: `P0=0xEF` when pressed, back to `0xFF` on release, with P1 always `0xFF`. The probe's candidate range came from the direction register writes in the same board's upstream firmware `atk_dnesp32s3_box.cc` (`0x06=0x1B`, `0x07=0xFE`, i.e. P0.0, P0.1, P0.4, and P1.1–P1.7 as inputs); on the hardware only P0.4 changed with K1.
 
+### Touch, and what else is on I2C0 (2026-10-13)
+
+A probe firmware, flashed to the app slot only, scanned I2C0 (SDA GPIO48, SCL GPIO45, 100 kHz) on two more boxes of the same board, then watched the touch controller. Both ran our firmware normally beforehand (same screen, ES8311, buttons), so they are the same board; they differ in the screen module.
+
+| Address (7-bit) | Box `30:ED:A0:A4:0D:08` | Box `FC:01:2C:CF:C8:DC` | Most likely |
+|---|---|---|---|
+| `0x18` | yes | yes | ES8311 codec (known) |
+| `0x1E` | yes | yes | magnetometer (unconfirmed) |
+| `0x20` | yes | yes | XL9555 expander (known) |
+| `0x2E` | **yes** | **no** | CHSC5432 touch controller |
+| `0x50` | yes | yes | EEPROM (unconfirmed) |
+| `0x6A` | yes | yes | QMI8658 IMU (unconfirmed) |
+
+- **Some boxes have a capacitive touchscreen, some don't.** On `30:ED:A0:A4:0D:08` the chip at `0x2E` answers the CHSC5432 protocol from ALIENTEK's BOX3 touch notes: write a 32-bit big-endian register address, then read. Touch events are at `0x2000002C`, read as 28 bytes; the chip ID is at `0x20000080`. While the user touched and swiped, byte 1 was the number of points (`01` down, `00` up), bytes 2–3 the low bytes of the coordinates, which moved with the finger, and byte 6 the event (`00` down, `80` moving, `40` up). It worked straight after power-on, with no reset pulse; where its RST and INT lines go on this board is still unknown. A plain read without a register address returns all `0xFF`.
+- On `FC:01:2C:CF:C8:DC` nothing answers at `0x2E`, nor at the other common touch addresses (`0x14`, `0x15`, `0x38`, `0x5D`), and the ID read fails. Either its screen has no touch layer or the touch flex isn't connected.
+- **So touch can't be assumed.** Firmware that uses it must probe `0x2E` at boot and fall back to the buttons when nothing answers.
+- `0x1E`, `0x50` and `0x6A` were only seen answering; their identities above are guesses from common parts at those addresses, not read from the chips.
+- Dragon's daily box (`98:88:E0:06:8B:CC`) hasn't been probed.
+
 ## Corroboration from the currently running firmware
 
 The hardware runs `xiaozhi` 1.9.4. The source at that pinned version contains an `atk-dnesp32s3-box` board directory that records the ST7789 i80, XL9555, ES8311, and a set of board-level pins. This corroborates the boot log and can be used as a candidate for cross-checking, but that repository is not ALIENTEK's official schematic/BSP and cannot bypass the PCB revision gate to freeze pins directly.
@@ -60,6 +79,7 @@ The hardware runs `xiaozhi` 1.9.4. The source at that pinned version contains an
 ## Pending verification
 
 - Vendor schematic, BSP, and examples matching the exact PCB revision.
-- Touch controller (if any).
+- Touch controller wiring (RST, INT) on boxes that have one; whether a box has one is decided by probing `0x2E` (see above).
+- The chips at `0x1E`, `0x50` and `0x6A`.
 - Microphone input chain.
 - Buzzer GPIO and active level.
