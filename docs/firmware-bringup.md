@@ -91,6 +91,70 @@ The review fixes applied before bring-up (see the PR) were in place, so it can't
 7. **Change the voice once in the app.** When the write finishes, the box speaks in the new voice. Power-cycle it and check that the voice stays.
 8. **Leave it on the UART bridge alone overnight**, with nothing on the USB port, and check the next morning that the screen still animates. This verifies that an output channel without a reader never blocks.
 
+## Microphone
+
+The box has a microphone, and no firmware of ours has used it yet. `device.mic.record` is a bring-up diagnostic, like the screenshot: it records a few seconds and sends them back over the cable. It isn't a user feature, and neither app uses it.
+
+### What we know, and from where
+
+No ALIENTEK schematic or BSP for this board (ATK-DNESP32S3-BOX V1.1) could be found; the BOX3's wiki (a different board, with different I2S pins) doesn't count. So each fact below is either already seen on a box, or a candidate the diagnostic settles.
+
+| Fact | Value | Source | Confidence |
+|---|---|---|---|
+| Microphone ADC | The ES8311's own mono ADC; no ES7210 | No chip at 0x40–0x43 in the I2C0 scans of two boxes ([`hardware.md`](hardware.md)); xiaozhi 1.9.4's `atk-dnesp32s3-box` uses `Es8311AudioCodec` for both input and output | High that there's no ES7210 on the scanned boxes; the ES8311 ADC is a candidate until a recording shows it |
+| ES8311 address | 0x18 (7-bit) | Seen on boxes | Verified |
+| ES7210 addresses checked | 0x40–0x43 (AD1/AD0 straps; esp_codec_dev's `es7210_address_t`) | esp_codec_dev | The diagnostic reports each |
+| Microphone data into the ESP32 | GPIO47 (I2S DIN) | xiaozhi 1.9.4 `config.h`, `AUDIO_I2S_GPIO_DIN` | Candidate, from the same board's config; only ever configured as an input |
+| Clocks | Shared with the speaker: BCLK GPIO21, WS GPIO13, no MCLK. The ESP32's receiver runs off its transmitter's clocks (signal loopback), as ESP-IDF's full duplex does | Speaker pins verified on boxes; xiaozhi creates TX and RX on one I2S port with the same pins and `GPIO_NUM_NC` for MCLK | High |
+| Format and rate | Standard I2S, 16-bit, two slots, 24 kHz. Not 16 kHz: the ES8311 has one LRCK for ADC and DAC, so input runs at the speaker's rate | xiaozhi asserts input rate == output rate (24000) for this codec | High |
+| Which slot is the microphone | Left = ADC, right = DAC reference (silent unless the box is speaking) | esp_codec_dev writes ES8311 register 0x44 = 0x58, "ADCL + DACR"; our sequence already does | Medium; the per-slot levels show it |
+| ADC already enabled at boot | Yes: our ES8311 sequence is esp_codec_dev's `ESP_CODEC_DEV_WORK_MODE_BOTH`, the mode the C firmware used, so the ADC is powered and its serial output unmuted (registers 0x0A, 0x0E, 0x14, 0x15, 0x17) | `firmware/main/agent_audio.c`; `core/src/audio.rs` test | Verified in code |
+| Microphone gain | Register 0x16, 0–42 dB in 6 dB steps; 30 dB by default (xiaozhi's `AUDIO_CODEC_DEFAULT_MIC_GAIN`) | esp_codec_dev `es8311_set_mic_gain` | High |
+| Boxes on the NS4168 variant | No codec; xiaozhi reads a digital microphone straight from the same DIN with the same clocks | xiaozhi `ATK_NoAudioCodecDuplex` | Untested; the diagnostic still records |
+
+### Running it
+
+1. Quit the VibeBuddy app, then flash with `just flash /dev/cu.usbmodemXXXX` (step 2 above). Check the boot report still says `AUDIO READY` and that announcements still play: the speaker's I2S setup changed (the receiver now shares its clocks).
+2. Record, making some noise near the box (talk, clap, tap the case) while it records:
+
+   ```bash
+   uv run --with pyserial python tools/mic-record.py --port /dev/cu.usbmodemXXXX --ms 3000 --out mic.wav
+   ```
+
+   `--gain-db` sets the microphone gain. The samples come back at about 11 s per recorded second, because the firmware writes the UART at 115200 baud whichever port you use.
+3. Listen to `mic.wav`. The left channel should be your voice.
+
+The box replies, in order:
+
+```
+MIC PROBE 0x18 ID 8311        ES8311 chip ID (0xFD, 0xFE); NONE if nothing answers
+MIC PROBE 0x40 NONE           0x40–0x43: an ES7210 would answer here, with the bytes of 0x3D, 0x3E
+...
+MIC GAIN 30 DB                only with an ES8311
+MIC RECORDING 3000 MS
+MIC CAPTURED 3010 MS 288000 BYTES
+MIC LEVEL 0 L <rms> <peak> R <rms> <peak>      one per 100 ms, raw units, full scale 32768
+MIC BEGIN 24000 2 16 288000
+MIC DATA <seq> <base64>        576 bytes of samples per line
+MIC END 288000 <crc32>
+```
+
+`MIC UNAVAILABLE` means the board has no input; `MIC BUSY`, that a recording is still going out; `MIC ERROR STALLED`, that no samples came for half a second (the receive DMA overflowed, or nothing clocks the receiver); `MIC ERROR MEMORY`, that the capture didn't fit.
+
+### Reading the result
+
+| What you see | What it means |
+|---|---|
+| Left `LIVE`, rising when you talk; right silent | The microphone works on this box. Record the box's serial number in [`hardware.md`](hardware.md) |
+| Both slots `SILENT` (all zeros) | Nothing drives GPIO47: wrong pin, or the ES8311's ADC output isn't on |
+| Both slots stuck at one value, or `SATURATED` with no sound | GPIO47 is floating or isn't the codec's data line |
+| Left `FLAT` with a level above zero | The ADC runs but the microphone isn't reaching it: try `--gain-db 42` and noise right at the mic hole; then suspect the analog path (MIC bias, which input the ES8311 selects in register 0x14) |
+| `LIVE` on the right, not the left | The slots are the other way round from esp_codec_dev's 0x44 setting |
+| `MIC CAPTURED` far longer than asked | Samples were lost on the way in; the DMA buffer (250 ms) is too short for something the main loop did |
+| Any `MIC PROBE 0x4x ID …` | This box has a chip where an ES7210 would be: it differs from the scanned boxes, so stop and look before trusting the ES8311 path |
+
+Boxes of this board differ (some have a touchscreen, some don't), so run it on each box you care about and say which box in the result.
+
 ## Going back to the C firmware
 
 ```bash

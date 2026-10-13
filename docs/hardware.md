@@ -81,5 +81,5 @@ The hardware runs `xiaozhi` 1.9.4. The source at that pinned version contains an
 - Vendor schematic, BSP, and examples matching the exact PCB revision.
 - Touch controller wiring (RST, INT) on boxes that have one; whether a box has one is decided by probing `0x2E` (see above).
 - The chips at `0x1E`, `0x50` and `0x6A`.
-- Microphone input chain.
+- Microphone input chain. Most likely the ES8311's own ADC with samples on GPIO47 (xiaozhi 1.9.4), since no ES7210 answers at 0x40–0x43 on the scanned boxes; `device.mic.record` checks it on a box (see [`firmware-bringup.md`](firmware-bringup.md#microphone)).
 - Buzzer GPIO and active level.

@@ -11,7 +11,8 @@ use alloc::vec::Vec;
 use serde_json::{Map, Value};
 use vibebuddy_protocol::{Event, ProtocolError, VERSION};
 
-use crate::audio::{Occasion, Sound, clamp_volume, VOLUME_DEFAULT};
+use crate::audio::{ES8311_ADDRESS, Occasion, SAMPLE_RATE, Sound, clamp_volume, VOLUME_DEFAULT};
+use crate::mic;
 use crate::buttons::{ButtonEvent, Buttons, Levels};
 use crate::display::{Display, LinkPath, MAX_STATS, MAX_TASKS, Mode, Panel, PanelKind, SNAPSHOT_LINE_BYTES, Scene, Screen, Snapshot, State, TaskInput, Tone};
 use crate::leisure::{Leisure, Tier};
@@ -101,6 +102,49 @@ pub trait Board: Screen {
     }
     /// Starts the box again from the top, as after power-on.
     fn restart(&mut self) {}
+
+    /// One register read on the codec's I2C bus; None when nothing acknowledges. For the microphone
+    /// diagnostic ([`crate::mic`]).
+    fn i2c_read(&mut self, _address: u8, _register: u8) -> Option<u8> {
+        None
+    }
+    fn i2c_write(&mut self, _address: u8, _register: u8, _value: u8) -> Result<(), ()> {
+        Err(())
+    }
+    /// Starts capturing `bytes` of I2S input (24 kHz, 16-bit, two slots, little endian). Err where the
+    /// board has no input.
+    fn mic_start(&mut self, _bytes: usize) -> Result<(), ()> {
+        Err(())
+    }
+    /// The capture once all of it is in, or why it stopped short; None while it is still running.
+    fn mic_take(&mut self) -> Option<Result<Vec<u8>, &'static str>> {
+        None
+    }
+}
+
+/// The codec's registers through the board's I2C, for register sequences in core.
+struct BoardI2c<'a, B: Board> {
+    board: &'a mut B,
+    address: u8,
+}
+
+impl<B: Board> crate::audio::Registers for BoardI2c<'_, B> {
+    type Error = ();
+    fn read(&mut self, register: u8) -> Result<u8, ()> {
+        self.board.i2c_read(self.address, register).ok_or(())
+    }
+    fn write(&mut self, register: u8, value: u8) -> Result<(), ()> {
+        self.board.i2c_write(self.address, register, value)
+    }
+}
+
+/// Where the microphone diagnostic is.
+enum MicState {
+    Idle,
+    /// Capturing since this time.
+    Recording { since: u32 },
+    /// Streaming the capture out as `MIC DATA` lines, one per poll.
+    Sending { capture: Vec<u8>, sent: usize },
 }
 
 /// What the box is linked to without the Relay.
@@ -170,6 +214,7 @@ pub struct Firmware {
     reported_lights_out: bool,
     reported_hour: i32,
     reported_look: alloc::string::String,
+    mic: MicState,
 }
 
 /// Borrows the Firmware's pomodoro and leisure director to build the context for one frame.
@@ -280,6 +325,7 @@ impl Firmware {
             reported_lights_out: false,
             reported_hour: -1,
             reported_look: alloc::string::String::from("ROBOT"),
+            mic: MicState::Idle,
         }
     }
 
@@ -565,6 +611,7 @@ impl Firmware {
         }
         self.continue_voice_begin(board);
         self.send_snapshot(board, now);
+        self.tend_mic(board, now);
         if self.menu.expire(now) {
             Self::write_literal(board, "MENU CLOSED\n");
             self.show_menu(board);
@@ -593,6 +640,84 @@ impl Firmware {
                 *due = now.wrapping_add(SNAPSHOT_LINE_MS);
             }
             None => self.snapshot = None,
+        }
+    }
+
+    /// `device.mic.record`: report what answers on I2C where a microphone ADC could be, set the ES8311's
+    /// microphone gain if there is one, and start capturing; `tend_mic` reports and sends the result.
+    fn start_mic<B: Board>(&mut self, board: &mut B, fields: &BTreeMap<alloc::string::String, Value>) {
+        if !matches!(self.mic, MicState::Idle) {
+            return Self::write_literal(board, "MIC BUSY\n");
+        }
+        let ms = number(fields, "ms").map_or(mic::DEFAULT_MS, |ms| (ms.max(0.0) as u32).clamp(mic::MIN_MS, mic::MAX_MS));
+        let gain = number(fields, "gain_db").map_or(mic::DEFAULT_GAIN_DB, |db| (db.max(0.0) as u32).min(mic::MAX_GAIN_DB));
+        let mut es8311 = false;
+        for (address, [high, low]) in mic::PROBES {
+            let id = board.i2c_read(address, high).zip(board.i2c_read(address, low));
+            es8311 |= address == ES8311_ADDRESS && id.is_some();
+            let line = match id {
+                Some((high, low)) => text!(32, "MIC PROBE 0x{:02X} ID {:02X}{:02X}\n", address, high, low),
+                None => text!(32, "MIC PROBE 0x{:02X} NONE\n", address),
+            };
+            board.write(line.as_bytes());
+        }
+        if es8311 {
+            let line = match mic::set_es8311_mic_gain(&mut BoardI2c { board: &mut *board, address: ES8311_ADDRESS }, gain) {
+                Ok(()) => text!(24, "MIC GAIN {} DB\n", mic::mic_gain_register(gain) as u32 * 6),
+                Err(()) => text!(24, "MIC GAIN ERROR\n"),
+            };
+            board.write(line.as_bytes());
+        }
+        match board.mic_start(mic::capture_bytes(ms)) {
+            Ok(()) => {
+                self.mic = MicState::Recording { since: board.now_ms() };
+                board.write(text!(32, "MIC RECORDING {} MS\n", ms).as_bytes());
+            }
+            Err(()) => Self::write_literal(board, "MIC UNAVAILABLE\n"),
+        }
+    }
+
+    fn tend_mic<B: Board>(&mut self, board: &mut B, now: u32) {
+        match &mut self.mic {
+            MicState::Idle => {}
+            MicState::Recording { since } => {
+                let since = *since;
+                match board.mic_take() {
+                    None => {}
+                    Some(Err(reason)) => {
+                        Self::write_value_line(board, "MIC ERROR ", reason.as_bytes());
+                        self.mic = MicState::Idle;
+                    }
+                    Some(Ok(capture)) => {
+                        // Much longer than asked for means samples were lost on the way in.
+                        let line = text!(48, "MIC CAPTURED {} MS {} BYTES\n", now.wrapping_sub(since), capture.len());
+                        board.write(line.as_bytes());
+                        for (index, [left, right]) in mic::levels(&capture).iter().enumerate() {
+                            let at = index as u32 * mic::LEVEL_WINDOW_MS;
+                            let line = text!(64, "MIC LEVEL {} L {} {} R {} {}\n", at, left.rms, left.peak, right.rms, right.peak);
+                            board.write(line.as_bytes());
+                        }
+                        let line = text!(48, "MIC BEGIN {} {} 16 {}\n", SAMPLE_RATE, mic::CHANNELS, capture.len());
+                        board.write(line.as_bytes());
+                        self.mic = MicState::Sending { capture, sent: 0 };
+                    }
+                }
+            }
+            // One line per pass, so the main loop keeps running while a minute of lines goes out over the UART.
+            MicState::Sending { capture, sent } if *sent < capture.len() => {
+                let end = (*sent + mic::DATA_CHUNK_BYTES).min(capture.len());
+                let mut line = alloc::format!("MIC DATA {} ", *sent / mic::DATA_CHUNK_BYTES);
+                line.push_str(&mic::encode_base64(&capture[*sent..end]));
+                // One write, so the newline can't be dropped apart from its line.
+                line.push('\n');
+                board.write(line.as_bytes());
+                *sent = end;
+            }
+            MicState::Sending { capture, .. } => {
+                let line = text!(48, "MIC END {} {}\n", capture.len(), crc32(0, capture));
+                board.write(line.as_bytes());
+                self.mic = MicState::Idle;
+            }
         }
     }
 
@@ -1289,6 +1414,10 @@ impl Firmware {
             "device.relay.set" => self.handle_relay(board, fields),
             // The radio belongs to the device layer, which reports what it hears as `WIFI SEEN` lines.
             "device.wifi.scan" => self.scan_requested = true,
+            // Microphone bring-up (docs/firmware-bringup.md): a diagnostic like the screenshot, so not agent
+            // activity. Over the cable only: a recording is hundreds of lines.
+            "device.mic.record" if self.remote => Self::write_literal(board, "ERROR cable_only\n"),
+            "device.mic.record" => self.start_mic(board, fields),
             // Link self-test: send the received string's length and CRC back to the Mac to check for corrupted serial bytes.
             "device.echo" => {
                 if let Some(data) = string(fields, "data") {

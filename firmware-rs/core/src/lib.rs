@@ -26,6 +26,7 @@ pub mod lines;
 pub mod link;
 pub mod look;
 pub mod menu;
+pub mod mic;
 pub mod ota;
 pub mod pomodoro;
 pub mod relay_box;
