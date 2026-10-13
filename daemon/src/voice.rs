@@ -23,7 +23,7 @@ use tracing::{debug, info, warn};
 use vibebuddy_protocol::{Event, MAX_MESSAGE_BYTES};
 
 use crate::resident::Resident;
-use crate::serial_transport::Transport;
+use crate::serial_transport::{Transport, TransportError};
 use crate::speech::Recognizer;
 use crate::synthesis::{self, Synthesizer};
 
@@ -441,7 +441,9 @@ fn speak(
         for chunk in piece.chunks(AUDIO_BYTES) {
             let mut event = audio_event(turn, reply, seq);
             event.extra.insert("data".to_owned(), base64::engine::general_purpose::STANDARD.encode(chunk).into());
-            send(transport, event);
+            if !send_paced(transport, event, stopped) {
+                return false;
+            }
             seq += 1;
         }
         true
@@ -459,7 +461,33 @@ fn speak(
             end.extra.insert("error".to_owned(), "synthesis".into());
         }
     }
-    send(transport, end);
+    send_paced(transport, end, stopped);
+}
+
+/// How long one piece of a reply's audio may wait for room in the link's send queue.
+const AUDIO_QUEUE_WAIT: std::time::Duration = std::time::Duration::from_secs(5);
+
+/// Sends a piece of a reply's audio, waiting while the link's send queue is full: a reply arrives from the voice
+/// service far faster than the link drains, and a dropped piece cuts the reply short on the box. Blocking. False when
+/// it gave up (stopped, link closed, or no room for too long).
+fn send_paced(transport: &dyn Transport, event: Event, stopped: &AtomicBool) -> bool {
+    let Ok(frame) = event.to_ndjson() else {
+        warn!(event = %event.event, "a voice event could not be encoded");
+        return false;
+    };
+    let started = Instant::now();
+    loop {
+        match transport.send(frame.clone()) {
+            Ok(()) => return true,
+            Err(TransportError::QueueFull) if !stopped.load(Ordering::Acquire) && started.elapsed() < AUDIO_QUEUE_WAIT => {
+                std::thread::sleep(std::time::Duration::from_millis(10));
+            }
+            Err(error) => {
+                warn!(?error, event = %event.event, "a voice event could not be queued for the box");
+                return false;
+            }
+        }
+    }
 }
 
 async fn run_turn(
@@ -619,6 +647,33 @@ pub mod tests {
         // An odd count cuts the padding nibble of the last byte.
         let lines: BTreeMap<u32, Vec<i16>> = [(0, vec![5; 4])].into();
         assert_eq!(assemble(&lines, 3).0, [5, 5, 5]);
+    }
+
+    #[test]
+    fn audio_waits_for_room_in_a_full_queue_instead_of_dropping() {
+        struct Busy {
+            refusals: std::sync::Mutex<u32>,
+            sent: std::sync::Mutex<u32>,
+        }
+        impl Transport for Busy {
+            fn send(&self, _frame: Vec<u8>) -> Result<(), crate::serial_transport::TransportError> {
+                let mut refusals = self.refusals.lock().unwrap();
+                if *refusals > 0 {
+                    *refusals -= 1;
+                    return Err(crate::serial_transport::TransportError::QueueFull);
+                }
+                *self.sent.lock().unwrap() += 1;
+                Ok(())
+            }
+        }
+        let busy = Busy { refusals: std::sync::Mutex::new(3), sent: std::sync::Mutex::new(0) };
+        let stopped = AtomicBool::new(false);
+        assert!(send_paced(&busy, audio_event(1, 0, 0), &stopped));
+        assert_eq!(*busy.sent.lock().unwrap(), 1);
+        // Stopped: gives up on a full queue at once.
+        *busy.refusals.lock().unwrap() = 1;
+        stopped.store(true, Ordering::Release);
+        assert!(!send_paced(&busy, audio_event(1, 0, 1), &stopped));
     }
 
     #[test]

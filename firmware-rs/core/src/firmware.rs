@@ -1180,6 +1180,8 @@ impl Firmware {
                 self.end_recording(board, now);
             }
             self.show_overlay(board);
+        } else if self.voice.waiting() && self.menu.view().is_none() {
+            self.show_overlay(board);
         }
         // The text stays up while a reply is still being spoken; when it goes, so does what is left to say.
         if !board.reply_speaking() && self.voice.expire(now) {

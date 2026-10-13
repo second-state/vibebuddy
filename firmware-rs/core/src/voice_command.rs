@@ -251,6 +251,11 @@ impl VoiceCommand {
     }
 
     /// The overlay is up.
+    /// Waiting for the computer's first reply: the THINKING panel animates, so it is redrawn each pass.
+    pub fn waiting(&self) -> bool {
+        matches!(&self.stage, Stage::Thinking { replies, .. } if replies.is_empty())
+    }
+
     pub fn is_open(&self) -> bool {
         !matches!(self.stage, Stage::Idle)
     }
@@ -378,7 +383,10 @@ impl VoiceCommand {
         over
     }
 
-    /// What the overlay shows now; None when it is closed.
+    /// How often THINKING gains a dot while it waits.
+const THINKING_DOT_MS: u32 = 400;
+
+/// What the overlay shows now; None when it is closed.
     pub fn panel(&self, now: u32) -> Option<Panel> {
         let close = alloc::vec![(&b"K2"[..], &b"CLOSE"[..])];
         match &self.stage {
@@ -394,9 +402,18 @@ impl VoiceCommand {
                     hints: alloc::vec![(b"K0", b"LET GO"), (b"K2", b"CANCEL")],
                 })
             }
-            Stage::Thinking { heard, replies, .. } => {
-                let title: &[u8] = if replies.is_empty() { b"THINKING" } else { b"REPLY" };
-                Some(text_panel(title, heard.as_deref(), replies, close))
+            Stage::Thinking { turn: _, heard, replies, quiet_since } => {
+                if !replies.is_empty() {
+                    return Some(text_panel(b"REPLY", heard.as_deref(), replies, close));
+                }
+                // Recognition and the resident session take seconds: the dots and the count keep the wait visibly
+                // alive.
+                let waited = now.wrapping_sub(*quiet_since);
+                let mut title = b"THINKING".to_vec();
+                title.extend(core::iter::repeat_n(b'.', (waited / Self::THINKING_DOT_MS % 4) as usize));
+                let mut panel = text_panel(&title, heard.as_deref(), replies, close);
+                panel.lines.push((crate::text!(8, "{} S", waited / 1000).as_bytes().to_vec(), Vec::new(), Tone::Dim));
+                Some(panel)
             }
             Stage::Done { heard, replies, .. } => Some(text_panel(b"REPLY", heard.as_deref(), replies, close)),
             Stage::Failed { reason, message, .. } => {
@@ -449,6 +466,21 @@ mod tests {
 
     fn tone(level: i16, count: usize) -> Vec<i16> {
         (0..count).map(|index| if index % 2 == 0 { level } else { -level }).collect()
+    }
+
+    #[test]
+    fn thinking_counts_dots_and_seconds_while_it_waits() {
+        let mut voice = VoiceCommand::new();
+        voice.set_available(true);
+        voice.start(0);
+        voice.push(&tone(3000, SAMPLES_PER_LINE));
+        voice.release(1000);
+        assert!(voice.waiting());
+        let at = |now| voice.panel(now).unwrap();
+        assert_eq!(at(1000).title, b"THINKING");
+        assert_eq!(at(1000 + 2 * VoiceCommand::THINKING_DOT_MS).title, b"THINKING..");
+        let panel = at(4500);
+        assert_eq!(panel.lines.last().unwrap().0, b"3 S");
     }
 
     #[test]
