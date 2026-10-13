@@ -139,7 +139,18 @@ MIC DATA <seq> <base64>        576 bytes of samples per line
 MIC END 288000 <crc32>
 ```
 
-`MIC UNAVAILABLE` means the board has no input; `MIC BUSY`, that a recording is still going out; `MIC ERROR STALLED`, that no samples came for half a second (the receive DMA overflowed, or nothing clocks the receiver); `MIC ERROR MEMORY`, that the capture (PSRAM) or the 12 KB receive ring (internal RAM, taken only while recording) didn't fit.
+`MIC UNAVAILABLE` means the board has no input; `MIC BUSY`, that a recording is still going out; `MIC ERROR STALLED`, that the DMA hadn't filled the buffer a second after the recording should have ended; `MIC ERROR MEMORY`, that the capture (PSRAM) or its DMA descriptors (internal RAM, taken only while recording) didn't fit.
+
+The DMA writes the whole recording straight into one buffer in PSRAM, so nothing depends on the main loop keeping up. Each recording also prints two `MIC DEBUG` lines, 100 ms in (`T100`) and at the end (`END` or `TIMEOUT`), for when it fails:
+
+```
+MIC DEBUG T100 DESC 2/71 I2S RXCONF … TXCONF … INTRAW … RXCLKM … RXEOF … TXSTATE … DMA ININT … INFIFO … INLINK … INSTATE … INDSCR … INPERI … OUTSTATE … OUTPERI … PINS DIN 312 BCLK 0 WS 0
+```
+
+- `DESC done/total`: DMA descriptors (about 4 KB each) filled so far. At `T100` a working receiver has filled two (96 KB/s); 0 means no sample reached memory.
+- `I2S …`: I2S0's RX_CONF (0x20), TX_CONF (0x24), INT_RAW (0x0C), RX_CLKM_CONF (0x30), RXEOF_NUM (0x64), TX status (0x6C). RX_CONF bit 2 is RX_START and bit 3 RX_SLAVE_MOD; TX_CONF bit 2 is TX_START and bit 27 SIG_LOOPBACK (field offsets from the esp32s3 0.37 PAC).
+- `DMA …`: GDMA channel 1's IN_INT_RAW, INFIFO_STATUS, IN_LINK, IN_STATE, IN_DSCR (the descriptor it is on), IN_PERI_SEL (I2S0 is 3), and OUT_STATE and OUT_PERI_SEL for the speaker's side of the same channel.
+- `PINS`: level changes over 2000 quick reads of GPIO47 (DIN), GPIO21 (BCLK) and GPIO13 (WS). DIN is an input, so 0 there means the data line doesn't move (or the codec sends silence). The clocks are outputs and may read 0 even when running.
 
 ### Reading the result
 
@@ -150,7 +161,6 @@ MIC END 288000 <crc32>
 | Both slots stuck at one value, or `SATURATED` with no sound | GPIO47 is floating or isn't the codec's data line |
 | Left `FLAT` with a level above zero | The ADC runs but the microphone isn't reaching it: try `--gain-db 42` and noise right at the mic hole; then suspect the analog path (MIC bias, which input the ES8311 selects in register 0x14) |
 | `LIVE` on the right, not the left | The slots are the other way round from esp_codec_dev's 0x44 setting |
-| `MIC CAPTURED` far longer than asked | Samples were lost on the way in; the receive ring (125 ms) is too short for something the main loop did |
 | Any `MIC PROBE 0x4x ID …` | This box has a chip where an ES7210 would be: it differs from the scanned boxes, so stop and look before trusting the ES8311 path |
 
 Boxes of this board differ (some have a touchscreen, some don't), so run it on each box you care about and say which box in the result.

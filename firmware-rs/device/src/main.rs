@@ -306,6 +306,10 @@ impl Board for DeviceBoard {
     }
 
     fn mic_take(&mut self) -> Option<Result<alloc::vec::Vec<u8>, &'static str>> {
+        while let Ok(note) = mic::NOTES.try_receive() {
+            self.write(note.as_bytes());
+            self.write(b"\n");
+        }
         mic::DONE.try_take()
     }
 }
