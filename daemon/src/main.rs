@@ -1,4 +1,5 @@
 mod activity;
+mod app_server;
 mod ci;
 mod agent_hooks;
 mod claude_hooks;
@@ -7,6 +8,7 @@ mod config;
 mod identity;
 mod lan;
 mod relay;
+mod resident;
 mod link_alert;
 mod occasions;
 mod rom_flasher;
@@ -92,6 +94,9 @@ struct AppState {
     updates: Arc<Mutex<Updates>>,
     /// "Check for updates" pressed: checks now instead of waiting for the daily one.
     check_updates: Arc<Notify>,
+    /// The resident session voice commands go to (ADR-0015); None without a state directory, and in tests
+    /// unless one sets it. Present even when switched off, so its hook events are still recognised.
+    resident: Option<Arc<resident::Resident>>,
 }
 
 impl AppState {
@@ -125,6 +130,7 @@ impl AppState {
             state_dir: None,
             updates: Arc::new(Mutex::new(Updates::new(None, None))),
             check_updates: Arc::new(Notify::new()),
+            resident: None,
         }
     }
 
@@ -240,6 +246,13 @@ async fn main() {
     state.identity = identity;
     state.relay = relay_config;
     state.state_dir = config::state_dir();
+    state.resident = state.state_dir.as_deref().map(|dir| {
+        let enabled = resident::enabled_by_env();
+        if enabled {
+            warn!("the experimental resident session is on");
+        }
+        Arc::new(resident::Resident::new(enabled, dir, resident::Launcher::Codex, state.activities.clone()))
+    });
     state.device.lock().await.pin = pin;
     state.updates = Arc::new(Mutex::new(Updates::new(
         updates::Source::configured(),
@@ -472,6 +485,8 @@ fn app(state: AppState) -> Router {
         .route("/v1/device/firmware", post(post_firmware))
         .route("/v1/daemon/restart", post(post_restart))
         .route("/v1/updates/check", post(post_check_updates))
+        .route("/v1/resident", get(get_resident))
+        .route("/v1/resident/say", post(post_resident_say))
         .with_state(state)
 }
 
@@ -1158,6 +1173,16 @@ async fn post_codex_hook(
     State(state): State<AppState>,
     Json(hook): Json<CodexHook>,
 ) -> (StatusCode, Json<ApiResponse>) {
+    // The resident session is an Agent, but never an Activity: no card, announcement or stats (ADR-0015).
+    if let Some(resident) = &state.resident
+        && resident.owns_hook(&hook.session_id, hook.thread_id.as_deref(), hook.cwd.as_deref())
+    {
+        tracing::debug!(event = %hook.hook_event_name, "ignoring a hook from the resident session");
+        return (
+            StatusCode::ACCEPTED,
+            Json(ApiResponse { accepted: true, message: "resident session, ignored".to_owned() }),
+        );
+    }
     state.hooks_seen.lock().await.codex = Some(chrono::Local::now());
     state.notify_status();
     let event = {
@@ -1228,6 +1253,62 @@ async fn forward(state: AppState, event: Option<Event>) -> (StatusCode, Json<Api
         );
     };
     post_event(State(state), Json(event)).await
+}
+
+#[derive(serde::Deserialize)]
+struct SayRequest {
+    text: String,
+}
+
+#[derive(Serialize)]
+struct ResidentInfo {
+    enabled: bool,
+    thread_id: Option<String>,
+    /// Opens the resident thread in the Codex App.
+    url: Option<String>,
+}
+
+async fn get_resident(State(state): State<AppState>) -> Json<ResidentInfo> {
+    let thread_id = state.resident.as_ref().and_then(|resident| resident.thread_id());
+    Json(ResidentInfo {
+        enabled: state.resident.as_ref().is_some_and(|resident| resident.enabled()),
+        url: thread_id.as_ref().map(|id| format!("codex://threads/{id}")),
+        thread_id,
+    })
+}
+
+/// One voice command, typed for now: waits for the resident session's spoken replies.
+async fn post_resident_say(State(state): State<AppState>, Json(request): Json<SayRequest>) -> axum::response::Response {
+    use axum::response::IntoResponse;
+    let Some(resident) = state.resident.clone() else {
+        return (StatusCode::SERVICE_UNAVAILABLE, Json(ApiResponse { accepted: false, message: "no state directory".to_owned() }))
+            .into_response();
+    };
+    let text = request.text.trim();
+    if text.is_empty() {
+        return (StatusCode::BAD_REQUEST, Json(ApiResponse { accepted: false, message: "text is empty".to_owned() })).into_response();
+    }
+    let started = std::time::Instant::now();
+    match resident.say(text).await {
+        Ok(answer) => {
+            info!(elapsed_ms = started.elapsed().as_millis() as u64, replies = answer.replies.len(), "voice command answered");
+            Json(serde_json::json!({
+                "thread_id": answer.thread_id,
+                "replies": answer.replies,
+                "elapsed_ms": started.elapsed().as_millis() as u64,
+            }))
+            .into_response()
+        }
+        Err(error) => {
+            warn!(%error, "voice command failed");
+            let status = match error {
+                resident::ResidentError::Disabled => StatusCode::NOT_FOUND,
+                resident::ResidentError::Timeout => StatusCode::GATEWAY_TIMEOUT,
+                _ => StatusCode::SERVICE_UNAVAILABLE,
+            };
+            (status, Json(ApiResponse { accepted: false, message: error.to_string() })).into_response()
+        }
+    }
 }
 
 #[cfg(test)]
@@ -1400,6 +1481,46 @@ mod tests {
             tokio::time::sleep(Duration::from_millis(5)).await;
         }
         panic!("event {index} never showed up");
+    }
+
+    #[tokio::test]
+    async fn the_resident_sessions_own_hooks_make_no_card_announcement_or_stats() {
+        let dir = std::env::temp_dir().join(format!("vibebuddy-main-resident-hooks-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let transport = Arc::new(RecordingTransport::default());
+        let mut state = test_state(transport.clone());
+        state.resident = Some(Arc::new(resident::Resident::new(
+            false,
+            &dir,
+            resident::Launcher::Codex,
+            state.activities.clone(),
+        )));
+        let resident_cwd = dir.join("resident").display().to_string();
+        for event in ["UserPromptSubmit", "PostToolUse", "Stop"] {
+            let hook: CodexHook = serde_json::from_value(serde_json::json!({
+                "session_id": "resident-thread",
+                "turn_id": "t1",
+                "hook_event_name": event,
+                "cwd": resident_cwd,
+            }))
+            .unwrap();
+            let _ = post_codex_hook(State(state.clone()), Json(hook)).await;
+        }
+        assert!(transport.events().is_empty());
+        assert!(state.activities.lock().await.summaries().is_empty());
+        assert_eq!(state.activities.lock().await.today().done, 0);
+
+        // Any other Codex session still counts.
+        let hook: CodexHook = serde_json::from_value(serde_json::json!({
+            "session_id": "work",
+            "turn_id": "t1",
+            "hook_event_name": "UserPromptSubmit",
+            "cwd": "/work/vibe-buddy",
+        }))
+        .unwrap();
+        let _ = post_codex_hook(State(state.clone()), Json(hook)).await;
+        assert_eq!(state.activities.lock().await.summaries().len(), 1);
+        let _ = std::fs::remove_dir_all(dir);
     }
 
     #[test]

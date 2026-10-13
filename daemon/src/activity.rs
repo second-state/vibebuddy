@@ -184,6 +184,27 @@ pub struct TodaySummary {
     pub busy_seconds: u64,
 }
 
+/// One Activity as the resident session sees it (ADR-0015): only what the task cards already show, plus the agent,
+/// where it runs and how long ago things happened. Never prompts or replies, which the daemon doesn't hold anyway.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+pub struct ActivitySummary {
+    pub agent: String,
+    pub title: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub project: Option<String>,
+    /// `working` or `needs_input`.
+    pub state: &'static str,
+    /// `app` (the agent's own desktop app), a host app's bundle id, `window` (Linux), `none` or `github`.
+    pub host: String,
+    /// Seconds in the current state.
+    pub state_for_s: u64,
+    /// Seconds since the agent last reported anything about it.
+    pub last_event_s: u64,
+    /// Work an agent delegated inside its own session, such as a Claude Code subagent.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub delegated: bool,
+}
+
 /// Today's stats rotated on the idle screen.
 #[derive(Debug, Default)]
 struct DailyStats {
@@ -733,6 +754,45 @@ impl ActivityTracker {
         }
     }
 
+    /// Every Activity, newest first, for the resident session's `list_activities` tool.
+    pub fn summaries(&self) -> Vec<ActivitySummary> {
+        let now = Instant::now();
+        let mut activities: Vec<(&String, &Activity)> = self.activities.iter().collect();
+        activities.sort_by_key(|(_, activity)| std::cmp::Reverse(activity.sequence));
+        activities
+            .into_iter()
+            .map(|(key, activity)| {
+                let (agent, surface) = match &activity.source {
+                    Some(ActivitySource::Codex { surface, .. }) => ("codex".to_owned(), Some(surface)),
+                    Some(ActivitySource::ClaudeCode { surface, .. }) => ("claude-code".to_owned(), Some(surface)),
+                    Some(ActivitySource::GitHubActions { .. }) => ("github-actions".to_owned(), None),
+                    Some(ActivitySource::Cli { agent, surface, .. }) => (agent.clone(), Some(surface)),
+                    None => ("unknown".to_owned(), None),
+                };
+                let host = match (&activity.source, surface) {
+                    (Some(ActivitySource::GitHubActions { .. }), _) => "github".to_owned(),
+                    (_, Some(Surface::App { .. })) => "app".to_owned(),
+                    (_, Some(Surface::Host { bundle_id, .. })) => bundle_id.clone(),
+                    (_, Some(Surface::Window { .. })) => "window".to_owned(),
+                    _ => "none".to_owned(),
+                };
+                ActivitySummary {
+                    agent,
+                    title: activity.title.clone(),
+                    project: self.projects.get(key).cloned(),
+                    state: match activity.status {
+                        ActivityStatus::Working => "working",
+                        ActivityStatus::InputRequired => "needs_input",
+                    },
+                    host,
+                    state_for_s: now.saturating_duration_since(activity.status_since).as_secs(),
+                    last_event_s: now.saturating_duration_since(activity.updated_at).as_secs(),
+                    delegated: activity.child,
+                }
+            })
+            .collect()
+    }
+
     fn stats_lines(&self) -> Vec<String> {
         let busy = self.stats.busy_seconds
             + self
@@ -961,6 +1021,40 @@ mod tests {
         tracker.associate_source(&waiting, codex.clone());
 
         assert_eq!(tracker.focus_source(), Some(codex));
+    }
+
+    #[test]
+    fn summaries_list_every_activity_newest_first_with_agent_and_host() {
+        let mut tracker = ActivityTracker::default();
+        let build = id("ci", "ci:1");
+        tracker.observe(&build, "CI:BUILD", ActivityStatus::Working);
+        tracker.associate_source(&build, ActivitySource::GitHubActions { repo: "o/r".to_owned(), run_id: 1 });
+        let waiting = id("thread", "thread:turn");
+        tracker.note_project(&waiting, "VIBE-BUDDY");
+        tracker.require_input(&waiting, "CX:REVIEW");
+        tracker.associate_source(
+            &waiting,
+            ActivitySource::Codex {
+                thread_id: "thread".to_owned(),
+                surface: Surface::Host {
+                    bundle_id: "com.mitchellh.ghostty".to_owned(),
+                    ttys: vec![],
+                    tmux: None,
+                    focus_url: None,
+                },
+            },
+        );
+
+        let summaries = tracker.summaries();
+        assert_eq!(summaries.len(), 2);
+        assert_eq!(summaries[0].agent, "codex");
+        assert_eq!(summaries[0].title, "CX:REVIEW");
+        assert_eq!(summaries[0].project.as_deref(), Some("VIBE-BUDDY"));
+        assert_eq!(summaries[0].state, "needs_input");
+        assert_eq!(summaries[0].host, "com.mitchellh.ghostty");
+        assert_eq!(summaries[1].agent, "github-actions");
+        assert_eq!(summaries[1].host, "github");
+        assert_eq!(summaries[1].state, "working");
     }
 
     #[test]
