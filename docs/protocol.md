@@ -195,7 +195,7 @@ A voice command (ADR-0017) on a box linked over USB or the local network: the bo
 
 The computer offers voice, and the box only treats a long K0 as push-to-talk while it is offered:
 
-- `{"version":1,"event":"voice.available","on":true}`: sent after `device.hello` is answered, and again whenever it changes, when the resident session is switched on and speech recognition is configured; `"on":false` withdraws it. A box that hasn't been told, or was told `false`, keeps K0 long as it was. A new link starts with voice off until the computer says otherwise.
+- `{"version":1,"event":"voice.available","on":true}`: sent after `device.hello` is answered (the daemon sends it on every `DISPLAY READY BUILD`, so a box that rebooted on the same link is told again), and again whenever it changes, when the resident session is switched on and speech recognition is configured; `"on":false` withdraws it. A box that hasn't been told, or was told `false`, keeps K0 long as it was. A new link starts with voice off until the computer says otherwise.
 
 One recording is a turn, numbered by the box from 1 after each boot. The box sends diagnostic lines, each under 1024 bytes:
 
@@ -209,7 +209,7 @@ The computer answers with JSON events carrying the same `turn`:
 - `voice.heard` with `text`: what was recognised (cut to fit the line), so the box can show it.
 - `voice.reply` with `text`: one spoken reply, sent the moment the resident session says it; a turn may have several.
 - `voice.done`: the turn is over; the box goes back to what it showed before.
-- `voice.error` with `reason` (`not_heard` when recognition returned nothing, `unavailable` when recognition or the resident session failed, `busy` when another turn is still running) and an optional `message`; the turn is over.
+- `voice.error` with `reason` (`not_heard` when recognition returned nothing or no audio arrived, `unavailable` when recognition or the resident session failed, `busy` when another turn is still running) and an optional `message`; the turn is over.
 
 Spoken replies are shown as text for now; their audio will follow as `voice.audio` chunks once there is speech synthesis.
 

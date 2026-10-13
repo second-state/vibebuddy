@@ -163,6 +163,15 @@ impl Resident {
 
     /// Hands one voice command to the resident session and waits for its spoken replies.
     pub async fn say(&self, text: &str) -> Result<Answer, ResidentError> {
+        let mut replies = Vec::new();
+        let thread_id = self.say_streaming(text, &mut |reply| replies.push(reply.to_owned())).await?;
+        Ok(Answer { thread_id, replies })
+    }
+
+    /// Hands one voice command to the resident session; each spoken reply goes to `on_reply` the moment the
+    /// session calls `speak`, not when the turn completes, which in testing was 4 to 6 seconds later. Returns the
+    /// thread id once the turn has completed.
+    pub async fn say_streaming(&self, text: &str, on_reply: &mut (dyn FnMut(&str) + Send)) -> Result<String, ResidentError> {
         if !self.enabled {
             return Err(ResidentError::Disabled);
         }
@@ -175,7 +184,7 @@ impl Resident {
             *slot = Some(self.start().await?);
         }
         let session = slot.as_mut().expect("session was just started");
-        let result = self.run_turn(session, text).await;
+        let result = self.run_turn(session, text, on_reply).await;
         if session.client.is_closed() {
             *slot = None;
         }
@@ -253,10 +262,15 @@ impl Resident {
         })
     }
 
-    async fn run_turn(&self, session: &mut Session, text: &str) -> Result<Answer, ResidentError> {
+    async fn run_turn(
+        &self,
+        session: &mut Session,
+        text: &str,
+        on_reply: &mut (dyn FnMut(&str) + Send),
+    ) -> Result<String, ResidentError> {
         // Whatever an earlier, timed-out turn left behind still gets its answer, but no longer counts.
         while let Ok(message) = session.incoming.try_recv() {
-            self.handle(&session.client, message, &mut Vec::new()).await;
+            self.handle(&session.client, message, &mut |_| {}).await;
         }
         let started = request(
             &session.client,
@@ -266,7 +280,6 @@ impl Resident {
         .await?;
         let turn_id = started.pointer("/turn/id").and_then(Value::as_str).unwrap_or_default().to_owned();
         let deadline = tokio::time::Instant::now() + TURN_TIMEOUT;
-        let mut replies = Vec::new();
         loop {
             let message = match tokio::time::timeout_at(deadline, session.incoming.recv()).await {
                 Err(_) => {
@@ -284,7 +297,7 @@ impl Resident {
                 && params.pointer("/turn/id").and_then(Value::as_str) == Some(turn_id.as_str())
             {
                 return match params.pointer("/turn/status").and_then(Value::as_str) {
-                    Some("completed") => Ok(Answer { thread_id: session.thread_id.clone(), replies }),
+                    Some("completed") => Ok(session.thread_id.clone()),
                     status => Err(ResidentError::TurnEnded(
                         params
                             .pointer("/turn/error/message")
@@ -295,12 +308,12 @@ impl Resident {
                     )),
                 };
             }
-            self.handle(&session.client, message, &mut replies).await;
+            self.handle(&session.client, message, on_reply).await;
         }
     }
 
     /// Answers a server-to-client request; notifications other than the turn's end need nothing.
-    async fn handle(&self, client: &Client, message: Incoming, replies: &mut Vec<String>) {
+    async fn handle(&self, client: &Client, message: Incoming, on_reply: &mut (dyn FnMut(&str) + Send)) {
         let Incoming::Request { id, method, params } = message else {
             return;
         };
@@ -310,7 +323,7 @@ impl Resident {
                 client.respond(id, result).await
             }
             None if method == "item/tool/call" => {
-                let output = self.call_tool(&params, replies).await;
+                let output = self.call_tool(&params, on_reply).await;
                 client.respond(id, output).await
             }
             None if method == "currentTime/read" => {
@@ -326,7 +339,7 @@ impl Resident {
         }
     }
 
-    async fn call_tool(&self, params: &Value, replies: &mut Vec<String>) -> Value {
+    async fn call_tool(&self, params: &Value, on_reply: &mut (dyn FnMut(&str) + Send)) -> Value {
         let tool = params.get("tool").and_then(Value::as_str).unwrap_or_default();
         let (success, text) = match tool {
             "speak" => {
@@ -335,7 +348,7 @@ impl Resident {
                     (false, "text is empty".to_owned())
                 } else {
                     info!(chars = text.chars().count(), "the resident session spoke");
-                    replies.push(text.to_owned());
+                    on_reply(text);
                     (true, "spoken".to_owned())
                 }
             }
@@ -553,7 +566,7 @@ fn save(path: &Path, saved: &Saved) -> std::io::Result<()> {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 
     use super::*;
@@ -561,25 +574,27 @@ mod tests {
 
     /// How the fake app-server behaves, and what it saw.
     #[derive(Default)]
-    struct Script {
-        logged_in: bool,
+    pub(crate) struct Script {
+        pub(crate) logged_in: bool,
         /// thread/resume fails, as if the rollout were gone.
         lose_thread: bool,
         /// Ends its output instead of completing this turn, as if the process died; only once.
-        die_on_turn: Option<usize>,
+        pub(crate) die_on_turn: Option<usize>,
         /// Server-to-client requests made during each turn, before it completes.
-        turn_requests: Vec<(String, Value)>,
+        pub(crate) turn_requests: Vec<(String, Value)>,
         /// Requests and notifications from the daemon, in order.
-        received: Vec<Value>,
+        pub(crate) received: Vec<Value>,
         /// The daemon's answers to the server's own requests.
         answers: Vec<Value>,
         /// How many times the server was started.
-        starts: usize,
+        pub(crate) starts: usize,
+        /// The turn completes only once this is notified, so a test can look at what came before it.
+        pub(crate) hold: Option<Arc<tokio::sync::Notify>>,
     }
 
-    type Shared = Arc<std::sync::Mutex<Script>>;
+    pub(crate) type Shared = Arc<std::sync::Mutex<Script>>;
 
-    fn fake_server(script: Shared) -> Pipes {
+    pub(crate) fn fake_server(script: Shared) -> Pipes {
         script.lock().unwrap().starts += 1;
         let (daemon_side, server_side) = tokio::io::duplex(1 << 16);
         let (daemon_read, daemon_write) = tokio::io::split(daemon_side);
@@ -628,6 +643,10 @@ mod tests {
                         if script.lock().unwrap().die_on_turn.take_if(|turn| *turn == turns).is_some() {
                             return;
                         }
+                        let hold = script.lock().unwrap().hold.clone();
+                        if let Some(hold) = hold {
+                            hold.notified().await;
+                        }
                         let completed = json!({"method": "turn/completed", "params": {
                             "threadId": message["params"]["threadId"],
                             "turn": {"id": turn_id, "status": "completed", "items": []},
@@ -647,19 +666,19 @@ mod tests {
         Pipes { reader: Box::new(daemon_read), writer: Box::new(daemon_write), child: None }
     }
 
-    fn temp_dir(name: &str) -> PathBuf {
+    pub(crate) fn temp_dir(name: &str) -> PathBuf {
         let dir = std::env::temp_dir().join(format!("vibebuddy-resident-{name}-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
         dir
     }
 
-    fn resident(dir: &Path, script: &Shared, activities: Arc<Mutex<ActivityTracker>>) -> Resident {
+    pub(crate) fn resident(dir: &Path, script: &Shared, activities: Arc<Mutex<ActivityTracker>>) -> Resident {
         let script = script.clone();
         Resident::new(true, dir, Launcher::Fake(Box::new(move || fake_server(script.clone()))), activities)
     }
 
-    fn logged_in() -> Shared {
+    pub(crate) fn logged_in() -> Shared {
         Arc::new(std::sync::Mutex::new(Script { logged_in: true, ..Script::default() }))
     }
 
@@ -667,7 +686,7 @@ mod tests {
         script.lock().unwrap().received.iter().map(|message| message["method"].as_str().unwrap().to_owned()).collect()
     }
 
-    fn tool_call(tool: &str, arguments: Value) -> (String, Value) {
+    pub(crate) fn tool_call(tool: &str, arguments: Value) -> (String, Value) {
         let params = json!({"threadId": "t", "turnId": "u", "callId": "c", "tool": tool, "arguments": arguments});
         ("item/tool/call".to_owned(), params)
     }
@@ -758,6 +777,26 @@ mod tests {
         assert_eq!(answers[2]["result"]["success"], false);
         assert_eq!(answers[3]["result"]["success"], false);
         assert_eq!(text(3), "unknown tool run_shell");
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[tokio::test]
+    async fn a_spoken_reply_is_handed_over_when_speak_is_called_not_when_the_turn_completes() {
+        let dir = temp_dir("stream");
+        let script = logged_in();
+        let hold = Arc::new(tokio::sync::Notify::new());
+        script.lock().unwrap().hold = Some(hold.clone());
+        script.lock().unwrap().turn_requests = vec![tool_call("speak", json!({"text": "On it."}))];
+        let resident = Arc::new(resident(&dir, &script, Arc::default()));
+        let (sender, mut receiver) = tokio::sync::mpsc::unbounded_channel();
+        let turn = tokio::spawn({
+            let resident = resident.clone();
+            async move { resident.say_streaming("hi", &mut |reply| sender.send(reply.to_owned()).unwrap()).await }
+        });
+        assert_eq!(receiver.recv().await.as_deref(), Some("On it."));
+        assert!(!turn.is_finished(), "the turn is still running");
+        hold.notify_one();
+        assert_eq!(turn.await.unwrap().unwrap(), "new-thread");
         let _ = std::fs::remove_dir_all(dir);
     }
 
