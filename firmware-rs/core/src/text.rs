@@ -55,8 +55,25 @@ macro_rules! text {
     }};
 }
 
-/// Copies bytes truncated to at most `limit` bytes, matching C's strncpy into a fixed-size array.
+/// Copies bytes truncated to at most `limit` bytes, matching C's strncpy into a fixed-size array. A cut never
+/// falls inside a UTF-8 character: the partial character goes too.
 pub fn truncated(bytes: &[u8], limit: usize) -> alloc::vec::Vec<u8> {
-    let end = bytes.iter().take(limit).position(|&byte| byte == 0).unwrap_or(bytes.len().min(limit));
+    let mut end = bytes.iter().take(limit).position(|&byte| byte == 0).unwrap_or(bytes.len().min(limit));
+    while end > 0 && bytes.get(end).is_some_and(|&byte| byte & 0xc0 == 0x80) {
+        end -= 1;
+    }
     bytes[..end].to_vec()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::truncated;
+
+    #[test]
+    fn truncation_keeps_whole_characters() {
+        assert_eq!(truncated(b"abcdef", 4), b"abcd");
+        assert_eq!(truncated(b"ab\0cd", 4), b"ab");
+        assert_eq!(truncated("你好".as_bytes(), 4), "你".as_bytes());
+        assert_eq!(truncated("你好".as_bytes(), 6), "你好".as_bytes());
+    }
 }

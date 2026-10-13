@@ -1,6 +1,7 @@
 //! Renders a voice command's overlay (docs/device-menu.md, "Voice commands") to PPM on the Mac: the real
 //! firmware on a fake board, with a fake microphone and the computer's answers fed in as lines, so the
-//! pictures in the docs are what the box shows.
+//! pictures in the docs are what the box shows. Also the Chinese text pictures (docs/firmware-bringup.md,
+//! "Fonts").
 //!
 //! Usage: cargo run -p vibebuddy-firmware-core --example voice_preview -- <directory>
 
@@ -171,4 +172,21 @@ fn main() {
     preview.release_k0();
     preview.send(r#"{"version":1,"event":"voice.error","turn":2,"reason":"not_heard"}"#);
     preview.snapshot("voice-error");
+
+    // Chinese (font.rs): session titles on the task cards, then a voice turn in large and in small type.
+    let mut preview = Preview::new(&directory);
+    preview.send(
+        r#"{"version":1,"event":"task.start","title":"CC:给盒子加中文字体","tasks":[{"title":"CC:给盒子加中文字体","status":"working","elapsed_s":420,"project":"VIBE-BUDDY"},{"title":"CX:修好语音回复的播放","status":"input_required","elapsed_s":95,"project":"VIBE-BUDDY"},{"title":"CC:整理发布说明","status":"done","elapsed_s":1500,"project":"官网"}]}"#,
+    );
+    preview.snapshot("device-cards-zh");
+    preview.send(r#"{"version":1,"event":"voice.available","on":true}"#);
+    preview.hold_k0(2500, 4000.0);
+    preview.release_k0();
+    preview.send(r#"{"version":1,"event":"voice.heard","turn":1,"text":"Codex 现在在忙什么？"}"#);
+    preview.send(r#"{"version":1,"event":"voice.reply","turn":1,"text":"它在写 v0.5.1 的发布说明，大概还要五分钟。写完我提醒你。"}"#);
+    preview.snapshot("voice-reply-zh");
+    preview.send(
+        r#"{"version":1,"event":"voice.reply","turn":1,"text":"另外，Claude Code 那边在等你确认：要不要把字体表放进 flash 的只读数据里？它估计会多占七十多 KB，但完全不占内存。你说“可以”，我就让它继续。"}"#,
+    );
+    preview.snapshot("voice-reply-zh-small");
 }

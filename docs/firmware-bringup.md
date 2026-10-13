@@ -45,6 +45,22 @@ The review fixes applied before bring-up (see the PR) were in place, so it can't
 - Settings (today's pomodoro tally, the volume) use a new storage format, so they reset once when the Rust firmware is first flashed.
 - `voice.begin` interrupts the line currently playing before erasing the partition; the C firmware waited up to 10 seconds for it to finish.
 - JSON parsing is stricter than cJSON: invalid UTF-8, `"version":1.0` and a non-string `message` get `ERROR invalid_message` (or `invalid_json`). The Mac never sends these. When `device.echo` is used to hunt corrupted bytes, a corrupted line now gets `ERROR invalid_json` instead of a CRC reply, which says the same thing.
+- Task titles, project names and the voice overlay draw Chinese (see Fonts below); the C firmware draws a placeholder for every byte of it. ASCII is unchanged: `tools/compare-display.sh` still finds every English screen identical.
+
+## Fonts
+
+ASCII is the 5×7 bitmap font in `core/src/canvas.rs`, uppercase only, scaled 1×, 2× or 3×. Everything else comes from a 12 px Chinese font in `core/src/font.rs`:
+
+- **What's in it**: the 3,500 characters of level one of the Table of General Standard Chinese Characters (通用规范汉字表 一级, 2013), CJK punctuation (、。《》「」【】…), the full-width forms (，！？：；（）) and a few more marks (“”‘’…—·→): 3,678 glyphs. A character outside it, an emoji say, draws as a dotted box the size of a Chinese character, so a gap is visible rather than silent.
+- **Where it comes from**: [Fusion Pixel Font](https://github.com/TakWolf/fusion-pixel-font) 12 px monospaced, zh_Hans shapes, under the SIL Open Font License 1.1. Fusion is Ark Pixel Font with the characters Ark hasn't drawn at 12 px yet (over a hundred of level one, among them 热, 然 and 紧) filled in from Cubic 11. It was chosen because it is a pixel font drawn for 12 px, not an outline font rasterized down: strokes land on whole pixels and every glyph keeps a blank row and column for spacing, so a line of Chinese stays legible on the 320×240 panel (Muse's 16 px Unifont captions, which fill their whole cell, ran together). 12 px is also the smallest size that keeps level-one characters readable, and close to 2× ASCII's 14 px.
+- **How it's built**: `tools/make-cjk-font.py` downloads the font and Unicode's Unihan database (whose `kTGH` field numbers the 2013 table) pinned by SHA-256, and writes `core/fonts/cjk-12px.bin`: a sorted index of 16-bit codepoints, looked up by binary search, then one packed 1-bit 12×12 bitmap per glyph, 18 bytes. 73,562 bytes in all, committed, plus the font's license files beside it, which the firmware zip carries as `FONTS.txt`. The table is `include_bytes!`, read-only data that stays in flash: it adds about 75 KB to the app image and nothing to RAM or the main stack.
+- **Layout**: a Chinese character advances 12 px and is centred on the ASCII line, which at 1× puts the font's own baseline on the ASCII baseline. It stays 12 px next to 2× ASCII (titles, large type). Width is measured per glyph (`font::width`, `font::fit`); text is cut at whole characters. `font::wrap` breaks between any two Chinese characters but never inside an ASCII word unless the word is longer than a row, and lets closing punctuation (，。！？ and the like) hang past the row's end rather than start a row. Curly single quotes next to English letters draw as the ASCII apostrophe.
+- **Where it's used**: task card titles and project names, the title under the buddy, the agent line in Pomodoro mode, and the voice overlay. Menus and labels stay ASCII. The daemon still squashes session titles to uppercase ASCII before sending them ([`pet.md`](pet.md)), so Chinese titles reach the cards only once it stops doing that for firmware that can draw them; voice text already arrives as it was spoken.
+- **Voice overlay**: text with Chinese in it goes straight to small type (rows 13 px apart, 10 rows); large type, with doubled ASCII beside 12 px Chinese, looked shouty. English-only text keeps large then small type as before.
+
+![Chinese task titles](images/device-cards-zh.png) ![A Chinese reply](images/voice-reply-zh.png) ![A longer one, mixed with English](images/voice-reply-zh-small.png)
+
+The pictures come from `cargo run -p vibebuddy-firmware-core --example voice_preview -- <directory>`.
 
 ## Steps
 

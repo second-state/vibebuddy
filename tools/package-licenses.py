@@ -59,6 +59,11 @@ def main():
         (licenses / "THIRD-PARTY-FIRMWARE.txt").write_text(
             dependency_notices("firmware-rs/device/Cargo.toml", "xtensa-esp32s3-none-elf"))
         shutil.copyfile(ROOT / "packaging/BOOTLOADER-NOTICES.txt", licenses / "BOOTLOADER-NOTICES.txt")
+        # The firmware's Chinese glyphs come from Fusion Pixel Font (OFL), whose licenses travel with them.
+        fonts = ROOT / "firmware-rs/core/fonts"
+        (licenses / "FONTS.txt").write_text("\n\n".join(
+            f"{path.relative_to(fonts)}\n{'=' * len(str(path.relative_to(fonts)))}\n\n{path.read_text()}"
+            for path in sorted(fonts.rglob("*.txt"))))
     else:
         (licenses / "THIRD-PARTY-APP.txt").write_text(dependency_notices("Cargo.toml", app_target))
     revision = run("git", "rev-parse", "HEAD")

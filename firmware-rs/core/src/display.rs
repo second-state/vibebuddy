@@ -9,6 +9,7 @@ use alloc::boxed::Box;
 use alloc::vec::Vec;
 
 use crate::canvas::{Canvas, FRAME_BYTES, HEIGHT, WIDTH, half_bright};
+use crate::font;
 use crate::leisure::{self, Skit};
 use crate::look::{self, Look};
 use crate::pomodoro::{self, Phase, Run};
@@ -138,9 +139,30 @@ pub enum PanelKind {
     Text(u8),
 }
 
-/// Columns and rows a `Text` panel holds at scale 2 and at scale 1.
-pub const VOICE_TEXT_LARGE: (usize, usize) = (19, 7);
-pub const VOICE_TEXT_SMALL: (usize, usize) = (38, 13);
+/// How wide a `Text` panel's rows are in pixels: 19 ASCII characters in large type, 38 in small, and 19
+/// Chinese characters in either (font.rs).
+pub const VOICE_TEXT_WIDTH: i32 = 228;
+const VOICE_TEXT_HEIGHT: i32 = 130;
+
+/// Row pitch of a `Text` panel: large type, small type, or small type with Chinese in it, whose 12 px
+/// glyphs need taller rows than 5×7 ASCII.
+fn voice_text_pitch(scale: u8, wide: bool) -> i32 {
+    match (scale >= 2, wide) {
+        (true, _) => 18,
+        (false, false) => 10,
+        (false, true) => 13,
+    }
+}
+
+/// Rows a `Text` panel holds: 7 in large type, 13 in small, 10 in small with Chinese. Large type holds no
+/// Chinese: the 12 px glyphs stay 12 px, and doubled ASCII next to them looks shouty, so text with Chinese
+/// in it goes straight to small type.
+pub fn voice_text_rows(scale: u8, wide: bool) -> usize {
+    if scale >= 2 && wide {
+        return 0;
+    }
+    (VOICE_TEXT_HEIGHT / voice_text_pitch(scale, wide)) as usize
+}
 
 /// A panel over the whole screen (the device menu, a voice command): what it says is the caller's, drawing
 /// it is the display's.
@@ -871,12 +893,12 @@ impl Display {
             canvas.fill_rect(x, y, width, 32, COLOR_MUTED);
             canvas.fill_rect(x + 2, y + 2, width - 4, 28, card_color);
             canvas.fill_rect(x + 2, y + 2, 4, 28, color);
-            canvas.draw_text(x + 12, y + 5, &task.title, 1, COLOR_TEXT, 26);
+            canvas.draw_str(x + 12, y + 5, &task.title, 1, COLOR_TEXT, 26 * 6 - 1);
             canvas.draw_text(x + 12, y + 17, short_state_label(task.state), 1, color, 4);
             // When the first line is a session name, the project name moves to the second line; if the title is the
             // project name, don't repeat it.
             if !task.project.is_empty() && !contains(&task.title, &task.project) {
-                canvas.draw_text(x + 42, y + 17, &task.project, 1, COLOR_MUTED, 16);
+                canvas.draw_str(x + 42, y + 17, &task.project, 1, COLOR_MUTED, 16 * 6 - 1);
             }
             let elapsed = format_elapsed(self.task_elapsed_seconds(task, now_ms));
             let elapsed_width = elapsed.len() as i32 * 6 - 1;
@@ -912,7 +934,7 @@ impl Display {
         }
         let slot = (self.animation_frame / IDLE_ROTATE_FRAMES) as usize % count;
         let color = if has_title && slot == 0 { COLOR_TEXT } else { COLOR_MUTED };
-        canvas.draw_text_centered(195, lines[slot], 2, color);
+        canvas.draw_str_centered(195, lines[slot], 2, color);
     }
 
     /// Whether the alarm is still ringing. After the end, any change of view means the user acted: starting the
@@ -961,7 +983,7 @@ impl Display {
         canvas.draw_text(PANEL_X, 176, b"AGENT", 1, COLOR_MUTED, 18);
         canvas.draw_text(PANEL_X, 188, label, 1, status_color, 18);
         if let Some(task) = self.tasks.first() {
-            canvas.draw_text(PANEL_X, 200, &task.title, 1, if self.link_lost { COLOR_MUTED } else { COLOR_TEXT }, 18);
+            canvas.draw_str(PANEL_X, 200, &task.title, 1, if self.link_lost { COLOR_MUTED } else { COLOR_TEXT }, 18 * 6 - 1);
         }
     }
 
@@ -1131,7 +1153,7 @@ impl Display {
             // No rotation while the link is lost: a moving screen looks alive, the exact opposite of NO LINK.
             self.draw_idle_line(canvas, scene);
         } else if !self.title.is_empty() {
-            canvas.draw_text_centered(195, &self.title, 2, COLOR_TEXT);
+            canvas.draw_str_centered(195, &self.title, 2, COLOR_TEXT);
         }
         self.draw_pomodoro_badge(canvas, scene);
     }
@@ -1494,8 +1516,10 @@ fn draw_panel(canvas: &mut Canvas, panel: &Panel) {
             }
             PanelKind::Meter(_) => canvas.draw_text_centered(150 + index * 18, label, 2, tone_color(*tone)),
             PanelKind::Text(scale) => {
-                let (scale, (columns, _)) = if scale >= 2 { (2, VOICE_TEXT_LARGE) } else { (1, VOICE_TEXT_SMALL) };
-                canvas.draw_text(PANEL_LEFT, 56 + index * if scale == 2 { 18 } else { 10 }, label, scale, tone_color(*tone), columns);
+                let pitch = voice_text_pitch(scale, panel.lines.iter().any(|(label, _, _)| font::has_wide(label)));
+                // Room for one hanging closing mark past the row's width (font::wrap).
+                let max_width = VOICE_TEXT_WIDTH + font::CELL;
+                canvas.draw_str(PANEL_LEFT, 56 + index * pitch, label, if scale >= 2 { 2 } else { 1 }, tone_color(*tone), max_width);
             }
         }
     }
