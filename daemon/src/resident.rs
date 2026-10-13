@@ -207,6 +207,19 @@ impl Resident {
         result
     }
 
+    /// Starts the app-server and resumes the thread ahead of the first voice command, which otherwise waits for
+    /// both. Does nothing when switched off or already running; a failure is logged and the next command tries again.
+    pub async fn warm(&self) {
+        if !self.enabled {
+            return;
+        }
+        let mut slot = self.session.lock().await;
+        match self.running(&mut slot).await {
+            Ok(session) => info!(thread = %session.thread_id, "the resident session is ready"),
+            Err(error) => warn!(%error, "the resident session could not be started ahead of time"),
+        }
+    }
+
     /// The last `limit` voice commands and their spoken replies, oldest first, read from the thread through the
     /// app-server (the daemon keeps no record of its own). Empty while there is no thread yet.
     pub async fn history(&self, limit: usize) -> Result<Vec<Exchange>, ResidentError> {
@@ -589,10 +602,19 @@ const FEATURES_OFF: [&str; 15] = [
 ///   path) and, on saving, would delete the link.
 /// - `memories.generate_memories=false`: the resident thread is never summarised into memories, should the feature
 ///   come on.
+/// - `model="gpt-6-luna"`, `model_reasoning_effort="low"`: a voice command waits on the answer, and the resident
+///   session only talks and hands work on. Measured on 2026-10-13, a turn's first `speak` came 2.7 s in on
+///   gpt-6-luna at low, against 4.3 s on gpt-6.1-sol at high.
 fn tool_overrides() -> Vec<String> {
     let mut args: Vec<String> =
         FEATURES_OFF.iter().flat_map(|feature| ["-c".to_owned(), format!("features.{feature}=false")]).collect();
-    for setting in ["web_search=\"disabled\"", "cli_auth_credentials_store=\"file\"", "memories.generate_memories=false"] {
+    for setting in [
+        "web_search=\"disabled\"",
+        "cli_auth_credentials_store=\"file\"",
+        "memories.generate_memories=false",
+        "model=\"gpt-6-luna\"",
+        "model_reasoning_effort=\"low\"",
+    ] {
         args.extend(["-c".to_owned(), setting.to_owned()]);
     }
     args
@@ -1269,6 +1291,8 @@ pub(crate) mod tests {
             "web_search=\"disabled\"",
             "cli_auth_credentials_store=\"file\"",
             "memories.generate_memories=false",
+            "model=\"gpt-6-luna\"",
+            "model_reasoning_effort=\"low\"",
             "mcp_servers.node_repl.enabled=false",
             "mcp_servers.computer-use.enabled=false",
         ] {

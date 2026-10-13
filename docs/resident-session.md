@@ -94,3 +94,7 @@ The user's Codex memory summary, and whatever `search_memories` finds, go to the
 A voice command's audio leaves the computer for the speech recognizer: in development that is Cloudflare Workers AI, under the developer's own account; with the user's own recognizer, only that endpoint (and its key goes nowhere else). The recognised text then goes to the user's Codex model provider as the voice command. The daemon keeps neither the audio nor the text once the turn is over, and logs neither.
 
 Each spoken reply's text, which may name what the Agents are doing, goes to the voice service to be synthesized (in development, staging), with the voice name; the service passes it on to the speech engine behind it (Edge voices for now). The audio it returns goes only to the box. The daemon logs the voice, timings and byte counts, never the text.
+
+## Latency
+
+A voice command waits on recognition, the resident session and synthesis in turn, so the resident session runs on `gpt-6-luna` at `low` reasoning effort (set with `-c`; the user's own model settings don't load in its Codex home): on 2026-10-13 a turn's first `speak` came 2.7 s in, against 4.3 s on `gpt-6.1-sol` at `high`. The daemon starts the app-server and resumes the thread when it starts, not on the first command, and the synthesizer keeps one HTTPS agent so its connection to the voice service is reused.

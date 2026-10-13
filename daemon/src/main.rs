@@ -265,6 +265,9 @@ async fn main() {
         Arc::new(resident::Resident::new(enabled, dir, resident::Launcher::Codex, state.activities.clone()))
     });
     state.voice = Arc::new(voice::Voice::new(speech::from_env(), state.resident.clone()).with_synthesizer(synthesis::from_env()));
+    if let Some(resident) = state.resident.clone() {
+        tokio::spawn(async move { resident.warm().await });
+    }
     state.device.lock().await.pin = pin;
     state.updates = Arc::new(Mutex::new(Updates::new(
         updates::Source::configured(),

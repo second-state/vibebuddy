@@ -46,7 +46,11 @@ impl VoiceService {
         let host = url.split('/').nth(2).unwrap_or_default().to_owned();
         let body = json!({"text": text, "voice": voice}).to_string();
         // The seam for the account session: its Authorization header goes here once the service asks for one.
-        let mut response = crate::speech::agent(TIMEOUT)
+        // One agent for every reply, so its connection to the service is reused: a fresh TLS handshake cost about
+        // half a second a reply.
+        static AGENT: std::sync::OnceLock<ureq::Agent> = std::sync::OnceLock::new();
+        let mut response = AGENT
+            .get_or_init(|| crate::speech::agent(TIMEOUT))
             .post(&url)
             .header("Content-Type", "application/json")
             .send(body.as_bytes())
