@@ -1485,7 +1485,7 @@ mod tests {
 
     #[tokio::test]
     async fn the_resident_sessions_own_hooks_make_no_card_announcement_or_stats() {
-        let dir = std::env::temp_dir().join(format!("vibebuddy-resident-hooks-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("vibebuddy-main-resident-hooks-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         let transport = Arc::new(RecordingTransport::default());
         let mut state = test_state(transport.clone());

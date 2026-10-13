@@ -211,8 +211,9 @@ impl Resident {
         let thread_id = match self.thread_id() {
             Some(saved) => match self.resume(&client, &saved).await {
                 Err(ResidentError::Rpc(message)) if !client.is_closed() => {
-                    warn!(thread = %saved, %message, "the resident thread could not be resumed; starting a new one");
-                    self.start_thread(&client).await?
+                    let thread = self.start_thread(&client).await?;
+                    warn!(old_thread = %saved, new_thread = %thread, %message, "the resident thread could not be resumed; started a new one");
+                    thread
                 }
                 other => other?,
             },
@@ -434,18 +435,92 @@ async fn spawn_codex() -> Result<(Pipes, Option<String>), ResidentError> {
             "the resident session was tested with another Codex version; app-server is experimental and may differ"
         ),
     }
+    let base = tool_overrides();
+    let servers = enabled_mcp_servers(&program, &base).await;
     let mut child = tokio::process::Command::new(&program)
-        .arg("app-server")
+        .args(app_server_args(&base, &servers))
         .stdin(std::process::Stdio::piped())
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::null())
         .kill_on_drop(true)
         .spawn()
         .map_err(|error| ResidentError::Rpc(format!("cannot start {}: {error}", program.display())))?;
-    info!(program = %program.display(), "started codex app-server for the resident session");
+    info!(program = %program.display(), mcp_servers_off = servers.len(), "started codex app-server for the resident session");
     let reader = child.stdout.take().expect("stdout is piped");
     let writer = child.stdin.take().expect("stdin is piped");
     Ok((Pipes { reader: Box::new(reader), writer: Box::new(writer), child: Some(child) }, version))
+}
+
+/// Features that give a Codex thread tools of its own: the resident session gets none of them, only ours. Plugins
+/// and apps (connectors) bring tools and MCP servers; the rest are built-in tools. Set as `-c features.<name>=false`
+/// rather than `--disable`, which refuses a name another Codex version doesn't know. The user's hooks and
+/// AGENTS.md stay: the hooks are filtered, and AGENTS.md only shapes how it talks.
+const FEATURES_OFF: [&str; 15] = [
+    "plugins",
+    "apps",
+    "shell_tool",
+    "unified_exec",
+    "multi_agent",
+    "goals",
+    "memories",
+    "image_generation",
+    "view_image",
+    "browser_use",
+    "computer_use",
+    "in_app_browser",
+    "sleep_tool",
+    "tool_suggest",
+    "skill_search",
+];
+
+/// The config overrides that strip a Codex thread of its own tools, before MCP servers.
+fn tool_overrides() -> Vec<String> {
+    let mut args: Vec<String> =
+        FEATURES_OFF.iter().flat_map(|feature| ["-c".to_owned(), format!("features.{feature}=false")]).collect();
+    args.extend(["-c".to_owned(), "web_search=\"disabled\"".to_owned()]);
+    args
+}
+
+/// `codex app-server` with the tool overrides and every MCP server the user configured switched off. An override
+/// can't empty `mcp_servers` (it merges), so each server is turned off by name.
+fn app_server_args(base: &[String], mcp_servers: &[String]) -> Vec<String> {
+    let mut args = base.to_vec();
+    for name in mcp_servers {
+        args.extend(["-c".to_owned(), format!("mcp_servers.{name}.enabled=false")]);
+    }
+    args.push("app-server".to_owned());
+    args
+}
+
+/// The MCP servers that would be on, as Codex itself resolves them (`codex mcp list --json`, under the same
+/// overrides, so servers that plugins bring are already gone). A name that can't be written as a bare TOML key
+/// can't be switched off by an override; it is logged.
+async fn enabled_mcp_servers(program: &Path, base: &[String]) -> Vec<String> {
+    let output = tokio::process::Command::new(program)
+        .args(base)
+        .args(["mcp", "list", "--json"])
+        .stdin(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .output()
+        .await;
+    let listed = output.ok().and_then(|output| serde_json::from_slice::<Value>(&output.stdout).ok());
+    let Some(servers) = listed.as_ref().and_then(Value::as_array) else {
+        warn!("could not list the user's MCP servers; the resident session may see their tools");
+        return Vec::new();
+    };
+    servers
+        .iter()
+        .filter(|server| server.get("enabled").and_then(Value::as_bool) != Some(false))
+        .filter_map(|server| server.get("name").and_then(Value::as_str))
+        .filter(|name| {
+            let bare = !name.is_empty() && name.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_');
+            if !bare {
+                warn!(server = %name, "an MCP server name that can't be overridden; the resident session may see its tools");
+            }
+            bare
+        })
+        .map(str::to_owned)
+        .collect()
 }
 
 /// `VIBEBUDDY_CODEX`, else `codex` on PATH, else where installers put it: the daemon may run with launchd's bare PATH.
@@ -757,6 +832,29 @@ mod tests {
         assert_eq!(resident.say("hi").await.unwrap_err(), ResidentError::Disabled);
         assert_eq!(script.lock().unwrap().starts, 0);
         let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn the_app_server_starts_without_plugins_apps_built_in_tools_or_the_users_mcp_servers() {
+        let args = app_server_args(&tool_overrides(), &["node_repl".to_owned(), "computer-use".to_owned()]);
+        assert_eq!(args.last().map(String::as_str), Some("app-server"));
+        let overrides: Vec<&str> =
+            args.chunks(2).filter(|pair| pair[0] == "-c").map(|pair| pair[1].as_str()).collect();
+        for expected in [
+            "features.plugins=false",
+            "features.apps=false",
+            "features.shell_tool=false",
+            "features.unified_exec=false",
+            "features.multi_agent=false",
+            "web_search=\"disabled\"",
+            "mcp_servers.node_repl.enabled=false",
+            "mcp_servers.computer-use.enabled=false",
+        ] {
+            assert!(overrides.contains(&expected), "missing {expected}");
+        }
+        // Hooks stay on: the daemon filters them.
+        assert!(!args.iter().any(|arg| arg.contains("hooks")));
+        assert!(!args.iter().any(|arg| arg == "--disable"));
     }
 
     #[test]
