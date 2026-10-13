@@ -17,8 +17,10 @@ mod screenshot;
 mod serial_transport;
 mod session_titles;
 mod source_opener;
+mod speech;
 mod status;
 mod updates;
+mod voice;
 mod voice_writer;
 
 use std::convert::Infallible;
@@ -98,6 +100,8 @@ struct AppState {
     /// The resident session voice commands go to (ADR-0017); None without a state directory, and in tests
     /// unless one sets it. Present even when switched off, so its hook events are still recognised.
     resident: Option<Arc<resident::Resident>>,
+    /// Voice commands from the box (ADR-0017): its recording, and the turn being answered.
+    voice: Arc<voice::Voice>,
     /// The box on the cable said `LINK NOISE` since its last `BOX KEY` (ADR-0015).
     noise_seen: Arc<std::sync::atomic::AtomicBool>,
 }
@@ -134,6 +138,7 @@ impl AppState {
             updates: Arc::new(Mutex::new(Updates::new(None, None))),
             check_updates: Arc::new(Notify::new()),
             resident: None,
+            voice: Arc::new(voice::Voice::new(None, None)),
             noise_seen: Arc::new(std::sync::atomic::AtomicBool::new(false)),
         }
     }
@@ -258,6 +263,7 @@ async fn main() {
         }
         Arc::new(resident::Resident::new(enabled, dir, resident::Launcher::Codex, state.activities.clone()))
     });
+    state.voice = Arc::new(voice::Voice::new(speech::from_env(), state.resident.clone()));
     state.device.lock().await.pin = pin;
     state.updates = Arc::new(Mutex::new(Updates::new(
         updates::Source::configured(),
@@ -372,6 +378,9 @@ async fn publish_device_message(state: &AppState, message: DeviceMessage) {
     {
         lan::remember(&lan::box_address_file(dir), address.trim());
     }
+    if let DeviceMessage::Line(line) = &message {
+        handle_voice_line(state, line).await;
+    }
     let _ = state.device_bus.send(message.clone());
     // Ask right after connecting; the device reports its mode, firmware build and voice again.
     if matches!(message, DeviceMessage::Connected { .. } | DeviceMessage::ConnectedNetwork { .. } | DeviceMessage::ConnectedRelay { .. }) {
@@ -385,6 +394,24 @@ async fn publish_device_message(state: &AppState, message: DeviceMessage) {
     } else if !event.event.starts_with("voice.") && event.event != "echo" {
         info!(event = %event.event, "ignoring unbound device event");
     }
+}
+
+/// Voice commands (docs/protocol.md, "Voice commands"): offered on every report of the box's build, which follows
+/// hello on each new link and every reboot, and taken over USB or the local network. Over the Relay the box will
+/// talk to the voice service itself, so voice isn't offered there and its lines are ignored.
+async fn handle_voice_line(state: &AppState, line: &str) -> Option<tokio::task::JoinHandle<()>> {
+    let over_relay = state.device.lock().await.relay;
+    if line.contains(serial_transport::BUILD_MARKER) && !over_relay && state.voice.available() {
+        send_event(state, voice::available_event(true));
+    }
+    if !line.starts_with("VOICE ") {
+        return None;
+    }
+    if over_relay {
+        tracing::debug!("ignoring a voice line over the Relay");
+        return None;
+    }
+    state.voice.handle_line(line, &state.transport)
 }
 
 async fn open_k2_source(state: &AppState) {
@@ -1562,6 +1589,45 @@ mod tests {
             "0.3.0 abc1234 2026-09-16 10:50"
         );
         assert_eq!(build_identity_from(None, "abc1234", ""), "abc1234");
+    }
+
+    /// A recognizer that is never called: these tests only look at whether voice is offered.
+    struct SilentRecognizer;
+
+    impl speech::Recognizer for SilentRecognizer {
+        fn recognize(&self, _wav: &[u8]) -> Result<speech::Transcript, String> {
+            Ok(speech::Transcript::default())
+        }
+    }
+
+    #[tokio::test]
+    async fn voice_is_offered_after_each_build_report_but_never_over_the_relay() {
+        let dir = std::env::temp_dir().join(format!("vibebuddy-voice-offer-{}", std::process::id()));
+        let offers = |transport: &RecordingTransport| {
+            transport.events().iter().filter(|event| event.event == "voice.available").map(|event| event.extra["on"].clone()).collect::<Vec<_>>()
+        };
+        let build = || DeviceMessage::Line("DISPLAY READY BUILD v9 2026-10-01".to_owned());
+        for enabled in [true, false] {
+            let transport = Arc::new(RecordingTransport::default());
+            let mut state = test_state(transport.clone());
+            let resident = Arc::new(resident::Resident::new(enabled, &dir, resident::Launcher::Codex, Arc::default()));
+            state.voice = Arc::new(voice::Voice::new(Some(Arc::new(SilentRecognizer)), Some(resident)));
+
+            publish_device_message(&state, DeviceMessage::Connected { port: "/dev/cu.x".to_owned(), bridge: false, usb_serial: None }).await;
+            assert!(offers(&transport).is_empty(), "a new link starts with voice off");
+            publish_device_message(&state, build()).await;
+            // The box rebooting on the same link reports its build again, and forgets.
+            publish_device_message(&state, build()).await;
+            publish_device_message(&state, DeviceMessage::ConnectedNetwork { address: "192.168.1.23:7340".to_owned() }).await;
+            publish_device_message(&state, build()).await;
+            let expected = if enabled { vec![serde_json::json!(true); 3] } else { Vec::new() };
+            assert_eq!(offers(&transport), expected);
+
+            publish_device_message(&state, DeviceMessage::ConnectedRelay { url: "wss://relay.example".to_owned() }).await;
+            publish_device_message(&state, build()).await;
+            assert_eq!(offers(&transport), expected, "not over the Relay");
+        }
+        let _ = std::fs::remove_dir_all(dir);
     }
 
     #[tokio::test]

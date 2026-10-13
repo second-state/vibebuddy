@@ -1,6 +1,6 @@
 # Resident session
 
-The resident session is the one long-running Codex thread every voice command goes to ([ADR-0017](adr/0017-voice-commands-go-to-a-resident-session-that-speaks-as-the-buddy.md); see "Voice commands" in [`CONTEXT.md`](../CONTEXT.md)). This is the first, command-line-only cut: the box can't hear yet, so a voice command is typed.
+The resident session is the one long-running Codex thread every voice command goes to ([ADR-0017](adr/0017-voice-commands-go-to-a-resident-session-that-speaks-as-the-buddy.md); see "Voice commands" in [`CONTEXT.md`](../CONTEXT.md)). A voice command reaches it spoken to a box linked over USB or the local network (below), or typed with `vibebuddy say`.
 
 It is experimental and off by default. Start `vibebuddyd` with `VIBEBUDDY_RESIDENT_SESSION=1` to turn it on. There is no App UI for it, on the Mac or on Linux.
 
@@ -25,10 +25,34 @@ vibebuddy resident                          # prints codex://threads/<id>, to op
 - **Starting.** On the first voice command, and on the next one after the app-server dies, the daemon runs the `codex` it finds (`VIBEBUDDY_CODEX`, else PATH, else `~/.local/bin`, `/opt/homebrew/bin`, `/usr/local/bin`, since launchd's PATH is bare). It sends `initialize` (`experimentalApi: true`) and `initialized`, then `account/read`: with no account it stops with "not logged in". It never starts a login.
 - **One thread for good.** `thread/start` once, with `cwd` set to `resident/` in the daemon's state directory, `sandbox: "read-only"`, `approvalPolicy: "on-request"`, the developer instructions and the dynamic tools. The thread id is kept in `resident.json` beside it, and every later start sends `thread/resume` with the same settings (the tools survive a resume; the instructions are sent again). If the thread can't be resumed, a new one is started and saved, and the log names both the old and the new thread id.
 - **Only our tools.** The app-server is started with the user's own Codex config, minus everything that gives a thread tools of its own: `-c features.<name>=false` for plugins, apps (connectors), the shell and exec tools, sub-agents, goals, memories, image generation and viewing, the browser and computer use, sleep, tool suggestions and skill search, plus `web_search="disabled"`. An override can't empty `mcp_servers` (it merges), so the daemon first asks `codex mcp list --json`, under the same overrides, which servers would be on, and adds `-c mcp_servers.<name>.enabled=false` for each. Overrides are `-c` rather than `--disable`, which refuses a feature name another Codex version doesn't know. The user's global `AGENTS.md` and hooks stay: the hooks are filtered (below). Checked on 0.162.0: `mcpServerStatus/list` goes from seven servers (one with 365 app tools) to two, both off with no tools, and the thread's tool list is `speak`, `list_activities` and what Codex always adds and has no switch for: `apply_patch` (refused by the read-only sandbox, its approval declined), a clock, and the MCP resource readers (no server is on to read from).
-- **Tools.** `speak({text})` is the spoken reply: the daemon collects it and hands it back to the caller (later it goes to the box). `list_activities({})` returns the Activities the aggregator already holds, as JSON: agent, task-card title, project, `working`/`needs_input`, host, seconds in that state and since the last event. There are no tools that run commands or write files.
+- **Tools.** `speak({text})` is the spoken reply: the daemon hands it on the moment it is called (`Resident::say_streaming`), to the box as `voice.reply`, or collected for `POST /v1/resident/say`. `list_activities({})` returns the Activities the aggregator already holds, as JSON: agent, task-card title, project, `working`/`needs_input`, host, seconds in that state and since the last event. There are no tools that run commands or write files.
 - **Declining.** Every approval or question the session raises is declined: command and file-change approvals (`decline`, or `denied` on the legacy methods), permission requests (nothing granted), MCP elicitations (`decline`) and user-input requests (no answers). `currentTime/read` is answered; anything else gets a JSON-RPC "method not found".
 - **Turns.** `turn/start` with the text, then the daemon answers tool calls until `turn/completed` for that turn. One turn at a time: a command that arrives during another waits for it, in order, rather than being rejected, since two quick sentences are both meant to be answered. A turn that takes over two minutes is interrupted (`turn/interrupt`).
 - **Persona.** `instructions()` in `resident.rs` takes the Character's persona; until Characters carry one, it is `None` and the buddy speaks plainly.
+
+## From the box
+
+The box side of push-to-talk is in [`protocol.md`](protocol.md), "Voice commands (experimental)"; `daemon/src/voice.rs` is the computer side and `daemon/src/speech.rs` the recognizers.
+
+- **Offered.** Voice is on when the resident session is on and a speech recognizer is configured. The daemon then sends `voice.available` `on: true` every time the box reports its build (after `device.hello` on each new link, and after a reboot). Never over the Relay: there the box will talk to the voice service itself. Nothing switches either condition at run time yet, so `on: false` is never sent.
+- **Recording.** `VOICE DATA` lines are decoded as they arrive, each from the IMA ADPCM state it carries (the same decoder as `firmware-rs/core/src/adpcm.rs`, checked against it in the tests). On `VOICE END` the lines are put in seq order; a lost line becomes silence as long as a line, audio lost at the end is filled up to the sample count `END` gives, and the missing seqs are logged. A turn's audio is kept only in memory and only until it is recognised; `VOICE DATA` lines stay out of the log.
+- **A turn.** The audio goes to the recognizer as a 24 kHz 16-bit mono WAV file; the text goes to the box as `voice.heard` and to the resident session as a voice command; each `speak` goes to the box as `voice.reply` as soon as it is called; `voice.done` follows `turn/completed`. Text is cut at a character, with an ellipsis, to fit the 1024-byte line. Errors: `not_heard` (no audio arrived, or the recognizer heard nothing), `unavailable` (voice is off, recognition failed, or the resident session failed, with the reason as `message`), `busy` (a turn ended while another is still being answered; unlike `vibebuddy say`, a voice turn doesn't wait). A typed command and a voice turn still queue behind each other in the resident session.
+- **Timing.** A 5 s recording, checked end to end on 2026-10-13 (recognition by Workers AI, codex-cli 0.162.0, app-server started cold): `voice.heard` 2.2 s after `VOICE END`, the spoken reply at 10.1 s, `voice.done` at 14.0 s.
+
+The end-to-end check is an ignored test, `e2e_a_real_recording_through_the_real_recognizer_and_resident_session` in `voice.rs`: it encodes the left channel of a WAV file as the box would and feeds it through the real recognizer and the real resident session, in a temporary state directory. Its doc comment says how to run it; give it a `VIBEBUDDY_CODEX` that adds `-c features.hooks=false`, or the turn's hooks reach the daemon on 7331 and show up on the box.
+
+### Speech recognition
+
+Behind the `Recognizer` trait, so the planned voice service in `vibebuddy-cloud` (called with the account session) can take over. For now there are two backends, picked at start:
+
+| Backend | Settings | Used |
+| --- | --- | --- |
+| The user's own recognizer: any OpenAI-compatible `POST {base}/audio/transcriptions` | `VIBEBUDDY_STT_BASE_URL`, `VIBEBUDDY_STT_API_KEY` (optional), `VIBEBUDDY_STT_MODEL` (default `whisper-1`) | When set; it wins over Cloudflare |
+| Cloudflare Workers AI, `@cf/openai/whisper-large-v3-turbo` | `CLOUDFLARE_ACCOUNT_ID`, `CLOUDFLARE_AI_TOKEN` | Otherwise; for development |
+
+`VIBEBUDDY_STT=cloudflare|openai|off` forces the choice. `VIBEBUDDY_STT_LANGUAGE` (`zh`, `en`, …) tells the recognizer the language; unset, it detects it, and the log names what it detected.
+
+Each setting is taken from the environment, else from `speech.json` in the config directory (`{"base_url","api_key","model","language"}`, the user's own recognizer), else from a `KEY=VALUE` file named by `VIBEBUDDY_STT_ENV_FILE` (development credentials, so they stay out of the daemon's environment and out of the repository). All are read when the daemon starts. `speech.json` is a file of its own, not part of `config.json`, because `PUT /v1/config` replaces the whole config and an App that doesn't know the field would wipe the key; whoever writes it (an App setting, later) writes it with mode 0600. Credentials are never logged, and errors name only the recognizer's host.
 
 ## Never an Activity
 
@@ -42,6 +66,4 @@ app-server and `dynamicTools` are experimental. This was built and checked again
 
 `list_activities` sends the task-card titles and project names the daemon holds, with each Activity's agent, state, host app and ages, to the model provider the user's Codex uses, as part of the resident thread. Until now these stayed on the computer and the box. Prompts and replies are not sent: the daemon never holds them.
 
-## Known gaps
-
-- A reply is returned when the turn completes, which in testing was 4 to 6 seconds after `speak` was called. The box should play a spoken reply the moment `speak` arrives, not at `turn/completed`.
+A voice command's audio leaves the computer for the speech recognizer: in development that is Cloudflare Workers AI, under the developer's own account; with the user's own recognizer, only that endpoint (and its key goes nowhere else). The recognised text then goes to the user's Codex model provider as the voice command. The daemon keeps neither the audio nor the text once the turn is over, and logs neither.
