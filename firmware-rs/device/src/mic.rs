@@ -10,7 +10,7 @@
 //! its 12-bit maximum: an EOF every 4095 16-bit samples, 8190 bytes, which on 4080-byte descriptors fills
 //! two and leaves the third with 30 bytes. So a 288,000-byte buffer held only about two thirds of that in
 //! samples when its last descriptor came back (`MIC ERROR SHORT` on the box, 2026-10-13). The samples are still
-//! in order, each descriptor's length says how many it holds, so the buffer is 1.5 times the capture plus
+//! in order, each descriptor's length says how many it holds, so the buffer is 2.5 times the capture plus
 //! some, and the capture ends once the descriptors handed back hold enough.
 //!
 //! A ring that had to be relinked by this task before the DMA reached its end stalled for good on the box
@@ -161,7 +161,7 @@ pub async fn mic_task(mut rx: I2sRx<'static, Async>) {
 
 async fn capture(rx: I2sRx<'static, Async>, wanted: usize) -> (Result<Vec<u8>, &'static str>, I2sRx<'static, Async>) {
     // Room for the descriptors an EOF cuts short (see the top of this file).
-    let size = (wanted * 3 / 2 + 2 * DESCRIPTOR_BYTES).next_multiple_of(ALIGN);
+    let size = (wanted * 5 / 2 + 2 * DESCRIPTOR_BYTES).next_multiple_of(ALIGN);
     let count = size.div_ceil(DESCRIPTOR_BYTES);
     let (Some(data), Some(descriptors)) = (Block::new(MemoryCapability::External, size), Block::new(MemoryCapability::Internal, count * size_of::<DmaDescriptor>()))
     else {
