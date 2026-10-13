@@ -89,6 +89,12 @@ struct FakeBoard {
     peer_full: bool,
     /// Restarts asked for.
     restarts: usize,
+    /// Registers of the chips on I2C, by (address, register), and what was written.
+    i2c: std::collections::BTreeMap<(u8, u8), u8>,
+    i2c_writes: Vec<(u8, u8, u8)>,
+    /// The board has I2S input; and the size of the capture asked for, until it is taken.
+    mic_input: bool,
+    mic_capture: Option<usize>,
 }
 
 impl FakeBoard {
@@ -114,6 +120,10 @@ impl FakeBoard {
             relay_peer: false,
             peer_full: false,
             restarts: 0,
+            i2c: [((0x18, 0xFD), 0x83), ((0x18, 0xFE), 0x11), ((0x18, 0x16), 0x24)].into(),
+            i2c_writes: Vec::new(),
+            mic_input: true,
+            mic_capture: None,
         }
     }
 
@@ -206,6 +216,25 @@ impl Board for FakeBoard {
     fn set_volume(&mut self, level: u32) -> Result<(), VolumeError> {
         self.codec_volume = Some(level);
         Ok(())
+    }
+    fn i2c_read(&mut self, address: u8, register: u8) -> Option<u8> {
+        self.i2c.get(&(address, register)).copied()
+    }
+    fn i2c_write(&mut self, address: u8, register: u8, value: u8) -> Result<(), ()> {
+        self.i2c.keys().any(|&(chip, _)| chip == address).then_some(()).ok_or(())?;
+        self.i2c.insert((address, register), value);
+        self.i2c_writes.push((address, register, value));
+        Ok(())
+    }
+    fn mic_start(&mut self, bytes: usize) -> Result<(), ()> {
+        self.mic_input.then_some(()).ok_or(())?;
+        self.mic_capture = Some(bytes);
+        Ok(())
+    }
+    /// The left slot counts up, the right slot is silent.
+    fn mic_take(&mut self) -> Option<Result<Vec<u8>, &'static str>> {
+        let bytes = self.mic_capture.take()?;
+        Some(Ok((0..bytes / 4).flat_map(|frame| [(frame % 256) as u8, 0, 0, 0]).collect()))
     }
 }
 
@@ -1240,4 +1269,90 @@ mod relay {
         assert!(relay.message(&mut firmware, &mut board, &json!({"t": "data", "line": first})).is_empty());
         assert!(!relay.has_peer());
     }
+}
+
+/// Polls until `MIC END` and returns every line.
+fn poll_mic(firmware: &mut Firmware, board: &mut FakeBoard) -> Vec<String> {
+    let mut lines = Vec::new();
+    for _ in 0..2_000 {
+        board.advance(10);
+        firmware.poll(board);
+        lines.extend(board.take_lines());
+        if lines.last().is_some_and(|line| line.starts_with("MIC END")) {
+            return lines;
+        }
+    }
+    panic!("no MIC END; got {} lines", lines.len());
+}
+
+#[test]
+fn a_mic_recording_reports_probes_levels_and_the_samples() {
+    let (mut firmware, mut board, _) = booted(blank_flash());
+    let lines = send(&mut firmware, &mut board, r#"{"version":1,"event":"device.mic.record","ms":200}"#);
+    assert_eq!(
+        lines,
+        [
+            "MIC PROBE 0x18 ID 8311",
+            "MIC PROBE 0x40 NONE",
+            "MIC PROBE 0x41 NONE",
+            "MIC PROBE 0x42 NONE",
+            "MIC PROBE 0x43 NONE",
+            "MIC GAIN 30 DB",
+            "MIC RECORDING 200 MS",
+        ]
+    );
+    // es8311_set_mic_gain(30 dB) writes 5 to register 0x16.
+    assert_eq!(board.i2c_writes, [(0x18, 0x16, 5)]);
+    assert_eq!(send(&mut firmware, &mut board, r#"{"version":1,"event":"device.mic.record"}"#), ["MIC BUSY"]);
+
+    let lines = poll_mic(&mut firmware, &mut board);
+    assert_eq!(lines[0], "MIC CAPTURED 10 MS 19200 BYTES");
+    assert_eq!(&lines[1..3], ["MIC LEVEL 0 L 144 255 R 0 0", "MIC LEVEL 100 L 147 255 R 0 0"]);
+    assert_eq!(lines[3], "MIC BEGIN 24000 2 16 19200");
+    let data: Vec<&String> = lines.iter().filter(|line| line.starts_with("MIC DATA ")).collect();
+    assert_eq!(data.len(), 19200usize.div_ceil(576));
+    let mut samples = Vec::new();
+    for (seq, line) in data.iter().enumerate() {
+        assert!(line.len() < 800, "a data line stays well under the 1 KB line limit");
+        let mut parts = line.splitn(4, ' ').skip(2);
+        assert_eq!(parts.next().unwrap(), seq.to_string());
+        let mut out = vec![0u8; 576];
+        let length = voice_pack::decode_base64(parts.next().unwrap().as_bytes(), &mut out).unwrap();
+        samples.extend_from_slice(&out[..length]);
+    }
+    let expected: Vec<u8> = (0..4800).flat_map(|frame| [(frame % 256) as u8, 0, 0, 0]).collect();
+    assert_eq!(samples, expected);
+    assert_eq!(lines.last().unwrap(), &format!("MIC END 19200 {}", voice_pack::crc32(0, &expected)));
+
+    // Done: another recording may start.
+    let lines = send(&mut firmware, &mut board, r#"{"version":1,"event":"device.mic.record","ms":100}"#);
+    assert_eq!(lines.last().map(String::as_str), Some("MIC RECORDING 100 MS"));
+}
+
+#[test]
+fn a_mic_recording_is_clamped_and_reports_what_is_missing() {
+    let (mut firmware, mut board, _) = booted(blank_flash());
+    board.i2c.clear();
+    board.i2c.insert((0x41, 0x3D), 0x72);
+    board.i2c.insert((0x41, 0x3E), 0x10);
+    board.mic_input = false;
+    let lines = send(&mut firmware, &mut board, r#"{"version":1,"event":"device.mic.record","ms":60000,"gain_db":99}"#);
+    assert_eq!(
+        lines,
+        [
+            "MIC PROBE 0x18 NONE",
+            "MIC PROBE 0x40 NONE",
+            "MIC PROBE 0x41 ID 7210",
+            "MIC PROBE 0x42 NONE",
+            "MIC PROBE 0x43 NONE",
+            "MIC UNAVAILABLE",
+        ]
+    );
+    // No ES8311: no gain write.
+    assert!(board.i2c_writes.is_empty());
+
+    board.mic_input = true;
+    let lines = send(&mut firmware, &mut board, r#"{"version":1,"event":"device.mic.record","ms":60000}"#);
+    assert_eq!(lines.last().map(String::as_str), Some("MIC RECORDING 5000 MS"));
+    assert_eq!(board.mic_capture, Some(480_000));
 }
