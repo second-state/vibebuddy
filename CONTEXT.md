@@ -48,7 +48,15 @@ _Avoid_: cloud, server, backend (too broad: later online features are not the Re
 
 **Pairing (配对)**:
 The lasting permission for a computer to link to a box. Pairing is done once per computer and box and needs no account; the paired computers of a box are the only ones that may link to it or take it over.
-_Avoid_: binding, registration, login (an account is a separate, later thing)
+_Avoid_: binding, registration, login (an account is a separate thing, see below)
+
+**Account (账户)**:
+A person's identity with VibeBuddy's online services, needed only for features that cost us money to run, voice commands first. It belongs to a person, never to a box: the user signs in on a computer, in the App, and a box is never signed in. It is layered on pairing and changes nothing about it: linking, takeover and the Relay need no account.
+_Avoid_: user (the person, not their account), box account, device registration, login (the act of signing in)
+
+**Daily allowance (每日额度)**:
+How many voice commands one account may make in a day. Past it, voice stops for that account until the next day; nothing else about the box changes.
+_Avoid_: quota, credits, plan, limit (on its own)
 
 **Takeover (接管)**:
 A paired computer becoming the one the box links to, ending the previous computer's link. Plugging in USB always takes over; otherwise the user takes over from the App, or another paired computer links on its own once the previous one has been gone long enough. Agent activity never moves the box between computers by itself.
