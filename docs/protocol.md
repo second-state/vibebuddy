@@ -219,7 +219,12 @@ The computer answers with JSON events carrying the same `turn`:
 
 The box ignores answers for any turn but the one on its screen: after K2 closed it, after a new turn started, or after a minute without a word from the computer, when it closes the overlay on its own.
 
-Spoken replies are shown as text for now; their audio will follow as `voice.audio` chunks once there is speech synthesis.
+The computer also sends each spoken reply's audio, synthesized in the Character's voice, right after its `voice.reply`:
+
+- `voice.audio` with `reply` (0 for the turn's first `voice.reply`, counting up), `seq` (from 0, without gaps) and `data`: base64 of the next bytes of an MP3 stream (MPEG-2 Layer III, 24 kHz mono, 48 kbps, as the voice service returns it), at most 768 base64 characters. Chunks don't follow MP3 frame boundaries; the box buffers and decodes frame by frame.
+- `voice.audio` with `reply`, `seq` and `"end":true` (no `data`): that reply's audio is complete.
+
+The box plays replies in order, one after another, and starts a reply as soon as it has enough frames, without waiting for its end. If synthesis fails the reply stays text only. While muted the box shows replies without playing them.
 
 ## Stage 1 error output
 
