@@ -36,6 +36,10 @@ pub struct DeviceState {
     pub firmware_build: Option<String>,
     /// The firmware version, such as `0.2.2`, which orders releases; firmware older than ADR-0010 reports none.
     pub firmware_version: Option<String>,
+    /// The firmware takes firmware images over any link (`TRANSFER 1`, ADR-0016), so updating needs no cable.
+    pub transfer: bool,
+    /// The last image sent over the link didn't confirm itself, and the box went back (`FIRMWARE ROLLED BACK`).
+    pub rolled_back: bool,
     /// Id of the announcement voice the device is using; `builtin` means the built-in voice.
     pub voice: Option<String>,
     /// Speaker volume (the codec's 20 to 100), stored on the device; the app is just a remote.
@@ -120,6 +124,8 @@ impl DeviceState {
                 self.foreign_firmware = false;
                 self.firmware_build = None;
                 self.firmware_version = None;
+                self.transfer = false;
+                self.rolled_back = false;
                 self.mode = None;
                 self.voice = None;
                 self.volume = None;
@@ -152,6 +158,8 @@ impl DeviceState {
                 self.unsupported_board = None;
                 self.firmware_build = None;
                 self.firmware_version = None;
+                self.transfer = false;
+                self.rolled_back = false;
                 self.mode = None;
                 self.voice = None;
                 self.volume = None;
@@ -183,6 +191,13 @@ impl DeviceState {
                 } else if let Some((_, build)) = line.split_once(BUILD_MARKER) {
                     self.foreign_firmware = false;
                     self.firmware_build = Some(build.trim().to_owned());
+                    // The box reports these after the build, each time it reports its state.
+                    self.transfer = false;
+                    self.rolled_back = false;
+                } else if line.trim() == "TRANSFER 1" {
+                    self.transfer = true;
+                } else if line.trim() == "FIRMWARE ROLLED BACK" {
+                    self.rolled_back = true;
                 } else if let Some(key) = line.strip_prefix(BOX_KEY_PREFIX) {
                     let key = key.trim();
                     // Another key on the same port: the box made itself a new identity and restarted without the
@@ -403,6 +418,8 @@ mod tests {
                 busy: None,
                 mode: Some("pomodoro".to_owned()),
                 firmware_build: Some("21a8360-dirty 2026-09-16 10:23".to_owned()),
+                transfer: false,
+                rolled_back: false,
                 firmware_version: Some("0.2.2".to_owned()),
                 voice: Some("builtin".to_owned()),
                 volume: Some(65),

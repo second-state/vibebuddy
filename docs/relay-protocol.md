@@ -90,4 +90,4 @@ The simulator plays the box on the Relay with `tools/simulate-device.py --relay 
 
 ## Not decided yet
 
-Resuming large writes after a drop. Noticing a box that lost power without closing its socket: the Relay shows it online until the edge notices.
+Noticing a box that lost power without closing its socket: the Relay shows it online until the edge notices.

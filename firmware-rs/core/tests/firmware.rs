@@ -237,6 +237,7 @@ fn boot_reports_like_the_c_firmware() {
             "TALLY LOADED 0 0S DAY 0",
             "DISPLAY READY BUILD abc1234 2026-09-26 10:00",
             "FIRMWARE VERSION 1.2.3",
+            "TRANSFER 1",
             "LINK NOISE",
             BOX_KEY,
             RELAY_URL,
@@ -349,7 +350,7 @@ fn bad_lines_are_reported() {
     assert_eq!(send(&mut firmware, &mut board, r#"{"version":1,"event":""}"#), ["ERROR invalid_message"]);
     assert_eq!(send(&mut firmware, &mut board, r#"{"version":1,"event":"x","title":3}"#), ["ERROR invalid_message"]);
     assert_eq!(send(&mut firmware, &mut board, r#"{"version":2,"event":"x"}"#), ["ERROR unsupported_version"]);
-    let long = format!(r#"{{"version":1,"event":"x","title":"{}"}}"#, "a".repeat(1100));
+    let long = format!(r#"{{"version":1,"event":"x","title":"{}"}}"#, "a".repeat(4700));
     assert_eq!(send(&mut firmware, &mut board, &long), ["ERROR input_too_large"]);
     // A line ending in CRLF is accepted too.
     firmware.receive(&mut board, b"{\"version\":1,\"event\":\"device.identify\"}\r\n");
@@ -490,7 +491,7 @@ fn echo_reports_length_and_crc() {
 fn hello_repeats_the_static_state() {
     let (mut firmware, mut board, _) = booted(blank_flash());
     let lines = send(&mut firmware, &mut board, r#"{"version":1,"event":"device.hello"}"#);
-    assert_eq!(lines, ["DISPLAY READY BUILD abc1234 2026-09-26 10:00", "FIRMWARE VERSION 1.2.3", "LINK NOISE", BOX_KEY, RELAY_URL, "MODE DUTY", "VOICES builtin", "VOLUME 65"]);
+    assert_eq!(lines, ["DISPLAY READY BUILD abc1234 2026-09-26 10:00", "FIRMWARE VERSION 1.2.3", "TRANSFER 1", "LINK NOISE", BOX_KEY, RELAY_URL, "MODE DUTY", "VOICES builtin", "VOLUME 65"]);
 }
 
 #[test]
@@ -1239,5 +1240,93 @@ mod relay {
         let (_, first) = Initiator::start([2; 32], &box_key, [6; 32], b"{}").unwrap();
         assert!(relay.message(&mut firmware, &mut board, &json!({"t": "data", "line": first})).is_empty());
         assert!(!relay.has_peer());
+    }
+}
+
+mod transfer {
+    use super::*;
+    use serde_json::Value;
+    use sha2::{Digest, Sha256};
+    use vibebuddy_firmware_core::transfer::CHUNK_BYTES;
+    use vibebuddy_firmware_core::voice_pack::crc32;
+
+    fn base64(bytes: &[u8]) -> String {
+        const ALPHABET: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+        let mut out = String::new();
+        for chunk in bytes.chunks(3) {
+            let bits = chunk.iter().enumerate().fold(0u32, |acc, (index, &byte)| acc | u32::from(byte) << (16 - 8 * index));
+            for index in 0..4 {
+                out.push(if index <= chunk.len() { ALPHABET[(bits >> (18 - 6 * index) & 63) as usize] as char } else { '=' });
+            }
+        }
+        out
+    }
+
+    fn reply(lines: &[String]) -> Value {
+        serde_json::from_str(lines.last().unwrap()).unwrap()
+    }
+
+    /// Sends xfer.begin and runs the main loop until the box answers: it erases the slot first.
+    fn begin_transfer(firmware: &mut Firmware, board: &mut FakeBoard, line: &str) -> Value {
+        let mut lines = send(firmware, board, line);
+        let mut passes = 0;
+        while !lines.iter().any(|line| line.contains("xfer.")) {
+            firmware.poll(board);
+            lines = board.take_lines();
+            passes += 1;
+            assert!(passes < 100, "no answer to xfer.begin");
+        }
+        reply(&lines)
+    }
+
+    #[test]
+    fn a_firmware_image_comes_over_the_link_and_the_box_restarts_into_it() {
+        let (mut firmware, mut board, _) = booted(blank_flash());
+        let mut image: Vec<u8> = (0..10_000).map(|index| (index * 13 + 1) as u8).collect();
+        image[0] = 0xE9;
+        image[12..14].copy_from_slice(&[9, 0]);
+        let sha: String = Sha256::digest(&image).iter().map(|byte| format!("{byte:02x}")).collect();
+        let begin = format!(r#"{{"version":1,"event":"xfer.begin","kind":"firmware","size":{},"sha256":"{sha}"}}"#, image.len());
+        assert_eq!(begin_transfer(&mut firmware, &mut board, &begin), serde_json::json!({"version": 1, "event": "xfer.ready", "offset": 0}));
+        for (index, piece) in image.chunks(CHUNK_BYTES).enumerate() {
+            let line = format!(
+                r#"{{"version":1,"event":"xfer.chunk","offset":{},"crc":{},"data":"{}"}}"#,
+                index * CHUNK_BYTES,
+                crc32(0, piece),
+                base64(piece)
+            );
+            assert!(line.len() < 4608 || piece.len() < CHUNK_BYTES, "a full chunk fits a line");
+            let ack = reply(&send(&mut firmware, &mut board, &line));
+            assert_eq!(ack["offset"], (index * CHUNK_BYTES + piece.len()) as u64);
+        }
+        // Asked again, the same image resumes at its end.
+        assert_eq!(reply(&send(&mut firmware, &mut board, &begin))["offset"], image.len() as u64);
+        assert_eq!(reply(&send(&mut firmware, &mut board, r#"{"version":1,"event":"xfer.end"}"#))["event"], "xfer.done");
+        assert_eq!(board.restarts, 1);
+        assert_eq!(&board.flash.bytes[0x610000..0x610000 + image.len()], &image[..]);
+    }
+
+    #[test]
+    fn a_chunk_of_a_full_size_survives_the_line_limit() {
+        let (mut firmware, mut board, _) = booted(blank_flash());
+        let mut image = vec![0xA5u8; CHUNK_BYTES * 2];
+        image[0] = 0xE9;
+        image[12..14].copy_from_slice(&[9, 0]);
+        let sha: String = Sha256::digest(&image).iter().map(|byte| format!("{byte:02x}")).collect();
+        begin_transfer(&mut firmware, &mut board, &format!(r#"{{"version":1,"event":"xfer.begin","kind":"firmware","size":{},"sha256":"{sha}"}}"#, image.len()));
+        let piece = &image[..CHUNK_BYTES];
+        let line = format!(r#"{{"version":1,"event":"xfer.chunk","offset":0,"crc":{},"data":"{}"}}"#, crc32(0, piece), base64(piece));
+        assert_eq!(reply(&send(&mut firmware, &mut board, &line))["offset"], CHUNK_BYTES as u64);
+    }
+
+    #[test]
+    fn a_bad_chunk_ends_the_transfer_with_its_reason() {
+        let (mut firmware, mut board, _) = booted(blank_flash());
+        let begin = format!(r#"{{"version":1,"event":"xfer.begin","kind":"firmware","size":100,"sha256":"{}"}}"#, "00".repeat(32));
+        begin_transfer(&mut firmware, &mut board, &begin);
+        let line = format!(r#"{{"version":1,"event":"xfer.chunk","offset":0,"crc":1,"data":"{}"}}"#, base64(&[0xE9; 100]));
+        assert_eq!(reply(&send(&mut firmware, &mut board, &line)), serde_json::json!({"version": 1, "event": "xfer.error", "code": "crc"}));
+        assert_eq!(reply(&send(&mut firmware, &mut board, r#"{"version":1,"event":"xfer.end"}"#))["code"], "sequence");
+        assert_eq!(board.restarts, 0);
     }
 }

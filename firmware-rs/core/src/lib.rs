@@ -31,6 +31,7 @@ pub mod ota;
 pub mod pomodoro;
 pub mod relay_box;
 pub mod storage;
+pub mod transfer;
 pub mod voice_pack;
 pub mod voices;
 

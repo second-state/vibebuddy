@@ -5137,6 +5137,7 @@ dependencies = [
  "libm",
  "rand_core 0.6.4",
  "serde_json",
+ "sha2",
  "tungstenite",
  "vibebuddy-protocol",
 ]

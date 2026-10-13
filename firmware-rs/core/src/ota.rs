@@ -15,6 +15,8 @@ const ENTRY_BYTES: usize = 32;
 const STATE_NEW: u32 = 0;
 const STATE_PENDING_VERIFY: u32 = 1;
 const STATE_VALID: u32 = 2;
+const STATE_INVALID: u32 = 3;
+const STATE_ABORTED: u32 = 4;
 const UNSET: u32 = 0xFFFF_FFFF;
 
 /// What confirming did.
@@ -33,6 +35,67 @@ fn word(entry: &[u8], at: usize) -> u32 {
 /// The CRC ESP-IDF keeps over an entry's sequence number: crc32 seeded with all ones.
 pub fn sequence_crc(sequence: u32) -> u32 {
     crc32(UNSET, &sequence.to_le_bytes())
+}
+
+/// The two otadata entries as (sector, sequence, state), for the ones whose CRC checks out.
+fn entries(flash: &mut dyn Flash, otadata: Region) -> Result<[Option<(u32, u32)>; 2], FlashError> {
+    let mut out = [None; 2];
+    for sector in 0..2u32 {
+        let mut entry = [0u8; ENTRY_BYTES];
+        flash.read(otadata.offset + sector * SECTOR_BYTES, &mut entry)?;
+        let sequence = word(&entry, 0);
+        if sequence != UNSET && word(&entry, 28) == sequence_crc(sequence) {
+            out[sector as usize] = Some((sequence, word(&entry, 24)));
+        }
+    }
+    Ok(out)
+}
+
+/// The entry the running image came from: the newest one the bootloader didn't give up on. None after a USB
+/// flash, which leaves otadata blank and boots `ota_0`.
+fn running_entry(entries: &[Option<(u32, u32)>; 2]) -> Option<(u32, u32)> {
+    (0..2u32)
+        .filter_map(|sector| entries[sector as usize].map(|(sequence, state)| (sector, sequence, state)))
+        .filter(|&(_, _, state)| !matches!(state, STATE_INVALID | STATE_ABORTED))
+        .max_by_key(|&(_, sequence, _)| sequence)
+        .map(|(sector, sequence, _)| (sector, sequence))
+}
+
+/// ESP-IDF's rule: sequence n selects slot (n - 1) % 2.
+fn slot_of(sequence: u32) -> usize {
+    (sequence.wrapping_sub(1) % 2) as usize
+}
+
+/// Which slot, 0 or 1, the box is running from.
+pub fn running_slot(flash: &mut dyn Flash, otadata: Region) -> Result<usize, FlashError> {
+    Ok(running_entry(&entries(flash, otadata)?).map_or(0, |(_, sequence)| slot_of(sequence)))
+}
+
+/// Makes `slot` boot next, as NEW: the bootloader runs it once as PENDING_VERIFY and goes back unless it
+/// confirms itself. The entry goes in the sector the running image's entry isn't in, so that one is still there
+/// to go back to; its sequence is the next above every entry that selects `slot`.
+pub fn select(flash: &mut dyn Flash, otadata: Region, slot: usize) -> Result<(), FlashError> {
+    let entries = entries(flash, otadata)?;
+    let newest = entries.iter().flatten().map(|&(sequence, _)| sequence).max().unwrap_or(0);
+    let mut sequence = newest + 1;
+    if slot_of(sequence) != slot {
+        sequence += 1;
+    }
+    let sector = running_entry(&entries).map_or(0, |(sector, _)| 1 - sector);
+    let mut entry = [0xFFu8; ENTRY_BYTES];
+    entry[0..4].copy_from_slice(&sequence.to_le_bytes());
+    entry[24..28].copy_from_slice(&STATE_NEW.to_le_bytes());
+    entry[28..32].copy_from_slice(&sequence_crc(sequence).to_le_bytes());
+    let offset = otadata.offset + sector * SECTOR_BYTES;
+    flash.erase(offset, offset + SECTOR_BYTES)?;
+    flash.write(offset, &entry)
+}
+
+/// The newest entry was given up on: the last update didn't confirm itself and the box went back.
+pub fn rolled_back(flash: &mut dyn Flash, otadata: Region) -> Result<bool, FlashError> {
+    let entries = entries(flash, otadata)?;
+    let newest = entries.iter().flatten().max_by_key(|&&(sequence, _)| sequence);
+    Ok(newest.is_some_and(|&(_, state)| matches!(state, STATE_INVALID | STATE_ABORTED)))
 }
 
 /// Marks the selected image VALID if the bootloader left it NEW or PENDING_VERIFY.
@@ -120,6 +183,37 @@ mod tests {
         put(&mut flash, 0, &entry(1, STATE_VALID));
         put(&mut flash, 1, &entry(2, 4));
         assert_eq!(confirm(&mut flash, OTADATA), Ok(Confirmed::Nothing));
+    }
+
+    #[test]
+    fn a_usb_flash_runs_ota_0_and_an_update_goes_to_ota_1() {
+        let mut flash = MemoryFlash::new(0x4000);
+        assert_eq!(running_slot(&mut flash, OTADATA), Ok(0));
+        select(&mut flash, OTADATA, 1).unwrap();
+        assert_eq!(word(&flash.bytes[0x2000..], 0), 2, "sequence 2 selects ota_1");
+        assert_eq!(state(&flash, 0), STATE_NEW);
+        // The bootloader boots it; it confirms itself.
+        assert_eq!(confirm(&mut flash, OTADATA), Ok(Confirmed::Now));
+        assert_eq!(running_slot(&mut flash, OTADATA), Ok(1));
+
+        // The next update goes back to ota_0, in the other sector, leaving the running entry alone.
+        select(&mut flash, OTADATA, 0).unwrap();
+        assert_eq!(word(&flash.bytes[0x3000..], 0), 3);
+        assert_eq!((state(&flash, 0), state(&flash, 1)), (STATE_VALID, STATE_NEW));
+        assert_eq!(rolled_back(&mut flash, OTADATA), Ok(false));
+    }
+
+    #[test]
+    fn a_rolled_back_update_is_noticed_and_the_next_one_keeps_the_running_entry() {
+        let mut flash = MemoryFlash::new(0x4000);
+        put(&mut flash, 0, &entry(1, STATE_VALID));
+        put(&mut flash, 1, &entry(2, STATE_ABORTED));
+        assert_eq!(rolled_back(&mut flash, OTADATA), Ok(true));
+        assert_eq!(running_slot(&mut flash, OTADATA), Ok(0), "back on ota_0");
+        select(&mut flash, OTADATA, 1).unwrap();
+        assert_eq!(word(&flash.bytes[0x3000..], 0), 4, "above the aborted 2, and selecting ota_1");
+        assert_eq!(state(&flash, 0), STATE_VALID, "the running entry stays to go back to");
+        assert_eq!(rolled_back(&mut flash, OTADATA), Ok(false));
     }
 
     #[test]

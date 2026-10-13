@@ -575,7 +575,10 @@ struct DeviceView: View {
                 if let operation = model.operation, operation.kind == .firmware {
                     OperationRow(operation: operation)
                     if operation.state == .failed {
-                        Text("Before retrying, hold K0 on the box and replug the cable to put it in download mode.").font(.caption).foregroundStyle(.secondary)
+                        // Firmware that updates over the link carries on from where it got to; download mode is for the rest.
+                        if model.status?.device.transfer != true {
+                            Text("Before retrying, hold K0 on the box and replug the cable to put it in download mode.").font(.caption).foregroundStyle(.secondary)
+                        }
                         Button("Retry") { model.updateFirmware() }.disabled(!connected)
                     }
                 }

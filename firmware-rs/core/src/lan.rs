@@ -28,8 +28,8 @@ pub const HANDSHAKE_MS: u32 = 10_000;
 /// How long after the last line over USB the cable still counts as in use; the same silence makes the
 /// firmware call the link lost.
 pub const USB_QUIET_MS: u32 = 15_000;
-/// Longest line read from a connection: a sealed protocol line of 1024 bytes is 1388 characters.
-const MAX_LINE_BYTES: usize = 2048;
+/// Longest line read from a connection: a sealed protocol line of 4608 bytes is 6166 characters.
+const MAX_LINE_BYTES: usize = 8192;
 
 /// A connection, numbered by the device layer.
 pub type Conn = u32;

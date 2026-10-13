@@ -154,6 +154,8 @@ pub struct Device {
     pub candidates: Vec<Candidate>,
     /// The box's key (ADR-0012); none for firmware that can't pair, or from an older daemon.
     pub box_key: Option<String>,
+    /// The firmware takes updates over any link (ADR-0016): no cable, no download mode.
+    pub transfer: bool,
     /// This computer's key, to tell it apart in `paired_computers`.
     pub computer_key: Option<String>,
     pub paired_computers: Vec<PairedComputer>,

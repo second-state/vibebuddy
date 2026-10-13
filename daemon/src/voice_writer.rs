@@ -59,7 +59,7 @@ pub fn end_event() -> Event {
     event("voice.end", vec![])
 }
 
-async fn send(transport: &Arc<dyn Transport>, event: Event) -> Result<(), String> {
+pub async fn send(transport: &Arc<dyn Transport>, event: Event) -> Result<(), String> {
     let frame = event.to_ndjson().map_err(|error| error.to_string())?;
     // A full queue just means the device hasn't caught up yet; wait a bit and push again.
     for _ in 0..200 {

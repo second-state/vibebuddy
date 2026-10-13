@@ -7,7 +7,7 @@ VibeBuddy Protocol is the application protocol between `vibebuddyd` and a VibeBu
 - Each message is one JSON object terminated by a single LF (`\n`).
 - Receivers also accept CRLF (`\r\n`), but senders always use LF.
 - Blank lines are ignored.
-- A single JSON message is at most 1024 bytes, excluding the line terminator. Anything longer is dropped as a whole line and answered with `ERROR input_too_large`.
+- A single JSON message is at most 4608 bytes, excluding the line terminator, so a firmware chunk fits one (see Firmware over the link); firmware that doesn't report `TRANSFER 1` takes at most 1024. Anything longer is dropped as a whole line and answered with `ERROR input_too_large`.
 - v1 doesn't support JSON spanning multiple lines, JSON arrays, or multiple JSON objects on one line.
 
 ## Envelope
@@ -123,6 +123,34 @@ The device's acknowledgments:
 
 `begin` first waits for any line currently playing to finish, then erases the needed range; `size` is the whole pack's byte count, including the header: 1024 bytes for a Character pack, 256 for a voice pack, told apart by the magic in the first chunk. Chunks must arrive consecutively by `seq` starting from 0, each with at most 672 bytes of raw data, so the whole line after base64 still fits within the 1024-byte limit. `crc` is the CRC32 of the chunk's raw bytes (the same as zlib's); the device checks it right after decoding and, on a mismatch, replies `voice.error` and aborts rather than waiting until the end. The header stays in device memory; on `end` the device reads the flash back to verify the payload CRC, writes the header only if that passes, then switches to the new Character. If any step fails it replies `voice.error` and abandons the session; the firmware then sees the partition as empty and announcements fall back to the built-in voice. Announcements during a write use the built-in voice.
 
+## Firmware over the link
+
+Firmware that answers `device.hello` with `TRANSFER 1` (just after `FIRMWARE VERSION`) takes a firmware image over whatever carries the link: USB, the local network or the Relay, inside the Noise session off the cable (ADR-0016, `firmware-rs/core/src/transfer.rs` and `daemon/src/transfer.rs`).
+
+```json
+{"version":1,"event":"xfer.begin","kind":"firmware","size":2820896,"sha256":"<64 hex digits>"}
+{"version":1,"event":"xfer.chunk","offset":0,"crc":305419896,"data":"<base64, at most 3072 bytes>"}
+{"version":1,"event":"xfer.end"}
+{"version":1,"event":"xfer.cancel"}
+```
+
+The box answers with JSON lines:
+
+```json
+{"version":1,"event":"xfer.ready","offset":0}
+{"version":1,"event":"xfer.ack","offset":3072}
+{"version":1,"event":"xfer.done"}
+{"version":1,"event":"xfer.error","code":"sha256"}
+```
+
+`size` and `sha256` are the app image's (`vibebuddy-fw.bin`; the bootloader and partition table never change once a box has the OTA layout). The box writes the slot it isn't running from, `ota_1` after a USB flash. Before it answers `xfer.begin` it erases what the image needs there, one 64 KB block per main-loop pass (about 15 s for 3 MB), so that while chunks arrive it only writes: an erase stops interrupts long enough to lose bytes on the UART bridge. It checks that the first chunk starts an ESP32-S3 app image. `xfer.ready` and `xfer.ack` carry the offset the box expects next; the computer keeps up to 16 chunks unacknowledged and sends at most 40 a second, under the Relay's 50 messages a second. A chunk at any other offset changes nothing and is acknowledged with the expected offset again: every way of carrying the link delivers in order, so a chunk only goes missing when the link drops. `crc` is zlib's CRC32 of the chunk's raw bytes. The box keeps the image's size, hash and how far it got in memory, so an `xfer.begin` for the same image, over any way of carrying the link, answers with that offset and the transfer carries on; another image starts over, and a restart forgets. When the link drops or moves, `vibebuddyd` waits up to 3 minutes for it to come back and asks again.
+
+On `xfer.end` the box reads the slot back, checks the length and SHA-256, writes the next `otadata` entry selecting that slot in the state NEW (in the sector that doesn't hold the running image's entry, so that one is still there to go back to), answers `xfer.done` and restarts. Nothing touches `otadata` before then, so a transfer that fails anywhere leaves the box running what it ran. The new image boots once and confirms itself early in boot, or the bootloader goes back to the old one (ADR-0013); a box that went back reports `FIRMWARE ROLLED BACK` after `TRANSFER 1` until the next update. `vibebuddyd` counts the update done when the box reports its build again without it.
+
+`xfer.error` ends the transfer and the box forgets it. Codes: `unsupported` (another `kind`, or no OTA layout), `too_big`, `crc`, `sha256`, `bad_image`, `flash`, `sequence` (a chunk or an end with no transfer, or an end before the last chunk), `cancelled`, `bad_message`.
+
+`POST /v1/device/firmware` takes this path whenever the box reports `TRANSFER 1`, on the cable as well, and the ROM flasher otherwise. Character packs still go by `voice.*`.
+
 ## Pairing
 
 A paired computer may later link to the box over the local network or through the Relay (ADR-0012, [`relay-protocol.md`](relay-protocol.md)). Pairing happens over USB only: the cable is the proof that whoever pairs is at the box. Keys are Ed25519 public keys, 32 bytes as unpadded base64url (43 characters).
@@ -185,7 +213,7 @@ A box links to one computer at a time (ADR-0011). A paired computer gets the box
 
 On the computer's side, `vibebuddyd` remembers the box's key when it sees `BOX KEY` over USB (`box-key` in its state directory), and the address the box reports over USB once it is on Wi-Fi, `WIFI ADDRESS <ip>` (`box-address`). It connects to port 7340 there; `VIBEBUDDY_LAN_ADDR=host:port` fixes the address instead, as for the simulator (`tools/simulate-device.py --tcp 7340`).
 
-Once on Wi-Fi the box also answers mDNS (DNS-SD) for `_vibebuddy._tcp` on port 7340, as the instance `VibeBuddy <first 8 characters of the box key>` on host `vibebuddy-<the same, lowercased, with anything but letters and digits as ->.local`, with the box key in its TXT record: `key=<box key>`. When nothing answers at the remembered address, as after the router hands the box another one while it is off the cable, `vibebuddyd` connects to whichever advertised instance carries the remembered key, and remembers that address once the handshake succeeds. mDNS only finds the box; the handshake still checks its key, so an instance that claims the key without holding it gets nowhere. The daemon starts browsing the first time the remembered address doesn't answer and keeps listening from then on (Bonjour's port on macOS and Avahi's on Linux are shared, no system service needed). A fixed `VIBEBUDDY_LAN_ADDR` turns discovery off. While linked through the Relay, the 30 s check for the local network tries both the remembered address and any advertised one. It tries the network only while no box is on the cable, and checks the cable every 2 s while linked over the network. Moving between the two is not a drop: `/v1/status` goes from one connection to the other with no `connected: false` in between, and `device.network` says which it is. Flashing needs the cable.
+Once on Wi-Fi the box also answers mDNS (DNS-SD) for `_vibebuddy._tcp` on port 7340, as the instance `VibeBuddy <first 8 characters of the box key>` on host `vibebuddy-<the same, lowercased, with anything but letters and digits as ->.local`, with the box key in its TXT record: `key=<box key>`. When nothing answers at the remembered address, as after the router hands the box another one while it is off the cable, `vibebuddyd` connects to whichever advertised instance carries the remembered key, and remembers that address once the handshake succeeds. mDNS only finds the box; the handshake still checks its key, so an instance that claims the key without holding it gets nowhere. The daemon starts browsing the first time the remembered address doesn't answer and keeps listening from then on (Bonjour's port on macOS and Avahi's on Linux are shared, no system service needed). A fixed `VIBEBUDDY_LAN_ADDR` turns discovery off. While linked through the Relay, the 30 s check for the local network tries both the remembered address and any advertised one. It tries the network only while no box is on the cable, and checks the cable every 2 s while linked over the network. Moving between the two is not a drop: `/v1/status` goes from one connection to the other with no `connected: false` in between, and `device.network` says which it is. Firmware that reports `TRANSFER 1` is updated over the network too (see Firmware over the link); older firmware needs the cable.
 
 USB stays in the clear: the cable is physical presence, as pairing already assumes.
 
@@ -196,4 +224,4 @@ USB stays in the clear: the cable is physical presence, as pairing already assum
 | `ERROR invalid_json` | The line isn't complete, valid JSON |
 | `ERROR invalid_message` | The root isn't an object, or `version`, `event` or `title` is missing or misused |
 | `ERROR unsupported_version` | `version` isn't `1` |
-| `ERROR input_too_large` | A line exceeds 1024 bytes |
+| `ERROR input_too_large` | A line exceeds 4608 bytes (1024 for firmware without `TRANSFER 1`) |

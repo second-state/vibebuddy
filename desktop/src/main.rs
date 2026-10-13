@@ -1308,14 +1308,15 @@ impl App {
             (false, false, _) => None,
         };
         let flashing = operation.filter(|operation| operation.kind == status::OperationKind::Firmware).map(|operation| {
+            // Firmware that updates over the link carries on from where it got to; download mode is for the rest.
+            let over_the_link = device.is_some_and(|device| device.transfer);
             let failed = (operation.state == status::OperationState::Failed).then(|| {
-                column![
-                    text(tr("Before retrying, hold K0 on the box and replug the cable to put it in download mode.", &[]))
-                        .size(13),
-                    button(text(tr("Retry", &[])))
-                        .on_press_maybe((online && downloaded).then_some(Message::FlashFirmware)),
-                ]
-                .spacing(8)
+                column![]
+                    .push((!over_the_link).then(|| {
+                        text(tr("Before retrying, hold K0 on the box and replug the cable to put it in download mode.", &[])).size(13)
+                    }))
+                    .push(button(text(tr("Retry", &[]))).on_press_maybe((online && downloaded).then_some(Message::FlashFirmware)))
+                    .spacing(8)
             });
             column![text(operation.summary()).size(13)].push(failed).spacing(8)
         });

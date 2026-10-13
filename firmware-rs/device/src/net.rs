@@ -317,7 +317,8 @@ async fn server(stack: Stack<'static>, slot: usize) {
     // On the heap, which is PSRAM first: internal RAM is for the Wi-Fi driver and the stack.
     let mut rx = alloc::vec![0u8; SOCKET_RX_BYTES];
     let mut tx = alloc::vec![0u8; SOCKET_TX_BYTES];
-    let mut chunk = [0u8; 256];
+    // A sealed firmware chunk is about 5.7 KB: read it in a few pieces, not twenty, each one an event for the main loop.
+    let mut chunk = alloc::vec![0u8; 1024];
     loop {
         let mut socket = TcpSocket::new(stack, &mut rx, &mut tx);
         socket.set_timeout(Some(Duration::from_secs(60)));

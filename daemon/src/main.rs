@@ -16,6 +16,7 @@ mod serial_transport;
 mod session_titles;
 mod source_opener;
 mod status;
+mod transfer;
 mod updates;
 mod voice_writer;
 
@@ -667,6 +668,20 @@ fn report_progress(state: &AppState, fraction: f32, message: Option<String>) {
     });
 }
 
+/// Changes only what a running operation says, as when an update waits for the link.
+fn report_message(state: &AppState, message: &str) {
+    let state = state.clone();
+    let message = message.to_owned();
+    tokio::spawn(async move {
+        if let Some(operation) = state.operation.lock().await.as_mut()
+            && operation.state == OperationState::Running
+        {
+            operation.message = message;
+        }
+        state.notify_status();
+    });
+}
+
 async fn post_identify(State(state): State<AppState>) -> (StatusCode, Json<ApiResponse>) {
     post_event(State(state), Json(device_command("device.identify"))).await
 }
@@ -932,6 +947,12 @@ async fn post_firmware(
     let (port, bridge) = {
         let device = state.device.lock().await;
         match &device.port {
+            // Firmware that takes images over the link gets one that way, over whichever it is: it can roll back,
+            // and it needs no cable (ADR-0016). The bootloader and partition table never change after the OTA layout.
+            Some(_) if device.connected && device.transfer => {
+                drop(device);
+                return update_over_the_link(state, segments).await;
+            }
             Some(_) if device.connected && device.network => {
                 return (
                     StatusCode::CONFLICT,
@@ -994,6 +1015,66 @@ async fn post_firmware(
 /// plugging in) stays there until it loses power, with a dark screen. Only the firmware's own `DISPLAY READY` proves it
 /// booted; until then the flash isn't done, and if it never comes the user has to replug the box. The replug wait has no
 /// deadline: a stale `replug` would keep the app's onboarding from ever showing the box as found, however late it boots.
+/// How long a box updated over the link may take to come back: restart, Wi-Fi, and the daemon finding it again.
+const OTA_BOOT_TIMEOUT: Duration = Duration::from_secs(180);
+/// Long enough for an image that fails before confirming itself to restart and be rolled back (seen on a box: about 2 s).
+const OTA_SETTLE: Duration = Duration::from_secs(8);
+
+/// Sends the app image over the link (ADR-0016), then waits for the box to come back on it. Success is the box
+/// reporting its build again without `FIRMWARE ROLLED BACK`.
+async fn update_over_the_link(state: AppState, segments: Vec<rom_flasher::Segment>) -> (StatusCode, Json<ApiResponse>) {
+    let Some(image) = segments.into_iter().find(|segment| segment.address == 0x10000).map(|segment| segment.data) else {
+        return (StatusCode::BAD_REQUEST, Json(ApiResponse { accepted: false, message: "no app image".to_owned() }));
+    };
+    if let Some(refused) = begin_operation(&state, OperationKind::Firmware, "sending the firmware to the box".to_owned()).await {
+        return refused;
+    }
+    let task_state = state.clone();
+    tokio::spawn(async move {
+        let bus = task_state.device_bus.subscribe();
+        let progress_state = task_state.clone();
+        let resuming_state = task_state.clone();
+        let result = transfer::send_image(
+            task_state.transport.clone(),
+            bus,
+            image,
+            move |fraction| report_progress(&progress_state, fraction * 0.95, Some("sending the firmware to the box".to_owned())),
+            move || report_message(&resuming_state, "waiting for the link to come back"),
+        )
+        .await;
+        let firmware = |state, progress, message: &str| Some(Operation { kind: OperationKind::Firmware, state, progress, message: message.to_owned() });
+        if let Err(error) = result {
+            warn!(%error, "firmware update over the link failed");
+            task_state.set_operation(firmware(OperationState::Failed, 0.0, &error)).await;
+            return;
+        }
+        info!("firmware sent over the link, waiting for the box to restart");
+        // Forget the old build, so only what the box reports after its restart counts.
+        task_state.device.lock().await.firmware_build = None;
+        task_state.set_operation(firmware(OperationState::Running, 0.95, "waiting for the box to restart")).await;
+        if !wait_for_firmware_build(&task_state, OTA_BOOT_TIMEOUT).await {
+            task_state.set_operation(firmware(OperationState::Failed, 0.0, "the box didn't come back after the update")).await;
+            return;
+        }
+        // On the cable the new image reports its build before it confirms itself; one that fails in between restarts
+        // at once, and the bootloader goes back. Over the network the box is reached only after it confirmed. So the
+        // answer that counts is the one after a short wait, and the rollback comes right after its build.
+        tokio::time::sleep(OTA_SETTLE).await;
+        if !wait_for_firmware_build(&task_state, OTA_BOOT_TIMEOUT).await {
+            task_state.set_operation(firmware(OperationState::Failed, 0.0, "the box didn't come back after the update")).await;
+            return;
+        }
+        tokio::time::sleep(Duration::from_secs(1)).await;
+        if task_state.device.lock().await.rolled_back {
+            warn!("the new firmware didn't confirm itself; the box went back");
+            task_state.set_operation(firmware(OperationState::Failed, 0.0, "the update didn't take; the box went back to its previous firmware")).await;
+        } else {
+            task_state.set_operation(firmware(OperationState::Done, 1.0, "updated, box restarted")).await;
+        }
+    });
+    (StatusCode::ACCEPTED, Json(ApiResponse { accepted: true, message: "sending the firmware to the box".to_owned() }))
+}
+
 async fn await_first_boot(state: &AppState, boot_timeout: Duration) {
     let firmware = |state, message: &str| Some(Operation { kind: OperationKind::Firmware, state, progress: 1.0, message: message.to_owned() });
     state.set_operation(firmware(OperationState::Running, "waiting for the box to restart")).await;

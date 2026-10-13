@@ -27,8 +27,11 @@ use crate::noise::Sealer;
 use crate::link::{self, Link, LinkStore, PairError, Wifi};
 use crate::look::Look;
 use crate::voices::{Pick, Voices, VoiceError};
+use crate::transfer::{self, Transfer};
+use crate::ota;
 
-pub const MAX_LINE_BYTES: usize = 1024;
+/// Longest line taken from a computer: a transfer chunk of 3072 bytes is about 4.2 KB as a line (ADR-0016).
+pub const MAX_LINE_BYTES: usize = 4608;
 const LINE_BUFFER_BYTES: usize = MAX_LINE_BYTES + 2;
 /// With no message for longer than this, the link to the Mac counts as lost.
 const LINK_TIMEOUT_MS: u32 = 15000;
@@ -171,6 +174,8 @@ pub struct Firmware {
     menu: Menu,
     /// voice.begin arrived and we are waiting for playback to stop before erasing the partition: total bytes and when the wait began.
     pending_voice_begin: Option<(u32, u32)>,
+    /// A firmware image coming in over the link (ADR-0016).
+    transfer: Transfer,
     /// The last task end that was spoken: whether it was a failure, and when.
     last_end_spoken: Option<(bool, u32)>,
 
@@ -223,6 +228,20 @@ impl Fields for BTreeMap<alloc::string::String, Value> {
 
 fn number(fields: &impl Fields, key: &str) -> Option<f64> {
     fields.field(key).and_then(Value::as_f64)
+}
+
+/// Exactly `N` bytes from lowercase or uppercase hex.
+fn decode_hex<const N: usize>(text: &str) -> Option<[u8; N]> {
+    let digits = text.as_bytes();
+    if digits.len() != N * 2 {
+        return None;
+    }
+    let mut out = [0u8; N];
+    for (index, pair) in digits.chunks(2).enumerate() {
+        let value = |digit: u8| (digit as char).to_digit(16);
+        out[index] = (value(pair[0])? * 16 + value(pair[1])?) as u8;
+    }
+    Some(out)
 }
 
 fn string<'a>(fields: &'a impl Fields, key: &str) -> Option<&'a str> {
@@ -285,6 +304,7 @@ impl Firmware {
             muted: false,
             menu: Menu::new(),
             pending_voice_begin: None,
+            transfer: Transfer::new(),
             last_end_spoken: None,
             reported_tier: Tier::Alert,
             reported_lights_out: false,
@@ -346,6 +366,7 @@ impl Firmware {
             Self::write_literal(board, "DISPLAY ERROR\n");
         }
         Self::write_value_line(board, "FIRMWARE VERSION ", self.version.as_bytes());
+        Self::announce_updates(board);
         self.announce_key(board);
 
         let voices_region = find_partition(board.flash(), "voices");
@@ -571,6 +592,12 @@ impl Firmware {
     }
 
     pub fn poll<B: Board>(&mut self, board: &mut B) {
+        // A firmware transfer erases its slot one block per pass, so the network and the screen keep running.
+        match self.transfer.erase_step(board.flash()) {
+            Ok(Some(offset)) => Self::transfer_reply(board, "xfer.ready", Some(offset)),
+            Ok(None) => {}
+            Err(failure) => Self::transfer_error(board, failure),
+        }
         let now = board.now_ms();
         let outputs = self.lan.poll(now);
         self.apply_lan(board, outputs);
@@ -1300,6 +1327,7 @@ impl Firmware {
                 }
             }
             _ if event.starts_with("voice.") => self.handle_voice_event(board, fields, event),
+            _ if event.starts_with("xfer.") => self.handle_transfer(board, fields, event),
             // Pairing is the computer at the other end of the cable telling the box who it is (ADR-0012).
             // Only over the cable: whoever is at the box decides who may link and which network it joins.
             "device.pair" | "device.unpair" | "device.pairs" | "device.wifi.set" | "device.wifi.forget" | "device.wifi.scan" | "device.relay.set"
@@ -1493,10 +1521,83 @@ impl Firmware {
         board.restart();
     }
 
+    /// `TRANSFER 1`: this firmware takes firmware images over any link (ADR-0016). `FIRMWARE ROLLED BACK`: the last
+    /// image sent that way didn't confirm itself, and the bootloader went back to this one; it stays until the next.
+    fn announce_updates<B: Board>(board: &mut B) {
+        let Some(otadata) = find_partition(board.flash(), "otadata") else { return };
+        Self::write_literal(board, "TRANSFER 1\n");
+        if ota::rolled_back(board.flash(), otadata).unwrap_or(false) {
+            Self::write_literal(board, "FIRMWARE ROLLED BACK\n");
+        }
+    }
+
+    /// `xfer.ready` or `xfer.ack` with the offset to send from, `xfer.done`, or `xfer.error` with its code; JSON lines,
+    /// since the computer's window is driven by them.
+    fn transfer_reply<B: Board>(board: &mut B, event: &str, offset: Option<u32>) {
+        let line = match offset {
+            Some(offset) => text!(80, "{{\"version\":1,\"event\":\"{}\",\"offset\":{}}}\n", event, offset),
+            None => text!(80, "{{\"version\":1,\"event\":\"{}\"}}\n", event),
+        };
+        board.write(line.as_bytes());
+    }
+
+    fn transfer_error<B: Board>(board: &mut B, failure: transfer::Error) {
+        let line = text!(80, "{{\"version\":1,\"event\":\"xfer.error\",\"code\":\"{}\"}}\n", failure.code());
+        board.write(line.as_bytes());
+    }
+
+    /// `xfer.*`: a firmware image over any link, in chunks, resumable (ADR-0016, [`crate::transfer`]).
+    fn handle_transfer<B: Board>(&mut self, board: &mut B, fields: &BTreeMap<alloc::string::String, Value>, event: &str) {
+        match event {
+            "xfer.begin" => {
+                let kind = string(fields, "kind").unwrap_or("");
+                let sha256 = string(fields, "sha256").and_then(decode_hex::<32>);
+                let (Some(size), Some(sha256)) = (number(fields, "size"), sha256) else {
+                    return Self::transfer_error(board, transfer::Error::BadMessage);
+                };
+                match self.transfer.begin(board.flash(), kind, size as u32, sha256) {
+                    Ok(Some(offset)) => Self::transfer_reply(board, "xfer.ready", Some(offset)),
+                    // Erasing first; poll answers once it is done.
+                    Ok(None) => {}
+                    Err(failure) => Self::transfer_error(board, failure),
+                }
+            }
+            "xfer.chunk" => {
+                let (Some(offset), Some(crc), Some(data)) = (number(fields, "offset"), number(fields, "crc"), string(fields, "data")) else {
+                    self.transfer.cancel();
+                    return Self::transfer_error(board, transfer::Error::BadMessage);
+                };
+                let mut bytes = alloc::vec![0u8; transfer::CHUNK_BYTES + 3];
+                let Some(length) = crate::voice_pack::decode_base64(data.as_bytes(), &mut bytes) else {
+                    self.transfer.cancel();
+                    return Self::transfer_error(board, transfer::Error::BadMessage);
+                };
+                match self.transfer.chunk(board.flash(), offset as u32, &bytes[..length], crc as u32) {
+                    Ok(next) => Self::transfer_reply(board, "xfer.ack", Some(next)),
+                    Err(failure) => Self::transfer_error(board, failure),
+                }
+            }
+            "xfer.end" => match self.transfer.end(board.flash()) {
+                Ok(()) => {
+                    Self::transfer_reply(board, "xfer.done", None);
+                    // The new image boots once and confirms itself, or the bootloader goes back (ADR-0013).
+                    board.restart();
+                }
+                Err(failure) => Self::transfer_error(board, failure),
+            },
+            "xfer.cancel" => {
+                self.transfer.cancel();
+                Self::transfer_error(board, transfer::Error::Cancelled);
+            }
+            _ => Self::transfer_error(board, transfer::Error::BadMessage),
+        }
+    }
+
     /// Reports the device's whole static state: firmware build and version, its key, mode, voice and volume.
     fn announce_state<B: Board>(&self, board: &mut B) {
         Self::write_value_line(board, "DISPLAY READY BUILD ", &self.build);
         Self::write_value_line(board, "FIRMWARE VERSION ", self.version.as_bytes());
+        Self::announce_updates(board);
         self.announce_key(board);
         Self::write_value_line(board, "MODE ", self.display.mode().name().as_bytes());
         Self::write_value_line(board, "VOICES ", self.voices.current_id().as_bytes());

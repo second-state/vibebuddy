@@ -18,7 +18,9 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 pub const VERSION: i64 = 1;
-pub const MAX_MESSAGE_BYTES: usize = 1024;
+/// The longest line the box takes: a firmware chunk of 3072 bytes is about 4.2 KB as a line (ADR-0016). Firmware
+/// before that took 1024; only those chunks come near it, and they go only to firmware that reports `TRANSFER 1`.
+pub const MAX_MESSAGE_BYTES: usize = 4608;
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 pub struct Event {
