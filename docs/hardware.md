@@ -69,6 +69,16 @@ A probe firmware, flashed to the app slot only, scanned I2C0 (SDA GPIO48, SCL GP
 - `0x1E`, `0x50` and `0x6A` were only seen answering; their identities above are guesses from common parts at those addresses, not read from the chips.
 - Dragon's daily box (`98:88:E0:06:8B:CC`) hasn't been probed.
 
+### Microphone (2026-10-13)
+
+`device.mic.record` ([`firmware-bringup.md`](firmware-bringup.md#microphone)) recorded 5 s on box `30:ED:A0:A4:0D:08` (the one with the touchscreen): `MIC CAPTURED 5175 MS 480000 BYTES`, CRC correct.
+
+- The microphone is on the **ES8311's own ADC**. The ES8311 answers at 0x18 with chip ID `8311` (registers 0xFD, 0xFE); nothing answers at 0x40–0x43, so there is **no ES7210** on this box.
+- Samples come in on **GPIO47** (I2S DIN), clocked by the speaker's BCLK GPIO21 and WS GPIO13 (24 kHz, 16-bit, two slots), with the ES8311 set up as esp_codec_dev does (register 0x44 = 0x58).
+- The **left slot** is the microphone: dragon spoke close to the box and confirmed by ear that the recording is that voice. The right slot is the DAC reference and stays silent while the box doesn't speak (peak 908 raw, about -133 dBFS once the DC offset is removed).
+- Levels at the default 30 dB gain, per 250 ms on the left: -31 to -35 dBFS while speaking close, -43 dBFS in a pause. That is quiet; real use needs more gain (up to 42 dB in the ES8311's PGA).
+- Other boxes, including dragon's daily box, haven't been recorded.
+
 ## Corroboration from the currently running firmware
 
 The hardware runs `xiaozhi` 1.9.4. The source at that pinned version contains an `atk-dnesp32s3-box` board directory that records the ST7789 i80, XL9555, ES8311, and a set of board-level pins. This corroborates the boot log and can be used as a candidate for cross-checking, but that repository is not ALIENTEK's official schematic/BSP and cannot bypass the PCB revision gate to freeze pins directly.
@@ -81,5 +91,5 @@ The hardware runs `xiaozhi` 1.9.4. The source at that pinned version contains an
 - Vendor schematic, BSP, and examples matching the exact PCB revision.
 - Touch controller wiring (RST, INT) on boxes that have one; whether a box has one is decided by probing `0x2E` (see above).
 - The chips at `0x1E`, `0x50` and `0x6A`.
-- Microphone input chain. Most likely the ES8311's own ADC with samples on GPIO47 (xiaozhi 1.9.4), since no ES7210 answers at 0x40–0x43 on the scanned boxes; `device.mic.record` checks it on a box (see [`firmware-bringup.md`](firmware-bringup.md#microphone)).
+- The microphone on other boxes (verified on `30:ED:A0:A4:0D:08` only, see above).
 - Buzzer GPIO and active level.

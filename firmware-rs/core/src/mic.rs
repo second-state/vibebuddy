@@ -5,8 +5,8 @@
 //! I2C (the ES8311 at 0x18, and anything at 0x40-0x43, where an ES7210 would sit), then records whatever
 //! arrives on the I2S data-in pin. The input shares the speaker's clocks (one LRCK on the ES8311), so it
 //! runs at the speaker's rate: 24 kHz, 16-bit, two slots. With esp_codec_dev's ES8311 setup (register
-//! 0x44 = 0x58, "ADCL + DACR") the left slot should carry the ADC and the right slot the DAC reference;
-//! the per-slot levels show whether that holds.
+//! 0x44 = 0x58, "ADCL + DACR") the left slot carries the ADC and the right slot the DAC reference, as a
+//! recording on one box showed (docs/hardware.md, 2026-10-13); the per-slot levels show it on others.
 
 use alloc::string::String;
 use alloc::vec::Vec;
@@ -17,7 +17,8 @@ use crate::audio::{ES8311_ADDRESS, Registers, SAMPLE_RATE};
 pub const CHANNELS: u32 = 2;
 pub const FRAME_BYTES: usize = 4;
 pub const DEFAULT_MS: u32 = 3000;
-/// At most 5 s: 480 KB in PSRAM, and about a minute to send over the UART.
+/// At most 5 s: 480 KB of samples (the device's DMA buffer is 2.5 times that, in PSRAM), and about a
+/// minute to send over the UART.
 pub const MAX_MS: u32 = 5000;
 pub const MIN_MS: u32 = 100;
 /// xiaozhi's AUDIO_CODEC_DEFAULT_MIC_GAIN for this board.

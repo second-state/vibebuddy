@@ -7,8 +7,8 @@
 //!   codec (0x18, absent on the NS4168 variant).
 //! - XL9555 P0: bit7 LCD backlight, bit5 amplifier enable, bit4 K1, bit3 K2 (keys active low).
 //! - K0: BOOT key, GPIO0, active low.
-//! - I2S0: BCLK GPIO21, WS GPIO13, DOUT GPIO14, no MCLK. DIN GPIO47 (microphone, not yet verified on a
-//!   box; only read during the `device.mic.record` diagnostic).
+//! - I2S0: BCLK GPIO21, WS GPIO13, DOUT GPIO14, no MCLK. DIN GPIO47 (the ES8311's ADC, left slot;
+//!   verified on one box, docs/hardware.md; only read during the `device.mic.record` diagnostic).
 //! - UART0: TX GPIO43, RX GPIO44, to the CH343 bridge; the chip's own USB Serial/JTAG as well.
 #![no_std]
 #![no_main]

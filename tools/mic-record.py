@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Microphone bring-up check: send `device.mic.record` to a box, collect the recording, write a WAV and say
-whether each I2S slot carries a live microphone.
+whether the microphone works. On this board the microphone is the left slot (the ES8311's ADC); the right
+slot is the speaker's reference, silent while the box doesn't speak (docs/hardware.md, 2026-10-13).
 
 Needs exclusive use of the serial port, so quit the VibeBuddy app first. The port must be named: the box may
 share a Mac with other ESP32-S3 devices, which enumerate the same way (LESSONS.md).
@@ -25,24 +26,43 @@ import zlib
 import serial
 
 FULL_SCALE = 32768
+WINDOW_MS = 100
+# Quieter than this in every window is no signal, whatever the spread: a lone blip over digital silence
+# (the right slot on 2026-10-13 went -71 then -120 dBFS) is not a microphone.
+SIGNAL_DBFS = -70
 
 
 def dbfs(value):
     return -120.0 if value <= 0 else 20 * math.log10(value / FULL_SCALE)
 
 
-def verdict(levels):
-    """What one slot's 100 ms levels say about it."""
-    rms = [level[0] for level in levels]
-    peaks = [level[1] for level in levels]
+def slot_windows(samples, channels, slot, rate):
+    """One slot's samples with its DC offset removed, cut into 100 ms windows; the first window is dropped,
+    since the receiver starts mid-stream and the codec may still be settling."""
+    values = [int.from_bytes(samples[index:index + 2], "little", signed=True) for index in range(slot * 2, len(samples), channels * 2)]
+    offset = sum(values) / max(len(values), 1)
+    size = rate * WINDOW_MS // 1000
+    windows = [values[start:start + size] for start in range(size, len(values) - size + 1, size)]
+    return offset, [(math.sqrt(sum((value - offset) ** 2 for value in window) / len(window)), max(abs(value) for value in window)) for window in windows]
+
+
+def verdict(windows):
+    """What one slot's windows (RMS without DC, raw peak) say about it."""
+    if not windows:
+        return "TOO SHORT (record at least 300 ms)"
+    rms = [window[0] for window in windows]
+    peaks = [window[1] for window in windows]
     if max(peaks) == 0:
-        return "SILENT (all zeros: nothing drives this slot, or wrong pin/slot)"
-    if max(peaks) >= FULL_SCALE - 1 and sum(peak >= FULL_SCALE - 1 for peak in peaks) > len(peaks) // 2:
+        return "SILENT (all zeros)"
+    if sum(peak >= FULL_SCALE - 1 for peak in peaks) > len(peaks) // 2:
         return "SATURATED (pinned at full scale in most windows: gain too high or a floating pin)"
-    spread = dbfs(max(rms)) - dbfs(max(min(rms), 1))
+    loudest = dbfs(max(rms))
+    if loudest < SIGNAL_DBFS:
+        return f"NO SIGNAL (loudest window {loudest:.1f} dBFS)"
+    spread = loudest - dbfs(max(min(rms), 1))
     if spread < 6:
-        return f"FLAT (level barely moves, {spread:.1f} dB: noise floor or DC only; make some noise and retry)"
-    return f"LIVE (level moves {spread:.1f} dB between quiet and loud windows)"
+        return f"FLAT (level barely moves, {spread:.1f} dB: noise floor only; make some noise and retry)"
+    return f"LIVE (loudest window {loudest:.1f} dBFS, {spread:.1f} dB above the quietest)"
 
 
 def main():
@@ -116,14 +136,17 @@ def main():
         print("\n  time   left rms/peak (dBFS)   right rms/peak (dBFS)")
         for index, (left, right) in enumerate(levels):
             print(f"{index * 100:5d} ms   {dbfs(left[0]):6.1f} / {dbfs(left[1]):6.1f}       {dbfs(right[0]):6.1f} / {dbfs(right[1]):6.1f}")
-        left = verdict([left for left, _ in levels])
-        right = verdict([right for _, right in levels])
-        print(f"\nleft slot:  {left}\nright slot: {right}")
-        # The right slot is expected to carry the speaker's reference, silent unless the box is speaking.
-        live = left.startswith("LIVE") or right.startswith("LIVE")
-        print(f"\nmicrophone on this box: {'WORKS' if live else 'NOT SHOWN'} (listen to {args.out} to be sure)")
-        return 0 if live else 3
-    return 0
+    # The verdict comes from the samples themselves, DC removed and the first window dropped; the box's
+    # LEVEL lines above include DC and the start-up window.
+    slots = [slot_windows(samples, channels, slot, rate) for slot in range(channels)]
+    print()
+    for name, (offset, windows) in zip(("left (microphone)", "right (speaker reference)"), slots):
+        print(f"{name}: {verdict(windows)}; DC offset {offset:.0f}")
+    live = verdict(slots[0][1]).startswith("LIVE")
+    if verdict(slots[1][1]).startswith("LIVE"):
+        print("note: the right slot moves too; fine if the box spoke while recording, otherwise the slots may be swapped")
+    print(f"\nmicrophone on this box: {'WORKS' if live else 'NOT SHOWN'} (listen to the left channel of {args.out} to be sure)")
+    return 0 if live else 3
 
 
 if __name__ == "__main__":

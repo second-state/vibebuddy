@@ -6,12 +6,18 @@
 //! main task's stack (LESSONS.md). The descriptors (12 bytes per 4 KB) come from the internal heap for the
 //! capture and go back after.
 //!
-//! The I2S receiver ends a DMA descriptor early at every EOF it signals, and esp-hal leaves RXEOF_NUM at
-//! its 12-bit maximum: an EOF every 4095 16-bit samples, 8190 bytes, which on 4080-byte descriptors fills
-//! two and leaves the third with 30 bytes. So a 288,000-byte buffer held only about two thirds of that in
-//! samples when its last descriptor came back (`MIC ERROR SHORT` on the box, 2026-10-13). The samples are still
-//! in order, each descriptor's length says how many it holds, so the buffer is 2.5 times the capture plus
-//! some, and the capture ends once the descriptors handed back hold enough.
+//! The I2S receiver ends a DMA descriptor early at every EOF it signals. esp-hal's `rx_start` writes
+//! RXEOF_NUM = 0xFFE (its `usize::MAX - 1` cut to the 12-bit field), and on the box the EOFs came every
+//! 4094 bytes: descriptor lengths 4080, 14, 4080, 14, … (2026-10-13). So the ESP32-S3 counts RXEOF_NUM
+//! in bytes, as ESP-IDF's driver uses it (it writes the DMA buffer size in bytes), not in samples as the
+//! TRM's formula reads. Each 4094 bytes of samples take two 4080-byte descriptors, about twice their size
+//! in buffer. The samples stay in order and each descriptor's length says how many it holds, so the
+//! buffer is 2.5 times the capture plus two descriptors, and the capture ends once the descriptors
+//! handed back hold enough.
+//!
+//! Setting RXEOF_NUM to 4080 would line the EOFs up with the descriptors and drop the overhead, but
+//! esp-hal writes it inside `read()` after resetting the receiver, so changing it means a raw register
+//! write racing the first EOF. That hasn't been tried on a box; the PSRAM is cheap (1.2 MB for 5 s).
 //!
 //! A ring that had to be relinked by this task before the DMA reached its end stalled for good on the box
 //! (`STALLED`); one linear buffer doesn't depend on the main loop. Each capture also reports `MIC DEBUG`
