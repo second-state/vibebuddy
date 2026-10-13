@@ -424,6 +424,18 @@ struct WifiSection: View {
     /// The fields are open again for another network; once one is set they fold away.
     @State private var editing = false
 
+    /// What `device.wifi_error` means (docs/protocol.md "Wi-Fi network").
+    private func wifiFailure(_ why: String) -> String {
+        switch why {
+        case "wrong_password": return String(localized: "The network turned the box away; the password is probably wrong. Check it, then join again.")
+        case "not_found": return String(localized: "The box can't find this network. It only joins 2.4 GHz Wi-Fi: check the name, and that the box is in range.")
+        case "security": return String(localized: "The box can't join this network's kind of security. It joins WPA2 and open networks.")
+        case "password": return String(localized: "The password must be 8 to 63 characters.")
+        case "ssid": return String(localized: "The network name is too long: 32 bytes at most.")
+        default: return String(localized: "Couldn't join (\(why)). Check the network name and password, then join again.")
+        }
+    }
+
     var body: some View {
         Section {
             LabeledContent("Network", value: device.wifiNetwork ?? String(localized: "Not set"))
@@ -431,11 +443,12 @@ struct WifiSection: View {
             if device.wifiNetwork != nil {
                 LabeledContent("Status") {
                     if let why = device.wifiError {
-                        Text("Couldn't join (\(why)). Check the network name and password, then join again.").foregroundStyle(.red)
+                        Text(wifiFailure(why)).foregroundStyle(.red)
                     } else if let address = device.wifiAddress {
                         Text("Joined · \(address)").foregroundStyle(.green)
                     } else {
-                        Text("Joining…")
+                        // A wrong password takes the network 10 to 15 s to turn down.
+                        Text("Joining… This can take up to 15 seconds.")
                     }
                 }
             }

@@ -209,6 +209,7 @@ async fn main() {
             identity: identity.clone(),
             state_dir,
             fixed_address: std::env::var("VIBEBUDDY_LAN_ADDR").ok(),
+            discovery: lan::Discovery::default(),
         });
         // VIBEBUDDY_RELAY_URL points at another Relay, such as `ws://127.0.0.1:8787` under `wrangler dev`.
         let relay = relay::RelayConfig::new(identity.clone(), std::env::var("VIBEBUDDY_RELAY_URL").ok(), relay::release());
@@ -753,7 +754,13 @@ async fn post_wifi(State(state): State<AppState>, Json(request): Json<WifiReques
     let mut event = device_command("device.wifi.set");
     event.extra.insert("ssid".to_owned(), request.ssid.into());
     event.extra.insert("password".to_owned(), request.password.into());
-    post_event(State(state), Json(event)).await
+    let response = post_event(State(state.clone()), Json(event)).await;
+    if response.1.accepted {
+        // The last failure was the old password's: this try says how it went once the box has tried.
+        state.device.lock().await.wifi_error = None;
+        state.notify_status();
+    }
+    response
 }
 
 async fn post_wifi_forget(State(state): State<AppState>) -> (StatusCode, Json<ApiResponse>) {
@@ -1376,8 +1383,11 @@ mod tests {
         assert_eq!(status, StatusCode::CONFLICT, "firmware that can't pair would show it as agent activity");
 
         publish_device_message(&state, DeviceMessage::Line("BOX KEY 1Uc4Vh8Aby1bV4I08TphnmbwAm0AzHkw5RelizUGdRE".to_owned())).await;
+        publish_device_message(&state, DeviceMessage::Line("WIFI NETWORK Home".to_owned())).await;
+        publish_device_message(&state, DeviceMessage::Line("WIFI FAILED FourWayHandshakeTimeout".to_owned())).await;
         let (status, _) = post_wifi(State(state.clone()), request()).await;
         assert_eq!(status, StatusCode::ACCEPTED);
+        assert_eq!(state.device.lock().await.wifi_error, None, "joining again forgets the old password's failure");
         let set = transport.events().into_iter().find(|event| event.event == "device.wifi.set").expect("sent");
         assert_eq!((set.extra["ssid"].as_str(), set.extra["password"].as_str()), (Some("Home"), Some("secret")));
 

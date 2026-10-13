@@ -1037,6 +1037,21 @@ mod lan {
     }
 
     #[test]
+    fn hello_repeats_the_wifi_address_while_joined() {
+        let (mut firmware, mut board) = paired_box();
+        send(&mut firmware, &mut board, r#"{"version":1,"event":"device.wifi.set","ssid":"Home","password":"secret"}"#);
+        let hello = |firmware: &mut Firmware, board: &mut _| send(firmware, board, r#"{"version":1,"event":"device.hello"}"#);
+        assert!(!hello(&mut firmware, &mut board).iter().any(|line| line.starts_with("WIFI ADDRESS")), "not joined yet");
+        firmware.set_wifi_joined(true);
+        firmware.set_wifi_address("192.168.1.23");
+        let lines = hello(&mut firmware, &mut board);
+        let network = lines.iter().position(|line| line == "WIFI NETWORK Home").expect("network");
+        assert_eq!(lines.get(network + 1).map(String::as_str), Some("WIFI ADDRESS 192.168.1.23"), "{lines:?}");
+        firmware.set_wifi_joined(false);
+        assert!(!hello(&mut firmware, &mut board).iter().any(|line| line.starts_with("WIFI ADDRESS")), "lost with the network");
+    }
+
+    #[test]
     fn the_screen_and_the_network_view_say_how_the_box_is_linked() {
         use vibebuddy_firmware_core::display::{LinkPath, Tone};
         use vibebuddy_firmware_core::menu::View;

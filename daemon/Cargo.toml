@@ -36,6 +36,7 @@ rustls = { version = "0.23", default-features = false, features = ["ring", "std"
 rustls-platform-verifier = "0.7"
 tokio-tungstenite = { version = "0.30", default-features = false, features = ["connect", "__rustls-tls"] }
 zip = { version = "2", default-features = false, features = ["deflate"] }
+mdns-sd = "0.21.5"
 
 [dev-dependencies]
 http-body-util = "0.1"

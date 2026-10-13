@@ -124,6 +124,8 @@ pub async fn task(stack: Stack<'static>, tls: Tls<'static>) {
     let box_id = BOX_ID.wait().await;
     let mut url = URL.wait().await;
     let mut backoff = Duration::from_secs(2);
+    // Not stack.wait_config_up(): that waker belongs to net::address_task (see net::ADDRESS).
+    let mut address = crate::net::ADDRESS.receiver().expect("Relay address reader");
     loop {
         if let Some(next) = URL.try_take() {
             url = next;
@@ -131,7 +133,7 @@ pub async fn task(stack: Stack<'static>, tls: Tls<'static>) {
         }
         // firmware-core only keeps a URL it can use.
         let host = relay_box::url_host(&url).unwrap_or_default();
-        stack.wait_config_up().await;
+        address.get_and(Option::is_some).await;
         if UNIX_AT_BOOT.load(Ordering::Relaxed) == 0 {
             match sntp(stack).await {
                 Some(unix) => {

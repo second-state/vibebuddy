@@ -1,9 +1,11 @@
 //! The computer's side of the local network link (ADR-0012, docs/protocol.md "Local network link"):
-//! where the box is, and the handshake in which both ends prove their keys before any VibeBuddy
+//! where the box is (remembered from USB, or found by mDNS when it moved), and the handshake in which both ends prove their keys before any VibeBuddy
 //! Protocol line goes over the connection.
 
+use std::collections::HashMap;
+use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex, OnceLock};
 use std::time::Duration;
 
 use base64::Engine;
@@ -27,6 +29,8 @@ pub struct LanConfig {
     pub state_dir: PathBuf,
     /// `VIBEBUDDY_LAN_ADDR`: a fixed host:port, for the simulator and for networks where the box's address is known.
     pub fixed_address: Option<String>,
+    /// What boxes advertise over mDNS, listened for from the first time the remembered address doesn't answer.
+    pub discovery: Discovery,
 }
 
 /// One box to try: where it is and which key it must prove.
@@ -53,6 +57,114 @@ impl LanConfig {
             }
         };
         Some(Target { address, box_key })
+    }
+}
+
+impl LanConfig {
+    /// Where mDNS says the box with this key is now; nothing with a fixed address.
+    pub fn advertised(&self, box_key: &[u8; 32]) -> Vec<String> {
+        if self.fixed_address.is_some() {
+            return Vec::new();
+        }
+        self.discovery.found().map_or_else(Vec::new, |found| pick(&found, box_key))
+    }
+}
+
+impl LanConfig {
+    /// [`advertised`](Self::advertised), but a browse that only starts now has heard nothing yet: it gets a moment
+    /// for the box to answer its first query.
+    async fn find(&self, box_key: &[u8; 32]) -> Vec<String> {
+        let fresh = self.discovery.browser.get().is_none();
+        let mut found = self.advertised(box_key);
+        for _ in 0..20 {
+            if !fresh || !found.is_empty() || self.fixed_address.is_some() {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(100)).await;
+            found = self.advertised(box_key);
+        }
+        found
+    }
+}
+
+/// The DNS-SD service type the box advertises once it is on Wi-Fi (docs/protocol.md).
+pub const SERVICE_TYPE: &str = "_vibebuddy._tcp.local.";
+
+/// One service instance an mDNS browse resolved: where it listens and the box key in its TXT record.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Advertised {
+    pub addresses: Vec<SocketAddr>,
+    pub key: Option<String>,
+}
+
+/// The addresses of the instances whose TXT key is this box's, IPv4 first. Only finds the box: the handshake
+/// still checks its key.
+pub fn pick(found: &[Advertised], box_key: &[u8; 32]) -> Vec<String> {
+    let mut addresses: Vec<SocketAddr> = found
+        .iter()
+        .filter(|service| service.key.as_deref().and_then(decode::<32>) == Some(*box_key))
+        .flat_map(|service| service.addresses.iter().copied())
+        .collect();
+    addresses.sort_by_key(|address| (!address.is_ipv4(), *address));
+    addresses.dedup();
+    addresses.iter().map(SocketAddr::to_string).collect()
+}
+
+/// A browse for [`SERVICE_TYPE`] that runs for the rest of the daemon's life once started, keeping what it
+/// resolved so a lookup is immediate. It listens for the box's announcements rather than asking every time.
+#[derive(Default)]
+pub struct Discovery {
+    browser: OnceLock<Option<Browser>>,
+}
+
+struct Browser {
+    /// Keeps the browse running; None only in tests that fill `found` themselves.
+    _daemon: Option<mdns_sd::ServiceDaemon>,
+    found: Arc<Mutex<HashMap<String, Advertised>>>,
+}
+
+impl Discovery {
+    /// What has been resolved so far, starting the browse on first use; None if mDNS couldn't start.
+    fn found(&self) -> Option<Vec<Advertised>> {
+        let browser = self.browser.get_or_init(|| match Browser::start() {
+            Ok(browser) => Some(browser),
+            Err(error) => {
+                tracing::warn!(%error, "couldn't browse for the box over mDNS");
+                None
+            }
+        });
+        let found = browser.as_ref()?.found.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        Some(found.values().cloned().collect())
+    }
+}
+
+impl Browser {
+    fn start() -> Result<Self, mdns_sd::Error> {
+        let daemon = mdns_sd::ServiceDaemon::new()?;
+        let events = daemon.browse(SERVICE_TYPE)?;
+        let found = Arc::new(Mutex::new(HashMap::new()));
+        let shared = Arc::clone(&found);
+        std::thread::Builder::new()
+            .name("mdns-browse".to_owned())
+            .spawn(move || {
+                while let Ok(event) = events.recv() {
+                    let mut found = shared.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+                    match event {
+                        mdns_sd::ServiceEvent::ServiceResolved(service) => {
+                            let addresses = service.addresses.iter().map(|ip| SocketAddr::new(ip.to_ip_addr(), service.port)).collect();
+                            let key = service.txt_properties.get_property_val_str("key").map(str::to_owned);
+                            tracing::debug!(name = %service.fullname, ?addresses, "a box advertised itself over mDNS");
+                            found.insert(service.fullname.clone(), Advertised { addresses, key });
+                        }
+                        mdns_sd::ServiceEvent::ServiceRemoved(_, name) => {
+                            found.remove(&name);
+                        }
+                        _ => {}
+                    }
+                }
+            })
+            .map_err(|error| mdns_sd::Error::Msg(error.to_string()))?;
+        Ok(Self { _daemon: Some(daemon), found })
     }
 }
 
@@ -141,6 +253,54 @@ pub async fn connect(target: &Target, identity: &Identity, takeover: bool) -> Re
         .await
         .map_err(|_| LinkError::Unreachable("handshake timed out".to_owned()))??;
     Ok(stream)
+}
+
+/// Links to the paired box over the local network: at the remembered address, or, when nothing answers there,
+/// wherever mDNS says it is now. A new address is remembered once the handshake proves the box's key. None when
+/// this computer isn't paired or knows nowhere to try; otherwise the last place tried and how it went.
+pub async fn link(lan: &LanConfig, takeover: bool) -> Option<(Target, Result<TcpStream, LinkError>)> {
+    let box_key = lan.box_key()?;
+    let remembered = lan.target();
+    let mut last = None;
+    if let Some(target) = &remembered {
+        let result = connect(target, &lan.identity, takeover).await;
+        if !matches!(result, Err(LinkError::Unreachable(_))) {
+            return Some((target.clone(), result));
+        }
+        last = Some((target.clone(), result));
+    }
+    for address in lan.find(&box_key).await {
+        if remembered.as_ref().is_some_and(|target| target.address == address) {
+            continue;
+        }
+        let target = Target { address, box_key };
+        let result = connect(&target, &lan.identity, takeover).await;
+        if result.is_ok()
+            && let Ok(found) = target.address.parse::<SocketAddr>()
+        {
+            tracing::info!(address = %target.address, "found the box over mDNS");
+            remember(&box_address_file(&lan.state_dir), &found.ip().to_string());
+        }
+        if !matches!(result, Err(LinkError::Unreachable(_))) {
+            return Some((target, result));
+        }
+        last = Some((target, result));
+    }
+    last
+}
+
+/// Whether the paired box answers on the local network, at the remembered address or one mDNS found: while
+/// linked through the Relay, a reason to move over.
+pub async fn reachable(lan: &LanConfig) -> bool {
+    let Some(box_key) = lan.box_key() else { return false };
+    let remembered = lan.target().map(|target| target.address);
+    let found = lan.advertised(&box_key).into_iter().filter(|address| remembered.as_ref() != Some(address));
+    for address in remembered.clone().into_iter().chain(found) {
+        if let Ok(Ok(_)) = tokio::time::timeout(Duration::from_secs(1), TcpStream::connect(&address)).await {
+            return true;
+        }
+    }
+    false
 }
 
 pub async fn handshake<S: AsyncRead + AsyncWrite + Unpin>(
@@ -243,7 +403,7 @@ mod tests {
     }
 
     /// Plays the box's side of the handshake on the other end of a duplex pipe.
-    async fn fake_box(stream: tokio::io::DuplexStream, box_key: SigningKey, reply: &'static str) {
+    async fn fake_box<S: AsyncRead + AsyncWrite + Send + 'static>(stream: S, box_key: SigningKey, reply: &'static str) {
         let (read, mut write) = tokio::io::split(stream);
         let mut lines = tokio::io::BufReader::new(read).lines();
         let public = box_key.verifying_key().to_bytes();
@@ -294,7 +454,7 @@ mod tests {
     #[test]
     fn the_target_needs_a_remembered_key() {
         let dir = std::env::temp_dir().join(format!("vibebuddy-lan-target-{}-{}", std::process::id(), rand_suffix()));
-        let config = LanConfig { identity: Arc::new(identity()), state_dir: dir.clone(), fixed_address: Some("127.0.0.1:7341".to_owned()) };
+        let config = LanConfig { identity: Arc::new(identity()), state_dir: dir.clone(), fixed_address: Some("127.0.0.1:7341".to_owned()), discovery: Discovery::default() };
         assert_eq!(config.target(), None);
         remember(&box_key_file(&dir), &URL_SAFE_NO_PAD.encode([3u8; 32]));
         assert_eq!(config.target(), Some(Target { address: "127.0.0.1:7341".to_owned(), box_key: [3; 32] }));
@@ -302,6 +462,77 @@ mod tests {
         assert_eq!(config.target(), None, "no address learned yet");
         remember(&box_address_file(&dir), "192.168.1.23");
         assert_eq!(config.target().map(|target| target.address), Some(format!("192.168.1.23:{PORT}")));
+        std::fs::remove_dir_all(dir).ok();
+    }
+
+    fn advertised(addresses: &[&str], key: Option<[u8; 32]>) -> Advertised {
+        Advertised { addresses: addresses.iter().map(|address| address.parse().unwrap()).collect(), key: key.map(|key| URL_SAFE_NO_PAD.encode(key)) }
+    }
+
+    #[test]
+    fn mdns_picks_the_box_whose_key_matches_among_several() {
+        let found = [
+            advertised(&["192.168.1.40:7340"], Some([1; 32])),
+            advertised(&["[fe80::2]:7340", "192.168.1.41:7340"], Some([2; 32])),
+            advertised(&["192.168.1.42:7340"], None),
+            advertised(&["192.168.1.43:7340"], Some([3; 32])),
+        ];
+        assert_eq!(pick(&found, &[2; 32]), ["192.168.1.41:7340", "[fe80::2]:7340"], "IPv4 first");
+        assert_eq!(pick(&found, &[1; 32]), ["192.168.1.40:7340"]);
+    }
+
+    #[test]
+    fn mdns_without_a_matching_key_finds_nothing() {
+        let found = [
+            advertised(&["192.168.1.40:7340"], Some([1; 32])),
+            advertised(&["192.168.1.42:7340"], None),
+            Advertised { addresses: vec!["192.168.1.44:7340".parse().unwrap()], key: Some("not a key".to_owned()) },
+        ];
+        assert!(pick(&found, &[9; 32]).is_empty());
+        assert!(pick(&[], &[9; 32]).is_empty());
+    }
+
+    #[tokio::test]
+    async fn an_unmatched_key_falls_back_to_the_remembered_address() {
+        // Nothing listens at the remembered address and mDNS found no box with this key: the link reports the
+        // remembered address as unreachable, as before discovery, and the daemon moves on to the Relay.
+        let dir = std::env::temp_dir().join(format!("vibebuddy-lan-fallback-{}-{}", std::process::id(), rand_suffix()));
+        remember(&box_key_file(&dir), &URL_SAFE_NO_PAD.encode([3u8; 32]));
+        remember(&box_address_file(&dir), "127.0.0.2");
+        let config = LanConfig { identity: Arc::new(identity()), state_dir: dir.clone(), fixed_address: None, discovery: Discovery::default() };
+        let found = Arc::new(Mutex::new(HashMap::from([("other".to_owned(), advertised(&["127.0.0.1:1"], Some([4; 32])))])));
+        let _ = config.discovery.browser.set(Some(Browser { _daemon: None, found }));
+        assert!(config.advertised(&[3; 32]).is_empty());
+        let (target, result) = link(&config, false).await.unwrap();
+        assert_eq!(target.address, format!("127.0.0.2:{PORT}"));
+        assert!(matches!(result, Err(LinkError::Unreachable(_))));
+        assert_eq!(std::fs::read_to_string(box_address_file(&dir)).unwrap().trim(), "127.0.0.2", "nothing new remembered");
+        std::fs::remove_dir_all(dir).ok();
+    }
+
+    #[tokio::test]
+    async fn mdns_finds_the_box_after_its_address_changed() {
+        let box_key = SigningKey::from_bytes(&[8; 32]);
+        let public = box_key.verifying_key().to_bytes();
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let moved = listener.local_addr().unwrap();
+        tokio::spawn(async move {
+            let (stream, _) = listener.accept().await.unwrap();
+            fake_box(stream, box_key, "welcome").await;
+        });
+        let dir = std::env::temp_dir().join(format!("vibebuddy-lan-moved-{}-{}", std::process::id(), rand_suffix()));
+        remember(&box_key_file(&dir), &URL_SAFE_NO_PAD.encode(public));
+        remember(&box_address_file(&dir), "127.0.0.2");
+        let config = LanConfig { identity: Arc::new(identity()), state_dir: dir.clone(), fixed_address: None, discovery: Discovery::default() };
+        let found = HashMap::from([
+            ("another".to_owned(), advertised(&["127.0.0.1:1"], Some([4; 32]))),
+            ("ours".to_owned(), advertised(&[&moved.to_string()], Some(public))),
+        ]);
+        let _ = config.discovery.browser.set(Some(Browser { _daemon: None, found: Arc::new(Mutex::new(found)) }));
+        let (target, result) = link(&config, false).await.unwrap();
+        assert_eq!(target.address, moved.to_string());
+        assert!(result.is_ok());
+        assert_eq!(std::fs::read_to_string(box_address_file(&dir)).unwrap().trim(), "127.0.0.1", "the new address is remembered");
         std::fs::remove_dir_all(dir).ok();
     }
 }

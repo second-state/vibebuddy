@@ -272,9 +272,9 @@ async fn serial_worker(
             let takeover = config.takeover.load(Ordering::Relaxed);
             let mut busy = None;
             if let Some(lan) = &config.lan
-                && let Some(target) = lan.target()
+                && let Some((target, result)) = lan::link(lan, takeover).await
             {
-                match lan::connect(&target, &lan.identity, takeover).await {
+                match result {
                     Ok(mut stream) => {
                         config.takeover.store(false, Ordering::Relaxed);
                         info!(address = %target.address, "linked over the local network");
@@ -343,14 +343,13 @@ async fn serial_worker(
                         let linked_at = Instant::now();
                         let _ = device_event_sender.send(DeviceMessage::ConnectedRelay { url: url.clone() }).await;
                         linked = true;
-                        let probe = config.lan.as_ref().and_then(|lan| lan.target()).map(|target| target.address);
                         let end = run_session(
                             &mut stream,
                             &url,
                             false,
                             Firmware::Ours,
                             Some(&config),
-                            probe.as_deref(),
+                            config.lan.as_deref(),
                             Some(&config.relay_enabled),
                             &mut pending,
                             &mut receiver,
@@ -541,7 +540,7 @@ async fn run_session<P: AsyncRead + AsyncWrite + Unpin>(
     paced: bool,
     mut firmware: Firmware,
     watch_cable: Option<&SerialConfig>,
-    probe_lan: Option<&str>,
+    probe_lan: Option<&LanConfig>,
     relay_switch: Option<&AtomicBool>,
     pending: &mut VecDeque<Vec<u8>>,
     receiver: &mut mpsc::Receiver<Vec<u8>>,
@@ -615,8 +614,9 @@ async fn run_session<P: AsyncRead + AsyncWrite + Unpin>(
                 }
             }
             _ = lan_check.tick(), if probe_lan.is_some() => {
-                let address = probe_lan.unwrap_or_default();
-                if let Ok(Ok(_)) = tokio::time::timeout(Duration::from_secs(1), tokio::net::TcpStream::connect(address)).await {
+                if let Some(lan) = probe_lan
+                    && lan::reachable(lan).await
+                {
                     return SessionEnd::Lan;
                 }
             }

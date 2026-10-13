@@ -2,7 +2,8 @@
 //! over USB, DHCP, and the TCP server computers on the local network connect to. Who may link is
 //! decided by firmware-core (`lan.rs`); this only moves bytes. The main loop owns the firmware, so
 //! everything crosses over in static channels: [`EVENTS`] towards the main loop, a pipe per
-//! connection and [`CREDENTIALS`] away from it.
+//! connection and [`CREDENTIALS`] away from it. Once on Wi-Fi the box also answers mDNS for
+//! `_vibebuddy._tcp`, so a computer can find it after the router hands it another address.
 
 use alloc::string::String;
 use alloc::vec::Vec;
@@ -16,6 +17,7 @@ use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 use embassy_sync::channel::Channel;
 use embassy_sync::pipe::Pipe;
 use embassy_sync::signal::Signal;
+use embassy_sync::watch::Watch;
 use embassy_time::{Duration, Timer};
 use esp_hal::rng::Rng;
 use esp_radio::wifi::sta::StationConfig;
@@ -26,8 +28,8 @@ use static_cell::StaticCell;
 const PORT: u16 = 7340;
 /// Connections served at once: the linked computer, and one more so a takeover can get through.
 const SLOTS: usize = 2;
-/// Sockets beyond the servers: DHCP, DNS, SNTP and the Relay.
-const EXTRA_SOCKETS: usize = 4;
+/// Sockets beyond the servers: DHCP, DNS, SNTP, the Relay and mDNS.
+const EXTRA_SOCKETS: usize = 5;
 const SOCKET_RX_BYTES: usize = 2048;
 const SOCKET_TX_BYTES: usize = 4096;
 /// Output waiting for a connection; a screenshot is the biggest burst.
@@ -45,6 +47,12 @@ pub enum NetEvent {
 pub static EVENTS: Channel<CriticalSectionRawMutex, NetEvent, 16> = Channel::new();
 /// The computer on the cable asked for the networks the box can hear.
 pub static SCAN: Signal<CriticalSectionRawMutex, ()> = Signal::new();
+/// The address the box has on Wi-Fi, or None while it has none; for the mDNS and Relay tasks. embassy-net keeps one
+/// waker for its state, so two tasks waiting on it at once keep waking each other: only [`address_task`] waits there.
+/// A `Watch` gives each reader its own waker, and the current value to one that starts late.
+pub static ADDRESS: Watch<CriticalSectionRawMutex, Option<core::net::Ipv4Addr>, ADDRESS_READERS> = Watch::new();
+/// The mDNS task and the Relay task.
+const ADDRESS_READERS: usize = 2;
 /// The network to join, or None to leave Wi-Fi; signalled at boot and whenever the user changes it.
 pub static CREDENTIALS: Signal<CriticalSectionRawMutex, Option<(String, String)>> = Signal::new();
 
@@ -183,10 +191,19 @@ async fn connection(mut controller: WifiController<'static>) {
                 }
             }
             embassy_futures::select::Either::First(Err(error)) => {
-                line(alloc::format!("WIFI FAILED {error:?}"));
+                // The driver's reason alone (`AuthenticationExpired`, `NoAccessPointFound`): the daemon tells the
+                // user what it means.
+                match error {
+                    esp_radio::wifi::ConnectionError::Failed(info) => line(alloc::format!("WIFI FAILED {:?}", info.reason)),
+                    error => line(alloc::format!("WIFI FAILED {error:?}")),
+                }
                 report_scan(&mut controller).await;
             }
             embassy_futures::select::Either::Second(next) => {
+                // Dropping the wait doesn't stop the driver's attempt, and the driver refuses a new config while it
+                // is still connecting: a wrong password keeps it at that for over 10 s, so a quick second Join
+                // failed with `config`.
+                let _ = controller.disconnect_async().await;
                 wanted = next;
                 continue;
             }
@@ -219,15 +236,78 @@ async fn net_task(mut runner: Runner<'static, Interface>) {
     runner.run().await
 }
 
-/// Reports the address each time the network comes up, so the computer on the cable can find the box.
+/// Starts answering mDNS for `_vibebuddy._tcp` on [`PORT`], with the box key (its id) in the TXT record
+/// so a computer can tell its box from another before connecting (docs/protocol.md).
+pub fn advertise(spawner: &Spawner, stack: Stack<'static>, box_key: String) {
+    spawner.spawn(mdns_task(stack, box_key).expect("mDNS task"));
+}
+
+#[embassy_executor::task]
+async fn mdns_task(stack: Stack<'static>, box_key: String) {
+    use core::net::{Ipv4Addr, Ipv6Addr};
+    use edge_mdns::buf::VecBufAccess;
+    use edge_mdns::domain::base::Ttl;
+    use edge_mdns::host::{Host, Service, ServiceAnswers};
+    use edge_mdns::{HostAnswersMdnsHandler, io};
+    use edge_nal::UdpSplit;
+    use embassy_sync::blocking_mutex::raw::NoopRawMutex;
+
+    // On the heap, like the TCP sockets' buffers: internal RAM is for the Wi-Fi driver.
+    let buffers: &'static edge_nal_embassy::UdpBuffers<1, 1500, 1500, 2> = alloc::boxed::Box::leak(alloc::boxed::Box::new(edge_nal_embassy::UdpBuffers::new()));
+    let udp = edge_nal_embassy::Udp::new(stack, buffers);
+    let recv_buf = VecBufAccess::<NoopRawMutex, 1500>::new();
+    let send_buf = VecBufAccess::<NoopRawMutex, 1500>::new();
+    // DNS labels: the host name takes letters, digits and '-' only, and the key's base64url may hold '_'.
+    let tag: String = box_key.chars().take(8).map(|c| if c.is_ascii_alphanumeric() { c.to_ascii_lowercase() } else { '-' }).collect();
+    let hostname = alloc::format!("vibebuddy-{tag}");
+    let name = alloc::format!("VibeBuddy {}", &box_key[..box_key.len().min(8)]);
+    let txt = [("key", box_key.as_str())];
+    let service = Service {
+        name: &name,
+        priority: 0,
+        weight: 0,
+        service: "_vibebuddy",
+        protocol: "_tcp",
+        port: PORT,
+        service_subtypes: &[],
+        txt_kvs: &txt,
+    };
+    let mut address = ADDRESS.receiver().expect("mDNS address reader");
+    loop {
+        let Some(ipv4) = address.get_and(Option::is_some).await else { continue };
+        let host = Host { hostname: &hostname, ipv4, ipv6: Ipv6Addr::UNSPECIFIED, ttl: Ttl::from_secs(120) };
+        let mut socket = match io::bind(&udp, io::IPV4_DEFAULT_SOCKET, Some(Ipv4Addr::UNSPECIFIED), None).await {
+            Ok(socket) => socket,
+            Err(error) => {
+                line(alloc::format!("MDNS FAILED {error:?}"));
+                Timer::after(Duration::from_secs(10)).await;
+                continue;
+            }
+        };
+        let (recv, send) = socket.split();
+        let signal = embassy_sync::signal::Signal::<NoopRawMutex, ()>::new();
+        let mdns = io::Mdns::new(Some(Ipv4Addr::UNSPECIFIED), None, recv, send, &recv_buf, &send_buf, Rng::new(), &signal);
+        let answers = ServiceAnswers::new(&host, &service);
+        // Ends when the address changes or goes; the next address gets a fresh socket and announcement.
+        if let embassy_futures::select::Either::First(Err(error)) = select(mdns.run(HostAnswersMdnsHandler::new(&answers)), address.changed()).await {
+            line(alloc::format!("MDNS FAILED {error:?}"));
+            Timer::after(Duration::from_secs(10)).await;
+        }
+    }
+}
+
+/// Reports the address each time the network comes up, so the computer on the cable can find the box, and hands it
+/// to the mDNS and Relay tasks through [`ADDRESS`].
 #[embassy_executor::task]
 async fn address_task(stack: Stack<'static>) {
     loop {
         stack.wait_config_up().await;
         if let Some(config) = stack.config_v4() {
             line(alloc::format!("WIFI ADDRESS {}", config.address.address()));
+            ADDRESS.sender().send(Some(config.address.address()));
         }
         stack.wait_config_down().await;
+        ADDRESS.sender().send(None);
     }
 }
 

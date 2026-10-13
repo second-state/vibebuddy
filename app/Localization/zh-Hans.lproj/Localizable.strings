@@ -309,6 +309,11 @@
 "VibeBuddy lives in the tray, or in Omarchy's bar: the buddy's face, with its eyes open while the box is online. To change anything, open Settings from there, or run VibeBuddy again." = "VibeBuddy 待在托盘里，或者 Omarchy 的状态栏上：图标是小伙伴的脸，盒子在线时睁着眼。想改什么设置，从那里打开设置，或者再运行一次 VibeBuddy。";
 "Couldn't join (%@). Check the network name and password, then join again." = "没能加入（%@）。检查一下网络名和密码，再加入一次。";
 "Joined · %@" = "已加入 · %@";
-"Joining…" = "正在加入…";
+"Joining… This can take up to 15 seconds." = "正在加入…最多要等 15 秒左右。";
+"The network turned the box away; the password is probably wrong. Check it, then join again." = "网络拒绝了盒子，多半是密码不对。检查一下密码，再加入一次。";
+"The box can't find this network. It only joins 2.4 GHz Wi-Fi: check the name, and that the box is in range." = "盒子找不到这个网络。它只能连 2.4 GHz 的 Wi-Fi：检查一下网络名，以及盒子是否在信号范围内。";
+"The box can't join this network's kind of security. It joins WPA2 and open networks." = "盒子不支持这个网络的加密方式，它能连 WPA2 和不加密的网络。";
+"The password must be 8 to 63 characters." = "密码要 8 到 63 个字符。";
+"The network name is too long: 32 bytes at most." = "网络名太长了，最多 32 字节。";
 "Status" = "状态";
 "Change network" = "更换网络";

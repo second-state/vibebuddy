@@ -317,6 +317,14 @@ On 2026-10-12 the first OTA-layout firmware reset in a loop right after READY on
 
 Code that parses partitions or otadata at boot either lives in firmware-core with host tests built from the real `partitions.csv` (as `ota::confirm` now does), or is flashed to a box and watched through one full boot and a reset before the branch is called done. And back the box up first: a full `read-flash` took three minutes and made every later step low-risk.
 
+## A wait that only one task may hold
+
+The box's mDNS responder built, passed every host test, and answered nothing on the box. The mDNS task waited for the network to go down (`wait_config_down`) while `address_task` waited on the same thing. embassy-net keeps a single waker for its state, and embassy-sync's `WakerRegistration` wakes the old waker whenever a different task registers, so the two tasks woke each other for as long as the network stayed up. Diagnostic lines sent with `.await` changed the timing enough to make it work, which pointed at scheduling rather than the mDNS code.
+
+Before waiting on shared state from a second task, check how many waiters it holds; embassy's `Signal` and the stack's state waits hold one. Let one task own the wait and hand the result on through a channel or a `Signal` only the other task waits on. Diagnostic lines sent with `try_send` on a 16-slot channel also got dropped in the burst at boot, so "no line" didn't mean "never got there": for a diagnosis, send with `.await`.
+
+The same day, the fix and this lesson covered only the mDNS task. The Relay task had waited on `wait_config_up` alongside `address_task` since it was written, so on a box with no Wi-Fi set the two spun the whole time: a poll counter on the box read about 3 million polls every 5 s, and 3 once the Relay read the address from a `Watch` instead. Nothing looked wrong, because the spin ran only while there was no network to notice it on. When a lesson names a pattern, search the code for every other place it already occurs (`grep wait_config`), not just the one that broke. And a `Signal` with one reader is the same trap the next time someone adds a reader: where more than one task needs a value, use a `Watch`, which keeps a waker per reader.
+
 ## On the firmware, every new static in internal RAM comes out of the main stack
 
 On 2026-10-13 the first microphone build boot-looped: `Detected a write to the stack guard value on ProCpu`, inside text drawing while the boot loaded the Character's look. With esp-hal the main task's stack is whatever internal DRAM is left between the end of `.bss` and the fixed start of the reclaimed heap (`_stack_end_cpu0` to `_stack_start_cpu0`). The build had added a 24 KB static DMA ring (`dma_rx_stream_buffer!`) and a 2.6 KB task (an async task's locals live in its static pool), and the stack went from 47,784 bytes to 21,032 with nothing in the build saying so. Host tests and the device build both passed.

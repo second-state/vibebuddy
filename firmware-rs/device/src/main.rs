@@ -432,6 +432,9 @@ async fn main(spawner: Spawner) -> ! {
     net::CREDENTIALS.signal(wifi_credentials(&firmware));
     report_memory(&mut board);
     if let Some(stack) = stack {
+        if let Some(link) = firmware.link() {
+            net::advertise(&spawner, stack, vibebuddy_firmware_core::link::encode(&link.public_key()).into());
+        }
         start_relay(&spawner, stack, trng, &firmware);
     }
     let mut relay_box = RelayBox::new();
@@ -463,7 +466,8 @@ async fn main(spawner: Spawner) -> ! {
                         firmware.set_wifi_joined(false);
                     }
                     // Once on the network, the Wi-Fi driver has taken what it needs (#108).
-                    if line.starts_with("WIFI ADDRESS") {
+                    if let Some(address) = line.strip_prefix("WIFI ADDRESS ") {
+                        firmware.set_wifi_address(address);
                         report_memory(&mut board);
                     }
                 }
