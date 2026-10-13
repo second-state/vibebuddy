@@ -21,7 +21,8 @@ use crate::pomodoro::{Phase, Pomodoro, Run, Transition};
 use crate::relay_box;
 use crate::storage::{Flash, Settings, SettingsStore, find_partition};
 use crate::text;
-use crate::voice_pack::crc32;
+use crate::spoken_reply::ReplyAudio;
+use crate::voice_pack::{crc32, decode_base64};
 use crate::lines::LinePicker;
 use crate::lan::{Conn, Lan, Output as LanOutput};
 use crate::noise::Sealer;
@@ -142,6 +143,13 @@ pub trait Board: Screen {
     fn write_stream(&mut self, line: &[u8]) {
         self.write(line);
     }
+    /// Hands a spoken reply's audio to the player ([`crate::spoken_reply`]), which the speaker plays from while
+    /// no announcement is playing, through the same output and at the same volume.
+    fn reply_audio(&mut self, _audio: ReplyAudio) {}
+    /// A spoken reply is making sound right now.
+    fn reply_speaking(&self) -> bool {
+        false
+    }
 }
 
 /// The codec's registers through the board's I2C, for register sequences in core.
@@ -243,6 +251,9 @@ pub struct Firmware {
     voice: VoiceCommand,
     /// The microphone is running for a voice command.
     voice_mic: bool,
+    /// The turn whose spoken replies are played; None once they were stopped (an announcement, mute, K2, the
+    /// overlay closing), and the rest of that turn's audio is then ignored.
+    reply_turn: Option<u32>,
 }
 
 /// Borrows the Firmware's pomodoro and leisure director to build the context for one frame.
@@ -357,6 +368,7 @@ impl Firmware {
             mic: MicState::Idle,
             voice: VoiceCommand::new(),
             voice_mic: false,
+            reply_turn: None,
         }
     }
 
@@ -817,6 +829,10 @@ impl Firmware {
                 }
             },
         };
+        // An announcement or the Pomodoro chime wins over a spoken reply: the reply stops and the rest of its turn
+        // stays text only. The announcement is the box's own news and is short; queued behind a reply it
+        // could come half a minute late, and two voices taking turns would be one too many.
+        self.stop_reply(board);
         let queued = self.audio_ready && board.play(first).is_ok() && then.is_none_or(|sound| board.play(sound).is_ok());
         if queued {
             Self::write_value_line(board, "AUDIO QUEUED ", label.as_bytes());
@@ -966,6 +982,10 @@ impl Firmware {
     /// K2 long, or MUTE in the menu.
     fn toggle_mute<B: Board>(&mut self, board: &mut B) {
         self.muted = !self.muted;
+        // Muting silences a reply at once; unmuting doesn't bring back the rest of that turn.
+        if self.muted {
+            self.stop_reply(board);
+        }
         let now = board.now_ms();
         let muted = self.muted;
         self.display.set_muted(board, &scene!(self, now), muted);
@@ -1059,14 +1079,18 @@ impl Firmware {
         let out = self.voice.set_available(on);
         Self::write_voice(board, out);
         self.stop_voice_mic(board);
+        if !on {
+            self.stop_reply(board);
+        }
         self.show_overlay(board);
     }
 
     /// K0 held while voice is offered: the microphone at voice gain, any sound stopped so the box doesn't
-    /// hear itself, and a new turn.
+    /// hear itself (a spoken reply too: a new command interrupts the last one's answer), and a new turn.
     fn start_recording<B: Board>(&mut self, board: &mut B, now: u32) {
         self.voice.cancel();
         self.stop_voice_mic(board);
+        self.stop_reply(board);
         // A box without the ES8311 (the NS4168 variant) has no gain to set; its microphone, if any, is untested.
         let _ = mic::set_es8311_mic_gain(&mut BoardI2c { board: &mut *board, address: ES8311_ADDRESS }, voice_command::GAIN_DB);
         let started = matches!(self.mic, MicState::Idle) && board.voice_start().is_ok();
@@ -1075,6 +1099,7 @@ impl Firmware {
             board.stop_audio();
             let start = self.voice.start(now);
             Self::write_voice(board, [start]);
+            self.reply_turn = Some(self.voice.turn());
         } else {
             self.voice.no_microphone(now);
         }
@@ -1102,7 +1127,41 @@ impl Firmware {
         let out = self.voice.cancel();
         Self::write_voice(board, out);
         self.stop_voice_mic(board);
+        self.stop_reply(board);
         self.show_overlay(board);
+    }
+
+    /// Stops the turn's spoken replies, and ignores the rest of its audio.
+    fn stop_reply<B: Board>(&mut self, board: &mut B) {
+        if self.reply_turn.take().is_some() {
+            board.reply_audio(ReplyAudio::Stop);
+        }
+    }
+
+    /// `voice.audio`: a chunk of a spoken reply's MP3, or its end, for the turn being played. While muted the
+    /// replies are only shown. A chunk that doesn't decode is a chunk lost: the next one's `seq` gives it away.
+    fn on_voice_audio<B: Board>(&mut self, board: &mut B, fields: &BTreeMap<alloc::string::String, Value>) {
+        let field = |key| number(fields, key).filter(|value| *value >= 0.0).map(|value| value as u32);
+        let (Some(turn), Some(reply), Some(seq)) = (field("turn"), field("reply"), field("seq")) else { return };
+        if self.reply_turn != Some(turn) {
+            return;
+        }
+        if fields.get("end") == Some(&Value::Bool(true)) {
+            // Synthesis failed or was cut short: what came plays, and the log says it isn't the whole reply.
+            if fields.get("error").is_some() {
+                let line = text!(48, "VOICE AUDIO CUT SHORT {} {}\n", turn, reply);
+                board.write(line.as_bytes());
+            }
+            if !self.muted {
+                board.reply_audio(ReplyAudio::End { reply, seq });
+            }
+            return;
+        }
+        let Some(data) = string(fields, "data").filter(|_| !self.muted) else { return };
+        let mut bytes = alloc::vec![0u8; data.len() / 4 * 3 + 3];
+        let Some(count) = decode_base64(data.as_bytes(), &mut bytes) else { return };
+        bytes.truncate(count);
+        board.reply_audio(ReplyAudio::Chunk { reply, seq, data: bytes });
     }
 
     fn stop_voice_mic<B: Board>(&mut self, board: &mut B) {
@@ -1122,7 +1181,9 @@ impl Firmware {
             }
             self.show_overlay(board);
         }
-        if self.voice.expire(now) {
+        // The text stays up while a reply is still being spoken; when it goes, so does what is left to say.
+        if !board.reply_speaking() && self.voice.expire(now) {
+            self.stop_reply(board);
             self.show_overlay(board);
         }
         self.stop_voice_mic(board);
@@ -1581,6 +1642,7 @@ impl Firmware {
             // Voice commands (docs/protocol.md): the computer offers them, then answers each turn.
             "voice.available" => self.set_voice_available(board, fields.get("on") == Some(&Value::Bool(true))),
             "voice.heard" | "voice.reply" | "voice.done" | "voice.error" => self.on_voice_turn(board, fields, event),
+            "voice.audio" => self.on_voice_audio(board, fields),
             _ if event.starts_with("voice.") => self.handle_voice_event(board, fields, event),
             // Pairing is the computer at the other end of the cable telling the box who it is (ADR-0012).
             // Only over the cable: whoever is at the box decides who may link and which network it joins.
@@ -1816,6 +1878,7 @@ impl Firmware {
                 // stalled, and DMA replays whatever is in its buffer over and over, so it must be
                 // silence first. The wait continues in poll.
                 board.stop_audio();
+                self.stop_reply(board);
                 self.pending_voice_begin = Some((size as u32, board.now_ms()));
                 self.continue_voice_begin(board);
             }

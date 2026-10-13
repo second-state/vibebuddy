@@ -2584,6 +2584,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "nanomp3-core"
+version = "0.2.0"
+
+[[package]]
 name = "native-tls"
 version = "0.2.18"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5135,6 +5139,7 @@ dependencies = [
  "clatter",
  "ed25519-dalek",
  "libm",
+ "nanomp3-core",
  "rand_core 0.6.4",
  "serde_json",
  "tungstenite",

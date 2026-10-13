@@ -1,7 +1,7 @@
 [workspace]
 members = ["daemon", "desktop", "firmware-rs/core", "hook", "manifest", "protocol"]
 # The device firmware builds separately with the Xtensa toolchain; see firmware-rs/device.
-exclude = ["firmware-rs/device"]
+exclude = ["firmware-rs/device", "firmware-rs/vendor/nanomp3-core"]
 resolver = "3"
 
 [workspace.package]
@@ -25,3 +25,6 @@ tokio-serial = "5"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 
+# The MP3 decoder for spoken replies, patched for the Xtensa backend (see its Cargo.toml).
+[patch.crates-io]
+nanomp3-core = { path = "firmware-rs/vendor/nanomp3-core" }
