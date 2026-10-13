@@ -59,6 +59,8 @@ fn glyph_row(character: u8, row: usize) -> u8 {
         b'0'..=b'9' => DIGIT_GLYPHS[(upper - b'0') as usize][row],
         b'-' => if row == 3 { 0x1f } else { 0 },
         b'.' => if row == 6 { 0x04 } else { 0 },
+        b',' => match row { 5 => 0x04, 6 => 0x08, _ => 0 },
+        b'\'' => if row < 2 { 0x04 } else { 0 },
         b':' => if row == 2 || row == 5 { 0x04 } else { 0 },
         b'/' => 1 << if row < 5 { 4 - row } else { 0 },
         b'!' => if row < 5 || row == 6 { 0x04 } else { 0 },

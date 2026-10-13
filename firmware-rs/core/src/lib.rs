@@ -26,11 +26,13 @@ pub mod lines;
 pub mod link;
 pub mod look;
 pub mod menu;
+pub mod mic;
 pub mod noise;
 pub mod ota;
 pub mod pomodoro;
 pub mod relay_box;
 pub mod storage;
+pub mod voice_command;
 pub mod voice_pack;
 pub mod voices;
 

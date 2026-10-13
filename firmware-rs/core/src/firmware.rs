@@ -11,7 +11,8 @@ use alloc::vec::Vec;
 use serde_json::{Map, Value};
 use vibebuddy_protocol::{Event, ProtocolError, VERSION};
 
-use crate::audio::{Occasion, Sound, clamp_volume, VOLUME_DEFAULT};
+use crate::audio::{ES8311_ADDRESS, Occasion, SAMPLE_RATE, Sound, clamp_volume, VOLUME_DEFAULT};
+use crate::mic;
 use crate::buttons::{ButtonEvent, Buttons, Levels};
 use crate::display::{Display, LinkPath, MAX_STATS, MAX_TASKS, Mode, Panel, PanelKind, SNAPSHOT_LINE_BYTES, Scene, Screen, Snapshot, State, TaskInput, Tone};
 use crate::leisure::{Leisure, Tier};
@@ -27,6 +28,7 @@ use crate::noise::Sealer;
 use crate::link::{self, Link, LinkStore, PairError, Wifi};
 use crate::look::Look;
 use crate::voices::{Pick, Voices, VoiceError};
+use crate::voice_command::{self, Out as VoiceOut, VoiceCommand};
 
 pub const MAX_LINE_BYTES: usize = 1024;
 const LINE_BUFFER_BYTES: usize = MAX_LINE_BYTES + 2;
@@ -108,6 +110,63 @@ pub trait Board: Screen {
     }
     /// Starts the box again from the top, as after power-on.
     fn restart(&mut self) {}
+
+    /// One register read on the codec's I2C bus; None when nothing acknowledges. For the microphone
+    /// diagnostic ([`crate::mic`]).
+    fn i2c_read(&mut self, _address: u8, _register: u8) -> Option<u8> {
+        None
+    }
+    fn i2c_write(&mut self, _address: u8, _register: u8, _value: u8) -> Result<(), ()> {
+        Err(())
+    }
+    /// Starts capturing `bytes` of I2S input (24 kHz, 16-bit, two slots, little endian). Err where the
+    /// board has no input.
+    fn mic_start(&mut self, _bytes: usize) -> Result<(), ()> {
+        Err(())
+    }
+    /// The capture once all of it is in, or why it stopped short; None while it is still running.
+    fn mic_take(&mut self) -> Option<Result<Vec<u8>, &'static str>> {
+        None
+    }
+
+    /// Starts the microphone for a voice command ([`crate::voice_command`]): the left slot (the ES8311's ADC)
+    /// at 24 kHz, without end, until [`Board::voice_stop`]. Err where the board can't record.
+    fn voice_start(&mut self) -> Result<(), ()> {
+        Err(())
+    }
+    /// Appends the samples recorded since the last call, without waiting.
+    fn voice_take(&mut self, _samples: &mut Vec<i16>) {}
+    fn voice_stop(&mut self) {}
+    /// Writes one line of an audio stream (`VOICE DATA`) to the links that can carry one, and drops it whole
+    /// where it doesn't fit right now rather than wait: a gap in `seq` is what the computer expects then.
+    fn write_stream(&mut self, line: &[u8]) {
+        self.write(line);
+    }
+}
+
+/// The codec's registers through the board's I2C, for register sequences in core.
+struct BoardI2c<'a, B: Board> {
+    board: &'a mut B,
+    address: u8,
+}
+
+impl<B: Board> crate::audio::Registers for BoardI2c<'_, B> {
+    type Error = ();
+    fn read(&mut self, register: u8) -> Result<u8, ()> {
+        self.board.i2c_read(self.address, register).ok_or(())
+    }
+    fn write(&mut self, register: u8, value: u8) -> Result<(), ()> {
+        self.board.i2c_write(self.address, register, value)
+    }
+}
+
+/// Where the microphone diagnostic is.
+enum MicState {
+    Idle,
+    /// Capturing since this time.
+    Recording { since: u32 },
+    /// Streaming the capture out as `MIC DATA` lines, one per poll.
+    Sending { capture: Vec<u8>, sent: usize },
 }
 
 /// What the box is linked to without the Relay.
@@ -179,6 +238,11 @@ pub struct Firmware {
     reported_lights_out: bool,
     reported_hour: i32,
     reported_look: alloc::string::String,
+    mic: MicState,
+    /// Voice commands: whether the computer offers them, the turn and its overlay.
+    voice: VoiceCommand,
+    /// The microphone is running for a voice command.
+    voice_mic: bool,
 }
 
 /// Borrows the Firmware's pomodoro and leisure director to build the context for one frame.
@@ -290,6 +354,9 @@ impl Firmware {
             reported_lights_out: false,
             reported_hour: -1,
             reported_look: alloc::string::String::from("ROBOT"),
+            mic: MicState::Idle,
+            voice: VoiceCommand::new(),
+            voice_mic: false,
         }
     }
 
@@ -590,9 +657,11 @@ impl Firmware {
         }
         self.continue_voice_begin(board);
         self.send_snapshot(board, now);
+        self.tend_mic(board, now);
+        self.tend_voice(board, now);
         if self.menu.expire(now) {
             Self::write_literal(board, "MENU CLOSED\n");
-            self.show_menu(board);
+            self.show_overlay(board);
         }
         self.tick_buttons(board);
         let transition = self.pomodoro.tick(board.now_ms());
@@ -621,7 +690,89 @@ impl Firmware {
         }
     }
 
+    /// `device.mic.record`: report what answers on I2C where a microphone ADC could be, set the ES8311's
+    /// microphone gain if there is one, and start capturing; `tend_mic` reports and sends the result.
+    fn start_mic<B: Board>(&mut self, board: &mut B, fields: &BTreeMap<alloc::string::String, Value>) {
+        if !matches!(self.mic, MicState::Idle) || self.voice_mic {
+            return Self::write_literal(board, "MIC BUSY\n");
+        }
+        let ms = number(fields, "ms").map_or(mic::DEFAULT_MS, |ms| (ms.max(0.0) as u32).clamp(mic::MIN_MS, mic::MAX_MS));
+        let gain = number(fields, "gain_db").map_or(mic::DEFAULT_GAIN_DB, |db| (db.max(0.0) as u32).min(mic::MAX_GAIN_DB));
+        let mut es8311 = false;
+        for (address, [high, low]) in mic::PROBES {
+            let id = board.i2c_read(address, high).zip(board.i2c_read(address, low));
+            es8311 |= address == ES8311_ADDRESS && id.is_some();
+            let line = match id {
+                Some((high, low)) => text!(32, "MIC PROBE 0x{:02X} ID {:02X}{:02X}\n", address, high, low),
+                None => text!(32, "MIC PROBE 0x{:02X} NONE\n", address),
+            };
+            board.write(line.as_bytes());
+        }
+        if es8311 {
+            let line = match mic::set_es8311_mic_gain(&mut BoardI2c { board: &mut *board, address: ES8311_ADDRESS }, gain) {
+                Ok(()) => text!(24, "MIC GAIN {} DB\n", mic::mic_gain_register(gain) as u32 * 6),
+                Err(()) => text!(24, "MIC GAIN ERROR\n"),
+            };
+            board.write(line.as_bytes());
+        }
+        match board.mic_start(mic::capture_bytes(ms)) {
+            Ok(()) => {
+                self.mic = MicState::Recording { since: board.now_ms() };
+                board.write(text!(32, "MIC RECORDING {} MS\n", ms).as_bytes());
+            }
+            Err(()) => Self::write_literal(board, "MIC UNAVAILABLE\n"),
+        }
+    }
+
+    fn tend_mic<B: Board>(&mut self, board: &mut B, now: u32) {
+        match &mut self.mic {
+            MicState::Idle => {}
+            MicState::Recording { since } => {
+                let since = *since;
+                match board.mic_take() {
+                    None => {}
+                    Some(Err(reason)) => {
+                        Self::write_value_line(board, "MIC ERROR ", reason.as_bytes());
+                        self.mic = MicState::Idle;
+                    }
+                    Some(Ok(capture)) => {
+                        // Much longer than asked for means samples were lost on the way in.
+                        let line = text!(48, "MIC CAPTURED {} MS {} BYTES\n", now.wrapping_sub(since), capture.len());
+                        board.write(line.as_bytes());
+                        for (index, [left, right]) in mic::levels(&capture).iter().enumerate() {
+                            let at = index as u32 * mic::LEVEL_WINDOW_MS;
+                            let line = text!(64, "MIC LEVEL {} L {} {} R {} {}\n", at, left.rms, left.peak, right.rms, right.peak);
+                            board.write(line.as_bytes());
+                        }
+                        let line = text!(48, "MIC BEGIN {} {} 16 {}\n", SAMPLE_RATE, mic::CHANNELS, capture.len());
+                        board.write(line.as_bytes());
+                        self.mic = MicState::Sending { capture, sent: 0 };
+                    }
+                }
+            }
+            // One line per pass, so the main loop keeps running while a minute of lines goes out over the UART.
+            MicState::Sending { capture, sent } if *sent < capture.len() => {
+                let end = (*sent + mic::DATA_CHUNK_BYTES).min(capture.len());
+                let mut line = alloc::format!("MIC DATA {} ", *sent / mic::DATA_CHUNK_BYTES);
+                line.push_str(&mic::encode_base64(&capture[*sent..end]));
+                // One write, so the newline can't be dropped apart from its line.
+                line.push('\n');
+                board.write(line.as_bytes());
+                *sent = end;
+            }
+            MicState::Sending { capture, .. } => {
+                let line = text!(48, "MIC END {} {}\n", capture.len(), crc32(0, capture));
+                board.write(line.as_bytes());
+                self.mic = MicState::Idle;
+            }
+        }
+    }
+
     fn set_link_lost<B: Board>(&mut self, board: &mut B, lost: bool) {
+        if lost && !self.link_lost {
+            // Whoever offered voice is gone; the next link offers it again if it can.
+            self.set_voice_available(board, false);
+        }
         self.link_lost = lost;
         let now = board.now_ms();
         self.display.set_link_lost(board, &scene!(self, now), lost);
@@ -724,6 +875,23 @@ impl Firmware {
     /// its own job: leisure hides nothing that needs a look first.
     fn on_button<B: Board>(&mut self, board: &mut B, event: ButtonEvent) {
         let now = board.now_ms();
+        // Letting go of K0 after a long press only ends a recording.
+        if event == ButtonEvent::K0LongEnd {
+            if self.voice.listening() {
+                self.end_recording(board, now);
+            }
+            return;
+        }
+        // The voice command's overlay: while recording only K2 (cancel) counts; afterwards K2 closes it, a
+        // long K0 starts the next command, and any other key closes it and then does its own job.
+        if self.voice.is_open() {
+            match event {
+                ButtonEvent::K2Short => return self.close_voice(board),
+                _ if self.voice.listening() => return,
+                ButtonEvent::K0Long if self.voice.available() => {}
+                _ => self.close_voice(board),
+            }
+        }
         if self.menu.is_open() {
             self.leisure.note_activity(now);
             let action = self.menu.key(event, self.menu_context(now), now);
@@ -753,14 +921,20 @@ impl Firmware {
             ButtonEvent::K1Long => {
                 self.menu.open(self.menu_context(now), now);
                 Self::write_literal(board, "MENU OPEN\n");
-                self.show_menu(board);
+                self.show_overlay(board);
                 return;
             }
-            ButtonEvent::K0Short | ButtonEvent::K0Long => {}
+            ButtonEvent::K0Short | ButtonEvent::K0Long | ButtonEvent::K0LongEnd => {}
         }
 
+        // While the computer offers voice commands, a long K0 is push-to-talk; giving up a phase is then in
+        // the menu (ADR-0017).
         if event == ButtonEvent::K0Long {
-            self.stop_phase(board);
+            if self.voice.available() {
+                self.start_recording(board, now);
+            } else {
+                self.stop_phase(board);
+            }
             return;
         }
         let before = self.pomodoro.view(now);
@@ -829,7 +1003,7 @@ impl Firmware {
             MenuAction::Close => Self::write_literal(board, "MENU CLOSED\n"),
             MenuAction::StopPhase => {
                 Self::write_literal(board, "MENU CLOSED\n");
-                self.show_menu(board);
+                self.show_overlay(board);
                 self.stop_phase(board);
             }
             // The preview goes through announce, so it is silent when muted, like the app's.
@@ -841,27 +1015,128 @@ impl Firmware {
             MenuAction::ForgetComputers => self.forget_computers(board),
             MenuAction::NewIdentity => {
                 Self::write_literal(board, "MENU CLOSED\n");
-                self.show_menu(board);
+                self.show_overlay(board);
                 return self.new_identity(board);
             }
         }
-        self.show_menu(board);
+        self.show_overlay(board);
     }
 
-    /// Something that needs the user takes the screen back from the menu.
-    fn close_menu<B: Board>(&mut self, board: &mut B) {
+    /// Something that needs the user takes the screen back from the menu and from a voice command (a
+    /// recording is given up).
+    fn close_overlays<B: Board>(&mut self, board: &mut B) {
         if self.menu.is_open() {
             self.menu.close();
             Self::write_literal(board, "MENU CLOSED\n");
-            self.show_menu(board);
+            self.show_overlay(board);
+        }
+        if self.voice.is_open() {
+            self.close_voice(board);
         }
     }
 
-    /// Hands the display the panel for what the menu shows now, or none when it's closed.
-    fn show_menu<B: Board>(&mut self, board: &mut B) {
+    /// Hands the display the panel for what the menu shows now, or the voice command's overlay, or none.
+    fn show_overlay<B: Board>(&mut self, board: &mut B) {
         let now = board.now_ms();
-        let panel = self.menu.view().map(|view| self.menu_panel(view, now));
+        let panel = match self.menu.view() {
+            Some(view) => Some(self.menu_panel(view, now)),
+            None => self.voice.panel(now),
+        };
         self.display.set_panel(board, &scene!(self, now), panel);
+    }
+
+    fn write_voice<B: Board>(board: &mut B, out: impl IntoIterator<Item = VoiceOut>) {
+        for out in out {
+            match out {
+                VoiceOut::Line(line) => board.write(line.as_bytes()),
+                VoiceOut::Data(line) => board.write_stream(line.as_bytes()),
+            }
+        }
+    }
+
+    /// `voice.available`, a new link or a lost one.
+    fn set_voice_available<B: Board>(&mut self, board: &mut B, on: bool) {
+        let out = self.voice.set_available(on);
+        Self::write_voice(board, out);
+        self.stop_voice_mic(board);
+        self.show_overlay(board);
+    }
+
+    /// K0 held while voice is offered: the microphone at voice gain, any sound stopped so the box doesn't
+    /// hear itself, and a new turn.
+    fn start_recording<B: Board>(&mut self, board: &mut B, now: u32) {
+        self.voice.cancel();
+        self.stop_voice_mic(board);
+        // A box without the ES8311 (the NS4168 variant) has no gain to set; its microphone, if any, is untested.
+        let _ = mic::set_es8311_mic_gain(&mut BoardI2c { board: &mut *board, address: ES8311_ADDRESS }, voice_command::GAIN_DB);
+        let started = matches!(self.mic, MicState::Idle) && board.voice_start().is_ok();
+        if started {
+            self.voice_mic = true;
+            board.stop_audio();
+            let start = self.voice.start(now);
+            Self::write_voice(board, [start]);
+        } else {
+            self.voice.no_microphone(now);
+        }
+        self.show_overlay(board);
+    }
+
+    fn take_voice_samples<B: Board>(&mut self, board: &mut B) {
+        let mut samples = Vec::new();
+        board.voice_take(&mut samples);
+        let out = self.voice.push(&samples);
+        Self::write_voice(board, out);
+    }
+
+    /// K0 let go, or the 30 s are up: the last samples, then `VOICE END` (or `VOICE CANCEL` if it was short).
+    fn end_recording<B: Board>(&mut self, board: &mut B, now: u32) {
+        self.take_voice_samples(board);
+        let out = self.voice.release(now);
+        Self::write_voice(board, out);
+        self.stop_voice_mic(board);
+        self.show_overlay(board);
+    }
+
+    /// K2, or something that needs the user: the overlay closes, and a recording is given up.
+    fn close_voice<B: Board>(&mut self, board: &mut B) {
+        let out = self.voice.cancel();
+        Self::write_voice(board, out);
+        self.stop_voice_mic(board);
+        self.show_overlay(board);
+    }
+
+    fn stop_voice_mic<B: Board>(&mut self, board: &mut B) {
+        if self.voice_mic && !self.voice.listening() {
+            board.voice_stop();
+            self.voice_mic = false;
+        }
+    }
+
+    /// Each pass: stream what the microphone has, end the recording at 30 s, move the meter, and close the
+    /// overlay when its time is up.
+    fn tend_voice<B: Board>(&mut self, board: &mut B, now: u32) {
+        if self.voice.listening() {
+            self.take_voice_samples(board);
+            if self.voice.due(now) {
+                self.end_recording(board, now);
+            }
+            self.show_overlay(board);
+        }
+        if self.voice.expire(now) {
+            self.show_overlay(board);
+        }
+        self.stop_voice_mic(board);
+    }
+
+    /// `voice.heard`, `voice.reply`, `voice.done` and `voice.error` for a turn.
+    fn on_voice_turn<B: Board>(&mut self, board: &mut B, fields: &BTreeMap<alloc::string::String, Value>, event: &str) {
+        let Some(turn) = number(fields, "turn").filter(|turn| *turn >= 0.0) else { return };
+        let text = string(fields, if event == "voice.error" { "message" } else { "text" });
+        let now = board.now_ms();
+        if self.voice.event(event, turn as u32, text, string(fields, "reason"), now) {
+            self.stop_voice_mic(board);
+            self.show_overlay(board);
+        }
     }
 
     /// What the menu draws for a view.
@@ -1036,7 +1311,7 @@ impl Firmware {
         };
         Self::report_pomodoro(board, if focus_ended { "FOCUS END" } else { "BREAK END" });
         // The alarm waits for K0, which the menu would take.
-        self.close_menu(board);
+        self.close_overlays(board);
         if focus_ended {
             self.save_tally(board);
         }
@@ -1059,7 +1334,7 @@ impl Firmware {
     fn tend_leisure<B: Board>(&mut self, board: &mut B) {
         let now = board.now_ms();
         let pomodoro = self.pomodoro.view(now);
-        if !self.display.agent_idle() || pomodoro.run == Run::Running || self.link_lost || self.menu.is_open() {
+        if !self.display.agent_idle() || pomodoro.run == Run::Running || self.link_lost || self.menu.is_open() || self.voice.is_open() {
             self.leisure.note_activity(now);
         }
 
@@ -1157,7 +1432,7 @@ impl Firmware {
         }
 
         if matches!(state, State::InputRequired | State::Failed) {
-            self.close_menu(board);
+            self.close_overlays(board);
         }
         let shown = self.display.show_tasks(board, &scene!(self, now), state, title.map(str::as_bytes), &tasks);
         if shown.is_err() {
@@ -1269,7 +1544,11 @@ impl Firmware {
             // The Mac asks when it first connects: mode, firmware build and voice are only reported
             // at boot or on change, and the daemon restarts more often than the device, so without
             // asking it would never know.
-            "device.hello" => self.announce_state(board),
+            // A new link starts with voice commands off; the computer offers them after this if it can.
+            "device.hello" => {
+                self.set_voice_available(board, false);
+                self.announce_state(board);
+            }
             // The daily greeting or a welcome back: a line and nothing else. It isn't agent activity,
             // so it neither changes the screen nor wakes leisure, and only those may be said this way.
             "buddy.say" => {
@@ -1294,11 +1573,14 @@ impl Firmware {
                     None => self.announce_volume(board),
                 }
                 // The app's slider can move while the menu shows the volume.
-                self.show_menu(board);
+                self.show_overlay(board);
                 if fields.get("preview") == Some(&Value::Bool(true)) {
                     self.announce(board, Occasion::Done);
                 }
             }
+            // Voice commands (docs/protocol.md): the computer offers them, then answers each turn.
+            "voice.available" => self.set_voice_available(board, fields.get("on") == Some(&Value::Bool(true))),
+            "voice.heard" | "voice.reply" | "voice.done" | "voice.error" => self.on_voice_turn(board, fields, event),
             _ if event.starts_with("voice.") => self.handle_voice_event(board, fields, event),
             // Pairing is the computer at the other end of the cable telling the box who it is (ADR-0012).
             // Only over the cable: whoever is at the box decides who may link and which network it joins.
@@ -1314,6 +1596,10 @@ impl Firmware {
             "device.relay.set" => self.handle_relay(board, fields),
             // The radio belongs to the device layer, which reports what it hears as `WIFI SEEN` lines.
             "device.wifi.scan" => self.scan_requested = true,
+            // Microphone bring-up (docs/firmware-bringup.md): a diagnostic like the screenshot, so not agent
+            // activity. Over the cable only: a recording is hundreds of lines.
+            "device.mic.record" if self.remote => Self::write_literal(board, "ERROR cable_only\n"),
+            "device.mic.record" => self.start_mic(board, fields),
             // Link self-test: send the received string's length and CRC back to the Mac to check for corrupted serial bytes.
             "device.echo" => {
                 if let Some(data) = string(fields, "data") {
