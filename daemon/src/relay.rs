@@ -2,9 +2,10 @@
 //! `vibebuddy-relay` when neither the cable nor the local network does.
 //!
 //! Once linked, a bridge task turns the Relay's `data` messages into the same NDJSON byte stream the
-//! cable carries, so the serial worker's session loop runs over it unchanged. The bridge also sends
-//! WebSocket pings, gives the link up when the Relay goes quiet, and ends the stream when the box is
-//! taken away.
+//! cable carries, so the serial worker's session loop runs over it unchanged. Firmware that sends
+//! `link.noise` gets a Noise session, and every `data` line after the handshake is sealed (ADR-0015,
+//! [`crate::noise_link`]). The bridge also sends WebSocket pings, gives the link up when the Relay goes
+//! quiet, and ends the stream when the box is taken away.
 
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -22,6 +23,7 @@ use tokio_tungstenite::{Connector, MaybeTlsStream, WebSocketStream};
 use tracing::{debug, info, warn};
 
 use crate::identity::Identity;
+use crate::noise_link::{self, Memory, Session};
 
 /// The Relay protocol version this daemon speaks (docs/relay-protocol.md).
 const PROTOCOL_VERSION: u32 = 1;
@@ -162,6 +164,8 @@ pub struct Wait<'a> {
     pub give_up: &'a (dyn Fn() -> bool + Sync),
     /// Told, once linked, whenever the box goes off or comes back on the Relay (`status` box, or `linked` again).
     pub presence: Arc<dyn Fn(bool) + Send + Sync>,
+    /// Which box has spoken Noise to this computer; None links in the clear unless the box opens a session.
+    pub memory: Option<Memory>,
 }
 
 /// Connects, proves this computer's key, and asks for the box, waiting on the socket while someone else has
@@ -178,13 +182,14 @@ pub async fn link(config: &RelayConfig, box_key: &[u8; 32], wait: Wait<'_>) -> R
         Ok(Ok(connected)) => connected,
     };
     let presence = wait.presence.clone();
+    let memory = wait.memory.clone();
     let result = match tokio::time::timeout(HANDSHAKE_TIMEOUT, handshake(&mut socket, &config.identity, box_key)).await {
         Err(_) => Err(RelayError::Unreachable("handshake timed out".to_owned())),
         Ok(Err(error)) => Err(error),
         Ok(Ok(())) => wait_for_box(&mut socket, wait).await,
     };
     match result {
-        Ok(()) => Ok(bridge(socket, presence)),
+        Ok(()) => Ok(bridge(socket, presence, Noise { identity: config.identity.clone(), box_key: *box_key, memory })),
         Err(error) => {
             close_normally(&mut socket).await;
             Err(error)
@@ -319,16 +324,36 @@ where
     socket.send(Message::text(value.to_string())).await.map_err(|error| RelayError::Unreachable(error.to_string()))
 }
 
+/// What the bridge needs for a session with the box.
+struct Noise {
+    identity: Arc<Identity>,
+    box_key: [u8; 32],
+    memory: Option<Memory>,
+}
+
+/// Where the bridge is with the box's session.
+enum Mode {
+    /// Firmware that doesn't speak Noise: lines go as they are.
+    Clear,
+    /// Waiting for the box's `link.noise`; nothing in the clear is believed or sent.
+    Waiting,
+    Handshaking(Box<noise_link::Handshake>),
+    Sealed(Session),
+}
+
+/// Lines held while a session comes up; past this the oldest go, as on a full cable.
+const HELD_LINES: usize = 64;
+
 /// Runs the linked socket behind a byte stream: lines written to the stream go out as `data`, `data`
-/// from the box comes back as lines. The stream ends when the box is taken away, the Relay closes, or
-/// it goes quiet for [`DEAD_AFTER`].
-fn bridge(socket: Socket, presence: Arc<dyn Fn(bool) + Send + Sync>) -> DuplexStream {
+/// from the box comes back as lines, sealed once the box opens a session. The stream ends when the box
+/// is taken away, the Relay closes, a sealed line doesn't open, or the Relay goes quiet for [`DEAD_AFTER`].
+fn bridge(socket: Socket, presence: Arc<dyn Fn(bool) + Send + Sync>, noise: Noise) -> DuplexStream {
     let (ours, theirs) = tokio::io::duplex(64 * 1024);
-    tokio::spawn(run_bridge(socket, theirs, presence));
+    tokio::spawn(run_bridge(socket, theirs, presence, noise));
     ours
 }
 
-async fn run_bridge<S>(socket: S, stream: DuplexStream, presence: Arc<dyn Fn(bool) + Send + Sync>)
+async fn run_bridge<S>(socket: S, stream: DuplexStream, presence: Arc<dyn Fn(bool) + Send + Sync>, noise: Noise)
 where
     S: futures_util::Stream<Item = Result<Message, tokio_tungstenite::tungstenite::Error>>
         + futures_util::Sink<Message, Error = tokio_tungstenite::tungstenite::Error>
@@ -342,6 +367,11 @@ where
     let mut heard = tokio::time::Instant::now();
     // The Relay links a computer even while the box is away; its first status says whether it is there.
     let mut box_here = true;
+    let knows_noise = || noise.memory.as_ref().is_some_and(|memory| memory.knows(&noise.box_key));
+    let mut mode = if knows_noise() { Mode::Waiting } else { Mode::Clear };
+    let mut held: std::collections::VecDeque<String> = std::collections::VecDeque::new();
+    let hello = serde_json::to_string(&vibebuddy_protocol::Event::named("device.hello")).unwrap_or_default();
+    let data = |line: &str| Message::text(json!({"t": "data", "line": line}).to_string());
     loop {
         tokio::select! {
             message = source.next() => {
@@ -352,21 +382,86 @@ where
                         match value["t"].as_str() {
                             Some("data") => {
                                 let Some(line) = value["line"].as_str() else { continue };
-                                if write.write_all(format!("{line}\n").as_bytes()).await.is_err() {
+                                // The box opens a session whenever a computer links to it, so this also starts
+                                // a new one after the box comes back.
+                                if noise_link::opener_key(line) == Some(noise.box_key) {
+                                    match noise_link::start(&noise.identity, &noise.box_key, b"{}") {
+                                        Ok((handshake, first)) => {
+                                            mode = Mode::Handshaking(Box::new(handshake));
+                                            if sink.send(data(&first)).await.is_err() {
+                                                break;
+                                            }
+                                        }
+                                        Err(error) => {
+                                            warn!(%error, "couldn't start a session with the box");
+                                            break;
+                                        }
+                                    }
+                                    continue;
+                                }
+                                let plain = match std::mem::replace(&mut mode, Mode::Waiting) {
+                                    Mode::Clear => {
+                                        mode = Mode::Clear;
+                                        line.to_owned()
+                                    }
+                                    Mode::Waiting => continue,
+                                    Mode::Handshaking(handshake) => {
+                                        let Ok(mut session) = handshake.finish(line) else {
+                                            warn!("the box didn't prove its key through the Relay");
+                                            break;
+                                        };
+                                        if let Some(memory) = &noise.memory {
+                                            memory.learned(&noise.box_key);
+                                        }
+                                        // A new session is a new start, as on a new cable connection: hello first,
+                                        // then whatever waited for it, less a hello of its own.
+                                        let mut failed = false;
+                                        let waited: Vec<String> = held.drain(..).filter(|line| *line != hello).collect();
+                                        for line in std::iter::once(hello.clone()).chain(waited) {
+                                            let sent = match session.seal(line.as_bytes()) {
+                                                Ok(sealed) => sink.send(data(&sealed)).await.is_ok(),
+                                                Err(_) => false,
+                                            };
+                                            if !sent {
+                                                failed = true;
+                                                break;
+                                            }
+                                        }
+                                        if failed {
+                                            break;
+                                        }
+                                        mode = Mode::Sealed(session);
+                                        continue;
+                                    }
+                                    Mode::Sealed(mut session) => match session.open(line) {
+                                        Ok(plain) => {
+                                            mode = Mode::Sealed(session);
+                                            String::from_utf8_lossy(&plain).into_owned()
+                                        }
+                                        Err(error) => {
+                                            warn!(%error, "ending the session with the box");
+                                            break;
+                                        }
+                                    },
+                                };
+                                if write.write_all(format!("{plain}\n").as_bytes()).await.is_err() {
                                     break;
                                 }
                             }
                             // Linked again while linked: the box reconnected to the Relay (it restarted, say), so
-                            // the session starts over with hello, as on a new cable connection.
+                            // the session starts over with hello, as on a new cable connection. A box that speaks
+                            // Noise opens a new session first, and hello goes out sealed once it is up.
                             Some("linked") => {
                                 if !box_here {
                                     box_here = true;
                                     presence(true);
                                 }
-                                let hello = vibebuddy_protocol::Event::named("device.hello");
-                                let Ok(frame) = serde_json::to_string(&hello) else { continue };
-                                if sink.send(Message::text(json!({"t": "data", "line": frame}).to_string())).await.is_err() {
-                                    break;
+                                if matches!(mode, Mode::Clear) && !knows_noise() {
+                                    if sink.send(data(&hello)).await.is_err() {
+                                        break;
+                                    }
+                                } else {
+                                    mode = Mode::Waiting;
                                 }
                             }
                             Some("unlinked") => {
@@ -401,7 +496,21 @@ where
             line = lines.next_line() => {
                 match line {
                     Ok(Some(line)) => {
-                        if sink.send(Message::text(json!({"t": "data", "line": line}).to_string())).await.is_err() {
+                        let message = match &mut mode {
+                            Mode::Clear => data(&line),
+                            Mode::Sealed(session) => match session.seal(line.as_bytes()) {
+                                Ok(sealed) => data(&sealed),
+                                Err(_) => break,
+                            },
+                            Mode::Waiting | Mode::Handshaking(_) => {
+                                if held.len() == HELD_LINES {
+                                    held.pop_front();
+                                }
+                                held.push_back(line);
+                                continue;
+                            }
+                        };
+                        if sink.send(message).await.is_err() {
                             break;
                         }
                     }
@@ -523,7 +632,7 @@ mod tests {
     async fn link_now(config: &RelayConfig) -> Result<DuplexStream, RelayError> {
         let takeover = AtomicBool::new(false);
         let mut busy = |_: String, _: String| {};
-        link(config, &[5; 32], Wait { takeover: &takeover, busy: &mut busy, give_up: &|| false, presence: Arc::new(|_| {}) }).await
+        link(config, &[5; 32], Wait { takeover: &takeover, busy: &mut busy, give_up: &|| false, presence: Arc::new(|_| {}), memory: None }).await
     }
 
     #[tokio::test]
@@ -552,7 +661,7 @@ mod tests {
         let takeover = AtomicBool::new(false);
         let owners = std::sync::Mutex::new(Vec::new());
         let mut busy = |owner: String, reason: String| owners.lock().unwrap().push((owner, reason));
-        let linked = link(&config, &[5; 32], Wait { takeover: &takeover, busy: &mut busy, give_up: &|| false, presence: Arc::new(|_| {}) }).await;
+        let linked = link(&config, &[5; 32], Wait { takeover: &takeover, busy: &mut busy, give_up: &|| false, presence: Arc::new(|_| {}), memory: None }).await;
         assert!(linked.is_ok());
         assert_eq!(owners.lock().unwrap().as_slice(), [("omarchy".to_owned(), "linked".to_owned())]);
     }
@@ -565,7 +674,7 @@ mod tests {
         let seen = Arc::new(std::sync::Mutex::new(Vec::new()));
         let record = seen.clone();
         let presence: Arc<dyn Fn(bool) + Send + Sync> = Arc::new(move |here| record.lock().unwrap().push(here));
-        let mut stream = link(&config, &[5; 32], Wait { takeover: &takeover, busy: &mut busy, give_up: &|| false, presence }).await.unwrap();
+        let mut stream = link(&config, &[5; 32], Wait { takeover: &takeover, busy: &mut busy, give_up: &|| false, presence, memory: None }).await.unwrap();
         let mut rest = String::new();
         stream.read_to_string(&mut rest).await.unwrap();
         assert_eq!(seen.lock().unwrap().as_slice(), [false, true]);
@@ -576,7 +685,7 @@ mod tests {
         let config = RelayConfig::new(Arc::new(identity()), Some(fake_relay("busy-forever").await), false);
         let takeover = AtomicBool::new(false);
         let mut busy = |_: String, _: String| {};
-        let result = link(&config, &[5; 32], Wait { takeover: &takeover, busy: &mut busy, give_up: &|| true, presence: Arc::new(|_| {}) }).await;
+        let result = link(&config, &[5; 32], Wait { takeover: &takeover, busy: &mut busy, give_up: &|| true, presence: Arc::new(|_| {}), memory: None }).await;
         assert!(matches!(result, Err(RelayError::Unreachable(_))));
     }
 
@@ -639,5 +748,118 @@ mod tests {
     #[test]
     fn the_url_names_the_box() {
         assert_eq!(box_url("wss://relay.korekore.ai/", &[0; 32]), "wss://relay.korekore.ai/v1/boxes/AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA");
+    }
+
+    /// A Relay with a box behind it that speaks Noise, played by the firmware's own code: it opens a session
+    /// when linked, then answers every sealed line with the line in upper case, sealed. What it saw in the clear
+    /// goes to `clear`.
+    async fn noise_relay(computer: [u8; 32], clear: Arc<std::sync::Mutex<Vec<String>>>) -> (String, [u8; 32]) {
+        use vibebuddy_firmware_core::link::Link;
+        use vibebuddy_firmware_core::noise;
+        let mut link = Link::new([1; 32]);
+        link.pair(computer, "test").unwrap();
+        let box_key = link.public_key();
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        tokio::spawn(async move {
+            let (stream, _) = listener.accept().await.unwrap();
+            let mut socket = accept_async(stream).await.unwrap();
+            let say = |value: Value| Message::text(value.to_string());
+            socket.send(say(json!({"t": "challenge", "nonce": "abc"}))).await.unwrap();
+            let _hello = socket.next().await;
+            socket.send(say(json!({"t": "welcome"}))).await.unwrap();
+            let _link = socket.next().await;
+            socket.send(say(json!({"t": "linked"}))).await.unwrap();
+            socket.send(say(json!({"t": "data", "line": noise::opener(&link.public_key())}))).await.unwrap();
+            let mut session = None;
+            while let Some(Ok(message)) = socket.next().await {
+                let Message::Text(text) = message else { continue };
+                let value: Value = serde_json::from_str(&text).unwrap();
+                let Some(line) = value["line"].as_str() else { continue };
+                match &mut session {
+                    // As the firmware does, anything before the handshake is never acted on.
+                    None => match noise::accept(&link, [4; 32], line.as_bytes()) {
+                        Ok(accepted) => {
+                            socket.send(say(json!({"t": "data", "line": accepted.reply}))).await.unwrap();
+                            session = Some((accepted.sealer, accepted.opener));
+                        }
+                        Err(_) => clear.lock().unwrap().push(line.to_owned()),
+                    },
+                    Some((sealer, opener)) => {
+                        let Some(plain) = opener.open(line.as_bytes()) else {
+                            clear.lock().unwrap().push(line.to_owned());
+                            continue;
+                        };
+                        let upper = String::from_utf8(plain).unwrap().to_uppercase();
+                        socket.send(say(json!({"t": "data", "line": sealer.seal(upper.as_bytes()).unwrap()}))).await.unwrap();
+                        if upper.contains("BYE") {
+                            socket.send(say(json!({"t": "unlinked", "reason": "takeover"}))).await.unwrap();
+                        }
+                    }
+                }
+            }
+        });
+        (format!("ws://{address}"), box_key)
+    }
+
+    fn computer_key(identity: &Identity) -> [u8; 32] {
+        URL_SAFE_NO_PAD.decode(identity.public_key()).unwrap().try_into().unwrap()
+    }
+
+    #[tokio::test]
+    async fn a_box_that_speaks_noise_gets_every_line_sealed() {
+        let identity = Arc::new(identity());
+        let clear = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let (url, box_key) = noise_relay(computer_key(&identity), clear.clone()).await;
+        let config = RelayConfig::new(identity, Some(url), false);
+        let dir = std::env::temp_dir().join(format!("vibebuddy-relay-noise-{}", std::process::id()));
+        let memory = Memory::new(&dir);
+        memory.learned(&box_key);
+        let takeover = AtomicBool::new(false);
+        let mut busy = |_: String, _: String| {};
+        let wait = Wait { takeover: &takeover, busy: &mut busy, give_up: &|| false, presence: Arc::new(|_| {}), memory: Some(memory.clone()) };
+        let mut stream = link(&config, &box_key, wait).await.unwrap();
+        // Written before the session is up: held, then sealed after the hello the bridge sends first.
+        stream.write_all(b"{\"version\":1,\"event\":\"bye\"}\n").await.unwrap();
+        let mut received = String::new();
+        stream.read_to_string(&mut received).await.unwrap();
+        assert_eq!(received, "{\"VERSION\":1,\"EVENT\":\"DEVICE.HELLO\"}\n{\"VERSION\":1,\"EVENT\":\"BYE\"}\n");
+        assert!(clear.lock().unwrap().is_empty(), "nothing went in the clear: {:?}", clear.lock().unwrap());
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[tokio::test]
+    async fn a_box_not_yet_known_to_speak_noise_still_gets_a_session_and_is_remembered() {
+        let identity = Arc::new(identity());
+        let (url, box_key) = noise_relay(computer_key(&identity), Arc::new(std::sync::Mutex::new(Vec::new()))).await;
+        let config = RelayConfig::new(identity, Some(url), false);
+        let dir = std::env::temp_dir().join(format!("vibebuddy-relay-learn-{}", std::process::id()));
+        let memory = Memory::new(&dir);
+        let takeover = AtomicBool::new(false);
+        let mut busy = |_: String, _: String| {};
+        let wait = Wait { takeover: &takeover, busy: &mut busy, give_up: &|| false, presence: Arc::new(|_| {}), memory: Some(memory.clone()) };
+        let stream = link(&config, &box_key, wait).await.unwrap();
+        let mut lines = tokio::io::BufReader::new(stream).lines();
+        assert_eq!(lines.next_line().await.unwrap().unwrap(), "{\"VERSION\":1,\"EVENT\":\"DEVICE.HELLO\"}");
+        assert!(memory.knows(&box_key), "never in the clear again");
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[tokio::test]
+    async fn a_box_that_spoke_noise_before_is_never_believed_in_the_clear() {
+        // An old-style Relay echoing in the clear, as one that hid the box's link.noise would.
+        let config = RelayConfig::new(Arc::new(identity()), Some(fake_relay("linked").await), false);
+        let dir = std::env::temp_dir().join(format!("vibebuddy-relay-downgrade-{}", std::process::id()));
+        let memory = Memory::new(&dir);
+        memory.learned(&[5; 32]);
+        let takeover = AtomicBool::new(false);
+        let mut busy = |_: String, _: String| {};
+        let wait = Wait { takeover: &takeover, busy: &mut busy, give_up: &|| false, presence: Arc::new(|_| {}), memory: Some(memory) };
+        let mut stream = link(&config, &[5; 32], wait).await.unwrap();
+        stream.write_all(b"{\"version\":1,\"event\":\"device.hello\"}\n").await.unwrap();
+        let mut received = String::new();
+        let read = tokio::time::timeout(Duration::from_millis(500), stream.read_to_string(&mut received)).await;
+        assert!(read.is_err() || received.is_empty(), "nothing in the clear came through: {received}");
+        let _ = std::fs::remove_dir_all(dir);
     }
 }

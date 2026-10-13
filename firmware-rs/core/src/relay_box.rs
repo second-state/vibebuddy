@@ -3,8 +3,9 @@
 //! mode each move text frames; this decides what is in them.
 //!
 //! The box signs the challenge with its key, then keeps the Relay told who it is paired with and
-//! what it is linked to on its own (`linked` via usb or lan, or `unlinked`), and carries a computer's
-//! lines once the Relay links one to it.
+//! what it is linked to on its own (`linked` via usb or lan, or `unlinked`). When the Relay links a
+//! computer to it, the box sends `link.noise` and answers the computer's handshake (ADR-0015); after
+//! that every `data` line either way is sealed, and only those carry the computer's lines.
 
 use alloc::string::String;
 use alloc::vec::Vec;
@@ -13,6 +14,7 @@ use serde_json::{Value, json};
 
 use crate::firmware::{Board, Firmware, LocalLink};
 use crate::link;
+use crate::noise::{self, Opener};
 
 /// What the box last told the Relay, so it says only what changed.
 #[derive(Default)]
@@ -20,8 +22,10 @@ pub struct RelayBox {
     welcomed: bool,
     paired: Option<Vec<(String, String)>>,
     local: Option<LocalLink>,
-    /// A computer is linked through the Relay: the box's output goes to it.
-    peer: bool,
+    /// The computer the Relay linked to the box, waiting for or holding a session.
+    computer: Option<[u8; 32]>,
+    /// The session with it: the box's output goes to it, sealed by the board.
+    opener: Option<Opener>,
 }
 
 /// The Relay protocol version the box speaks (docs/relay-protocol.md).
@@ -55,14 +59,19 @@ fn text(value: Value) -> String {
     serde_json::to_string(&value).unwrap_or_default()
 }
 
+/// One sealed line for the computer linked through the Relay, as a `data` message.
+pub fn data(line: &str) -> String {
+    text(json!({"t": "data", "line": line}))
+}
+
 impl RelayBox {
     pub fn new() -> Self {
         Self::default()
     }
 
-    /// A computer is linked through the Relay.
+    /// A computer is linked through the Relay, in a session.
     pub fn has_peer(&self) -> bool {
-        self.peer
+        self.opener.is_some()
     }
 
     /// A new socket's challenge: the hello to send, or None without a key.
@@ -74,32 +83,73 @@ impl RelayBox {
         Some(text(json!({"t": "hello", "role": "box", "key": box_id, "sig": link::encode(&sig), "v": PROTOCOL_VERSION})))
     }
 
-    /// A message from the Relay other than the challenge.
-    pub fn message<B: Board>(&mut self, firmware: &mut Firmware, board: &mut B, value: &Value) {
+    /// A message from the Relay other than the challenge; returns what to send the Relay at once, before
+    /// any of the box's output.
+    pub fn message<B: Board>(&mut self, firmware: &mut Firmware, board: &mut B, value: &Value) -> Vec<String> {
+        let mut out = Vec::new();
         match value["t"].as_str() {
             Some("welcome") => {
                 self.welcomed = true;
                 firmware.set_relay_up(true);
             }
+            // A computer linked, or linked again: a new session either way.
             Some("linked") => {
                 let key = value["computer"].as_str().and_then(link::decode_key);
                 firmware.relay_linked(board.now_ms(), key);
-                self.peer = key.is_some();
-            }
-            Some("unlinked") => self.gone(firmware, board.now_ms()),
-            Some("data") => {
-                if let Some(line) = value["line"].as_str() {
-                    firmware.relay_line(board, line.as_bytes());
+                self.end_session(board);
+                self.computer = key;
+                if key.is_some() {
+                    out.extend(self.opener_line(firmware));
                 }
             }
+            // Only the computer's link ended, and its session with it; the socket stays up and the box keeps reporting.
+            Some("unlinked") => {
+                firmware.relay_linked(board.now_ms(), None);
+                self.end_session(board);
+                self.computer = None;
+            }
+            Some("data") => {
+                let Some(line) = value["line"].as_str() else { return out };
+                if let Some(opener) = &mut self.opener {
+                    match opener.open(line.as_bytes()) {
+                        Some(line) => firmware.relay_line(board, &line),
+                        // Tampered, replayed or lost: start over, and tell the computer so.
+                        None => {
+                            self.end_session(board);
+                            out.extend(self.opener_line(firmware));
+                        }
+                    }
+                } else if let (Some(computer), Some(link), Some(ephemeral)) = (self.computer, firmware.link(), board.random())
+                    && let Ok(accepted) = noise::accept(link, ephemeral, line.as_bytes())
+                    // The session must be with the computer the Relay linked, not just any paired one.
+                    && accepted.computer == computer
+                {
+                    out.push(data(&accepted.reply));
+                    self.opener = Some(accepted.opener);
+                    board.relay_peer(Some(accepted.sealer));
+                }
+                // Anything else in the clear is never acted on.
+            }
             _ => {}
+        }
+        out
+    }
+
+    fn opener_line(&self, firmware: &Firmware) -> Option<String> {
+        firmware.link().map(|link| data(&noise::opener(&link.public_key())))
+    }
+
+    fn end_session<B: Board>(&mut self, board: &mut B) {
+        if self.opener.take().is_some() {
+            board.relay_peer(None);
         }
     }
 
     /// The socket closed: nobody is linked through it, and everything is said again on the next welcome.
-    pub fn gone(&mut self, firmware: &mut Firmware, now: u32) {
-        firmware.relay_linked(now, None);
+    pub fn gone<B: Board>(&mut self, firmware: &mut Firmware, board: &mut B) {
+        firmware.relay_linked(board.now_ms(), None);
         firmware.set_relay_up(false);
+        self.end_session(board);
         *self = Self::new();
     }
 
@@ -143,28 +193,5 @@ mod tests {
         for bad in ["ws://relay.korekore.ai", "wss://", "wss://host:8443", "wss://host/v1", "https://host", "wss://-host", "wss://a b"] {
             assert_eq!(url_host(bad), None, "{bad}");
         }
-    }
-}
-
-/// The box's output on its way to a computer linked through the Relay: one data message per whole line.
-/// Kept apart from [`RelayBox`] because the board owns it: the firmware writes through the board.
-#[derive(Default)]
-pub struct RelayLines {
-    partial: Vec<u8>,
-}
-
-impl RelayLines {
-    pub fn lines(&mut self, bytes: &[u8]) -> Vec<String> {
-        self.partial.extend_from_slice(bytes);
-        let mut out = Vec::new();
-        while let Some(end) = self.partial.iter().position(|&byte| byte == b'\n') {
-            let line: Vec<u8> = self.partial.drain(..=end).collect();
-            out.push(text(json!({"t": "data", "line": String::from_utf8_lossy(&line[..end])})));
-        }
-        out
-    }
-
-    pub fn clear(&mut self) {
-        self.partial.clear();
     }
 }

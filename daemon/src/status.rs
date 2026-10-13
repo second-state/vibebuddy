@@ -54,7 +54,8 @@ pub struct DeviceState {
     pub wifi_network: Option<String>,
     /// The address the box got on that network.
     pub wifi_address: Option<String>,
-    /// Why the box couldn't join it, from its last `WIFI FAILED <why>`; None once it joins or the network changes.
+    /// Why the box couldn't join it, from its last `WIFI FAILED <why>` (see [`wifi_failure`]); None once it joins,
+    /// the network changes or the user joins again.
     pub wifi_error: Option<String>,
     /// The Relay this computer uses, `wss://host`; None without a key. Set by the daemon, not the box.
     pub relay_server: Option<String>,
@@ -134,6 +135,10 @@ impl DeviceState {
             DeviceMessage::ConnectedNetwork { address } => {
                 self.apply(&DeviceMessage::Connected { port: address.clone(), bridge: false, usb_serial: None });
                 self.network = true;
+                // Reached over Wi-Fi, so that is its address there, even from firmware that doesn't repeat it in answer to hello.
+                if let Ok(socket) = address.parse::<std::net::SocketAddr>() {
+                    self.wifi_address = Some(socket.ip().to_string());
+                }
             }
             DeviceMessage::ConnectedRelay { url } => {
                 self.apply(&DeviceMessage::Connected { port: url.clone(), bridge: false, usb_serial: None });
@@ -198,7 +203,7 @@ impl DeviceState {
                     // Another network: the address and any failure were the old one's. The same name comes again
                     // with every hello and changes nothing.
                     let network = network.trim();
-                    if self.wifi_network.as_deref() != Some(network) {
+                    if self.wifi_network.as_deref().is_some_and(|old| old != network) {
                         self.wifi_address = None;
                         self.wifi_error = None;
                     }
@@ -208,7 +213,7 @@ impl DeviceState {
                     self.wifi_address = None;
                     self.wifi_error = None;
                 } else if let Some(why) = line.strip_prefix("WIFI FAILED ") {
-                    self.wifi_error = Some(why.trim().to_owned());
+                    self.wifi_error = Some(wifi_failure(why.trim()));
                 } else if line.trim() == "WIFI CONNECTED" {
                     self.wifi_error = None;
                 } else if line.trim() == "WIFI DISCONNECTED" {
@@ -322,6 +327,22 @@ pub struct Status {
     pub operation: Option<Operation>,
     pub config: Config,
     pub updates: crate::updates::UpdateStatus,
+}
+
+/// What the apps explain for `WIFI FAILED <why>`: `wrong_password` (the network turned the box away, which a
+/// wrong password causes), `not_found`, `security` (no WPA2 or open network by that name), or the box's own `password`
+/// / `ssid` (unusable as given). Anything else is passed on as it came. Firmware up to 0.5.0 sends the driver's whole
+/// error, `Failed(DisconnectedInfo { .., reason: AuthenticationExpired, .. })`; later firmware just the reason.
+pub fn wifi_failure(why: &str) -> String {
+    let reason = why.split_once("reason: ").map_or(why, |(_, rest)| rest.split([',', ' ', '}']).next().unwrap_or(rest));
+    match reason {
+        "AuthenticationExpired" | "AuthenticationFailed" | "FourWayHandshakeTimeout" | "HandshakeTimeout" | "MicFailure"
+        | "_802_1xAuthenticationFailed" => "wrong_password",
+        "NoAccessPointFound" | "NoAccessPointFoundInRssiThreshold" | "BeaconTimeout" => "not_found",
+        "NoAccessPointFoundWithCompatibleSecurity" | "NoAccessPointFoundInAuthmodeThreshold" => "security",
+        _ => why,
+    }
+    .to_owned()
 }
 
 #[cfg(test)]
@@ -457,6 +478,32 @@ mod tests {
         state.apply(&line("WIFI ADDRESS 10.0.0.7"));
         state.apply(&line("WIFI DISCONNECTED"));
         assert_eq!(state.wifi_address, None);
+    }
+
+    #[test]
+    fn a_box_reached_over_the_local_network_is_joined_there() {
+        let mut state = DeviceState::default();
+        state.apply(&DeviceMessage::ConnectedNetwork { address: "192.168.1.160:7340".to_owned() });
+        state.apply(&line("WIFI NETWORK Home"));
+        assert_eq!(state.wifi_address.as_deref(), Some("192.168.1.160"));
+    }
+
+    #[test]
+    fn a_failed_join_says_what_kind_of_failure() {
+        let mut state = DeviceState::default();
+        state.apply(&line("WIFI NETWORK Home"));
+        state.apply(&line(r#"WIFI FAILED Failed(DisconnectedInfo { ssid: "Home", bssid: [136, 220, 151, 19, 86, 27], reason: AuthenticationExpired, rssi: -59 })"#));
+        assert_eq!(state.wifi_error.as_deref(), Some("wrong_password"), "firmware 0.5.0's whole driver error");
+        state.apply(&line("WIFI FAILED NoAccessPointFound"));
+        assert_eq!(state.wifi_error.as_deref(), Some("not_found"));
+        state.apply(&line("WIFI FAILED NoAccessPointFoundWithCompatibleSecurity"));
+        assert_eq!(state.wifi_error.as_deref(), Some("security"));
+        state.apply(&line("WIFI FAILED FourWayHandshakeTimeout"));
+        assert_eq!(state.wifi_error.as_deref(), Some("wrong_password"));
+        state.apply(&line("WIFI FAILED ssid"));
+        assert_eq!(state.wifi_error.as_deref(), Some("ssid"));
+        state.apply(&line("WIFI FAILED AssociationTooMany"));
+        assert_eq!(state.wifi_error.as_deref(), Some("AssociationTooMany"), "passed on as it came");
     }
 
     #[test]

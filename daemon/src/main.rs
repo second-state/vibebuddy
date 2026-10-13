@@ -7,6 +7,7 @@ mod codex_hooks;
 mod config;
 mod identity;
 mod lan;
+mod noise_link;
 mod relay;
 mod resident;
 mod link_alert;
@@ -97,6 +98,8 @@ struct AppState {
     /// The resident session voice commands go to (ADR-0015); None without a state directory, and in tests
     /// unless one sets it. Present even when switched off, so its hook events are still recognised.
     resident: Option<Arc<resident::Resident>>,
+    /// The box on the cable said `LINK NOISE` since its last `BOX KEY` (ADR-0015).
+    noise_seen: Arc<std::sync::atomic::AtomicBool>,
 }
 
 impl AppState {
@@ -131,6 +134,7 @@ impl AppState {
             updates: Arc::new(Mutex::new(Updates::new(None, None))),
             check_updates: Arc::new(Notify::new()),
             resident: None,
+            noise_seen: Arc::new(std::sync::atomic::AtomicBool::new(false)),
         }
     }
 
@@ -215,6 +219,7 @@ async fn main() {
             identity: identity.clone(),
             state_dir,
             fixed_address: std::env::var("VIBEBUDDY_LAN_ADDR").ok(),
+            discovery: lan::Discovery::default(),
         });
         // VIBEBUDDY_RELAY_URL points at another Relay, such as `ws://127.0.0.1:8787` under `wrangler dev`.
         let relay = relay::RelayConfig::new(identity.clone(), std::env::var("VIBEBUDDY_RELAY_URL").ok(), relay::release());
@@ -321,6 +326,24 @@ async fn publish_device_message(state: &AppState, message: DeviceMessage) {
     // (ADR-0012). Pairing again is harmless: the box only writes flash when something changed.
     // Over the network the box refuses pairing, and what it says there isn't news about the cable.
     let on_cable = !state.device.lock().await.network;
+    // The box says `LINK NOISE` just before `BOX KEY` when it links off the cable only through a Noise session
+    // (ADR-0015); from then on this computer never links to it in the clear. Only the cable is believed, both ways.
+    if let DeviceMessage::Line(line) = &message
+        && on_cable
+    {
+        use std::sync::atomic::Ordering;
+        if line.trim() == "LINK NOISE" {
+            state.noise_seen.store(true, Ordering::Relaxed);
+        } else if let Some(key) = line.strip_prefix(status::BOX_KEY_PREFIX)
+            && let Some(dir) = &state.state_dir
+        {
+            let memory = noise_link::Memory::new(dir);
+            match lan::decode_key(key.trim()) {
+                Some(key) if state.noise_seen.swap(false, Ordering::Relaxed) => memory.learned(&key),
+                _ => memory.forget(),
+            }
+        }
+    }
     if let DeviceMessage::Line(line) = &message
         && on_cable
         && let Some(key) = line.strip_prefix(status::BOX_KEY_PREFIX)
@@ -768,7 +791,13 @@ async fn post_wifi(State(state): State<AppState>, Json(request): Json<WifiReques
     let mut event = device_command("device.wifi.set");
     event.extra.insert("ssid".to_owned(), request.ssid.into());
     event.extra.insert("password".to_owned(), request.password.into());
-    post_event(State(state), Json(event)).await
+    let response = post_event(State(state.clone()), Json(event)).await;
+    if response.1.accepted {
+        // The last failure was the old password's: this try says how it went once the box has tried.
+        state.device.lock().await.wifi_error = None;
+        state.notify_status();
+    }
+    response
 }
 
 async fn post_wifi_forget(State(state): State<AppState>) -> (StatusCode, Json<ApiResponse>) {
@@ -1457,8 +1486,11 @@ mod tests {
         assert_eq!(status, StatusCode::CONFLICT, "firmware that can't pair would show it as agent activity");
 
         publish_device_message(&state, DeviceMessage::Line("BOX KEY 1Uc4Vh8Aby1bV4I08TphnmbwAm0AzHkw5RelizUGdRE".to_owned())).await;
+        publish_device_message(&state, DeviceMessage::Line("WIFI NETWORK Home".to_owned())).await;
+        publish_device_message(&state, DeviceMessage::Line("WIFI FAILED FourWayHandshakeTimeout".to_owned())).await;
         let (status, _) = post_wifi(State(state.clone()), request()).await;
         assert_eq!(status, StatusCode::ACCEPTED);
+        assert_eq!(state.device.lock().await.wifi_error, None, "joining again forgets the old password's failure");
         let set = transport.events().into_iter().find(|event| event.event == "device.wifi.set").expect("sent");
         assert_eq!((set.extra["ssid"].as_str(), set.extra["password"].as_str()), (Some("Home"), Some("secret")));
 

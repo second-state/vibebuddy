@@ -55,7 +55,7 @@ A `v` that isn't an integer gets `{"t":"error","code":"auth"}` and close 4001. A
 - `{"t":"unlinked"}`: that link ended. If that computer wasn't paired (`computer: null`), the Relay frees the box at once, since such a computer can't come back through it; a paired one keeps the 10-minute grace.
 
 When the box's socket closes for any reason (a close, an error or silence), the Relay ends a USB or LAN link the box had reported as if `unlinked` had come: a paired computer gets the 10-minute grace, an unpaired one is cleared at once, and computers get `status` with `box: false` and the owner no longer linked. The box says what it is linked to again after every welcome, so a box that reconnects while still on the cable claims it again straight away.
-- `{"t":"data","line":"…"}`: one VibeBuddy Protocol line for the computer linked through the Relay.
+- `{"t":"data","line":"…"}`: one line for the computer linked through the Relay. Inside a Noise session (below) it is sealed.
 
 The Relay sends the box `{"t":"linked","computer":"<key>","name":"…"}` when a computer links through it (also right after welcome, if one is linked), `{"t":"unlinked","reason":…}` when that link ends, and `data` from that computer. Reasons for `unlinked` to the box: `gone` (the computer's socket closed or was dropped), `released` (it sent `unlink`), `unpaired`.
 
@@ -73,6 +73,14 @@ A linked computer gets `{"t":"unlinked","reason":"takeover"|"moved"|"unpaired"}`
 A computer linked through the Relay must send something at least every 75 s; the daemon's `device.heartbeat` every 5 s covers it. One that stays silent longer, such as a laptop gone to sleep, counts as gone: the grace period starts, the box gets `unlinked` with reason `gone`, and the socket is closed with 4004 `silent`. The daemon treats that as any other drop: it reconnects and asks to link again, which succeeds unless another computer linked in the meantime.
 
 When the box reconnects to the Relay while a computer is linked through it, that computer gets `{"t":"linked"}` again. It means the box came back, perhaps after a restart: the computer starts its session over, as on a new cable connection, by sending `device.hello`.
+
+## The session inside the Relay
+
+The Relay carries a computer's lines but can't read or forge them (ADR-0015). Whenever the Relay links a computer to the box (`linked`, also after either reconnects), the box sends `{"version":1,"event":"link.noise","box":"<box key>"}` as `data`, and the two run the same Noise handshake as over the local network ([`protocol.md`](protocol.md), "Local network link"), each handshake message one `data` line. The box accepts a session only from the computer the Relay linked. After it every `data` line either way is one sealed line: sealing adds a 16-byte tag and base64url a third, so the box's longest line (a screenshot line under 2 KB) is under 2.8 KB, well within the 8 KiB limit. The box acts on nothing in the clear; a line that doesn't open makes it drop the session and send `link.noise` again, and makes the daemon end the link and reconnect.
+
+The daemon starts a session whenever `link.noise` arrives and holds what it would send until the session is up, then sends `device.hello` first. Firmware before ADR-0015 never sends `link.noise`; the daemon talks to it in the clear, unless the box has spoken Noise to it before (`box-noise`, see "Local network link"), and then it waits for `link.noise` and believes nothing in the clear.
+
+The Relay itself is unchanged: `data` was always forwarded without being read.
 
 ## The daemon
 

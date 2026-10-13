@@ -16,6 +16,9 @@ fast-clock = []
 # The box's pairing key (link.rs). No default features: no std, no OS randomness; the seed comes from the device.
 ed25519-dalek = { version = "2", default-features = false }
 libm = "0.2"
+# Noise sessions on links off the cable (noise.rs, ADR-0015): no std and no getrandom; the device supplies the randomness.
+clatter = { version = "2.3", default-features = false, features = ["use-25519", "use-chacha20poly1305", "use-sha"] }
+rand_core = { version = "0.6", default-features = false }
 serde_json = { version = "1", default-features = false, features = ["alloc"] }
 vibebuddy-protocol = { path = "../../protocol", default-features = false }
 

@@ -74,6 +74,11 @@ impl Link {
         SigningKey::from_bytes(&self.seed).sign(message).to_bytes()
     }
 
+    /// The box's key as an X25519 secret for Noise sessions (ADR-0015): the scalar behind its Ed25519 key.
+    pub fn noise_secret(&self) -> [u8; 32] {
+        SigningKey::from_bytes(&self.seed).to_scalar_bytes()
+    }
+
     pub fn is_paired(&self, key: &[u8; 32]) -> bool {
         self.paired.iter().any(|paired| &paired.key == key)
     }
@@ -280,6 +285,28 @@ pub fn decode_key(text: &str) -> Option<[u8; 32]> {
     decode(text)
 }
 
+/// An Ed25519 public key as the X25519 key Noise uses (ADR-0015); None if it isn't a valid key.
+pub fn noise_public(key: &[u8; 32]) -> Option<[u8; 32]> {
+    VerifyingKey::from_bytes(key).ok().map(|key| key.to_montgomery().to_bytes())
+}
+
+/// Decodes canonical unpadded base64url of any length.
+pub fn decode_vec(text: &str) -> Option<Vec<u8>> {
+    if text.len() % 4 == 1 {
+        return None;
+    }
+    let mut out = Vec::with_capacity(text.len() / 4 * 3 + 2);
+    for chunk in text.as_bytes().chunks(4) {
+        let piece = core::str::from_utf8(chunk).ok()?;
+        match chunk.len() {
+            4 => out.extend_from_slice(&decode::<3>(piece)?),
+            3 => out.extend_from_slice(&decode::<2>(piece)?),
+            _ => out.extend_from_slice(&decode::<1>(piece)?),
+        }
+    }
+    Some(out)
+}
+
 /// Checks `signature` by `key` over `message`.
 pub fn verify(key: &[u8; 32], message: &[u8], signature: &[u8; 64]) -> bool {
     VerifyingKey::from_bytes(key).is_ok_and(|key| key.verify_strict(message, &Signature::from_bytes(signature)).is_ok())
@@ -304,6 +331,17 @@ mod tests {
         assert!(text.bytes().all(|byte| byte.is_ascii_alphanumeric() || byte == b'-' || byte == b'_'));
         assert_eq!(decode_key(&text), Some(key));
         assert_eq!(encode_key(&[0; 32]), "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA");
+    }
+
+    #[test]
+    fn any_length_decodes_from_base64url() {
+        for length in 0..8 {
+            let bytes: Vec<u8> = (0..length).map(|index| (index * 53 + 7) as u8).collect();
+            assert_eq!(decode_vec(&encode(&bytes)), Some(bytes), "{length}");
+        }
+        assert_eq!(decode_vec("A"), None);
+        assert_eq!(decode_vec("AB"), None, "spare bits set");
+        assert_eq!(decode_vec("{\"x"), None);
     }
 
     #[test]

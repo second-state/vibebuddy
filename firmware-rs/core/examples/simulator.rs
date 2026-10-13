@@ -20,7 +20,8 @@ use vibebuddy_firmware_core::canvas::FRAME_BYTES;
 use vibebuddy_firmware_core::display::Screen;
 use vibebuddy_firmware_core::firmware::{AudioStatus, Board, Firmware, FrameAction, VolumeError};
 use vibebuddy_firmware_core::link;
-use vibebuddy_firmware_core::relay_box::{RelayBox, RelayLines};
+use vibebuddy_firmware_core::noise::{SealedLines, Sealer};
+use vibebuddy_firmware_core::relay_box::{self, RelayBox};
 use vibebuddy_firmware_core::storage::{Flash, FlashError};
 
 struct MemoryFlash(Vec<u8>);
@@ -51,11 +52,11 @@ struct SimulatedBoard {
     out: std::io::Stdout,
     /// Network connections by number, and the one linked.
     conns: HashMap<u32, TcpStream>,
-    peer: Option<u32>,
-    /// Messages for the Relay thread, and whether a computer is linked through it.
+    /// The connection linked, and its session's sealer for the box's output.
+    peer: Option<(u32, SealedLines)>,
+    /// Messages for the Relay thread, and the session with a computer linked through it.
     relay: Option<mpsc::Sender<String>>,
-    relay_peer: bool,
-    relay_lines: RelayLines,
+    relay_peer: Option<SealedLines>,
 }
 
 /// What the main loop hears from the stdin and network threads.
@@ -89,14 +90,18 @@ impl Board for SimulatedBoard {
     fn write(&mut self, bytes: &[u8]) {
         let _ = self.out.write_all(bytes);
         let _ = self.out.flush();
-        if let Some(stream) = self.peer.and_then(|conn| self.conns.get_mut(&conn)) {
-            let _ = stream.write_all(bytes);
+        if let Some((conn, lines)) = &mut self.peer
+            && let Some(stream) = self.conns.get_mut(conn)
+        {
+            lines.lines(bytes, |_| true, |line| {
+                let _ = stream.write_all(format!("{line}\n").as_bytes());
+            });
         }
         // Through the Relay, every line goes as one data message.
-        if self.relay_peer && let Some(relay) = &self.relay {
-            for message in self.relay_lines.lines(bytes) {
-                let _ = relay.send(message);
-            }
+        if let (Some(lines), Some(relay)) = (&mut self.relay_peer, &self.relay) {
+            lines.lines(bytes, |_| true, |line| {
+                let _ = relay.send(relay_box::data(line));
+            });
         }
     }
 
@@ -110,8 +115,24 @@ impl Board for SimulatedBoard {
             let _ = stream.shutdown(std::net::Shutdown::Both);
         }
     }
-    fn lan_peer(&mut self, conn: Option<u32>) {
-        self.peer = conn;
+    fn lan_peer(&mut self, peer: Option<(u32, Sealer)>) {
+        self.peer = peer.map(|(conn, sealer)| (conn, SealedLines::new(sealer)));
+    }
+    fn lan_peer_send(&mut self, line: &[u8]) {
+        if let Some((conn, lines)) = &mut self.peer
+            && let (Some(stream), Some(line)) = (self.conns.get_mut(conn), lines.seal(line))
+        {
+            let _ = stream.write_all(format!("{line}\n").as_bytes());
+        }
+    }
+    fn relay_peer(&mut self, sealer: Option<Sealer>) {
+        self.relay_peer = sealer.map(SealedLines::new);
+    }
+    // Not secret: the simulator's key is fixed anyway. Only fresh enough for each session's ephemeral key.
+    fn random(&mut self) -> Option<[u8; 32]> {
+        use std::hash::{BuildHasher, RandomState};
+        let state = RandomState::new();
+        Some(std::array::from_fn(|index| state.hash_one(index) as u8))
     }
     fn flash(&mut self) -> &mut dyn Flash {
         &mut self.flash
@@ -281,8 +302,7 @@ fn main() {
         conns: HashMap::new(),
         peer: None,
         relay: None,
-        relay_peer: false,
-        relay_lines: RelayLines::default(),
+        relay_peer: None,
     };
     let build = std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/../device/build/build.txt")).unwrap_or_else(|_| "simulator".to_owned());
     let mut firmware = Firmware::new(1, board.now_ms(), build.trim().as_bytes(), "0.0.0");
@@ -299,9 +319,8 @@ fn main() {
                 Input::Cable(bytes) => firmware.receive(&mut board, &bytes),
                 Input::Opened(conn, stream) => {
                     board.conns.insert(conn, stream);
-                    // Not secret here: the simulator's key is fixed anyway.
-                    let nonce: [u8; 32] = std::array::from_fn(|index| (board.now_ms() as usize + index * 31 + conn as usize) as u8);
-                    firmware.lan_opened(&mut board, conn, nonce);
+                    let ephemeral = board.random().unwrap_or_default();
+                    firmware.lan_opened(&mut board, conn, ephemeral);
                 }
                 Input::Received(conn, bytes) => firmware.lan_received(&mut board, conn, &bytes),
                 Input::Closed(conn) => {
@@ -314,14 +333,13 @@ fn main() {
                     }
                 }
                 Input::RelayMessage(value) => {
-                    relay_box.message(&mut firmware, &mut board, &value);
-                    board.relay_peer = relay_box.has_peer();
+                    for message in relay_box.message(&mut firmware, &mut board, &value) {
+                        if let Some(relay) = &board.relay {
+                            let _ = relay.send(message);
+                        }
+                    }
                 }
-                Input::RelayGone => {
-                    relay_box.gone(&mut firmware, board.now_ms());
-                    board.relay_peer = false;
-                    board.relay_lines.clear();
-                }
+                Input::RelayGone => relay_box.gone(&mut firmware, &mut board),
             }
         }
         firmware.poll(&mut board);

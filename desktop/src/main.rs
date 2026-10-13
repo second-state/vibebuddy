@@ -1488,9 +1488,10 @@ impl App {
             // After Join the fields fold away and this says how it's going: joining, joined, or why not.
             let state = device.wifi_network.as_ref().map(|_| {
                 let state = match (&device.wifi_error, &device.wifi_address) {
-                    (Some(why), _) => text(tr("Couldn't join (%@). Check the network name and password, then join again.", &[why])).style(text::danger),
+                    (Some(why), _) => text(wifi_failure(why)).style(text::danger),
                     (None, Some(address)) => text(tr("Joined · %@", &[address])).style(text::success),
-                    (None, None) => text(tr("Joining…", &[])),
+                    // A wrong password takes the network 10 to 15 s to turn down.
+                    (None, None) => text(tr("Joining… This can take up to 15 seconds.", &[])),
                 };
                 row![text(tr("Status", &[])).width(140), state].spacing(12)
             });
@@ -1940,6 +1941,18 @@ fn run_instance() -> impl futures::Stream<Item = Message> {
             let _ = output.send(Message::OpenSettings).await;
         }
     })
+}
+
+/// What `device.wifi_error` means (docs/protocol.md "Wi-Fi network").
+fn wifi_failure(why: &str) -> String {
+    match why {
+        "wrong_password" => tr("The network turned the box away; the password is probably wrong. Check it, then join again.", &[]),
+        "not_found" => tr("The box can't find this network. It only joins 2.4 GHz Wi-Fi: check the name, and that the box is in range.", &[]),
+        "security" => tr("The box can't join this network's kind of security. It joins WPA2 and open networks.", &[]),
+        "password" => tr("The password must be 8 to 63 characters.", &[]),
+        "ssid" => tr("The network name is too long: 32 bytes at most.", &[]),
+        _ => tr("Couldn't join (%@). Check the network name and password, then join again.", &[&why]),
+    }
 }
 
 #[cfg(test)]

@@ -23,6 +23,7 @@ use crate::text;
 use crate::voice_pack::crc32;
 use crate::lines::LinePicker;
 use crate::lan::{Conn, Lan, Output as LanOutput};
+use crate::noise::Sealer;
 use crate::link::{self, Link, LinkStore, PairError, Wifi};
 use crate::look::Look;
 use crate::voices::{Pick, Voices, VoiceError};
@@ -88,8 +89,14 @@ pub trait Board: Screen {
     /// Writes a line to one network connection; the device layer owns the sockets ([`crate::lan`]).
     fn lan_send(&mut self, _conn: Conn, _bytes: &[u8]) {}
     fn lan_close(&mut self, _conn: Conn) {}
-    /// From now on [`Board::write`] also goes to this connection, the computer linked over the network.
-    fn lan_peer(&mut self, _conn: Option<Conn>) {}
+    /// From now on [`Board::write`] also goes to this connection, the computer linked over the network, each
+    /// line sealed with this sealer ([`crate::noise::SealedLines`]).
+    fn lan_peer(&mut self, _peer: Option<(Conn, Sealer)>) {}
+    /// Seals one line for the computer linked over the network and writes it to its connection only.
+    fn lan_peer_send(&mut self, _line: &[u8]) {}
+    /// From now on [`Board::write`] also goes to the computer linked through the Relay, each line sealed with
+    /// this sealer and sent as `data`; None stops it.
+    fn relay_peer(&mut self, _sealer: Option<Sealer>) {}
     /// The computer linked over the network or the Relay can take `bytes` more right now without any being
     /// dropped; true when none is linked. A screenshot waits on it rather than lose half a line.
     fn peer_can_take(&self, _bytes: usize) -> bool {
@@ -135,6 +142,8 @@ pub struct Firmware {
     relay_changed: bool,
     /// The box is on its Wi-Fi network, as the device layer reports.
     wifi_joined: bool,
+    /// The address the box has on Wi-Fi while joined, repeated in answer to hello.
+    wifi_address: Option<alloc::string::String>,
     /// The Relay has welcomed the box on the socket that is open now.
     relay_up: bool,
     /// The computer on the cable asked which networks the box can hear.
@@ -259,6 +268,7 @@ impl Firmware {
             wifi_changed: false,
             relay_changed: false,
             wifi_joined: false,
+            wifi_address: None,
             relay_up: false,
             scan_requested: false,
             cable_key: None,
@@ -406,13 +416,13 @@ impl Firmware {
     }
 
     /// Called once per main loop pass: link-loss detection, delayed return to idle, keys, pomodoro, leisure, animation.
-    /// A new network connection; `nonce` must be fresh randomness.
-    pub fn lan_opened<B: Board>(&mut self, board: &mut B, conn: Conn, nonce: [u8; 32]) {
+    /// A new network connection; `ephemeral` must be fresh randomness, the box's key for this session.
+    pub fn lan_opened<B: Board>(&mut self, board: &mut B, conn: Conn, ephemeral: [u8; 32]) {
         let Some((_, link)) = &self.link else {
             // A box with no key can't prove itself or check anyone.
             return board.lan_close(conn);
         };
-        let outputs = self.lan.opened(link, conn, nonce, board.now_ms());
+        let outputs = self.lan.opened(link, conn, ephemeral, board.now_ms());
         self.apply_lan(board, outputs);
     }
 
@@ -472,6 +482,15 @@ impl Firmware {
     /// The device layer joined the Wi-Fi network or lost it; shown in the menu's NETWORK view.
     pub fn set_wifi_joined(&mut self, joined: bool) {
         self.wifi_joined = joined;
+        if !joined {
+            self.wifi_address = None;
+        }
+    }
+
+    /// The device layer got an address on Wi-Fi (its `WIFI ADDRESS` line). The box reports that line once, as the
+    /// network comes up; a computer that connects later (or a daemon that restarted) learns it from hello.
+    pub fn set_wifi_address(&mut self, address: &str) {
+        self.wifi_address = Some(alloc::string::String::from(address));
     }
 
     /// The Relay welcomed the box, or its socket closed; shown in the menu's NETWORK view.
@@ -532,8 +551,14 @@ impl Firmware {
                     line.push('\n');
                     board.lan_send(conn, line.as_bytes());
                 }
+                LanOutput::SendPeer(line) => board.lan_peer_send(line.as_bytes()),
                 LanOutput::Close(conn) => board.lan_close(conn),
-                LanOutput::Peer(conn) => board.lan_peer(conn),
+                LanOutput::Peer(None) => board.lan_peer(None),
+                LanOutput::Peer(Some(conn)) => {
+                    if let Some(sealer) = self.lan.take_sealer(conn) {
+                        board.lan_peer(Some((conn, sealer)));
+                    }
+                }
                 LanOutput::Line(line) => {
                     self.last_message_ms = board.now_ms();
                     self.set_link_lost(board, false);
@@ -1333,13 +1358,19 @@ impl Firmware {
         }
     }
 
-    /// `BOX KEY`: the box's public key. Its presence also tells the computer this firmware can pair.
+    /// `BOX KEY`: the box's public key. Its presence also tells the computer this firmware can pair. `LINK NOISE`
+    /// comes just before it: off the cable this firmware links only through a Noise session (ADR-0015), and a
+    /// computer that has seen it never falls back to the clear for this box.
     fn announce_key<B: Board>(&self, board: &mut B) {
         if let Some((_, link)) = &self.link {
+            Self::write_literal(board, "LINK NOISE\n");
             Self::write_value_line(board, "BOX KEY ", link::encode_key(&link.public_key()).as_bytes());
             // The network's name only; the password never leaves the box.
             if let Some(wifi) = &link.wifi {
                 Self::write_value_line(board, "WIFI NETWORK ", wifi.ssid.as_bytes());
+                if let Some(address) = &self.wifi_address {
+                    Self::write_value_line(board, "WIFI ADDRESS ", address.as_bytes());
+                }
             }
             Self::write_value_line(board, "RELAY URL ", self.relay_url().as_bytes());
         }

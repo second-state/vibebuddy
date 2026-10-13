@@ -9,6 +9,7 @@ use vibebuddy_firmware_core::buttons::Levels;
 use vibebuddy_firmware_core::canvas::FRAME_BYTES;
 use vibebuddy_firmware_core::display::Screen;
 use vibebuddy_firmware_core::firmware::{AudioStatus, Board, Firmware, FrameAction, VolumeError};
+use vibebuddy_firmware_core::noise::Sealer;
 use vibebuddy_firmware_core::storage::{Flash, FlashError};
 use vibebuddy_firmware_core::voice_pack;
 
@@ -81,6 +82,9 @@ struct FakeBoard {
     lan_sent: Vec<(u32, String)>,
     lan_closed: Vec<u32>,
     lan_peer: Option<u32>,
+    /// What went sealed to the computer linked over the network, and whether one is linked through the Relay.
+    lan_peer_sent: Vec<String>,
+    relay_peer: bool,
     /// The linked network computer's buffer is full.
     peer_full: bool,
     /// Restarts asked for.
@@ -106,6 +110,8 @@ impl FakeBoard {
             lan_sent: Vec::new(),
             lan_closed: Vec::new(),
             lan_peer: None,
+            lan_peer_sent: Vec::new(),
+            relay_peer: false,
             peer_full: false,
             restarts: 0,
         }
@@ -142,8 +148,14 @@ impl Board for FakeBoard {
     fn lan_close(&mut self, conn: u32) {
         self.lan_closed.push(conn);
     }
-    fn lan_peer(&mut self, conn: Option<u32>) {
-        self.lan_peer = conn;
+    fn lan_peer(&mut self, peer: Option<(u32, Sealer)>) {
+        self.lan_peer = peer.map(|(conn, _)| conn);
+    }
+    fn lan_peer_send(&mut self, line: &[u8]) {
+        self.lan_peer_sent.push(String::from_utf8(line.to_vec()).unwrap());
+    }
+    fn relay_peer(&mut self, sealer: Option<Sealer>) {
+        self.relay_peer = sealer.is_some();
     }
     fn peer_can_take(&self, _bytes: usize) -> bool {
         !self.peer_full
@@ -225,6 +237,7 @@ fn boot_reports_like_the_c_firmware() {
             "TALLY LOADED 0 0S DAY 0",
             "DISPLAY READY BUILD abc1234 2026-09-26 10:00",
             "FIRMWARE VERSION 1.2.3",
+            "LINK NOISE",
             BOX_KEY,
             RELAY_URL,
             "VOICES builtin",
@@ -477,7 +490,7 @@ fn echo_reports_length_and_crc() {
 fn hello_repeats_the_static_state() {
     let (mut firmware, mut board, _) = booted(blank_flash());
     let lines = send(&mut firmware, &mut board, r#"{"version":1,"event":"device.hello"}"#);
-    assert_eq!(lines, ["DISPLAY READY BUILD abc1234 2026-09-26 10:00", "FIRMWARE VERSION 1.2.3", BOX_KEY, RELAY_URL, "MODE DUTY", "VOICES builtin", "VOLUME 65"]);
+    assert_eq!(lines, ["DISPLAY READY BUILD abc1234 2026-09-26 10:00", "FIRMWARE VERSION 1.2.3", "LINK NOISE", BOX_KEY, RELAY_URL, "MODE DUTY", "VOICES builtin", "VOLUME 65"]);
 }
 
 #[test]
@@ -888,10 +901,11 @@ fn a_new_identity_forgets_everything_that_trusted_the_old_one() {
 
 mod lan {
     use super::*;
-    use ed25519_dalek::{Signer, SigningKey};
+    use ed25519_dalek::SigningKey;
     use serde_json::Value;
-    use vibebuddy_firmware_core::lan::{USB_QUIET_MS, signed_message};
+    use vibebuddy_firmware_core::lan::USB_QUIET_MS;
     use vibebuddy_firmware_core::link;
+    use vibebuddy_firmware_core::noise::{Initiator, Sealer};
 
     fn computer() -> SigningKey {
         SigningKey::from_bytes(&[2; 32])
@@ -906,44 +920,47 @@ mod lan {
         (firmware, board)
     }
 
-    /// Opens connection `conn` and answers the challenge.
-    fn link_up(firmware: &mut Firmware, board: &mut FakeBoard, conn: u32) {
+    /// Opens connection `conn` and runs the Noise handshake; returns the computer's sealer.
+    fn link_up(firmware: &mut Firmware, board: &mut FakeBoard, conn: u32) -> Sealer {
         firmware.lan_opened(board, conn, [5; 32]);
-        let (_, challenge) = board.lan_sent.pop().unwrap();
-        let value: Value = serde_json::from_str(&challenge).unwrap();
+        let (_, opener) = board.lan_sent.pop().unwrap();
+        let value: Value = serde_json::from_str(&opener).unwrap();
         let box_key = link::decode::<32>(value["box"].as_str().unwrap()).unwrap();
-        let nonce = link::decode::<32>(value["nonce"].as_str().unwrap()).unwrap();
-        let sig = computer().sign(&signed_message("computer", &box_key, &nonce)).to_bytes();
-        let hello = format!(
-            "{{\"version\":1,\"event\":\"link.hello\",\"key\":\"{}\",\"sig\":\"{}\",\"nonce\":\"{}\"}}\n",
-            link::encode(&computer().verifying_key().to_bytes()),
-            link::encode(&sig),
-            link::encode(&[6; 32])
-        );
-        firmware.lan_received(board, conn, hello.as_bytes());
-        assert!(board.lan_sent.last().unwrap().1.contains("link.welcome"), "{:?}", board.lan_sent);
+        let (initiator, first) = Initiator::start([2; 32], &box_key, [6; 32], b"{}").unwrap();
+        firmware.lan_received(board, conn, format!("{first}\n").as_bytes());
+        let (_, reply) = &board.lan_sent[board.lan_sent.len() - 2];
+        let (sealer, mut from_box) = initiator.finish(reply.trim_end().as_bytes()).unwrap();
+        let (_, welcome) = board.lan_sent.last().unwrap();
+        assert_eq!(from_box.open(welcome.trim_end().as_bytes()).unwrap(), br#"{"version":1,"event":"link.welcome"}"#);
         board.take_lines();
+        sealer
+    }
+
+    /// One protocol line from the linked computer, sealed.
+    fn say(firmware: &mut Firmware, board: &mut FakeBoard, conn: u32, sealer: &mut Sealer, line: &str) {
+        let sealed = sealer.seal(line.as_bytes()).unwrap();
+        firmware.lan_received(board, conn, format!("{sealed}\n").as_bytes());
     }
 
     #[test]
     fn a_paired_computer_drives_the_box_over_the_network() {
         let (mut firmware, mut board) = paired_box();
-        link_up(&mut firmware, &mut board, 1);
+        let mut sealer = link_up(&mut firmware, &mut board, 1);
         assert_eq!(board.lan_peer, Some(1), "the box's output goes to it");
-        firmware.lan_received(&mut board, 1, b"{\"version\":1,\"event\":\"device.hello\"}\n");
+        say(&mut firmware, &mut board, 1, &mut sealer, r#"{"version":1,"event":"device.hello"}"#);
         assert!(board.take_lines().contains(&"MODE DUTY".to_owned()));
     }
 
     #[test]
     fn a_screenshot_over_the_network_is_the_frame_when_asked_paced_for_the_relay() {
         let (mut firmware, mut board) = paired_box();
-        link_up(&mut firmware, &mut board, 1);
+        let mut sealer = link_up(&mut firmware, &mut board, 1);
         // No two neighbouring pixels alike: the most runs a frame can have.
         let pattern: Vec<u16> = (0..320 * 240).map(|index| (index % 7) as u16 * 0x1111).collect();
         for (index, color) in pattern.iter().enumerate() {
             board.frame[index * 2..index * 2 + 2].copy_from_slice(&color.to_be_bytes());
         }
-        firmware.lan_received(&mut board, 1, b"{\"version\":1,\"event\":\"device.screenshot\"}\n");
+        say(&mut firmware, &mut board, 1, &mut sealer, r#"{"version":1,"event":"device.screenshot"}"#);
         assert!(!board.take_lines().iter().any(|line| line.starts_with("SHOT")), "nothing at once");
         // The screen moves on while the lines go out; the picture is the one asked for.
         board.frame.fill(0xff);
@@ -958,13 +975,13 @@ mod lan {
     #[test]
     fn pairing_and_wifi_are_cable_only() {
         let (mut firmware, mut board) = paired_box();
-        link_up(&mut firmware, &mut board, 1);
+        let mut sealer = link_up(&mut firmware, &mut board, 1);
         for line in [
             r#"{"version":1,"event":"device.pair","key":"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"}"#,
             r#"{"version":1,"event":"device.wifi.set","ssid":"evil","password":"x"}"#,
             r#"{"version":1,"event":"device.relay.set","url":"wss://evil.example"}"#,
         ] {
-            firmware.lan_received(&mut board, 1, format!("{line}\n").as_bytes());
+            say(&mut firmware, &mut board, 1, &mut sealer, line);
             assert_eq!(board.take_lines(), ["ERROR cable_only"]);
         }
     }
@@ -975,6 +992,7 @@ mod lan {
         link_up(&mut firmware, &mut board, 1);
         send(&mut firmware, &mut board, r#"{"version":1,"event":"device.heartbeat"}"#);
         assert!(board.lan_closed.contains(&1));
+        assert_eq!(board.lan_peer_sent, [r#"{"version":1,"event":"link.unlinked","reason":"usb"}"#], "told, sealed");
         assert_eq!(board.lan_peer, None);
     }
 
@@ -985,8 +1003,8 @@ mod lan {
         assert!(firmware.take_scan_request());
         assert!(!firmware.take_scan_request(), "once");
         board.advance(USB_QUIET_MS);
-        link_up(&mut firmware, &mut board, 1);
-        firmware.lan_received(&mut board, 1, b"{\"version\":1,\"event\":\"device.wifi.scan\"}\n");
+        let mut sealer = link_up(&mut firmware, &mut board, 1);
+        say(&mut firmware, &mut board, 1, &mut sealer, r#"{"version":1,"event":"device.wifi.scan"}"#);
         assert_eq!(board.take_lines(), ["ERROR cable_only"]);
         assert!(!firmware.take_scan_request());
     }
@@ -1005,6 +1023,21 @@ mod lan {
         assert_eq!(firmware.wifi().map(|wifi| wifi.password.as_str()), Some("secret"));
         assert_eq!(send(&mut firmware, &mut board, r#"{"version":1,"event":"device.wifi.forget"}"#), ["WIFI FORGOTTEN"]);
         assert_eq!(firmware.wifi(), None);
+    }
+
+    #[test]
+    fn hello_repeats_the_wifi_address_while_joined() {
+        let (mut firmware, mut board) = paired_box();
+        send(&mut firmware, &mut board, r#"{"version":1,"event":"device.wifi.set","ssid":"Home","password":"secret"}"#);
+        let hello = |firmware: &mut Firmware, board: &mut _| send(firmware, board, r#"{"version":1,"event":"device.hello"}"#);
+        assert!(!hello(&mut firmware, &mut board).iter().any(|line| line.starts_with("WIFI ADDRESS")), "not joined yet");
+        firmware.set_wifi_joined(true);
+        firmware.set_wifi_address("192.168.1.23");
+        let lines = hello(&mut firmware, &mut board);
+        let network = lines.iter().position(|line| line == "WIFI NETWORK Home").expect("network");
+        assert_eq!(lines.get(network + 1).map(String::as_str), Some("WIFI ADDRESS 192.168.1.23"), "{lines:?}");
+        firmware.set_wifi_joined(false);
+        assert!(!hello(&mut firmware, &mut board).iter().any(|line| line.starts_with("WIFI ADDRESS")), "lost with the network");
     }
 
     #[test]
@@ -1070,16 +1103,39 @@ mod relay {
     use serde_json::{Value, json};
     use vibebuddy_firmware_core::lan::USB_QUIET_MS;
     use vibebuddy_firmware_core::link;
-    use vibebuddy_firmware_core::relay_box::{RelayBox, RelayLines, signed_message};
+    use vibebuddy_firmware_core::noise::{Initiator, Opener, Sealer};
+    use vibebuddy_firmware_core::relay_box::{RelayBox, signed_message};
 
     fn parse(text: &str) -> Value {
         serde_json::from_str(text).unwrap()
+    }
+
+    /// A computer whose secret the test knows, unlike [`COMPUTER`].
+    fn computer_key() -> String {
+        link::encode(&ed25519_dalek::SigningKey::from_bytes(&[2; 32]).verifying_key().to_bytes())
+    }
+
+    /// The Relay links the computer; it answers the box's `link.noise` and returns its session.
+    fn session(relay: &mut RelayBox, firmware: &mut Firmware, board: &mut FakeBoard) -> (Sealer, Opener) {
+        let opener = relay.message(firmware, board, &json!({"t": "linked", "computer": computer_key()}));
+        let line = parse(&opener[0]);
+        let noise = parse(line["line"].as_str().unwrap());
+        assert_eq!(noise["event"], "link.noise");
+        let box_key = link::decode_key(noise["box"].as_str().unwrap()).unwrap();
+        let (initiator, first) = Initiator::start([2; 32], &box_key, [6; 32], b"{}").unwrap();
+        let reply = relay.message(firmware, board, &json!({"t": "data", "line": first}));
+        initiator.finish(parse(&reply[0])["line"].as_str().unwrap().as_bytes()).unwrap()
+    }
+
+    fn say(relay: &mut RelayBox, firmware: &mut Firmware, board: &mut FakeBoard, sealer: &mut Sealer, line: &str) {
+        relay.message(firmware, board, &json!({"t": "data", "line": sealer.seal(line.as_bytes()).unwrap()}));
     }
 
     #[test]
     fn the_box_signs_reports_and_carries_lines() {
         let (mut firmware, mut board, _) = booted(blank_flash());
         send(&mut firmware, &mut board, &format!(r#"{{"version":1,"event":"device.pair","key":"{COMPUTER}","name":"a"}}"#));
+        send(&mut firmware, &mut board, &format!(r#"{{"version":1,"event":"device.pair","key":"{}","name":"b"}}"#, computer_key()));
         let mut relay = RelayBox::new();
 
         let hello = parse(&relay.hello(&firmware, "abc").unwrap());
@@ -1091,23 +1147,28 @@ mod relay {
 
         relay.message(&mut firmware, &mut board, &json!({"t": "welcome"}));
         let reports: Vec<Value> = relay.report(&firmware, board.now_ms()).iter().map(|text| parse(text)).collect();
-        assert_eq!(reports[0], json!({"t": "paired", "computers": [{"key": COMPUTER, "name": "a"}]}));
-        assert_eq!(reports[1], json!({"t": "linked", "via": "usb", "computer": COMPUTER}), "it was just paired over the cable");
+        assert_eq!(reports[0], json!({"t": "paired", "computers": [{"key": COMPUTER, "name": "a"}, {"key": computer_key(), "name": "b"}]}));
+        assert_eq!(reports[1], json!({"t": "linked", "via": "usb", "computer": computer_key()}), "it was just paired over the cable");
         assert!(relay.report(&firmware, board.now_ms()).is_empty(), "only changes");
 
         board.advance(USB_QUIET_MS);
         assert_eq!(relay.report(&firmware, board.now_ms()), [r#"{"t":"unlinked"}"#]);
 
-        relay.message(&mut firmware, &mut board, &json!({"t": "linked", "computer": COMPUTER}));
+        let (mut sealer, _) = session(&mut relay, &mut firmware, &mut board);
         assert!(relay.has_peer());
+        assert!(board.relay_peer, "the box's output goes to it, sealed");
         board.take_lines();
+        say(&mut relay, &mut firmware, &mut board, &mut sealer, r#"{"version":1,"event":"device.hello"}"#);
+        assert!(board.take_lines().contains(&"MODE DUTY".to_owned()));
+
+        // A line in the clear is never acted on; one that doesn't open starts the session over.
         relay.message(&mut firmware, &mut board, &json!({"t": "data", "line": r#"{"version":1,"event":"device.hello"}"#}));
-        let output = board.take_lines().join("\n") + "\n";
-        let data: Vec<Value> = RelayLines::default().lines(output.as_bytes()).iter().map(|text| parse(text)).collect();
-        assert!(data.contains(&json!({"t": "data", "line": "MODE DUTY"})), "{data:?}");
+        assert!(board.take_lines().is_empty());
+        assert!(!relay.has_peer());
 
         relay.message(&mut firmware, &mut board, &json!({"t": "unlinked", "reason": "takeover"}));
         assert!(!relay.has_peer());
+        assert!(!board.relay_peer);
     }
 
     #[test]
@@ -1122,18 +1183,61 @@ mod relay {
             relay.message(&mut firmware, &mut board, &json!({"t": "welcome"}));
             let reports: Vec<Value> = relay.report(&firmware, board.now_ms()).iter().map(|text| parse(text)).collect();
             assert_eq!(reports[1], json!({"t": "linked", "via": "usb", "computer": COMPUTER}), "{socket}");
-            relay.gone(&mut firmware, board.now_ms());
+            relay.gone(&mut firmware, &mut board);
         }
+    }
+
+    #[test]
+    fn unlinked_ends_only_the_computers_link() {
+        // `unlinked` ends the link through the Relay, not the socket: the box keeps reporting and the Relay stays up.
+        use vibebuddy_firmware_core::display::Tone;
+        use vibebuddy_firmware_core::menu::View;
+        let (mut firmware, mut board, _) = booted(blank_flash());
+        send(&mut firmware, &mut board, &format!(r#"{{"version":1,"event":"device.pair","key":"{COMPUTER}","name":"a"}}"#));
+        send(&mut firmware, &mut board, r#"{"version":1,"event":"device.wifi.set","ssid":"Home","password":"secret"}"#);
+        let mut relay = RelayBox::new();
+        relay.hello(&firmware, "n");
+        relay.message(&mut firmware, &mut board, &json!({"t": "welcome"}));
+        relay.report(&firmware, board.now_ms());
+        board.advance(USB_QUIET_MS);
+        relay.report(&firmware, board.now_ms());
+        relay.message(&mut firmware, &mut board, &json!({"t": "linked", "computer": COMPUTER}));
+
+        relay.message(&mut firmware, &mut board, &json!({"t": "unlinked", "reason": "takeover"}));
+        assert!(!relay.has_peer());
+        let relay_line = |firmware: &Firmware| firmware.menu_panel(View::Network, board.now_ms()).lines[2].clone();
+        assert_eq!(relay_line(&firmware), (b"RELAY".to_vec(), b"PROD".to_vec(), Tone::Plain), "the socket is still up");
+
+        let other = link::encode(&[3; 32]);
+        send(&mut firmware, &mut board, &format!(r#"{{"version":1,"event":"device.pair","key":"{other}","name":"b"}}"#));
+        let reports: Vec<Value> = relay.report(&firmware, board.now_ms()).iter().map(|text| parse(text)).collect();
+        assert_eq!(reports.len(), 2, "{reports:?}");
+        assert_eq!(reports[0]["t"], "paired");
+        assert_eq!(reports[1], json!({"t": "linked", "via": "usb", "computer": other}));
     }
 
     #[test]
     fn pairing_over_the_relay_is_refused() {
         let (mut firmware, mut board, _) = booted(blank_flash());
+        send(&mut firmware, &mut board, &format!(r#"{{"version":1,"event":"device.pair","key":"{}","name":"b"}}"#, computer_key()));
+        board.advance(USB_QUIET_MS);
         let mut relay = RelayBox::new();
         relay.hello(&firmware, "n");
-        relay.message(&mut firmware, &mut board, &json!({"t": "linked", "computer": COMPUTER}));
+        let (mut sealer, _) = session(&mut relay, &mut firmware, &mut board);
         board.take_lines();
-        relay.message(&mut firmware, &mut board, &json!({"t": "data", "line": format!(r#"{{"version":1,"event":"device.pair","key":"{COMPUTER}"}}"#)}));
+        say(&mut relay, &mut firmware, &mut board, &mut sealer, &format!(r#"{{"version":1,"event":"device.pair","key":"{COMPUTER}"}}"#));
         assert_eq!(board.take_lines(), ["ERROR cable_only"]);
+    }
+
+    #[test]
+    fn only_the_computer_the_relay_linked_gets_a_session() {
+        let (mut firmware, mut board, _) = booted(blank_flash());
+        send(&mut firmware, &mut board, &format!(r#"{{"version":1,"event":"device.pair","key":"{}","name":"b"}}"#, computer_key()));
+        let mut relay = RelayBox::new();
+        relay.message(&mut firmware, &mut board, &json!({"t": "linked", "computer": COMPUTER}));
+        let box_key = firmware.link().unwrap().public_key();
+        let (_, first) = Initiator::start([2; 32], &box_key, [6; 32], b"{}").unwrap();
+        assert!(relay.message(&mut firmware, &mut board, &json!({"t": "data", "line": first})).is_empty());
+        assert!(!relay.has_peer());
     }
 }

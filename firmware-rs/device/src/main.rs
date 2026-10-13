@@ -47,7 +47,8 @@ use vibebuddy_firmware_core::buttons::Levels;
 use vibebuddy_firmware_core::canvas::FRAME_BYTES;
 use vibebuddy_firmware_core::display::Screen;
 use vibebuddy_firmware_core::firmware::{AudioStatus, Board, Firmware, FrameAction, VolumeError};
-use vibebuddy_firmware_core::relay_box::{RelayBox, RelayLines};
+use vibebuddy_firmware_core::noise::{self, SealedLines, Sealer};
+use vibebuddy_firmware_core::relay_box::{self, RelayBox};
 use vibebuddy_firmware_core::storage::Flash;
 
 use crate::audio::{PLAYING, PlayCommand, QUEUE, STOP, STREAM_BYTES, STREAM_CHUNK};
@@ -139,11 +140,10 @@ struct DeviceBoard {
     _lcd_read: Output<'static>,
     /// Only the ES8311 variant has a codec; the NS4168 variant has no adjustable volume.
     has_codec: bool,
-    /// The computer linked over the network, which gets the box's output too.
-    lan_peer: Option<u32>,
-    /// A computer is linked through the Relay, and the box's output goes there as whole lines.
-    relay_peer: bool,
-    relay_lines: RelayLines,
+    /// The computer linked over the network, which gets the box's output too, sealed for its session.
+    lan_peer: Option<(u32, SealedLines)>,
+    /// The session with a computer linked through the Relay: the box's output goes there as whole sealed lines.
+    relay_peer: Option<SealedLines>,
     /// The firmware asked to restart; the main loop closes the sockets first.
     restart: bool,
 }
@@ -179,13 +179,26 @@ impl Board for DeviceBoard {
 
     fn write(&mut self, bytes: &[u8]) {
         self.transport.write(bytes);
-        if let Some(conn) = self.lan_peer {
-            net::send(conn, bytes);
+        // A line with no room is dropped whole, before it is sealed (noise::SealedLines).
+        if let Some((conn, lines)) = &mut self.lan_peer {
+            let conn = *conn;
+            lines.lines(
+                bytes,
+                |length| net::room(conn) > length,
+                |line| {
+                    net::send(conn, line.as_bytes());
+                    net::send(conn, b"\n");
+                },
+            );
         }
-        if self.relay_peer {
-            for message in self.relay_lines.lines(bytes) {
-                let _ = relay::OUT.try_send((relay::current_socket(), message));
-            }
+        if let Some(lines) = &mut self.relay_peer {
+            lines.lines(
+                bytes,
+                |_| relay::OUT.free_capacity() > 0,
+                |line| {
+                    let _ = relay::OUT.try_send((relay::current_socket(), relay_box::data(line)));
+                },
+            );
         }
     }
 
@@ -197,13 +210,27 @@ impl Board for DeviceBoard {
         net::close(conn);
     }
 
-    fn lan_peer(&mut self, conn: Option<u32>) {
-        self.lan_peer = conn;
+    fn lan_peer(&mut self, peer: Option<(u32, Sealer)>) {
+        self.lan_peer = peer.map(|(conn, sealer)| (conn, SealedLines::new(sealer)));
+    }
+
+    fn lan_peer_send(&mut self, line: &[u8]) {
+        if let Some((conn, lines)) = &mut self.lan_peer
+            && net::room(*conn) > noise::sealed_len(line.len())
+            && let Some(line) = lines.seal(line)
+        {
+            net::send(*conn, line.as_bytes());
+            net::send(*conn, b"\n");
+        }
+    }
+
+    fn relay_peer(&mut self, sealer: Option<Sealer>) {
+        self.relay_peer = sealer.map(SealedLines::new);
     }
 
     fn peer_can_take(&self, bytes: usize) -> bool {
         // A Relay slot holds a line of any length; leave a couple for the box's other messages.
-        self.lan_peer.is_none_or(|conn| net::room(conn) >= bytes) && (!self.relay_peer || relay::OUT.free_capacity() > 2)
+        self.lan_peer.as_ref().is_none_or(|(conn, _)| net::room(*conn) > noise::sealed_len(bytes)) && (self.relay_peer.is_none() || relay::OUT.free_capacity() > 2)
     }
 
     // With the radio on, the RNG draws on real noise.
@@ -377,9 +404,8 @@ async fn main(spawner: Spawner) -> ! {
         _lcd_read: lcd_read,
         has_codec: false,
         lan_peer: None,
-        relay_peer: false,
+        relay_peer: None,
         restart: false,
-        relay_lines: RelayLines::default(),
     };
 
     // Let the audio task run once to start the I2S stream: the ES8311 is clocked by BCLK, and the C
@@ -403,6 +429,9 @@ async fn main(spawner: Spawner) -> ! {
     net::CREDENTIALS.signal(wifi_credentials(&firmware));
     report_memory(&mut board);
     if let Some(stack) = stack {
+        if let Some(link) = firmware.link() {
+            net::advertise(&spawner, stack, vibebuddy_firmware_core::link::encode(&link.public_key()).into());
+        }
         start_relay(&spawner, stack, trng, &firmware);
     }
     let mut relay_box = RelayBox::new();
@@ -434,7 +463,8 @@ async fn main(spawner: Spawner) -> ! {
                         firmware.set_wifi_joined(false);
                     }
                     // Once on the network, the Wi-Fi driver has taken what it needs (#108).
-                    if line.starts_with("WIFI ADDRESS") {
+                    if let Some(address) = line.strip_prefix("WIFI ADDRESS ") {
+                        firmware.set_wifi_address(address);
                         report_memory(&mut board);
                     }
                 }
@@ -452,15 +482,12 @@ async fn main(spawner: Spawner) -> ! {
                 }
                 relay::RelayIn::Message(text) => {
                     if let Ok(value) = serde_json::from_str::<serde_json::Value>(&text) {
-                        relay_box.message(&mut firmware, &mut board, &value);
-                        board.relay_peer = relay_box.has_peer();
+                        for message in relay_box.message(&mut firmware, &mut board, &value) {
+                            let _ = relay::OUT.try_send((relay::current_socket(), message));
+                        }
                     }
                 }
-                relay::RelayIn::Gone => {
-                    relay_box.gone(&mut firmware, board.now_ms());
-                    board.relay_peer = false;
-                    board.relay_lines.clear();
-                }
+                relay::RelayIn::Gone => relay_box.gone(&mut firmware, &mut board),
                 relay::RelayIn::Line(line) => {
                     board.write(line.as_bytes());
                     board.write(b"\n");

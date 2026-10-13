@@ -36,7 +36,12 @@ rustls = { version = "0.23", default-features = false, features = ["ring", "std"
 rustls-platform-verifier = "0.7"
 tokio-tungstenite = { version = "0.30", default-features = false, features = ["connect", "__rustls-tls"] }
 zip = { version = "2", default-features = false, features = ["deflate"] }
+mdns-sd = "0.21.5"
+# Noise sessions with the box off the cable (noise_link.rs, ADR-0015): only what Noise_IK_25519_ChaChaPoly_SHA256 needs.
+snow = { version = "0.10", default-features = false, features = ["std", "default-resolver", "use-curve25519", "use-chacha20poly1305", "use-sha2", "use-getrandom"] }
 
 [dev-dependencies]
+# The box's own side of the Noise handshake, so the tests check the two implementations against each other.
+vibebuddy-firmware-core = { path = "../firmware-rs/core" }
 http-body-util = "0.1"
 tokio = { workspace = true, features = ["test-util"] }

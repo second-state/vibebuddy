@@ -39,6 +39,11 @@ impl Identity {
         self.key.sign(message).to_bytes()
     }
 
+    /// The key as an X25519 secret for Noise sessions with the box (ADR-0015): the scalar behind the Ed25519 key.
+    pub fn noise_secret(&self) -> [u8; 32] {
+        self.key.to_scalar_bytes()
+    }
+
     /// The public key as the box and the Relay see it: 43 characters of base64url.
     pub fn public_key(&self) -> String {
         URL_SAFE_NO_PAD.encode(self.key.verifying_key().to_bytes())
