@@ -505,13 +505,24 @@ async fn main(spawner: Spawner) -> ! {
     let mut relay_box = RelayBox::new();
 
     let mut input = [0u8; 256];
+    // UART and USB feed one line parser, so UART bytes are held here until their line is whole: a stray byte on
+    // the bridge must not land in the middle of a line arriving over USB.
+    let mut uart_line: alloc::vec::Vec<u8> = alloc::vec::Vec::new();
     loop {
         loop {
             let count = serial::take_uart(&mut input);
             if count == 0 {
                 break;
             }
-            firmware.receive(&mut board, &input[..count]);
+            for &byte in &input[..count] {
+                if uart_line.len() < 2048 {
+                    uart_line.push(byte);
+                }
+                if byte == b'\n' {
+                    firmware.receive(&mut board, &uart_line);
+                    uart_line.clear();
+                }
+            }
         }
         loop {
             let count = serial::take_usb(&mut input);

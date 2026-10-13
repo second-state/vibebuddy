@@ -13,8 +13,9 @@
 //!   its end. If it runs dry it goes quiet until that much is buffered again, rather than stutter.
 //! - Replies play in their order. One whose audio never comes (synthesis failed) is simply not there: the next
 //!   one plays.
-//! - A chunk out of order or missing drops that reply's audio, all of it, even while it plays; the next reply
-//!   follows. So does a reply too long to hold or in a sample rate the speaker doesn't run at.
+//! - A missing chunk is skipped: the decoder finds the next frame, so a lost line costs a moment of the reply,
+//!   not the rest of it. A chunk that comes late (behind one already taken) is ignored. A reply too long to hold
+//!   or in a sample rate the speaker doesn't run at drops its audio, and the next reply follows.
 
 use alloc::boxed::Box;
 use alloc::collections::VecDeque;
@@ -135,10 +136,10 @@ impl ReplyPlayer {
         if reply.dropped || reply.ended {
             return;
         }
-        if seq != reply.next_seq {
-            return self.drop_reply(at);
+        if seq < reply.next_seq {
+            return;
         }
-        reply.next_seq += 1;
+        reply.next_seq = seq + 1;
         let Some(data) = data else {
             reply.ended = true;
             return;
@@ -397,39 +398,37 @@ mod tests {
     }
 
     #[test]
-    fn a_gap_or_a_chunk_out_of_order_drops_that_reply_only() {
+    fn a_missing_chunk_is_skipped_and_a_late_one_ignored() {
         let pieces = chunks(FIXTURE, &[768]);
         let expected = one_shot(FIXTURE, Decoder::new());
-        // A missing chunk before the reply starts: none of it plays, the next reply does.
+        // A chunk lost in the middle: the reply plays on past it, only a little shorter, then the next one whole.
         let mut player = ReplyPlayer::new();
-        player.apply(ReplyAudio::Chunk { reply: 0, seq: 0, data: pieces[0].clone() });
-        player.apply(ReplyAudio::Chunk { reply: 0, seq: 2, data: pieces[2].clone() });
-        player.apply(ReplyAudio::Chunk { reply: 0, seq: 3, data: pieces[3].clone() });
-        player.apply(ReplyAudio::End { reply: 0, seq: 4 });
-        send(&mut player, 1, &pieces);
-        assert!(drain(&mut player, 1000) == expected);
-
-        // Out of order mid-reply, while it plays: it stops there and the next one plays whole.
-        let mut player = ReplyPlayer::new();
-        for (seq, data) in pieces[..5].iter().enumerate() {
-            player.apply(ReplyAudio::Chunk { reply: 0, seq: seq as u32, data: data.clone() });
+        for (seq, data) in pieces.iter().enumerate() {
+            if seq != 3 {
+                player.apply(ReplyAudio::Chunk { reply: 0, seq: seq as u32, data: data.clone() });
+            }
         }
-        let mut buffer = [0u8; 1000];
-        assert_eq!(player.fill(&mut buffer), 1000);
-        player.apply(ReplyAudio::Chunk { reply: 0, seq: 6, data: pieces[6].clone() });
-        player.apply(ReplyAudio::Chunk { reply: 0, seq: 5, data: pieces[5].clone() });
+        player.apply(ReplyAudio::End { reply: 0, seq: pieces.len() as u32 });
         send(&mut player, 1, &pieces);
-        assert!(drain(&mut player, 1000) == expected);
+        let played = drain(&mut player, 1000);
+        assert!(played.ends_with(&expected), "the next reply plays whole");
+        let first = played.len() - expected.len();
+        assert!(first > expected.len() * 3 / 4 && first < expected.len(), "{first} of {}", expected.len());
 
-        // An end with the wrong count means the last chunk went missing: dropped too.
+        // A chunk that comes after a later one was taken is ignored; the reply carries on.
         let mut player = ReplyPlayer::new();
-        for (seq, data) in pieces.iter().enumerate().take(pieces.len() - 1) {
+        for (seq, data) in pieces.iter().enumerate() {
+            if seq == 5 {
+                continue;
+            }
             player.apply(ReplyAudio::Chunk { reply: 0, seq: seq as u32, data: data.clone() });
+            if seq == 6 {
+                player.apply(ReplyAudio::Chunk { reply: 0, seq: 5, data: pieces[5].clone() });
+            }
         }
         player.apply(ReplyAudio::End { reply: 0, seq: pieces.len() as u32 });
         let played = drain(&mut player, 1000).len();
-        assert!(played < expected.len() / 2, "{played}");
-        assert!(!player.pending());
+        assert!(played > expected.len() * 3 / 4 && played < expected.len(), "{played}");
     }
 
     #[test]
