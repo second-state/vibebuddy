@@ -189,6 +189,30 @@ Once on Wi-Fi the box also answers mDNS (DNS-SD) for `_vibebuddy._tcp` on port 7
 
 USB stays in the clear: the cable is physical presence, as pairing already assumes.
 
+## Voice commands (experimental)
+
+A voice command (ADR-0017) on a box linked over USB or the local network: the box records while K0 is held and streams the audio over the link; the computer turns it into text, hands it to the resident session and sends the spoken replies back. Over the Relay the box will talk to the voice service itself (ADR-0018); that path isn't described here yet.
+
+The computer offers voice, and the box only treats a long K0 as push-to-talk while it is offered:
+
+- `{"version":1,"event":"voice.available","on":true}`: sent after `device.hello` is answered, and again whenever it changes, when the resident session is switched on and speech recognition is configured; `"on":false` withdraws it. A box that hasn't been told, or was told `false`, keeps K0 long as it was. A new link starts with voice off until the computer says otherwise.
+
+One recording is a turn, numbered by the box from 1 after each boot. The box sends diagnostic lines, each under 1024 bytes:
+
+- `VOICE START <turn>`: K0 has been held for the long-press time and the box is recording.
+- `VOICE DATA <turn> <seq> <predictor> <index> <base64>`: the next stretch of audio, `seq` from 0 without gaps. Audio is 24 kHz mono IMA ADPCM, two samples per byte, low nibble first, the same coding the box plays Character packs with (`firmware-rs/core/src/adpcm.rs`). `predictor` (a signed 16-bit sample) and `index` (0–88) are the coder's state before the line's first nibble, so every line decodes on its own and a lost line costs only its own stretch. At most 768 base64 characters per line.
+- `VOICE END <turn> <samples>`: K0 was released, or 30 s passed; `samples` is how many were recorded.
+- `VOICE CANCEL <turn>`: the recording was too short (under half a second) or the box gave it up; the computer drops the turn.
+
+The computer answers with JSON events carrying the same `turn`:
+
+- `voice.heard` with `text`: what was recognised (cut to fit the line), so the box can show it.
+- `voice.reply` with `text`: one spoken reply, sent the moment the resident session says it; a turn may have several.
+- `voice.done`: the turn is over; the box goes back to what it showed before.
+- `voice.error` with `reason` (`not_heard` when recognition returned nothing, `unavailable` when recognition or the resident session failed, `busy` when another turn is still running) and an optional `message`; the turn is over.
+
+Spoken replies are shown as text for now; their audio will follow as `voice.audio` chunks once there is speech synthesis.
+
 ## Stage 1 error output
 
 | Output | Meaning |
