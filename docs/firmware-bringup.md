@@ -139,18 +139,19 @@ MIC DATA <seq> <base64>        576 bytes of samples per line
 MIC END 288000 <crc32>
 ```
 
-`MIC UNAVAILABLE` means the board has no input; `MIC BUSY`, that a recording is still going out; `MIC ERROR STALLED`, that the DMA hadn't filled the buffer a second after the recording should have ended; `MIC ERROR MEMORY`, that the capture (PSRAM) or its DMA descriptors (internal RAM, taken only while recording) didn't fit.
+`MIC UNAVAILABLE` means the board has no input; `MIC BUSY`, that a recording is still going out; `MIC ERROR STALLED`, that the DMA hadn't handed back enough samples a second after the recording should have ended; `MIC ERROR SHORT`, that the buffer filled up with fewer samples than asked for; `MIC ERROR MEMORY`, that the capture (PSRAM) or its DMA descriptors (internal RAM, taken only while recording) didn't fit.
 
-The DMA writes the whole recording straight into one buffer in PSRAM, so nothing depends on the main loop keeping up. Each recording also prints two `MIC DEBUG` lines, 100 ms in (`T100`) and at the end (`END` or `TIMEOUT`), for when it fails:
+The DMA writes the whole recording straight into one buffer in PSRAM, so nothing depends on the main loop keeping up. The buffer is half as big again as the recording: the I2S receiver signals an EOF every 8,190 bytes (esp-hal leaves RXEOF_NUM at its 12-bit maximum, 4,095 samples), and each EOF closes the DMA descriptor it lands in, so about every third descriptor holds only a few bytes. Each descriptor's length says how many it holds, and the samples stay in order. Each recording also prints two `MIC DEBUG` lines, 100 ms in (`T100`) and at the end (`END` or `TIMEOUT`), for when it fails:
 
 ```
-MIC DEBUG T100 DESC 2/71 I2S RXCONF … TXCONF … INTRAW … RXCLKM … RXEOF … TXSTATE … DMA ININT … INFIFO … INLINK … INSTATE … INDSCR … INPERI … OUTSTATE … OUTPERI … PINS DIN 312 BCLK 0 WS 0
+MIC DEBUG T100 DESC 3/108 BYTES 8190 LENS 4080 4080 30 0 0 0 I2S RXCONF … TXCONF … INTRAW … RXCLKM … RXEOF … TXSTATE … DMA ININT … INFIFO … INLINK … INSTATE … INDSCR … INPERI … OUTSTATE … OUTPERI … DIN 200
 ```
 
-- `DESC done/total`: DMA descriptors (about 4 KB each) filled so far. At `T100` a working receiver has filled two (96 KB/s); 0 means no sample reached memory.
+- `DESC done/total` and `BYTES`: DMA descriptors (4,080 bytes each) handed back so far, and the sample bytes in them; at `T100` up to 9,600 (96 KB/s), counted only for descriptors already handed back. `DESC 0` means no sample reached memory.
+- `LENS`: the first six descriptors' lengths, which show where the EOFs cut them.
 - `I2S …`: I2S0's RX_CONF (0x20), TX_CONF (0x24), INT_RAW (0x0C), RX_CLKM_CONF (0x30), RXEOF_NUM (0x64), TX status (0x6C). RX_CONF bit 2 is RX_START and bit 3 RX_SLAVE_MOD; TX_CONF bit 2 is TX_START and bit 27 SIG_LOOPBACK (field offsets from the esp32s3 0.37 PAC).
 - `DMA …`: GDMA channel 1's IN_INT_RAW, INFIFO_STATUS, IN_LINK, IN_STATE, IN_DSCR (the descriptor it is on), IN_PERI_SEL (I2S0 is 3), and OUT_STATE and OUT_PERI_SEL for the speaker's side of the same channel.
-- `PINS`: level changes over 2000 quick reads of GPIO47 (DIN), GPIO21 (BCLK) and GPIO13 (WS). DIN is an input, so 0 there means the data line doesn't move (or the codec sends silence). The clocks are outputs and may read 0 even when running.
+- `DIN`: level changes over 2000 quick reads of GPIO47. 0 means the data line doesn't move (or the codec sends exact silence). BCLK and WS can't be checked this way: they are outputs with their input path off, so their input register reads 0 however fast they run.
 
 ### Reading the result
 

@@ -6,9 +6,17 @@
 //! main task's stack (LESSONS.md). The descriptors (12 bytes per 4 KB) come from the internal heap for the
 //! capture and go back after.
 //!
-//! The first build streamed through a 12 KB ring and on the box never delivered a sample (`STALLED`), with
-//! nothing saying why. So each capture also reports `MIC DEBUG` lines: the I2S and DMA registers and the
-//! level changes seen on the pins 100 ms in and at the end, which the next flash can be read against.
+//! The I2S receiver ends a DMA descriptor early at every EOF it signals, and esp-hal leaves RXEOF_NUM at
+//! its 12-bit maximum: an EOF every 4095 16-bit samples, 8190 bytes, which on 4080-byte descriptors fills
+//! two and leaves the third with 30 bytes. So a 288,000-byte buffer held only about two thirds of that in
+//! samples when its last descriptor came back (`MIC ERROR SHORT` on the box, 2026-10-13). The samples are still
+//! in order, each descriptor's length says how many it holds, so the buffer is 1.5 times the capture plus
+//! some, and the capture ends once the descriptors handed back hold enough.
+//!
+//! A ring that had to be relinked by this task before the DMA reached its end stalled for good on the box
+//! (`STALLED`); one linear buffer doesn't depend on the main loop. Each capture also reports `MIC DEBUG`
+//! lines 100 ms in and at the end: the descriptors and bytes so far, the first descriptor lengths, the I2S
+//! and DMA registers, and how often the data pin changed level.
 
 use alloc::string::String;
 use alloc::vec::Vec;
@@ -75,38 +83,54 @@ fn register(address: u32) -> u32 {
 const I2S0: u32 = 0x6000_F000;
 /// GDMA channel 1 (I2S0's DMA_CH1 in main.rs); channels are 0xC0 apart.
 const GDMA_CH1: u32 = 0x6003_F000 + 0xC0;
-const GPIO_IN: u32 = 0x6000_403C;
 const GPIO_IN1: u32 = 0x6000_4040;
 
-/// How often GPIO47 (DIN), GPIO21 (BCLK) and GPIO13 (WS) changed level over 2000 quick reads. The two
-/// clocks are outputs and may read 0 if their input path is off; DIN is an input and reads true.
-fn pin_activity() -> [u32; 3] {
-    let sample = || [register(GPIO_IN1) >> 15 & 1, register(GPIO_IN) >> 21 & 1, register(GPIO_IN) >> 13 & 1];
+/// How often GPIO47 (DIN) changed level over 2000 quick reads. Only DIN: BCLK and WS are outputs whose
+/// input path is off, so their input register reads a constant 0 however fast they run.
+fn din_activity() -> u32 {
+    let sample = || register(GPIO_IN1) >> 15 & 1;
     let mut last = sample();
-    let mut changes = [0u32; 3];
+    let mut changes = 0;
     for _ in 0..2000 {
         let now = sample();
-        for pin in 0..3 {
-            changes[pin] += (now[pin] != last[pin]) as u32;
-        }
+        changes += (now != last) as u32;
         last = now;
     }
     changes
 }
 
-/// One line of the receive path's state: descriptors done so far, then I2S0 RX_CONF, TX_CONF, INT_RAW,
-/// RX_CLKM_CONF, RXEOF_NUM, TX state, and GDMA channel 1's IN_INT_RAW, INFIFO_STATUS, IN_LINK, IN_STATE,
-/// IN_DSCR, IN_PERI_SEL, OUT_STATE, OUT_PERI_SEL, then the pin level changes.
-fn note(stage: &str, descriptors: *const DmaDescriptor, count: usize) {
-    // SAFETY: the descriptors live for the capture; the DMA may write them, so read them volatile.
-    let done = (0..count).filter(|&index| unsafe { !core::ptr::read_volatile(descriptors.add(index)).flags.owner() }).count();
-    let [din, bclk, ws] = pin_activity();
+/// The descriptors the DMA has handed back, in chain order, and the sample bytes they hold.
+fn received(first: *const DmaDescriptor, linked: usize) -> (usize, usize) {
+    let mut bytes = 0;
+    for index in 0..linked {
+        // SAFETY: the descriptors live for the capture; the DMA may write them, so read them volatile.
+        let flags = unsafe { core::ptr::read_volatile(first.add(index)).flags };
+        if flags.owner() {
+            return (index, bytes);
+        }
+        bytes += flags.length() as usize;
+    }
+    (linked, bytes)
+}
+
+/// One line of the receive path's state: descriptors handed back and the bytes they hold, the lengths of
+/// the first six, then I2S0 RX_CONF, TX_CONF, INT_RAW, RX_CLKM_CONF, RXEOF_NUM, TX state, and GDMA channel
+/// 1's IN_INT_RAW, INFIFO_STATUS, IN_LINK, IN_STATE, IN_DSCR, IN_PERI_SEL, OUT_STATE, OUT_PERI_SEL, then
+/// the data pin's level changes.
+fn note(stage: &str, first: *const DmaDescriptor, linked: usize) {
+    let (done, bytes) = received(first, linked);
     let mut line = String::new();
+    let _ = write!(line, "MIC DEBUG {stage} DESC {done}/{linked} BYTES {bytes} LENS");
+    for index in 0..linked.min(6) {
+        // SAFETY: as in `received`.
+        let _ = write!(line, " {}", unsafe { core::ptr::read_volatile(first.add(index)).flags.length() });
+    }
+    let din = din_activity();
     let _ = write!(
         line,
-        "MIC DEBUG {stage} DESC {done}/{count} I2S RXCONF {:08X} TXCONF {:08X} INTRAW {:08X} RXCLKM {:08X} RXEOF {:08X} TXSTATE {:08X} \
+        " I2S RXCONF {:08X} TXCONF {:08X} INTRAW {:08X} RXCLKM {:08X} RXEOF {:08X} TXSTATE {:08X} \
          DMA ININT {:08X} INFIFO {:08X} INLINK {:08X} INSTATE {:08X} INDSCR {:08X} INPERI {:08X} OUTSTATE {:08X} OUTPERI {:08X} \
-         PINS DIN {din} BCLK {bclk} WS {ws}",
+         DIN {din}",
         register(I2S0 + 0x20),
         register(I2S0 + 0x24),
         register(I2S0 + 0x0C),
@@ -136,7 +160,8 @@ pub async fn mic_task(mut rx: I2sRx<'static, Async>) {
 }
 
 async fn capture(rx: I2sRx<'static, Async>, wanted: usize) -> (Result<Vec<u8>, &'static str>, I2sRx<'static, Async>) {
-    let size = wanted.next_multiple_of(ALIGN);
+    // Room for the descriptors an EOF cuts short (see the top of this file).
+    let size = (wanted * 3 / 2 + 2 * DESCRIPTOR_BYTES).next_multiple_of(ALIGN);
     let count = size.div_ceil(DESCRIPTOR_BYTES);
     let (Some(data), Some(descriptors)) = (Block::new(MemoryCapability::External, size), Block::new(MemoryCapability::Internal, count * size_of::<DmaDescriptor>()))
     else {
@@ -154,7 +179,7 @@ async fn capture(rx: I2sRx<'static, Async>, wanted: usize) -> (Result<Vec<u8>, &
         }
     };
     let Some(buffer) = buffer else { return (Err("DMA BUFFER"), rx) };
-    // The descriptors esp-hal linked, and the last of them: when the DMA hands that one back, it's full.
+    // How many descriptors esp-hal linked.
     let (mut linked, mut last) = (1, first);
     // SAFETY: esp-hal just linked these within the block; the DMA hasn't started.
     while let Some(next) = unsafe { (*last).next.as_mut() } {
@@ -178,8 +203,8 @@ async fn capture(rx: I2sRx<'static, Async>, wanted: usize) -> (Result<Vec<u8>, &
             note("T100", first, linked);
             noted = true;
         }
-        // SAFETY: as in `note`.
-        if unsafe { !core::ptr::read_volatile(last).flags.owner() } {
+        let (done, bytes) = received(first, linked);
+        if bytes >= wanted || done == linked {
             break true;
         }
         if started.elapsed().as_millis() > deadline {
