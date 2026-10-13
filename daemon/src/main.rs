@@ -397,12 +397,22 @@ async fn publish_device_message(state: &AppState, message: DeviceMessage) {
 }
 
 /// Voice commands (docs/protocol.md, "Voice commands"): offered on every report of the box's build, which follows
-/// hello on each new link and every reboot, and taken over USB or the local network. Over the Relay the box will
-/// talk to the voice service itself, so voice isn't offered there and its lines are ignored.
+/// hello on each new link and every reboot, and taken over native USB or the local network. The box sends no audio
+/// over the UART bridge, which is too slow for it, and over the Relay it will talk to the voice service itself, so
+/// voice isn't offered on either, and voice lines over the Relay are ignored.
 async fn handle_voice_line(state: &AppState, line: &str) -> Option<tokio::task::JoinHandle<()>> {
-    let over_relay = state.device.lock().await.relay;
-    if line.contains(serial_transport::BUILD_MARKER) && !over_relay && state.voice.available() {
-        send_event(state, voice::available_event(true));
+    let (over_relay, on_bridge) = {
+        let device = state.device.lock().await;
+        (device.relay, device.bridge)
+    };
+    if line.contains(serial_transport::BUILD_MARKER) && state.voice.available() {
+        if over_relay {
+            info!("voice commands not offered: the box is reached through the Relay");
+        } else if on_bridge {
+            info!("voice commands not offered: the box is on the UART bridge, which can't carry its audio; use its native USB port");
+        } else {
+            send_event(state, voice::available_event(true));
+        }
     }
     if !line.starts_with("VOICE ") {
         return None;
@@ -1601,7 +1611,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn voice_is_offered_after_each_build_report_but_never_over_the_relay() {
+    async fn voice_is_offered_after_each_build_report_but_never_over_the_relay_or_the_uart_bridge() {
         let dir = std::env::temp_dir().join(format!("vibebuddy-voice-offer-{}", std::process::id()));
         let offers = |transport: &RecordingTransport| {
             transport.events().iter().filter(|event| event.event == "voice.available").map(|event| event.extra["on"].clone()).collect::<Vec<_>>()
@@ -1626,6 +1636,10 @@ mod tests {
             publish_device_message(&state, DeviceMessage::ConnectedRelay { url: "wss://relay.example".to_owned() }).await;
             publish_device_message(&state, build()).await;
             assert_eq!(offers(&transport), expected, "not over the Relay");
+            // The box sends no audio over the UART bridge.
+            publish_device_message(&state, DeviceMessage::Connected { port: "/dev/cu.wchusbserial1".to_owned(), bridge: true, usb_serial: None }).await;
+            publish_device_message(&state, build()).await;
+            assert_eq!(offers(&transport), expected, "not over the UART bridge");
         }
         let _ = std::fs::remove_dir_all(dir);
     }

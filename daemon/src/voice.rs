@@ -62,36 +62,6 @@ impl Decoder {
         self.index = (self.index + INDEX_CHANGE[(nibble & 15) as usize]).clamp(0, 88);
         self.predictor as i16
     }
-
-    /// The nibble that brings the decoder closest to `sample`, applied: the inverse the box encodes with.
-    #[cfg(test)]
-    pub fn encode(&mut self, sample: i16) -> u8 {
-        let step = STEPS[self.index as usize];
-        let mut diff = i32::from(sample) - self.predictor;
-        let mut nibble = 0u8;
-        if diff < 0 {
-            nibble = 8;
-            diff = -diff;
-        }
-        if diff >= step {
-            nibble |= 4;
-            diff -= step;
-        }
-        if diff >= step >> 1 {
-            nibble |= 2;
-            diff -= step >> 1;
-        }
-        if diff >= step >> 2 {
-            nibble |= 1;
-        }
-        self.decode(nibble);
-        nibble
-    }
-
-    #[cfg(test)]
-    pub fn state(&self) -> (i16, u8) {
-        (self.predictor as i16, self.index as u8)
-    }
 }
 
 /// Two samples per byte, low nibble first.
@@ -140,6 +110,8 @@ struct Recording {
     turn: u32,
     lines: BTreeMap<u32, Vec<i16>>,
     samples: usize,
+    /// Answered `busy` at its start: the rest of it is dropped without another answer.
+    refused: bool,
 }
 
 /// The turn's audio, in order, `samples` long; a lost line becomes silence as long as a line, and audio lost at the
@@ -290,16 +262,26 @@ impl Voice {
                 if let Some(old) = recording.as_ref().filter(|old| old.turn != turn) {
                     warn!(old = old.turn, new = turn, "a voice turn started before the last one ended; dropped the last one");
                 }
-                info!(turn, "voice turn recording");
-                *recording = Some(Recording { turn, lines: BTreeMap::new(), samples: 0 });
+                // Refused at once rather than at its end, so the user isn't left talking to a box that won't listen.
+                let refused = self.running.load(Ordering::Acquire);
+                if refused {
+                    info!(turn, "a voice turn started while another is still running");
+                    send(&**transport, error_event(turn, "busy", "another voice command is still running"));
+                } else {
+                    info!(turn, "voice turn recording");
+                }
+                *recording = Some(Recording { turn, lines: BTreeMap::new(), samples: 0, refused });
             }
             VoiceLine::Data { turn, seq, predictor, index, bytes } => {
                 if recording.as_ref().is_none_or(|current| current.turn != turn) {
                     // Its START was lost: the audio still counts.
                     debug!(turn, "voice data without its start");
-                    *recording = Some(Recording { turn, lines: BTreeMap::new(), samples: 0 });
+                    *recording = Some(Recording { turn, lines: BTreeMap::new(), samples: 0, refused: false });
                 }
                 let current = recording.as_mut().expect("recording was just made");
+                if current.refused {
+                    return None;
+                }
                 let line = decode_line(predictor, index, &bytes);
                 if current.samples + line.len() > MAX_SAMPLES {
                     debug!(turn, seq, "voice turn over the longest recording; line dropped");
@@ -317,6 +299,9 @@ impl Voice {
             VoiceLine::End { turn, samples } => {
                 let taken = recording.take_if(|current| current.turn == turn);
                 drop(recording);
+                if taken.as_ref().is_some_and(|taken| taken.refused) {
+                    return None;
+                }
                 return self.end(turn, samples as usize, taken, transport.clone());
             }
         }
@@ -400,25 +385,27 @@ pub mod tests {
 
     use super::*;
 
-    /// Encodes `samples` as the box does: lines of `per_line` samples, each with the coder state it starts from.
-    pub fn voice_lines(turn: u32, samples: &[i16], per_line: usize) -> Vec<String> {
-        let mut encoder = Decoder::new(0, 0);
-        let mut lines = vec![format!("VOICE START {turn}")];
-        for (seq, chunk) in samples.chunks(per_line).enumerate() {
-            let (predictor, index) = encoder.state();
-            let bytes: Vec<u8> = chunk
-                .chunks(2)
-                .map(|pair| {
-                    let low = encoder.encode(pair[0]);
-                    let high = pair.get(1).map(|&sample| encoder.encode(sample)).unwrap_or(0);
-                    low | high << 4
-                })
-                .collect();
-            let data = base64::engine::general_purpose::STANDARD.encode(bytes);
-            lines.push(format!("VOICE DATA {turn} {seq} {predictor} {index} {data}"));
+    /// The lines the box itself sends for a turn of `samples`: made by firmware-core's own voice command code,
+    /// so these tests hold the daemon to what the box really writes.
+    pub fn voice_lines(turn: u32, samples: &[i16]) -> Vec<String> {
+        use vibebuddy_firmware_core::voice_command::{Out, VoiceCommand};
+        let mut box_side = VoiceCommand::new();
+        box_side.set_available(true);
+        // Turns count from 1 after each boot.
+        for _ in 1..turn {
+            box_side.start(0);
+            box_side.cancel();
         }
-        lines.push(format!("VOICE END {turn} {}", samples.len()));
-        lines
+        let mut out = vec![box_side.start(0)];
+        for piece in samples.chunks(700) {
+            out.extend(box_side.push(piece));
+        }
+        out.extend(box_side.release(10_000));
+        out.into_iter()
+            .map(|out| match out {
+                Out::Line(line) | Out::Data(line) => line.trim_end().to_owned(),
+            })
+            .collect()
     }
 
     pub fn sine(count: usize) -> Vec<i16> {
@@ -458,7 +445,7 @@ pub mod tests {
     #[test]
     fn a_line_decodes_on_its_own_from_the_state_it_carries() {
         let original = sine(10_000);
-        let lines = voice_lines(1, &original, 1152);
+        let lines = voice_lines(1, &original);
         let mut box_side = vibebuddy_firmware_core::adpcm::Decoder::default();
         let mut straight = Vec::new();
         let mut separately = Vec::new();
@@ -600,7 +587,7 @@ pub mod tests {
             vec![tool_call("speak", json!({"text": "Two agents are working."})), tool_call("speak", json!({"text": "One needs you."}))];
         let rig = Rig::new("turn", Ok("what are my agents doing"), script);
 
-        let task = rig.feed(&voice_lines(4, &sine(30_000), 1152)).expect("the turn runs");
+        let task = rig.feed(&voice_lines(4, &sine(30_000))).expect("the turn runs");
         // Both replies reach the box while the turn is still open in the app-server.
         while rig.names().len() < 3 {
             tokio::time::sleep(std::time::Duration::from_millis(5)).await;
@@ -627,21 +614,37 @@ pub mod tests {
     #[tokio::test]
     async fn lost_lines_still_make_a_turn_of_the_recorded_length() {
         let rig = Rig::new("gaps", Ok("hello"), logged_in());
-        let mut lines = voice_lines(1, &sine(5_000), 1000);
-        // No START and no line 2: the rest still counts.
+        let original = sine(5_000);
+        let mut lines = voice_lines(1, &original);
+        assert_eq!(lines.last().map(String::as_str), Some("VOICE END 1 5000"));
+        assert_eq!(lines.len(), 7, "START, four full lines of 1152 samples and one of 392, END");
+        // No START and no line 2 (samples 2304 to 3455): the rest still counts.
         lines.retain(|line| !line.starts_with("VOICE START") && !line.starts_with("VOICE DATA 1 2 "));
         rig.feed(&lines).expect("the turn runs").await.unwrap();
         let wav = rig.recognizer.heard.lock().unwrap()[0].clone();
         assert_eq!(wav.len(), 44 + 5_000 * 2);
-        let silence = &wav[44 + 2_000 * 2..44 + 3_000 * 2];
-        assert!(silence.iter().all(|byte| *byte == 0), "line 2 is silence");
+        let decoded: Vec<i16> = wav[44..].chunks(2).map(|pair| i16::from_le_bytes([pair[0], pair[1]])).collect();
+        assert!(decoded[2_304..3_456].iter().all(|sample| *sample == 0), "line 2 is silence");
+        // END counts the lost line's samples too, as the box's does, so what follows the gap keeps its place.
+        for k in (3_456 + 60..5_000).step_by(97) {
+            assert!((i32::from(decoded[k]) - i32::from(original[k])).abs() < 600, "sample {k}");
+        }
         assert_eq!(rig.names().last().map(String::as_str), Some("voice.done"));
+
+        // The last line lost: filled up to the count END gives.
+        let rig = Rig::new("gap-at-end", Ok("hello"), logged_in());
+        let mut lines = voice_lines(1, &original);
+        lines.retain(|line| !line.starts_with("VOICE DATA 1 4 "));
+        rig.feed(&lines).expect("the turn runs").await.unwrap();
+        let wav = rig.recognizer.heard.lock().unwrap()[0].clone();
+        assert_eq!(wav.len(), 44 + 5_000 * 2);
+        assert!(wav[44 + 4_608 * 2..].iter().all(|byte| *byte == 0));
     }
 
     #[tokio::test]
     async fn nothing_recognised_is_not_heard_and_the_session_is_not_asked() {
         let rig = Rig::new("empty", Ok(""), logged_in());
-        rig.feed(&voice_lines(2, &sine(12_000), 1152)).unwrap().await.unwrap();
+        rig.feed(&voice_lines(2, &sine(12_000))).unwrap().await.unwrap();
         assert_eq!(rig.names(), ["voice.error"]);
         assert_eq!(rig.error().0, "not_heard");
         assert_eq!(rig.script.lock().unwrap().starts, 0);
@@ -650,12 +653,12 @@ pub mod tests {
     #[tokio::test]
     async fn a_failed_recognizer_or_session_is_unavailable() {
         let rig = Rig::new("stt-down", Err("Workers AI answered 401: Authentication error"), logged_in());
-        rig.feed(&voice_lines(1, &sine(12_000), 1152)).unwrap().await.unwrap();
+        rig.feed(&voice_lines(1, &sine(12_000))).unwrap().await.unwrap();
         assert_eq!(rig.error(), ("unavailable".to_owned(), "Workers AI answered 401: Authentication error".to_owned()));
 
         // Codex isn't logged in: what was heard is still shown, then the error.
         let rig = Rig::new("no-login", Ok("hi"), Arc::new(std::sync::Mutex::new(Default::default())));
-        rig.feed(&voice_lines(1, &sine(12_000), 1152)).unwrap().await.unwrap();
+        rig.feed(&voice_lines(1, &sine(12_000))).unwrap().await.unwrap();
         assert_eq!(rig.names(), ["voice.heard", "voice.error"]);
         assert_eq!(rig.error().0, "unavailable");
     }
@@ -666,22 +669,26 @@ pub mod tests {
         let hold = Arc::new(tokio::sync::Notify::new());
         script.lock().unwrap().hold = Some(hold.clone());
         let rig = Rig::new("busy", Ok("first"), script);
-        let first = rig.feed(&voice_lines(1, &sine(12_000), 1152)).unwrap();
-        assert!(rig.feed(&voice_lines(2, &sine(12_000), 1152)).is_none());
-        let events = rig.transport.events();
-        let busy = events.iter().find(|event| event.event == "voice.error").unwrap();
-        assert_eq!((busy.extra["turn"].as_u64(), busy.extra["reason"].as_str()), (Some(2), Some("busy")));
+        let first = rig.feed(&voice_lines(1, &sine(12_000))).unwrap();
+        let second = voice_lines(2, &sine(12_000));
+        // Refused as soon as it starts, so the box stops recording; the rest of it gets no second answer.
+        assert!(rig.feed(&second[..1]).is_none());
+        let errors = || rig.transport.events().into_iter().filter(|event| event.event == "voice.error").collect::<Vec<_>>();
+        assert_eq!(errors().len(), 1);
+        assert_eq!((errors()[0].extra["turn"].as_u64(), errors()[0].extra["reason"].as_str()), (Some(2), Some("busy")));
+        assert!(rig.feed(&second[1..]).is_none());
+        assert_eq!(errors().len(), 1);
         hold.notify_one();
         first.await.unwrap();
         // Once it is over, the next turn runs.
         hold.notify_one();
-        rig.feed(&voice_lines(3, &sine(12_000), 1152)).expect("not busy any more").await.unwrap();
+        rig.feed(&voice_lines(3, &sine(12_000))).expect("not busy any more").await.unwrap();
     }
 
     #[tokio::test]
     async fn a_cancelled_turn_is_dropped_and_an_end_without_audio_is_not_heard() {
         let rig = Rig::new("cancel", Ok("hi"), logged_in());
-        let mut lines = voice_lines(5, &sine(6_000), 1152);
+        let mut lines = voice_lines(5, &sine(6_000));
         lines.pop();
         lines.push("VOICE CANCEL 5".to_owned());
         assert!(rig.feed(&lines).is_none());
@@ -757,7 +764,7 @@ pub mod tests {
         let transport: Arc<dyn Transport> = timed.clone();
 
         // 1152 samples are 576 bytes, 768 base64 characters: the most a line may carry.
-        let lines = voice_lines(1, &left, 1152);
+        let lines = voice_lines(1, &left);
         assert!(lines.iter().all(|line| line.len() < 1024));
         println!("{:.2} s of audio in {} lines", left.len() as f32 / SAMPLE_RATE as f32, lines.len());
         let (end, data) = lines.split_last().unwrap();
@@ -790,7 +797,7 @@ pub mod tests {
         let voice = Voice::new(None, on());
         let transport = Arc::new(RecordingTransport::default());
         let shared: Arc<dyn Transport> = transport.clone();
-        for line in voice_lines(1, &sine(12_000), 1152) {
+        for line in voice_lines(1, &sine(12_000)) {
             voice.handle_line(&line, &shared);
         }
         assert_eq!(transport.events()[0].extra["reason"], "unavailable");
