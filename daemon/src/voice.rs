@@ -1085,12 +1085,12 @@ pub mod tests {
     /// `VOICE` lines, recognised by the real recognizer and answered by the real resident session. Run by hand:
     ///
     /// ```sh
-    /// VIBEBUDDY_E2E_WAV=mic.wav VIBEBUDDY_STT_ENV_FILE=~/.vibebuddy-dev-ai.env VIBEBUDDY_CODEX=codex-without-hooks \
+    /// VIBEBUDDY_E2E_WAV=mic.wav VIBEBUDDY_STT_ENV_FILE=~/.vibebuddy-dev-ai.env \
     ///   cargo test -p vibebuddyd e2e_ -- --ignored --nocapture
     /// ```
     ///
-    /// `VIBEBUDDY_CODEX` should start Codex with `-c features.hooks=false`, or the turn's hooks reach the daemon on
-    /// 7331 and the box shows the test as an Activity. The thread lives in a temporary state directory.
+    /// The thread and its Codex home live in a temporary state directory; the user's hooks don't load there, so
+    /// nothing reaches the daemon on 7331.
     #[tokio::test(flavor = "multi_thread")]
     #[ignore = "uses the network, a speech recognizer's credentials and the user's Codex"]
     async fn e2e_a_real_recording_through_the_real_recognizer_and_resident_session() {

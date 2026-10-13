@@ -553,6 +553,7 @@ fn app(state: AppState) -> Router {
         .route("/v1/updates/check", post(post_check_updates))
         .route("/v1/resident", get(get_resident))
         .route("/v1/resident/say", post(post_resident_say))
+        .route("/v1/resident/history", get(get_resident_history))
         .with_state(state)
 }
 
@@ -1336,17 +1337,40 @@ struct SayRequest {
 struct ResidentInfo {
     enabled: bool,
     thread_id: Option<String>,
-    /// Opens the resident thread in the Codex App.
-    url: Option<String>,
 }
 
 async fn get_resident(State(state): State<AppState>) -> Json<ResidentInfo> {
-    let thread_id = state.resident.as_ref().and_then(|resident| resident.thread_id());
     Json(ResidentInfo {
         enabled: state.resident.as_ref().is_some_and(|resident| resident.enabled()),
-        url: thread_id.as_ref().map(|id| format!("codex://threads/{id}")),
-        thread_id,
+        thread_id: state.resident.as_ref().and_then(|resident| resident.thread_id()),
     })
+}
+
+#[derive(serde::Deserialize)]
+struct HistoryQuery {
+    limit: Option<usize>,
+}
+
+/// The last voice commands and their spoken replies, read from the resident thread (default 5, at most 50).
+async fn get_resident_history(
+    State(state): State<AppState>,
+    axum::extract::Query(query): axum::extract::Query<HistoryQuery>,
+) -> axum::response::Response {
+    use axum::response::IntoResponse;
+    let Some(resident) = state.resident.clone() else {
+        return (StatusCode::SERVICE_UNAVAILABLE, Json(ApiResponse { accepted: false, message: "no state directory".to_owned() }))
+            .into_response();
+    };
+    match resident.history(query.limit.unwrap_or(5).clamp(1, 50)).await {
+        Ok(exchanges) => Json(serde_json::json!({"thread_id": resident.thread_id(), "exchanges": exchanges})).into_response(),
+        Err(error) => {
+            let status = match error {
+                resident::ResidentError::Disabled => StatusCode::NOT_FOUND,
+                _ => StatusCode::SERVICE_UNAVAILABLE,
+            };
+            (status, Json(ApiResponse { accepted: false, message: error.to_string() })).into_response()
+        }
+    }
 }
 
 /// One voice command, typed for now: waits for the resident session's spoken replies.

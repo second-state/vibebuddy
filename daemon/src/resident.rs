@@ -1,16 +1,19 @@
 //! The resident session (ADR-0017): the one long-running Codex thread every voice command goes to.
 //!
-//! The daemon drives the user's own `codex app-server` over stdio with the user's own login: `thread/start` once,
-//! `thread/resume` on every later start, `turn/start` per voice command. The session answers through the `speak`
+//! The daemon drives `codex app-server` over stdio with the user's own login, in a Codex home of its own
+//! (`resident-codex/` in the daemon's state directory) that the user's Codex and the ChatGPT App never list, so they
+//! never take the thread's writer lock: `thread/start` once, `thread/resume` on every later start, `turn/start` per
+//! voice command. The session answers through the `speak`
 //! tool we define (`dynamicTools`), and reads the Activities through `list_activities`; it gets no tool that runs
-//! commands or writes files, runs read-only, and every approval or question it raises is declined.
+//! commands or writes files, runs read-only, and every approval or question it raises is declined. It reads the
+//! user's Codex memories, but only through the daemon, which never writes them.
 //!
 //! Experimental and off unless `VIBEBUDDY_RESIDENT_SESSION=1`. The app-server starts on the first voice command
 //! and again on the next one after it dies. Voice commands are taken one at a time; the ones that arrive meanwhile
 //! wait their turn in arrival order.
 //!
-//! The resident session is never an Activity: the user's Codex hooks fire for its thread too, and
-//! [`Resident::owns_hook`] is how the Codex adapter recognises and drops them.
+//! The resident session is never an Activity: should any Codex hooks fire for its thread, [`Resident::owns_hook`]
+//! is how the Codex adapter recognises and drops them.
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -36,6 +39,13 @@ pub const CODEX_VARIABLE: &str = "VIBEBUDDY_CODEX";
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(60);
 /// How long one voice command may take from `turn/start` to `turn/completed`; then the turn is interrupted.
 const TURN_TIMEOUT: Duration = Duration::from_secs(120);
+/// The resident session's own Codex home, in the daemon's state directory.
+const CODEX_HOME_DIR: &str = "resident-codex";
+/// How much of the user's `memory_summary.md` goes into the instructions: Codex's own cap, 2,500 tokens, which it
+/// counts as 4 bytes each.
+const MEMORY_SUMMARY_MAX_BYTES: usize = 10_000;
+/// How much one `search_memories` call returns at most.
+const MEMORY_SEARCH_MAX_BYTES: usize = 8_000;
 
 pub fn enabled_by_env() -> bool {
     matches!(std::env::var(ENABLE_VARIABLE).as_deref(), Ok("1" | "true"))
@@ -78,6 +88,13 @@ pub struct Answer {
     pub replies: Vec<String>,
 }
 
+/// One past voice command and the spoken replies to it, read back from the thread.
+#[derive(Debug, PartialEq, Serialize)]
+pub struct Exchange {
+    pub said: String,
+    pub replies: Vec<String>,
+}
+
 /// How the app-server is reached: the real `codex` child, or an in-memory fake in tests.
 pub enum Launcher {
     Codex,
@@ -113,6 +130,10 @@ pub struct Resident {
     /// The same directory with symlinks resolved, as Codex may report it in hooks.
     canonical_dir: PathBuf,
     state_file: PathBuf,
+    /// The Codex home the app-server runs in; the daemon owns it.
+    codex_home: PathBuf,
+    /// The user's own Codex home, whose login and memories the resident session shares.
+    user_codex_home: PathBuf,
     launcher: Launcher,
     activities: Arc<Mutex<ActivityTracker>>,
     /// Held for a whole turn: one voice command at a time, the rest wait here in order.
@@ -122,8 +143,8 @@ pub struct Resident {
 }
 
 impl Resident {
-    /// `state_dir` is the daemon's state directory: the thread id is kept in `resident.json` there, and the
-    /// session works in `resident/`.
+    /// `state_dir` is the daemon's state directory: the thread id is kept in `resident.json` there, the session
+    /// works in `resident/`, and its Codex home is `resident-codex/`.
     pub fn new(enabled: bool, state_dir: &Path, launcher: Launcher, activities: Arc<Mutex<ActivityTracker>>) -> Self {
         let dir = state_dir.join("resident");
         let state_file = state_dir.join("resident.json");
@@ -134,6 +155,8 @@ impl Resident {
             dir,
             canonical_dir,
             state_file,
+            codex_home: state_dir.join(CODEX_HOME_DIR),
+            user_codex_home: user_codex_home(),
             launcher,
             activities,
             session: Mutex::new(None),
@@ -149,8 +172,8 @@ impl Resident {
         self.thread_id.lock().expect("thread id lock").clone()
     }
 
-    /// Whether a Codex hook event comes from the resident session: by its thread, or by its working directory,
-    /// which also covers the user opening the thread in the Codex App and typing there.
+    /// Whether a Codex hook event comes from the resident session: by its thread, or by its working directory. The
+    /// user's own hooks don't load in the resident Codex home, but system and managed ones may.
     pub fn owns_hook(&self, session_id: &str, thread_id: Option<&str>, cwd: Option<&str>) -> bool {
         if let Some(resident) = self.thread_id.lock().expect("thread id lock").as_deref()
             && (session_id == resident || thread_id == Some(resident))
@@ -176,14 +199,7 @@ impl Resident {
             return Err(ResidentError::Disabled);
         }
         let mut slot = self.session.lock().await;
-        if slot.as_ref().is_some_and(|session| session.client.is_closed()) {
-            warn!("the resident app-server exited; starting it again");
-            *slot = None;
-        }
-        if slot.is_none() {
-            *slot = Some(self.start().await?);
-        }
-        let session = slot.as_mut().expect("session was just started");
+        let session = self.running(&mut slot).await?;
         let result = self.run_turn(session, text, on_reply).await;
         if session.client.is_closed() {
             *slot = None;
@@ -191,9 +207,43 @@ impl Resident {
         result
     }
 
+    /// The last `limit` voice commands and their spoken replies, oldest first, read from the thread through the
+    /// app-server (the daemon keeps no record of its own). Empty while there is no thread yet.
+    pub async fn history(&self, limit: usize) -> Result<Vec<Exchange>, ResidentError> {
+        if !self.enabled {
+            return Err(ResidentError::Disabled);
+        }
+        if self.thread_id().is_none() {
+            return Ok(Vec::new());
+        }
+        let mut slot = self.session.lock().await;
+        let session = self.running(&mut slot).await?;
+        let params = json!({"threadId": session.thread_id, "limit": limit, "sortDirection": "desc", "itemsView": "full"});
+        let listed = request(&session.client, "thread/turns/list", params).await;
+        if session.client.is_closed() {
+            *slot = None;
+        }
+        let turns = listed?.get("data").and_then(Value::as_array).cloned().unwrap_or_default();
+        Ok(turns.iter().rev().filter_map(exchange_of).collect())
+    }
+
+    /// The running session, started (again) if there is none or its app-server has exited.
+    async fn running<'a>(&self, slot: &'a mut Option<Session>) -> Result<&'a mut Session, ResidentError> {
+        if slot.as_ref().is_some_and(|session| session.client.is_closed()) {
+            warn!("the resident app-server exited; starting it again");
+            *slot = None;
+        }
+        if slot.is_none() {
+            *slot = Some(self.start().await?);
+        }
+        Ok(slot.as_mut().expect("session was just started"))
+    }
+
     async fn start(&self) -> Result<Session, ResidentError> {
+        prepare_codex_home(&self.codex_home, &self.user_codex_home)
+            .map_err(|error| ResidentError::Rpc(format!("cannot prepare {}: {error}", self.codex_home.display())))?;
         let (pipes, version) = match &self.launcher {
-            Launcher::Codex => spawn_codex().await?,
+            Launcher::Codex => spawn_codex(&self.codex_home).await?,
             #[cfg(test)]
             Launcher::Fake(connect) => (connect(), None),
         };
@@ -213,14 +263,21 @@ impl Resident {
         if account.get("account").is_none_or(Value::is_null)
             && account.get("requiresOpenaiAuth").and_then(Value::as_bool) != Some(false)
         {
+            if !self.user_codex_home.join("auth.json").exists() {
+                warn!(
+                    codex_home = %self.user_codex_home.display(),
+                    "no auth.json in the user's Codex home: a login kept in the keychain can't be shared with the resident session"
+                );
+            }
             return Err(ResidentError::NotLoggedIn);
         }
         std::fs::create_dir_all(&self.dir)
             .map_err(|error| ResidentError::Rpc(format!("cannot create {}: {error}", self.dir.display())))?;
         let thread_id = match self.thread_id() {
-            // There is one resident thread for good. Only a thread that no longer exists is replaced; one that
-            // can't be resumed for another reason (most often the Codex App has it open, and a thread has one
-            // writer at a time) fails this command and is tried again with the next.
+            // There is one resident thread for good. Only a thread that no longer exists is replaced (a thread
+            // saved before the resident session had its own Codex home is one); one that can't be resumed for
+            // another reason (another Codex process is its writer) fails this command and is tried again with the
+            // next.
             Some(saved) => match self.resume(&client, &saved).await {
                 Err(ResidentError::Rpc(message)) if !client.is_closed() && thread_is_gone(&message) => {
                     let thread = self.start_thread(&client).await?;
@@ -228,7 +285,7 @@ impl Resident {
                     thread
                 }
                 Err(ResidentError::Rpc(message)) if message.contains("active writer") => {
-                    warn!(thread = %saved, "the resident thread is open in another Codex process, most likely the Codex App; close it there");
+                    warn!(thread = %saved, "another Codex process is the resident thread's writer");
                     return Err(ResidentError::Rpc(message));
                 }
                 other => other?,
@@ -265,7 +322,7 @@ impl Resident {
             "cwd": self.dir,
             "sandbox": "read-only",
             "approvalPolicy": "on-request",
-            "developerInstructions": instructions(None),
+            "developerInstructions": instructions(None, memory_summary(&self.user_codex_home).as_deref()),
         })
     }
 
@@ -363,6 +420,10 @@ impl Resident {
                 let activities = self.activities.lock().await.summaries();
                 (true, json!({"activities": activities}).to_string())
             }
+            "search_memories" => {
+                let query = params.pointer("/arguments/query").and_then(Value::as_str).unwrap_or_default();
+                (true, search_memories(&self.user_codex_home.join("memories"), query))
+            }
             other => (false, format!("unknown tool {other}")),
         };
         json!({"success": success, "contentItems": [{"type": "inputText", "text": text}]})
@@ -402,13 +463,32 @@ fn tools() -> Value {
                 project, state (working or needs_input), where it runs, and seconds in that state.",
             "inputSchema": {"type": "object", "properties": {}, "additionalProperties": false},
         },
+        {
+            "type": "function",
+            "name": "search_memories",
+            "description": "Search the user's Codex memories (notes Codex keeps from the user's past sessions) for lines \
+                containing any of the words in `query`, case-insensitive. Returns the matching lines, each with the \
+                line before and after, by file.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {"query": {"type": "string", "description": "A few keywords."}},
+                "required": ["query"],
+                "additionalProperties": false,
+            },
+        },
     ])
 }
 
 /// The developer instructions. `persona` is the seam for the Character the user picked (CONTEXT.md, Persona);
-/// until Characters carry one, the buddy speaks plainly.
-fn instructions(persona: Option<&str>) -> String {
+/// until Characters carry one, the buddy speaks plainly. `memories` is the user's Codex memory summary, if any.
+fn instructions(persona: Option<&str>, memories: Option<&str>) -> String {
     let persona = persona.unwrap_or("You are friendly, calm and brief.");
+    let memories = memories.map_or_else(String::new, |summary| {
+        format!(
+            "\n\nWhat Codex remembers about the user from their past sessions, in summary. For more, call \
+             `search_memories`. Use it when it helps; never read it out.\n<memory_summary>\n{summary}\n</memory_summary>"
+        )
+    });
     format!(
         "You are the buddy of VibeBuddy: a small desk box that watches the user's coding Agents (Codex, Claude Code, \
          OpenCode, GitHub Copilot CLI, Pi, GitHub Actions) and speaks up for them. {persona}\n\
@@ -418,7 +498,7 @@ fn instructions(persona: Option<&str>) -> String {
          To know what the Agents are doing, call `list_activities`; never guess. Titles there are short upper-case \
          task-card names; say them naturally.\n\
          You do no work yourself: run no commands, read or edit no files, browse nothing. If the user asks for work \
-         to be done, say briefly that you can't start it yet."
+         to be done, say briefly that you can't start it yet.{memories}"
     )
 }
 
@@ -437,10 +517,11 @@ async fn request(client: &Client, method: &str, params: Value) -> Result<Value, 
     }
 }
 
-/// Starts `codex app-server` and checks its version against the one this was tested with.
-async fn spawn_codex() -> Result<(Pipes, Option<String>), ResidentError> {
+/// Starts `codex app-server` in the resident session's Codex home and checks its version against the one this was
+/// tested with.
+async fn spawn_codex(codex_home: &Path) -> Result<(Pipes, Option<String>), ResidentError> {
     let program = find_codex().ok_or(ResidentError::NoCodex)?;
-    let version = tokio::process::Command::new(&program)
+    let version = codex_command(&program, codex_home)
         .arg("--version")
         .output()
         .await
@@ -456,8 +537,8 @@ async fn spawn_codex() -> Result<(Pipes, Option<String>), ResidentError> {
         ),
     }
     let base = tool_overrides();
-    let servers = enabled_mcp_servers(&program, &base).await;
-    let mut child = tokio::process::Command::new(&program)
+    let servers = enabled_mcp_servers(&program, codex_home, &base).await;
+    let mut child = codex_command(&program, codex_home)
         .args(app_server_args(&base, &servers))
         .stdin(std::process::Stdio::piped())
         .stdout(std::process::Stdio::piped())
@@ -471,10 +552,19 @@ async fn spawn_codex() -> Result<(Pipes, Option<String>), ResidentError> {
     Ok((Pipes { reader: Box::new(reader), writer: Box::new(writer), child: Some(child) }, version))
 }
 
-/// Features that give a Codex thread tools of its own: the resident session gets none of them, only ours. Plugins
-/// and apps (connectors) bring tools and MCP servers; the rest are built-in tools. Set as `-c features.<name>=false`
-/// rather than `--disable`, which refuses a name another Codex version doesn't know. The user's hooks and
-/// AGENTS.md stay: the hooks are filtered, and AGENTS.md only shapes how it talks.
+/// `codex` run in the resident session's own Codex home. The user's `config.toml`, `AGENTS.md`, hooks, plugins and
+/// MCP servers live in theirs, so none of them load; Codex's system and managed config still do.
+fn codex_command(program: &Path, codex_home: &Path) -> tokio::process::Command {
+    let mut command = tokio::process::Command::new(program);
+    command.env("CODEX_HOME", codex_home);
+    command
+}
+
+/// Features that give a Codex thread tools of its own: the resident session gets none of them, only ours. Most are
+/// on by default even in an empty Codex home. Plugins and apps (connectors) bring tools and MCP servers; the rest
+/// are built-in tools. `memories` (off by default) would also start Codex's memory pipeline, which rewrites the
+/// memories folder of the Codex home it runs in; the daemon gives the session the user's memories itself. Set as
+/// `-c features.<name>=false` rather than `--disable`, which refuses a name another Codex version doesn't know.
 const FEATURES_OFF: [&str; 15] = [
     "plugins",
     "apps",
@@ -493,16 +583,24 @@ const FEATURES_OFF: [&str; 15] = [
     "skill_search",
 ];
 
-/// The config overrides that strip a Codex thread of its own tools, before MCP servers.
+/// The config overrides for the resident session's Codex, before MCP servers. Besides the tools:
+/// - `cli_auth_credentials_store="file"`: the login is the user's `auth.json`, linked in (see [`link_auth`]). The
+///   default already, but a keyring store would never find it (keyring entries are keyed by the Codex home's
+///   path) and, on saving, would delete the link.
+/// - `memories.generate_memories=false`: the resident thread is never summarised into memories, should the feature
+///   come on.
 fn tool_overrides() -> Vec<String> {
     let mut args: Vec<String> =
         FEATURES_OFF.iter().flat_map(|feature| ["-c".to_owned(), format!("features.{feature}=false")]).collect();
-    args.extend(["-c".to_owned(), "web_search=\"disabled\"".to_owned()]);
+    for setting in ["web_search=\"disabled\"", "cli_auth_credentials_store=\"file\"", "memories.generate_memories=false"] {
+        args.extend(["-c".to_owned(), setting.to_owned()]);
+    }
     args
 }
 
-/// `codex app-server` with the tool overrides and every MCP server the user configured switched off. An override
-/// can't empty `mcp_servers` (it merges), so each server is turned off by name.
+/// `codex app-server` with the overrides and every MCP server still configured switched off. The resident Codex home
+/// configures none, but system and managed config may. An override can't empty `mcp_servers` (it merges), so each
+/// server is turned off by name.
 fn app_server_args(base: &[String], mcp_servers: &[String]) -> Vec<String> {
     let mut args = base.to_vec();
     for name in mcp_servers {
@@ -515,8 +613,8 @@ fn app_server_args(base: &[String], mcp_servers: &[String]) -> Vec<String> {
 /// The MCP servers that would be on, as Codex itself resolves them (`codex mcp list --json`, under the same
 /// overrides, so servers that plugins bring are already gone). A name that can't be written as a bare TOML key
 /// can't be switched off by an override; it is logged.
-async fn enabled_mcp_servers(program: &Path, base: &[String]) -> Vec<String> {
-    let output = tokio::process::Command::new(program)
+async fn enabled_mcp_servers(program: &Path, codex_home: &Path, base: &[String]) -> Vec<String> {
+    let output = codex_command(program, codex_home)
         .args(base)
         .args(["mcp", "list", "--json"])
         .stdin(std::process::Stdio::null())
@@ -525,7 +623,7 @@ async fn enabled_mcp_servers(program: &Path, base: &[String]) -> Vec<String> {
         .await;
     let listed = output.ok().and_then(|output| serde_json::from_slice::<Value>(&output.stdout).ok());
     let Some(servers) = listed.as_ref().and_then(Value::as_array) else {
-        warn!("could not list the user's MCP servers; the resident session may see their tools");
+        warn!("could not list the MCP servers; the resident session may see their tools");
         return Vec::new();
     };
     servers
@@ -556,6 +654,106 @@ fn find_codex() -> Option<PathBuf> {
         .chain(home.map(|home| home.join(".local/bin/codex")))
         .chain(["/opt/homebrew/bin/codex", "/usr/local/bin/codex"].map(PathBuf::from))
         .find(|path| path.is_file())
+}
+
+/// The user's own Codex home: `CODEX_HOME`, else `~/.codex`.
+fn user_codex_home() -> PathBuf {
+    if let Some(home) = std::env::var_os("CODEX_HOME").filter(|home| !home.is_empty()) {
+        return PathBuf::from(home);
+    }
+    std::env::var_os("HOME").map(PathBuf::from).unwrap_or_default().join(".codex")
+}
+
+/// Makes the resident session's Codex home (mode 0700) and links the user's login into it.
+fn prepare_codex_home(codex_home: &Path, user_codex_home: &Path) -> std::io::Result<()> {
+    use std::os::unix::fs::PermissionsExt;
+    std::fs::create_dir_all(codex_home)?;
+    std::fs::set_permissions(codex_home, std::fs::Permissions::from_mode(0o700))?;
+    link_auth(codex_home, user_codex_home)
+}
+
+/// Makes `auth.json` in the resident Codex home a symlink to the user's, so both share one login and either one's
+/// token refresh is the other's. Codex 0.162.0 reads it with a plain open, refreshes by reloading it first (taking a
+/// token the other side already refreshed), and saves by truncating and rewriting it in place, all through the link.
+/// Anything else found there (a copy, a link elsewhere) is replaced, on every start. Without a login in the user's
+/// home the link dangles and the session reports "not logged in".
+fn link_auth(codex_home: &Path, user_codex_home: &Path) -> std::io::Result<()> {
+    let link = codex_home.join("auth.json");
+    let target = user_codex_home.join("auth.json");
+    if std::fs::read_link(&link).is_ok_and(|current| current == target) {
+        return Ok(());
+    }
+    match std::fs::remove_file(&link) {
+        Ok(()) => info!("replaced the resident Codex home's auth.json with a link to the user's"),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+        Err(error) => return Err(error),
+    }
+    std::os::unix::fs::symlink(&target, &link)
+}
+
+/// The user's Codex memory summary (`memories/memory_summary.md`), cut at Codex's own cap; None if there is none.
+/// Read again at every start, so it follows the user's Codex as it consolidates.
+fn memory_summary(user_codex_home: &Path) -> Option<String> {
+    let text = std::fs::read_to_string(user_codex_home.join("memories").join("memory_summary.md")).ok()?;
+    let text = text.trim();
+    let end = text.floor_char_boundary(MEMORY_SUMMARY_MAX_BYTES);
+    (!text.is_empty()).then(|| text[..end].to_owned())
+}
+
+/// Lines of the user's Codex memories (`MEMORY.md`, `raw_memories.md` and `rollout_summaries/`, as the user's Codex
+/// would search them) containing any word of `query`, case-insensitive, each with the line before and after. Only
+/// reads: the daemon never writes the user's memories.
+fn search_memories(root: &Path, query: &str) -> String {
+    let words: Vec<String> = query.split_whitespace().map(str::to_lowercase).collect();
+    if words.is_empty() {
+        return "query is empty".to_owned();
+    }
+    let mut files = vec![root.join("MEMORY.md"), root.join("raw_memories.md")];
+    if let Ok(entries) = std::fs::read_dir(root.join("rollout_summaries")) {
+        let mut summaries: Vec<PathBuf> = entries.filter_map(Result::ok).map(|entry| entry.path()).collect();
+        summaries.sort();
+        files.extend(summaries);
+    }
+    let mut out = String::new();
+    'files: for file in files {
+        let Ok(text) = std::fs::read_to_string(&file) else { continue };
+        let lines: Vec<&str> = text.lines().collect();
+        let name = file.strip_prefix(root).unwrap_or(&file).display().to_string();
+        let mut shown_until = 0;
+        for (index, line) in lines.iter().enumerate() {
+            let lower = line.to_lowercase();
+            if index < shown_until || !words.iter().any(|word| lower.contains(word.as_str())) {
+                continue;
+            }
+            let (from, to) = (index.saturating_sub(1).max(shown_until), (index + 2).min(lines.len()));
+            let block = format!("{name}:{}\n{}\n\n", from + 1, lines[from..to].join("\n"));
+            if out.len() + block.len() > MEMORY_SEARCH_MAX_BYTES {
+                out.push_str("(more matches left out)");
+                break 'files;
+            }
+            out.push_str(&block);
+            shown_until = to;
+        }
+    }
+    if out.is_empty() { "no matches".to_owned() } else { out }
+}
+
+/// A turn from `thread/turns/list` as an exchange: the user's text and what was said through `speak`.
+fn exchange_of(turn: &Value) -> Option<Exchange> {
+    let items = turn.get("items")?.as_array()?;
+    let said = items
+        .iter()
+        .filter(|item| item["type"] == "userMessage")
+        .flat_map(|item| item["content"].as_array().cloned().unwrap_or_default())
+        .filter_map(|input| input["text"].as_str().map(str::to_owned))
+        .collect::<Vec<_>>()
+        .join(" ");
+    let replies = items
+        .iter()
+        .filter(|item| item["type"] == "dynamicToolCall" && item["tool"] == "speak")
+        .filter_map(|item| item.pointer("/arguments/text").and_then(Value::as_str).map(str::to_owned))
+        .collect();
+    (!said.is_empty()).then_some(Exchange { said, replies })
 }
 
 fn load(path: &Path) -> Saved {
@@ -646,6 +844,18 @@ pub(crate) mod tests {
                         continue;
                     }
                     "thread/resume" => json!({"thread": {"id": message["params"]["threadId"]}}),
+                    "thread/turns/list" => json!({"data": [
+                        {"id": "turn-2", "items": [
+                            {"type": "userMessage", "id": "a", "content": [{"type": "text", "text": "and now?"}]},
+                            {"type": "dynamicToolCall", "id": "b", "tool": "list_activities", "arguments": {}},
+                            {"type": "dynamicToolCall", "id": "c", "tool": "speak", "arguments": {"text": "Still one."}},
+                        ]},
+                        {"id": "turn-1", "items": [
+                            {"type": "userMessage", "id": "d", "content": [{"type": "text", "text": "what's up?"}]},
+                            {"type": "dynamicToolCall", "id": "e", "tool": "speak", "arguments": {"text": "One task."}},
+                            {"type": "dynamicToolCall", "id": "f", "tool": "speak", "arguments": {"text": "It's fine."}},
+                        ]},
+                    ], "nextCursor": null}),
                     "turn/start" => {
                         turns += 1;
                         let turn_id = format!("turn-{turns}");
@@ -693,9 +903,13 @@ pub(crate) mod tests {
         dir
     }
 
+    /// A resident session on the fake app-server, whose user's Codex home is `user-codex/` in `dir`.
     pub(crate) fn resident(dir: &Path, script: &Shared, activities: Arc<Mutex<ActivityTracker>>) -> Resident {
         let script = script.clone();
-        Resident::new(true, dir, Launcher::Fake(Box::new(move || fake_server(script.clone()))), activities)
+        let mut resident =
+            Resident::new(true, dir, Launcher::Fake(Box::new(move || fake_server(script.clone()))), activities);
+        resident.user_codex_home = dir.join("user-codex");
+        resident
     }
 
     pub(crate) fn logged_in() -> Shared {
@@ -730,7 +944,7 @@ pub(crate) mod tests {
         assert!(start["developerInstructions"].as_str().unwrap().contains("speak"));
         let tools: Vec<&str> =
             start["dynamicTools"].as_array().unwrap().iter().map(|tool| tool["name"].as_str().unwrap()).collect();
-        assert_eq!(tools, ["speak", "list_activities"]);
+        assert_eq!(tools, ["speak", "list_activities", "search_memories"]);
         assert_eq!(received[4]["params"], json!({"threadId": "new-thread", "input": [{"type": "text", "text": "hello"}]}));
         assert!(dir.join("resident").is_dir());
         assert_eq!(load(&dir.join("resident.json")).thread_id.as_deref(), Some("new-thread"));
@@ -906,6 +1120,139 @@ pub(crate) mod tests {
         let _ = std::fs::remove_dir_all(dir);
     }
 
+    #[tokio::test]
+    async fn the_codex_home_is_private_and_shares_the_users_login_through_a_link() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = temp_dir("home");
+        std::fs::create_dir_all(dir.join("user-codex")).unwrap();
+        std::fs::write(dir.join("user-codex/auth.json"), "{}").unwrap();
+        resident(&dir, &logged_in(), Arc::default()).say("hi").await.unwrap();
+        let home = dir.join(CODEX_HOME_DIR);
+        assert_eq!(std::fs::metadata(&home).unwrap().permissions().mode() & 0o777, 0o700);
+        assert_eq!(std::fs::read_link(home.join("auth.json")).unwrap(), dir.join("user-codex/auth.json"));
+        // Nothing else is put there: no config.toml.
+        assert_eq!(std::fs::read_dir(&home).unwrap().count(), 1);
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn a_copied_or_misdirected_login_is_replaced_by_the_link_on_every_start() {
+        let dir = temp_dir("relink");
+        let (home, user) = (dir.join("home"), dir.join("user"));
+        std::fs::create_dir_all(&user).unwrap();
+        std::fs::write(user.join("auth.json"), "{\"tokens\":\"user\"}").unwrap();
+        let link = home.join("auth.json");
+
+        prepare_codex_home(&home, &user).unwrap();
+        assert_eq!(std::fs::read_link(&link).unwrap(), user.join("auth.json"));
+        prepare_codex_home(&home, &user).unwrap();
+        assert_eq!(std::fs::read_link(&link).unwrap(), user.join("auth.json"));
+
+        // A diverged copy, as a write by rename would leave behind.
+        std::fs::remove_file(&link).unwrap();
+        std::fs::write(&link, "{\"tokens\":\"stale\"}").unwrap();
+        prepare_codex_home(&home, &user).unwrap();
+        assert_eq!(std::fs::read_link(&link).unwrap(), user.join("auth.json"));
+        assert_eq!(std::fs::read_to_string(&link).unwrap(), "{\"tokens\":\"user\"}");
+
+        std::fs::remove_file(&link).unwrap();
+        std::os::unix::fs::symlink(dir.join("elsewhere.json"), &link).unwrap();
+        prepare_codex_home(&home, &user).unwrap();
+        assert_eq!(std::fs::read_link(&link).unwrap(), user.join("auth.json"));
+
+        // A write through the link, as Codex refreshes tokens (truncate and rewrite in place), lands in the user's.
+        let mut file = std::fs::OpenOptions::new().write(true).truncate(true).open(&link).unwrap();
+        std::io::Write::write_all(&mut file, b"{}").unwrap();
+        assert_eq!(std::fs::read_to_string(user.join("auth.json")).unwrap(), "{}");
+        assert!(std::fs::symlink_metadata(&link).unwrap().file_type().is_symlink());
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[tokio::test]
+    async fn the_users_memories_are_read_into_the_instructions_and_searched_but_never_written() {
+        let dir = temp_dir("memories");
+        let memories = dir.join("user-codex/memories");
+        std::fs::create_dir_all(memories.join("rollout_summaries")).unwrap();
+        std::fs::write(memories.join("memory_summary.md"), "The user's cat is called Biscuit.\n").unwrap();
+        std::fs::write(memories.join("MEMORY.md"), "# Pets\nCat: Biscuit\nlikes boxes\n\n# Work\nRust daemon\n").unwrap();
+        std::fs::write(memories.join("rollout_summaries/a.md"), "nothing here\nbiscuit again\n").unwrap();
+        let before: Vec<_> = walk(&memories);
+        let script = logged_in();
+        script.lock().unwrap().turn_requests = vec![
+            tool_call("search_memories", json!({"query": "BISCUIT"})),
+            tool_call("search_memories", json!({"query": "zebra"})),
+        ];
+        resident(&dir, &script, Arc::default()).say("what's my cat called?").await.unwrap();
+
+        let start = script.lock().unwrap().received[3]["params"].clone();
+        let instructions = start["developerInstructions"].as_str().unwrap();
+        assert!(instructions.contains("<memory_summary>\nThe user's cat is called Biscuit.\n</memory_summary>"));
+        let answers = script.lock().unwrap().answers.clone();
+        let found = answers[0]["result"]["contentItems"][0]["text"].as_str().unwrap();
+        assert!(found.contains("MEMORY.md:1\n# Pets\nCat: Biscuit\nlikes boxes"), "{found}");
+        assert!(found.contains("rollout_summaries/a.md:1\nnothing here\nbiscuit again"), "{found}");
+        assert!(!found.contains("Rust daemon"));
+        assert_eq!(answers[1]["result"]["contentItems"][0]["text"], "no matches");
+        assert_eq!(walk(&memories), before, "the memories folder was changed");
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    /// Every path under `root` with its contents.
+    fn walk(root: &Path) -> Vec<(PathBuf, Vec<u8>)> {
+        let mut found = Vec::new();
+        for entry in std::fs::read_dir(root).unwrap().map(Result::unwrap) {
+            let path = entry.path();
+            if path.is_dir() {
+                found.push((path.clone(), Vec::new()));
+                found.extend(walk(&path));
+            } else {
+                found.push((path.clone(), std::fs::read(&path).unwrap()));
+            }
+        }
+        found.sort();
+        found
+    }
+
+    #[test]
+    fn without_memories_the_instructions_say_nothing_of_them_and_a_long_summary_is_cut() {
+        assert!(!instructions(None, None).contains("memory"));
+        let dir = temp_dir("summary");
+        std::fs::create_dir_all(dir.join("memories")).unwrap();
+        assert_eq!(memory_summary(&dir), None);
+        std::fs::write(dir.join("memories/memory_summary.md"), "记".repeat(5_000)).unwrap();
+        let summary = memory_summary(&dir).unwrap();
+        assert!(summary.len() <= MEMORY_SUMMARY_MAX_BYTES && summary.len() > MEMORY_SUMMARY_MAX_BYTES - 3);
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[tokio::test]
+    async fn the_history_is_read_from_the_thread_oldest_first() {
+        let dir = temp_dir("history");
+        let script = logged_in();
+        let resident = resident(&dir, &script, Arc::default());
+        assert_eq!(resident.history(5).await.unwrap(), [], "no thread yet, so nothing is started");
+        assert_eq!(script.lock().unwrap().starts, 0);
+        resident.say("hi").await.unwrap();
+        let history = resident.history(2).await.unwrap();
+        assert_eq!(
+            history,
+            [
+                Exchange { said: "what's up?".to_owned(), replies: vec!["One task.".to_owned(), "It's fine.".to_owned()] },
+                Exchange { said: "and now?".to_owned(), replies: vec!["Still one.".to_owned()] },
+            ]
+        );
+        let list = script.lock().unwrap().received.last().unwrap()["params"].clone();
+        assert_eq!(list, json!({"threadId": "new-thread", "limit": 2, "sortDirection": "desc", "itemsView": "full"}));
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn codex_runs_in_the_resident_codex_home() {
+        let command = codex_command(Path::new("/bin/codex"), Path::new("/state/resident-codex"));
+        let home = command.as_std().get_envs().find(|(name, _)| *name == "CODEX_HOME").and_then(|(_, value)| value);
+        assert_eq!(home, Some(std::ffi::OsStr::new("/state/resident-codex")));
+    }
+
     #[test]
     fn the_app_server_starts_without_plugins_apps_built_in_tools_or_the_users_mcp_servers() {
         let args = app_server_args(&tool_overrides(), &["node_repl".to_owned(), "computer-use".to_owned()]);
@@ -918,7 +1265,10 @@ pub(crate) mod tests {
             "features.shell_tool=false",
             "features.unified_exec=false",
             "features.multi_agent=false",
+            "features.memories=false",
             "web_search=\"disabled\"",
+            "cli_auth_credentials_store=\"file\"",
+            "memories.generate_memories=false",
             "mcp_servers.node_repl.enabled=false",
             "mcp_servers.computer-use.enabled=false",
         ] {

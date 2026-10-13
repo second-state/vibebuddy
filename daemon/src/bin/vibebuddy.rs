@@ -2,7 +2,9 @@
 //! opens the serial port itself (docs/architecture.md, decision 2).
 //!
 //! - `vibebuddy say <text>`: hands a voice command, typed, to the resident session and prints its spoken replies.
-//! - `vibebuddy resident`: prints the resident thread as a `codex://threads/<id>` link for the Codex App.
+//! - `vibebuddy resident [n]`: prints the resident thread's id and its last `n` (default 5) voice commands with the
+//!   spoken replies, read from the thread. The thread lives in a Codex home of the daemon's own, so the Codex App
+//!   can't open it.
 //!
 //! The resident session is experimental: the daemon has it only when started with `VIBEBUDDY_RESIDENT_SESSION=1`.
 
@@ -15,16 +17,20 @@ use serde_json::{Value, json};
 
 /// A voice command waits for a whole Codex turn; the daemon gives up on it after two minutes.
 const SAY_TIMEOUT: Duration = Duration::from_secs(180);
+/// Reading the history may first have to start the app-server and wait for a turn in progress.
+const HISTORY_TIMEOUT: Duration = Duration::from_secs(180);
 const QUICK_TIMEOUT: Duration = Duration::from_secs(5);
 
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
     let result = match args.first().map(String::as_str) {
         Some("say") if args.len() > 1 => say(&args[1..].join(" ")),
-        Some("resident") => resident(),
+        Some("resident") if args.len() == 1 => resident(5),
+        Some("resident") if let [_, count] = args.as_slice()
+            && let Ok(count) = count.parse() => resident(count),
         _ => {
             eprintln!("usage: vibebuddy say <text>   (a voice command for the resident session, typed)");
-            eprintln!("       vibebuddy resident     (prints the resident thread's codex:// link)");
+            eprintln!("       vibebuddy resident [n] (prints the resident session's last n voice commands and replies)");
             return ExitCode::from(2);
         }
     };
@@ -52,14 +58,22 @@ fn say(text: &str) -> Result<(), String> {
     Ok(())
 }
 
-fn resident() -> Result<(), String> {
+fn resident(limit: usize) -> Result<(), String> {
     let info = call("GET", "/v1/resident", None, QUICK_TIMEOUT)?;
-    match info["url"].as_str() {
-        Some(url) => println!("{url}"),
-        None => println!("no resident thread yet; it starts with the first `vibebuddy say`"),
-    }
     if info["enabled"] != true {
-        eprintln!("the resident session is off; start vibebuddyd with VIBEBUDDY_RESIDENT_SESSION=1");
+        return Err("the resident session is off; start vibebuddyd with VIBEBUDDY_RESIDENT_SESSION=1".to_owned());
+    }
+    let Some(thread) = info["thread_id"].as_str() else {
+        println!("no resident thread yet; it starts with the first `vibebuddy say`");
+        return Ok(());
+    };
+    println!("thread {thread}");
+    let history = call("GET", &format!("/v1/resident/history?limit={limit}"), None, HISTORY_TIMEOUT)?;
+    for exchange in history["exchanges"].as_array().cloned().unwrap_or_default() {
+        println!("\n> {}", exchange["said"].as_str().unwrap_or_default());
+        for reply in exchange["replies"].as_array().cloned().unwrap_or_default() {
+            println!("  {}", reply.as_str().unwrap_or_default());
+        }
     }
     Ok(())
 }
