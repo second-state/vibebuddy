@@ -212,7 +212,7 @@ The computer answers with JSON events carrying the same `turn`:
 
 - `voice.heard` with `text`: what was recognised (cut to fit the line), so the box can show it.
 - `voice.reply` with `text`: one spoken reply, sent the moment the resident session says it; a turn may have several.
-- `voice.done`: the turn is over. The box leaves what it heard and the replies up for 15 s to be read (K2 closes them sooner), then goes back to what it showed before; with nothing to show, it goes back at once.
+- `voice.done`: the turn is over; it comes after the last reply's audio `end`. The box leaves what it heard and the replies up for 15 s to be read (K2 closes them sooner), then goes back to what it showed before; with nothing to show, it goes back at once.
 - `voice.error` with `reason` (`not_heard` when recognition returned nothing or no audio arrived, `unavailable` when recognition or the resident session failed, `busy` when another turn is still running) and an optional `message`; the turn is over. It may come while the box is still recording (`busy` right after `START`): the box stops recording and sends nothing more for that turn. The box shows `message` if there is one, otherwise a short text of its own, for 6 s.
 
 `voice.error` is also the name of the box's reply to a failed voice pack write ("Device maintenance" above). The two never meet: that one only goes from the box to the computer, this one only from the computer to the box, and it carries `turn`.
