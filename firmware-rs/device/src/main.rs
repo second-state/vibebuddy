@@ -7,7 +7,8 @@
 //!   codec (0x18, absent on the NS4168 variant).
 //! - XL9555 P0: bit7 LCD backlight, bit5 amplifier enable, bit4 K1, bit3 K2 (keys active low).
 //! - K0: BOOT key, GPIO0, active low.
-//! - I2S0: BCLK GPIO21, WS GPIO13, DOUT GPIO14, no MCLK.
+//! - I2S0: BCLK GPIO21, WS GPIO13, DOUT GPIO14, no MCLK. DIN GPIO47 (the ES8311's ADC, left slot;
+//!   verified on one box, docs/hardware.md; only read during the `device.mic.record` diagnostic).
 //! - UART0: TX GPIO43, RX GPIO44, to the CH343 bridge; the chip's own USB Serial/JTAG as well.
 #![no_std]
 #![no_main]
@@ -17,6 +18,7 @@ extern crate alloc;
 
 mod audio;
 mod lcd;
+mod mic;
 mod net;
 mod relay;
 mod serial;
@@ -287,6 +289,29 @@ impl Board for DeviceBoard {
         }
         codec::set_es8311_volume(&mut self.codec(), level).map_err(|_| VolumeError::Failed)
     }
+
+    fn i2c_read(&mut self, address: u8, register: u8) -> Option<u8> {
+        let mut value = [0u8];
+        self.i2c.write_read(address, &[register], &mut value).ok().map(|()| value[0])
+    }
+
+    fn i2c_write(&mut self, address: u8, register: u8, value: u8) -> Result<(), ()> {
+        self.i2c.write(address, &[register, value]).map_err(|_| ())
+    }
+
+    fn mic_start(&mut self, bytes: usize) -> Result<(), ()> {
+        mic::DONE.reset();
+        mic::START.signal(bytes);
+        Ok(())
+    }
+
+    fn mic_take(&mut self) -> Option<Result<alloc::vec::Vec<u8>, &'static str>> {
+        while let Ok(note) = mic::NOTES.try_receive() {
+            self.write(note.as_bytes());
+            self.write(b"\n");
+        }
+        mic::DONE.try_take()
+    }
 }
 
 #[allow(clippy::large_stack_frames, reason = "main has to hold a lot of peripherals and buffers anyway")]
@@ -351,20 +376,24 @@ async fn main(spawner: Spawner) -> ! {
     let lcd = Lcd::new(bus, parameters, frame);
 
     // Start the I2S stream first (all zeros): as in the C firmware, the clock runs before the codec is
-    // configured.
+    // configured. The receiver shares the transmitter's BCLK and WS (signal loopback), as ESP-IDF sets up a
+    // full-duplex channel pair on the same pins; it only runs during the microphone diagnostic.
     let i2s = I2s::new(
         peripherals.I2S0,
         peripherals.DMA_CH1,
         TdmConfig::new_tdm_philips()
             .with_sample_rate(Rate::from_hz(SAMPLE_RATE))
             .with_data_format(DataFormat::Data16Channel16)
-            .with_channels(Channels::STEREO),
+            .with_channels(Channels::STEREO)
+            .with_signal_loopback(true),
     )
     .expect("I2S0 config")
     .into_async();
     let i2s_tx = i2s.i2s_tx.with_bclk(peripherals.GPIO21).with_ws(peripherals.GPIO13).with_dout(peripherals.GPIO14).build();
     let stream: DmaTxStreamBuf = dma_tx_stream_buffer!(STREAM_BYTES, STREAM_CHUNK);
     spawner.spawn(audio::audio_task(i2s_tx, stream).expect("audio task"));
+    let i2s_rx = i2s.i2s_rx.with_din(peripherals.GPIO47).build();
+    spawner.spawn(mic::mic_task(i2s_rx).expect("mic task"));
 
     let k0 = Input::new(peripherals.GPIO0, InputConfig::default().with_pull(Pull::Up));
 
