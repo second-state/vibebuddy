@@ -27,6 +27,7 @@ Voice commands (ADR-0017) cost us money on every use, so they are offered only t
 
 - The voice service accepts two credentials: the account session from a daemon and a voice token from a box.
 - The VibeBuddy Protocol gets messages carrying audio and the spoken reply between the box and the daemon, and one carrying the voice token from the daemon to the box; a short token fits a line.
+- A user may set their own speech recognition service in the App. The daemon calls it with the user's key, which never reaches us; with it set, audio goes over the link to the daemon even over the Relay, and only the spoken reply comes from our service.
 - Voice over the Relay needs the box on Wi-Fi with the voice service reachable; voice over USB needs no Wi-Fi.
 - Self-made box keys no longer matter for cost: what is limited is accounts, and the global cap bounds the worst case. Blocking disposable email domains, or a lower allowance for new accounts, is added only if accounts are farmed.
 - What the box says when its computer isn't signed in, the allowance is used up or the global cap is hit is left to voice's design (#132).
