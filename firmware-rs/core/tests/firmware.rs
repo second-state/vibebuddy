@@ -95,6 +95,10 @@ struct FakeBoard {
     /// The board has I2S input; and the size of the capture asked for, until it is taken.
     mic_input: bool,
     mic_capture: Option<usize>,
+    /// The voice command microphone is running; samples waiting to be taken; `VOICE DATA` lines written.
+    voice_running: bool,
+    voice_samples: Vec<i16>,
+    stream: Vec<String>,
 }
 
 impl FakeBoard {
@@ -124,6 +128,9 @@ impl FakeBoard {
             i2c_writes: Vec::new(),
             mic_input: true,
             mic_capture: None,
+            voice_running: false,
+            voice_samples: Vec::new(),
+            stream: Vec::new(),
         }
     }
 
@@ -230,6 +237,21 @@ impl Board for FakeBoard {
         self.mic_input.then_some(()).ok_or(())?;
         self.mic_capture = Some(bytes);
         Ok(())
+    }
+    fn voice_start(&mut self) -> Result<(), ()> {
+        self.mic_input.then_some(()).ok_or(())?;
+        self.voice_running = true;
+        Ok(())
+    }
+    fn voice_take(&mut self, samples: &mut Vec<i16>) {
+        samples.append(&mut self.voice_samples);
+    }
+    fn voice_stop(&mut self) {
+        self.voice_running = false;
+        self.voice_samples.clear();
+    }
+    fn write_stream(&mut self, line: &[u8]) {
+        self.stream.push(String::from_utf8(line.to_vec()).unwrap());
     }
     /// The left slot counts up, the right slot is silent.
     fn mic_take(&mut self) -> Option<Result<Vec<u8>, &'static str>> {
@@ -1355,4 +1377,152 @@ fn a_mic_recording_is_clamped_and_reports_what_is_missing() {
     let lines = send(&mut firmware, &mut board, r#"{"version":1,"event":"device.mic.record","ms":60000}"#);
     assert_eq!(lines.last().map(String::as_str), Some("MIC RECORDING 5000 MS"));
     assert_eq!(board.mic_capture, Some(480_000));
+}
+
+const VOICE_ON: &str = r#"{"version":1,"event":"voice.available","on":true}"#;
+
+/// Holds K0 for `hold_ms`, with the microphone delivering 24 samples a millisecond while it runs; returns
+/// the lines printed (the `VOICE DATA` lines are in `board.stream`).
+fn hold_k0_talking(firmware: &mut Firmware, board: &mut FakeBoard, hold_ms: u32) -> Vec<String> {
+    board.advance(100);
+    board.k0 = true;
+    firmware.poll(board);
+    let mut held = 0;
+    while held < hold_ms {
+        board.advance(10);
+        held += 10;
+        if board.voice_running {
+            board.voice_samples.extend((0..240).map(|index| if index % 2 == 0 { 4000 } else { -4000 }));
+        }
+        firmware.poll(board);
+    }
+    board.k0 = false;
+    firmware.poll(board);
+    board.take_lines()
+}
+
+#[test]
+fn without_voice_a_long_k0_still_gives_up_the_phase() {
+    let (mut firmware, mut board, _) = booted(blank_flash());
+    assert_eq!(press(&mut firmware, &mut board, Key::K0, 50), ["POMODORO FOCUS START", "MODE POMODORO"]);
+    assert_eq!(press(&mut firmware, &mut board, Key::K0, 1100), ["POMODORO STOPPED"]);
+    assert!(!board.voice_running);
+    // Offered and then withdrawn, it's the same.
+    send(&mut firmware, &mut board, VOICE_ON);
+    send(&mut firmware, &mut board, r#"{"version":1,"event":"voice.available","on":false}"#);
+    press(&mut firmware, &mut board, Key::K0, 50);
+    assert_eq!(press(&mut firmware, &mut board, Key::K0, 1100), ["POMODORO STOPPED"]);
+}
+
+#[test]
+fn with_voice_a_long_k0_records_a_turn_and_the_phase_keeps_running() {
+    let (mut firmware, mut board, _) = booted(blank_flash());
+    assert_eq!(press(&mut firmware, &mut board, Key::K0, 50), ["POMODORO FOCUS START", "MODE POMODORO"]);
+    assert!(send(&mut firmware, &mut board, VOICE_ON).is_empty());
+    let lines = hold_k0_talking(&mut firmware, &mut board, 2000);
+    // Recording starts when the long press fires, a second in, and runs until K0 comes up.
+    assert_eq!(lines.first().map(String::as_str), Some("VOICE START 1"));
+    assert!(!lines.iter().any(|line| line.starts_with("POMODORO")), "{lines:?}");
+    let end = lines.iter().find(|line| line.starts_with("VOICE END 1 ")).expect("VOICE END");
+    let samples: usize = end.rsplit(' ').next().unwrap().parse().unwrap();
+    assert!((22_000..=24_500).contains(&samples), "about a second at 24 kHz: {samples}");
+    assert!(!board.voice_running, "the microphone stops with the recording");
+    // Every data line went to the stream, numbered without gaps, the last one shorter.
+    assert_eq!(board.stream.len(), samples.div_ceil(1152));
+    for (seq, line) in board.stream.iter().enumerate() {
+        assert!(line.starts_with(&format!("VOICE DATA 1 {seq} ")) && line.ends_with('\n') && line.len() < 1024, "{line}");
+    }
+    // The microphone ran at voice gain: 42 dB is register 0x16 = 7.
+    assert!(board.i2c_writes.contains(&(0x18, 0x16, 7)));
+    // The overlay counts as the user being there.
+    assert_eq!(press(&mut firmware, &mut board, Key::K2, 50), Vec::<String>::new(), "K2 closes the overlay");
+    assert_eq!(press(&mut firmware, &mut board, Key::K0, 50), ["POMODORO PAUSED"], "the phase was never given up");
+}
+
+#[test]
+fn a_tap_past_the_long_press_is_cancelled() {
+    let (mut firmware, mut board, _) = booted(blank_flash());
+    send(&mut firmware, &mut board, VOICE_ON);
+    let lines = hold_k0_talking(&mut firmware, &mut board, 1300);
+    assert_eq!(lines, ["VOICE START 1", "VOICE CANCEL 1"]);
+    assert!(!board.voice_running);
+}
+
+#[test]
+fn the_computers_answers_fill_the_overlay_and_k2_closes_it() {
+    let (mut firmware, mut board, _) = booted(blank_flash());
+    send(&mut firmware, &mut board, VOICE_ON);
+    hold_k0_talking(&mut firmware, &mut board, 1800);
+    let before = board.presents;
+    assert!(send(&mut firmware, &mut board, r#"{"version":1,"event":"voice.heard","turn":1,"text":"what is codex doing"}"#).is_empty());
+    assert!(send(&mut firmware, &mut board, r#"{"version":1,"event":"voice.reply","turn":1,"text":"Writing tests."}"#).is_empty());
+    assert!(board.presents >= before + 2, "each answer redraws the overlay");
+    // Another turn's answers change nothing.
+    let before = board.presents;
+    send(&mut firmware, &mut board, r#"{"version":1,"event":"voice.reply","turn":9,"text":"nope"}"#);
+    assert_eq!(board.presents, before);
+    send(&mut firmware, &mut board, r#"{"version":1,"event":"voice.done","turn":1}"#);
+    // K2 closes it rather than asking the computer to open a source; the next K2 does that again.
+    assert!(press(&mut firmware, &mut board, Key::K2, 50).is_empty());
+    assert_eq!(press(&mut firmware, &mut board, Key::K2, 50), [r#"{"version":1,"event":"button","button":"K2","action":"press"}"#]);
+}
+
+#[test]
+fn a_needs_input_event_takes_the_screen_and_gives_up_the_recording() {
+    let (mut firmware, mut board, _) = booted(blank_flash());
+    send(&mut firmware, &mut board, VOICE_ON);
+    board.advance(100);
+    board.k0 = true;
+    firmware.poll(&mut board);
+    board.advance(1100);
+    firmware.poll(&mut board);
+    assert_eq!(board.take_lines(), ["VOICE START 1"]);
+    assert!(board.voice_running);
+    let lines = send(&mut firmware, &mut board, r#"{"version":1,"event":"agent.input_required","title":"CC:ASK"}"#);
+    assert!(lines.contains(&"VOICE CANCEL 1".to_owned()), "{lines:?}");
+    assert!(!board.voice_running);
+    board.advance(500);
+    board.k0 = false;
+    firmware.poll(&mut board);
+    assert!(board.take_lines().is_empty(), "letting go afterwards says nothing");
+}
+
+#[test]
+fn a_new_link_starts_with_voice_off() {
+    let (mut firmware, mut board, _) = booted(blank_flash());
+    send(&mut firmware, &mut board, VOICE_ON);
+    send(&mut firmware, &mut board, r#"{"version":1,"event":"device.hello"}"#);
+    press(&mut firmware, &mut board, Key::K0, 50);
+    assert_eq!(press(&mut firmware, &mut board, Key::K0, 1100), ["POMODORO STOPPED"]);
+    // A link that goes quiet takes voice with it too.
+    send(&mut firmware, &mut board, VOICE_ON);
+    board.advance(16_000);
+    firmware.poll(&mut board);
+    board.take_lines();
+    assert!(hold_k0_talking(&mut firmware, &mut board, 1500).iter().all(|line| !line.starts_with("VOICE")));
+}
+
+#[test]
+fn a_box_that_cannot_record_says_so_and_sends_nothing() {
+    let (mut firmware, mut board, _) = booted(blank_flash());
+    board.mic_input = false;
+    send(&mut firmware, &mut board, VOICE_ON);
+    let before = board.presents;
+    let lines = hold_k0_talking(&mut firmware, &mut board, 1500);
+    assert!(lines.iter().all(|line| !line.starts_with("VOICE") && !line.starts_with("POMODORO")), "{lines:?}");
+    assert!(board.presents > before, "the overlay says there's no microphone");
+}
+
+#[test]
+fn the_diagnostic_and_a_voice_command_share_the_microphone() {
+    let (mut firmware, mut board, _) = booted(blank_flash());
+    send(&mut firmware, &mut board, VOICE_ON);
+    board.advance(100);
+    board.k0 = true;
+    firmware.poll(&mut board);
+    board.advance(1100);
+    firmware.poll(&mut board);
+    board.take_lines();
+    let lines = send(&mut firmware, &mut board, r#"{"version":1,"event":"device.mic.record"}"#);
+    assert_eq!(lines, ["MIC BUSY"]);
 }

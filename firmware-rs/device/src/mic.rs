@@ -1,6 +1,11 @@
-//! Microphone capture for the bring-up diagnostic (`device.mic.record`, firmware-core's `mic`): I2S0's
-//! receiver, clocked by the transmitter's BCLK and WS (signal loopback, as ESP-IDF does for full duplex),
-//! reads GPIO47 by DMA straight into one linear buffer in PSRAM, as long as the whole capture.
+//! Microphone capture: I2S0's receiver, clocked by the transmitter's BCLK and WS (signal loopback, as ESP-IDF
+//! does for full duplex), reads GPIO47 by DMA. Two users:
+//!
+//! - The bring-up diagnostic (`device.mic.record`, firmware-core's `mic`) captures into one linear buffer
+//!   in PSRAM, as long as the whole capture.
+//! - A voice command (firmware-core's `voice_command`) streams for as long as K0 is held, up to 30 s: a
+//!   linear buffer for that would be 7 MB, so the DMA writes round a ring instead ([`Ring`], below), and
+//!   this task moves the left slot's samples out of it into a queue the main loop takes from.
 //!
 //! Nothing here is a static in internal RAM beyond the task itself: every such static comes out of the
 //! main task's stack (LESSONS.md). The descriptors (12 bytes per 4 KB) come from the internal heap for the
@@ -24,10 +29,14 @@
 //! lines 100 ms in and at the end: the descriptors and bytes so far, the first descriptor lengths, the I2S
 //! and DMA registers, and how often the data pin changed level.
 
+use alloc::collections::VecDeque;
 use alloc::string::String;
 use alloc::vec::Vec;
 use core::alloc::{GlobalAlloc, Layout};
+use core::cell::RefCell;
 use core::fmt::Write;
+
+use critical_section::Mutex;
 
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 use embassy_sync::channel::Channel;
@@ -35,8 +44,8 @@ use embassy_sync::signal::Signal;
 use embassy_time::{Instant, Timer};
 use esp_alloc::{HEAP, MemoryCapability};
 use esp_hal::Async;
-use esp_hal::dma::aligned::DmaAlignedMut;
-use esp_hal::dma::{DmaDescriptor, DmaRxBuf};
+use esp_hal::dma::aligned::{DmaAlignedMut, DmaAlignedRef};
+use esp_hal::dma::{BurstConfig, DmaDescriptor, DmaRxBuf, DmaRxBuffer, Owner, Preparation};
 use esp_hal::i2s::master::I2sRx;
 
 /// PSRAM receive buffers must be aligned to the external burst size (16 bytes by default); 64 covers any.
@@ -46,8 +55,28 @@ const DESCRIPTOR_BYTES: usize = 4096 - ALIGN;
 /// The capture takes its own length plus this long before it counts as stalled.
 const SLACK_MS: u64 = 1000;
 
-/// How many bytes to capture.
-pub static START: Signal<CriticalSectionRawMutex, usize> = Signal::new();
+/// Descriptors in the voice command's ring: 520 KB of PSRAM. An EOF every 4094 bytes takes two descriptors
+/// (one full, one cut short), so the ring holds 64 × 4094 bytes, 2.7 s of audio, before the DMA comes round
+/// to what this task hasn't read yet.
+const RING_DESCRIPTORS: usize = 128;
+/// Samples the queue to the main loop holds (2 s); past that, new ones are dropped and counted.
+const QUEUE_SAMPLES: usize = 48_000;
+/// How often the streaming task looks at the ring.
+const STREAM_POLL_MS: u64 = 10;
+
+pub enum Command {
+    /// Capture this many bytes for the diagnostic.
+    Record(usize),
+    /// Stream the left slot into [`SAMPLES`] until [`Command::Stop`]. While streaming, a second `Stream`
+    /// just empties the queue for the new turn.
+    Stream,
+    Stop,
+}
+
+pub static COMMAND: Signal<CriticalSectionRawMutex, Command> = Signal::new();
+/// The left slot's samples while streaming, for the main loop. Its storage is on the heap (PSRAM), taken
+/// when a stream starts and given back when it stops; the static itself is a few words.
+static SAMPLES: Mutex<RefCell<VecDeque<i16>>> = Mutex::new(RefCell::new(VecDeque::new()));
 /// The capture, or why it stopped short.
 pub static DONE: Signal<CriticalSectionRawMutex, Result<Vec<u8>, &'static str>> = Signal::new();
 /// `MIC DEBUG` lines for the main loop to print.
@@ -158,11 +187,217 @@ fn note(stage: &str, first: *const DmaDescriptor, linked: usize) {
 #[embassy_executor::task]
 pub async fn mic_task(mut rx: I2sRx<'static, Async>) {
     loop {
-        let wanted = START.wait().await;
-        let (result, idle) = capture(rx, wanted).await;
-        rx = idle;
-        DONE.signal(result);
+        match COMMAND.wait().await {
+            Command::Record(wanted) => {
+                let (result, idle) = capture(rx, wanted).await;
+                rx = idle;
+                DONE.signal(result);
+            }
+            Command::Stream => rx = stream(rx).await,
+            Command::Stop => {}
+        }
     }
+}
+
+/// Starts streaming for a voice command; an empty queue either way.
+pub fn start_stream() {
+    critical_section::with(|cs| SAMPLES.borrow_ref_mut(cs).clear());
+    COMMAND.signal(Command::Stream);
+}
+
+/// Stops streaming and gives the queue's memory back.
+pub fn stop_stream() {
+    COMMAND.signal(Command::Stop);
+    critical_section::with(|cs| *SAMPLES.borrow_ref_mut(cs) = VecDeque::new());
+}
+
+/// Moves the samples streamed so far to `out`.
+pub fn take_samples(out: &mut Vec<i16>) {
+    critical_section::with(|cs| out.extend(SAMPLES.borrow_ref_mut(cs).drain(..)));
+}
+
+/// The voice command's DMA ring: descriptors in internal RAM linked in a circle, each over its own
+/// `DESCRIPTOR_BYTES` of one PSRAM block. The DMA never reaches an end, so it never stops however late
+/// this task is (a linear chain the main loop had to relink stalled for good, LESSONS.md); owner checks
+/// are off, so if the task falls a whole ring behind, the DMA writes over what wasn't read rather than
+/// stopping, and [`Reader`] counts it.
+struct Ring {
+    descriptors: Block,
+    data: Block,
+}
+
+impl Ring {
+    fn new() -> Option<Self> {
+        let descriptors = Block::new(MemoryCapability::Internal, RING_DESCRIPTORS * size_of::<DmaDescriptor>())?;
+        let data = Block::new(MemoryCapability::External, RING_DESCRIPTORS * DESCRIPTOR_BYTES)?;
+        Some(Self { descriptors, data })
+    }
+
+    fn descriptor(&self, index: usize) -> *mut DmaDescriptor {
+        // SAFETY: within the block, which holds RING_DESCRIPTORS descriptors.
+        unsafe { (self.descriptors.pointer as *mut DmaDescriptor).add(index) }
+    }
+}
+
+// SAFETY: both blocks live as long as the ring, which the transfer holds until it is stopped; the
+// descriptors point only into the data block and at each other.
+unsafe impl DmaRxBuffer for Ring {
+    type View = Ring;
+    type Final = Ring;
+
+    fn prepare(&mut self) -> Preparation {
+        for index in 0..RING_DESCRIPTORS {
+            let next = self.descriptor((index + 1) % RING_DESCRIPTORS);
+            // SAFETY: ours, and the DMA hasn't started.
+            let descriptor = unsafe { &mut *self.descriptor(index) };
+            // SAFETY: within the data block.
+            descriptor.buffer = unsafe { self.data.pointer.add(index * DESCRIPTOR_BYTES) };
+            descriptor.set_size(DESCRIPTOR_BYTES);
+            descriptor.reset_for_rx();
+            descriptor.next = next;
+        }
+        // What the CPU wrote while zeroing must not be written back over what the DMA writes.
+        // SAFETY: the block is ours, 64-byte aligned and a multiple of 64 bytes, so no other data shares
+        // its cache lines.
+        unsafe { DmaAlignedRef::new_unchecked(core::slice::from_raw_parts(self.data.pointer, RING_DESCRIPTORS * DESCRIPTOR_BYTES)) }.invalidate();
+        Preparation {
+            start: self.descriptor(0),
+            accesses_psram: true,
+            burst_transfer: BurstConfig::default(),
+            check_owner: Some(false),
+            auto_write_back: true,
+        }
+    }
+
+    fn into_view(self) -> Ring {
+        self
+    }
+
+    fn from_view(view: Ring) -> Ring {
+        view
+    }
+}
+
+/// Reads the ring in order: each descriptor the DMA has handed back (owner CPU) holds `length` bytes of the
+/// interleaved stream, which runs on across descriptors (frames don't line up with the 4094-byte EOFs).
+/// The left slot is bytes 0 and 1 of each 4-byte frame.
+struct Reader {
+    next: usize,
+    /// Position in the current frame, and the low byte of a left sample split across descriptors.
+    offset: usize,
+    low: u8,
+    samples: u32,
+    dropped: u32,
+    /// The most descriptors found waiting at one look; near the ring's size means the DMA lapped us.
+    backlog: usize,
+}
+
+impl Reader {
+    fn new() -> Self {
+        Self { next: 0, offset: 0, low: 0, samples: 0, dropped: 0, backlog: 0 }
+    }
+
+    /// `first` is the ring's first descriptor; the transfer holds the ring itself.
+    fn drain(&mut self, first: *mut DmaDescriptor) {
+        let mut found = 0;
+        let mut pending: Vec<i16> = Vec::new();
+        for _ in 0..RING_DESCRIPTORS {
+            // SAFETY: within the ring's descriptors, which live until the transfer is stopped.
+            let pointer = unsafe { first.add(self.next) };
+            // SAFETY: the DMA writes descriptors; read them volatile. Internal RAM isn't cached on the S3.
+            let descriptor = unsafe { core::ptr::read_volatile(pointer) };
+            if descriptor.owner() == Owner::Dma {
+                break;
+            }
+            found += 1;
+            let length = descriptor.len();
+            // SAFETY: this descriptor's slice of the data block, which the DMA has finished with.
+            let bytes = unsafe { core::slice::from_raw_parts(descriptor.buffer as *const u8, length) };
+            // The cache may hold what was there a lap ago. The slice is 64-byte aligned and whole lines
+            // are invalidated, all within this descriptor's DESCRIPTOR_BYTES.
+            // SAFETY: as above; nothing else uses these lines.
+            unsafe { DmaAlignedRef::new_unchecked(core::slice::from_raw_parts(descriptor.buffer as *const u8, DESCRIPTOR_BYTES)) }.invalidate();
+            for &byte in bytes {
+                match self.offset {
+                    0 => self.low = byte,
+                    1 => pending.push(i16::from_le_bytes([self.low, byte])),
+                    _ => {}
+                }
+                self.offset = (self.offset + 1) % 4;
+            }
+            let mut handed_back = descriptor;
+            handed_back.reset_for_rx();
+            // SAFETY: as above.
+            unsafe { core::ptr::write_volatile(&raw mut (*pointer).flags, handed_back.flags) };
+            self.next = (self.next + 1) % RING_DESCRIPTORS;
+        }
+        self.backlog = self.backlog.max(found);
+        if pending.is_empty() {
+            return;
+        }
+        self.samples += pending.len() as u32;
+        critical_section::with(|cs| {
+            let mut queue = SAMPLES.borrow_ref_mut(cs);
+            if queue.capacity() == 0 {
+                queue.reserve_exact(QUEUE_SAMPLES);
+            }
+            let room = QUEUE_SAMPLES.saturating_sub(queue.len()).min(pending.len());
+            queue.extend(&pending[..room]);
+            self.dropped += (pending.len() - room) as u32;
+        });
+    }
+}
+
+/// Streams until told to stop, then reports `MIC STREAM <ms> MS <samples> SAMPLES <dropped> DROPPED BACKLOG
+/// <most descriptors waiting> OF <descriptors>`: about 24 samples a millisecond means nothing was lost on the
+/// way in, and a backlog near the ring's size means the DMA lapped the reader.
+async fn stream(rx: I2sRx<'static, Async>) -> I2sRx<'static, Async> {
+    let Some(ring) = Ring::new() else {
+        let _ = NOTES.try_send(String::from("MIC STREAM MEMORY"));
+        return rx;
+    };
+    let first = ring.descriptor(0);
+    let transfer = match rx.read(ring) {
+        Ok(transfer) => transfer,
+        Err((_, rx, _)) => {
+            let _ = NOTES.try_send(String::from("MIC STREAM I2S"));
+            return rx;
+        }
+    };
+    let started = Instant::now();
+    let mut reader = Reader::new();
+    loop {
+        Timer::after_millis(STREAM_POLL_MS).await;
+        match COMMAND.try_take() {
+            Some(Command::Stream) => {
+                critical_section::with(|cs| SAMPLES.borrow_ref_mut(cs).clear());
+                reader.dropped = 0;
+            }
+            Some(Command::Stop) => break,
+            // The firmware doesn't start the diagnostic while a voice command records; if it did, it would
+            // run once the stream is over.
+            Some(Command::Record(bytes)) => {
+                COMMAND.signal(Command::Record(bytes));
+                break;
+            }
+            None => {}
+        }
+        reader.drain(first);
+    }
+    let (rx, ring) = transfer.stop();
+    drop(ring);
+    let mut line = String::new();
+    let _ = write!(
+        line,
+        "MIC STREAM {} MS {} SAMPLES {} DROPPED BACKLOG {} OF {}",
+        started.elapsed().as_millis(),
+        reader.samples,
+        reader.dropped,
+        reader.backlog,
+        RING_DESCRIPTORS
+    );
+    let _ = NOTES.try_send(line);
+    rx
 }
 
 async fn capture(rx: I2sRx<'static, Async>, wanted: usize) -> (Result<Vec<u8>, &'static str>, I2sRx<'static, Async>) {

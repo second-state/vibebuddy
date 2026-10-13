@@ -131,9 +131,19 @@ pub enum PanelKind {
     List,
     /// Facts: a small label, a large value.
     Facts,
+    /// A voice command being recorded: a level meter lit to this many of its `METER_STEPS` segments, and
+    /// the first line's label under it.
+    Meter(u8),
+    /// Wrapped text, one row per line's label, at this scale (2 or 1); see [`VOICE_TEXT_LARGE`].
+    Text(u8),
 }
 
-/// A panel over the whole screen (the device menu): what it says is the caller's, drawing it is the display's.
+/// Columns and rows a `Text` panel holds at scale 2 and at scale 1.
+pub const VOICE_TEXT_LARGE: (usize, usize) = (19, 7);
+pub const VOICE_TEXT_SMALL: (usize, usize) = (38, 13);
+
+/// A panel over the whole screen (the device menu, a voice command): what it says is the caller's, drawing
+/// it is the display's.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Panel {
     pub kind: PanelKind,
@@ -1482,7 +1492,15 @@ fn draw_panel(canvas: &mut Canvas, panel: &Panel) {
                 }
                 canvas.draw_text(120, y - 3, value, 2, tone_color(*tone), 13);
             }
+            PanelKind::Meter(_) => canvas.draw_text_centered(150 + index * 18, label, 2, tone_color(*tone)),
+            PanelKind::Text(scale) => {
+                let (scale, (columns, _)) = if scale >= 2 { (2, VOICE_TEXT_LARGE) } else { (1, VOICE_TEXT_SMALL) };
+                canvas.draw_text(PANEL_LEFT, 56 + index * if scale == 2 { 18 } else { 10 }, label, scale, tone_color(*tone), columns);
+            }
         }
+    }
+    if let PanelKind::Meter(level) = panel.kind {
+        draw_meter(canvas, level);
     }
     canvas.fill_rect(PANEL_LEFT, 196, PANEL_RIGHT - PANEL_LEFT, 1, COLOR_MUTED);
     let mut x = PANEL_LEFT;
@@ -1492,6 +1510,22 @@ fn draw_panel(canvas: &mut Canvas, panel: &Panel) {
         x += text_width(key, 1) + 10;
         canvas.draw_text(x, 206, action, 1, COLOR_TEXT, 12);
         x += text_width(action, 1) + 14;
+    }
+}
+
+/// The voice command's level meter: green for most of the range, then yellow, then orange near the top.
+fn draw_meter(canvas: &mut Canvas, level: u8) {
+    let steps = crate::voice_command::METER_STEPS as i32;
+    let x = PANEL_LEFT + 5;
+    for step in 0..steps {
+        let lit = step < level as i32;
+        let color = match step * 16 / steps {
+            _ if !lit => half_bright(COLOR_MUTED),
+            0..=9 => COLOR_DONE,
+            10..=12 => COLOR_INPUT,
+            _ => COLOR_WORKING,
+        };
+        canvas.fill_rect(x + step * 14, 92, 12, 40, color);
     }
 }
 

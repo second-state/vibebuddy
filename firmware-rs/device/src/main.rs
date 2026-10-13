@@ -8,7 +8,8 @@
 //! - XL9555 P0: bit7 LCD backlight, bit5 amplifier enable, bit4 K1, bit3 K2 (keys active low).
 //! - K0: BOOT key, GPIO0, active low.
 //! - I2S0: BCLK GPIO21, WS GPIO13, DOUT GPIO14, no MCLK. DIN GPIO47 (the ES8311's ADC, left slot;
-//!   verified on one box, docs/hardware.md; only read during the `device.mic.record` diagnostic).
+//!   verified on one box, docs/hardware.md; read while a voice command records, and by the
+//!   `device.mic.record` diagnostic).
 //! - UART0: TX GPIO43, RX GPIO44, to the CH343 bridge; the chip's own USB Serial/JTAG as well.
 #![no_std]
 #![no_main]
@@ -151,6 +152,22 @@ struct DeviceBoard {
 }
 
 impl DeviceBoard {
+    /// To the computer linked over the network: a line with no room is dropped whole, before it is sealed
+    /// (noise::SealedLines).
+    fn write_lan(&mut self, bytes: &[u8]) {
+        if let Some((conn, lines)) = &mut self.lan_peer {
+            let conn = *conn;
+            lines.lines(
+                bytes,
+                |length| net::room(conn) > length,
+                |line| {
+                    net::send(conn, line.as_bytes());
+                    net::send(conn, b"\n");
+                },
+            );
+        }
+    }
+
     fn expander(&mut self) -> Expander<'_> {
         Expander { i2c: &mut self.i2c }
     }
@@ -181,18 +198,7 @@ impl Board for DeviceBoard {
 
     fn write(&mut self, bytes: &[u8]) {
         self.transport.write(bytes);
-        // A line with no room is dropped whole, before it is sealed (noise::SealedLines).
-        if let Some((conn, lines)) = &mut self.lan_peer {
-            let conn = *conn;
-            lines.lines(
-                bytes,
-                |length| net::room(conn) > length,
-                |line| {
-                    net::send(conn, line.as_bytes());
-                    net::send(conn, b"\n");
-                },
-            );
-        }
+        self.write_lan(bytes);
         if let Some(lines) = &mut self.relay_peer {
             lines.lines(
                 bytes,
@@ -202,6 +208,14 @@ impl Board for DeviceBoard {
                 },
             );
         }
+    }
+
+    /// `VOICE DATA`, 16 KB/s of it: USB and the local network only. The UART carries 11.5 KB/s at 115200
+    /// baud and its writes block, so the stream would stall the main loop there; the Relay's 50 messages a
+    /// second are for the box's other output (a voice command over the Relay is ADR-0018's).
+    fn write_stream(&mut self, line: &[u8]) {
+        self.transport.write_usb(line);
+        self.write_lan(line);
     }
 
     fn lan_send(&mut self, conn: u32, bytes: &[u8]) {
@@ -328,7 +342,7 @@ impl Board for DeviceBoard {
 
     fn mic_start(&mut self, bytes: usize) -> Result<(), ()> {
         mic::DONE.reset();
-        mic::START.signal(bytes);
+        mic::COMMAND.signal(mic::Command::Record(bytes));
         Ok(())
     }
 
@@ -338,6 +352,19 @@ impl Board for DeviceBoard {
             self.write(b"\n");
         }
         mic::DONE.try_take()
+    }
+
+    fn voice_start(&mut self) -> Result<(), ()> {
+        mic::start_stream();
+        Ok(())
+    }
+
+    fn voice_take(&mut self, samples: &mut alloc::vec::Vec<i16>) {
+        mic::take_samples(samples);
+    }
+
+    fn voice_stop(&mut self) {
+        mic::stop_stream();
     }
 }
 
@@ -404,7 +431,8 @@ async fn main(spawner: Spawner) -> ! {
 
     // Start the I2S stream first (all zeros): as in the C firmware, the clock runs before the codec is
     // configured. The receiver shares the transmitter's BCLK and WS (signal loopback), as ESP-IDF sets up a
-    // full-duplex channel pair on the same pins; it only runs during the microphone diagnostic.
+    // full-duplex channel pair on the same pins; it only runs while a voice command records and during the
+    // microphone diagnostic.
     let i2s = I2s::new(
         peripherals.I2S0,
         peripherals.DMA_CH1,
@@ -540,6 +568,11 @@ async fn main(spawner: Spawner) -> ! {
             net::CREDENTIALS.signal(wifi_credentials(&firmware));
         }
         firmware.poll(&mut board);
+        // The microphone's own report on a stream that just ended.
+        while let Ok(note) = mic::NOTES.try_receive() {
+            board.write(note.as_bytes());
+            board.write(b"\n");
+        }
         // Before restarting, close the Relay socket and the network connections so the computers and the
         // Relay see the box go at once, rather than after their silence timeouts; a new identity has a new
         // box-id, so nothing would replace the old one's socket (#122). The wait also lets the last line out.

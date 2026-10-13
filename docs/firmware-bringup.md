@@ -168,6 +168,22 @@ MIC DEBUG T100 DESC 4/179 BYTES 8188 LENS 4080 14 4080 14 0 0 I2S RXCONF … TXC
 
 Boxes of this board differ (some have a touchscreen, some don't), so run it on each box you care about and say which box in the result.
 
+### Voice commands
+
+A voice command records the same input, but for as long as K0 is held (up to 30 s), so it can't use one linear buffer: that would be 7 MB. The DMA writes round a ring instead, 128 descriptors over 520 KB of PSRAM, linked in a circle with owner checks off, so it never reaches an end and never stops, however late the reader. The microphone task reads the descriptors the DMA has handed back every 10 ms, takes the left slot's samples out (the stream runs on across descriptors: frames don't line up with the 4,094-byte EOFs) and queues them for the main loop, which encodes and sends them. An EOF every 4,094 bytes takes two descriptors, so the ring holds 2.7 s of audio before the DMA comes round to what hasn't been read. The ring and the queue are taken from the heap when recording starts and given back when it stops: no statics (LESSONS.md).
+
+The microphone gain is 42 dB while recording a voice command (the PGA's maximum): at the diagnostic's 30 dB a voice close to the box was about -31 dBFS; 42 dB should bring it to about -19.
+
+When a recording stops, the box prints one line about it:
+
+```
+MIC STREAM <ms> MS <samples> SAMPLES <dropped> DROPPED BACKLOG <most descriptors waiting> OF 128
+```
+
+About 24 samples per millisecond means nothing was lost on the way in. `DROPPED` counts samples the main loop's 2 s queue had no room for. A `BACKLOG` near 128 means the DMA lapped the reader and some audio was overwritten. `MIC STREAM MEMORY` and `MIC STREAM I2S` mean the ring couldn't be allocated or the transfer didn't start.
+
+What to check on the first flash: with the computer offering voice, hold K0 and talk. `VOICE START 1`, then about 21 `VOICE DATA` lines a second with `seq` counting up without gaps (over USB), `VOICE END 1 <samples>` with `samples` about 24,000 per second held, and `MIC STREAM` with about 24 samples per millisecond and a small backlog. The meter should move with your voice and sit near the bottom when quiet. Decode the data lines (24 kHz IMA ADPCM, each line from its own `predictor` and `index`) and listen. Check that announcements still play afterwards, and that a long K0 still gives up a phase once voice is withdrawn.
+
 ## Going back to the C firmware
 
 ```bash

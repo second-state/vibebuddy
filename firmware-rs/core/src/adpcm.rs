@@ -1,4 +1,6 @@
-//! Decoding a Character pack line: 16 kHz mono IMA ADPCM in, the codec's 24 kHz stereo PCM out.
+//! Decoding a Character pack line: 16 kHz mono IMA ADPCM in, the codec's 24 kHz stereo PCM out. And the
+//! same coding the other way for voice commands ([`Encoder`], docs/protocol.md): the microphone's 24 kHz
+//! samples out as IMA ADPCM, which the computer decodes with the same tables.
 //!
 //! Each line is a standalone stream: predictor and step index start at zero, two samples per byte,
 //! low nibble first. The upsampling is linear interpolation, 2 input samples to 3 output samples;
@@ -21,6 +23,17 @@ pub struct Decoder {
 }
 
 impl Decoder {
+    /// A decoder that picks up a stream at a known state: a voice command line carries the coder's
+    /// predictor and step index before its first nibble, so each line decodes on its own.
+    pub fn with_state(predictor: i16, index: u8) -> Self {
+        Self { predictor: predictor as i32, index: (index as i32).clamp(0, 88) }
+    }
+
+    /// The predictor (the last sample) and the step index.
+    pub fn state(&self) -> (i16, u8) {
+        (self.predictor as i16, self.index as u8)
+    }
+
     pub fn decode(&mut self, nibble: u8) -> i16 {
         let step = STEPS[self.index as usize];
         let mut diff = step >> 3;
@@ -36,6 +49,49 @@ impl Decoder {
         self.predictor = if nibble & 8 != 0 { self.predictor - diff } else { self.predictor + diff }.clamp(-32768, 32767);
         self.index = (self.index + INDEX_CHANGE[(nibble & 15) as usize]).clamp(0, 88);
         self.predictor as i16
+    }
+}
+
+/// The standard IMA ADPCM encoder (the one `tools/character_pack.py` uses): each nibble is chosen against
+/// the decoder's own prediction, so the decoder above reproduces exactly what the encoder tracked.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct Encoder {
+    decoder: Decoder,
+}
+
+impl Encoder {
+    /// The state a decoder needs to start at the next nibble: predictor and step index.
+    pub fn state(&self) -> (i16, u8) {
+        self.decoder.state()
+    }
+
+    pub fn encode(&mut self, sample: i16) -> u8 {
+        let step = STEPS[self.decoder.index as usize];
+        let mut diff = sample as i32 - self.decoder.predictor;
+        let mut nibble = 0u8;
+        if diff < 0 {
+            nibble = 8;
+            diff = -diff;
+        }
+        if diff >= step {
+            nibble |= 4;
+            diff -= step;
+        }
+        if diff >= step >> 1 {
+            nibble |= 2;
+            diff -= step >> 1;
+        }
+        if diff >= step >> 2 {
+            nibble |= 1;
+        }
+        self.decoder.decode(nibble);
+        nibble
+    }
+
+    /// Two samples to one byte, low nibble first.
+    pub fn encode_pair(&mut self, first: i16, second: i16) -> u8 {
+        let low = self.encode(first);
+        low | self.encode(second) << 4
     }
 }
 
@@ -122,37 +178,16 @@ mod tests {
     use super::*;
     use std::vec::Vec;
 
-    /// The same IMA encoder as tools/character_pack.py, so the two can be checked against each other.
+    /// Packs samples two to a byte, as a Character pack line stores them.
     fn encode(samples: &[i16]) -> Vec<u8> {
-        let mut decoder = Decoder::default();
-        let mut out = Vec::new();
-        for pair in samples.chunks(2) {
-            let mut byte = 0u8;
-            for (half, &sample) in pair.iter().enumerate() {
-                let step = STEPS[decoder.index as usize];
-                let mut diff = sample as i32 - decoder.predictor;
-                let mut nibble = 0u8;
-                if diff < 0 {
-                    nibble = 8;
-                    diff = -diff;
-                }
-                if diff >= step {
-                    nibble |= 4;
-                    diff -= step;
-                }
-                if diff >= step >> 1 {
-                    nibble |= 2;
-                    diff -= step >> 1;
-                }
-                if diff >= step >> 2 {
-                    nibble |= 1;
-                }
-                decoder.decode(nibble);
-                byte |= nibble << (half * 4);
-            }
-            out.push(byte);
-        }
-        out
+        let mut encoder = Encoder::default();
+        samples
+            .chunks(2)
+            .map(|pair| match pair {
+                [first, second] => encoder.encode_pair(*first, *second),
+                _ => encoder.encode(pair[0]),
+            })
+            .collect()
     }
 
     fn sine(count: usize) -> Vec<i16> {
@@ -213,5 +248,66 @@ mod tests {
         }
         assert_eq!(pieces, whole);
         assert_eq!(pieces.len(), 452, "301 samples at 16 kHz become ceil(301 × 1.5) at 24 kHz");
+    }
+
+    /// What a computer does with a voice command line: start a decoder at the line's state and decode
+    /// every nibble, low first.
+    fn decode_line(predictor: i16, index: u8, bytes: &[u8]) -> Vec<i16> {
+        let mut decoder = Decoder::with_state(predictor, index);
+        bytes.iter().flat_map(|&byte| [byte & 15, byte >> 4]).map(|nibble| decoder.decode(nibble)).collect()
+    }
+
+    #[test]
+    fn the_encoder_tracks_exactly_what_the_decoder_reproduces() {
+        let original: Vec<i16> = (0..4800).map(|index| (libm::sinf(index as f32 * 0.07) * 9000.0 + libm::sinf(index as f32 * 0.31) * 3000.0) as i16).collect();
+        let mut encoder = Encoder::default();
+        let mut tracked = Vec::new();
+        let bytes: Vec<u8> = original
+            .chunks(2)
+            .map(|pair| {
+                let byte = encoder.encode_pair(pair[0], pair[1]);
+                tracked.push(encoder.state().0);
+                byte
+            })
+            .collect();
+        let decoded = decode_line(0, 0, &bytes);
+        assert_eq!(decoded.len(), original.len());
+        // The encoder's predictor after each byte is the decoder's output for its second sample.
+        assert_eq!(decoded.iter().skip(1).step_by(2).copied().collect::<Vec<_>>(), tracked);
+        for (index, (&got, &want)) in decoded.iter().zip(&original).enumerate().skip(40) {
+            assert!((got as i32 - want as i32).abs() < 700, "sample {index}: {got} vs {want}");
+        }
+    }
+
+    #[test]
+    fn a_stream_cut_into_lines_decodes_line_by_line_from_each_lines_state() {
+        let original: Vec<i16> = (0..3000).map(|index| (libm::sinf(index as f32 * 0.05) * 15000.0) as i16).collect();
+        let mut encoder = Encoder::default();
+        let mut whole = Vec::new();
+        let mut lines = Vec::new();
+        for piece in original.chunks(600) {
+            let (predictor, index) = encoder.state();
+            let bytes: Vec<u8> = piece.chunks(2).map(|pair| encoder.encode_pair(pair[0], pair[1])).collect();
+            whole.extend_from_slice(&bytes);
+            lines.push((predictor, index, bytes));
+        }
+        let from_start = decode_line(0, 0, &whole);
+        // Dropping the second line loses only its stretch: the third still decodes exactly.
+        let third = &lines[2];
+        assert_eq!(decode_line(third.0, third.1, &third.2), from_start[1200..1800]);
+        let joined: Vec<i16> = lines.iter().flat_map(|(predictor, index, bytes)| decode_line(*predictor, *index, bytes)).collect();
+        assert_eq!(joined, from_start);
+    }
+
+    #[test]
+    fn extremes_stay_in_range() {
+        let mut encoder = Encoder::default();
+        let samples = [i16::MAX, i16::MIN, i16::MAX, i16::MIN, 0, 0, i16::MAX, i16::MAX];
+        let bytes: Vec<u8> = samples.chunks(2).map(|pair| encoder.encode_pair(pair[0], pair[1])).collect();
+        let decoded = decode_line(0, 0, &bytes);
+        assert_eq!(decoded.len(), samples.len());
+        let (_, index) = encoder.state();
+        assert!(index <= 88);
+        assert_eq!(Decoder::with_state(-5, 200).state(), (-5, 88), "an index past the table is clamped");
     }
 }
