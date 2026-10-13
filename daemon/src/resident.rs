@@ -218,11 +218,18 @@ impl Resident {
         std::fs::create_dir_all(&self.dir)
             .map_err(|error| ResidentError::Rpc(format!("cannot create {}: {error}", self.dir.display())))?;
         let thread_id = match self.thread_id() {
+            // There is one resident thread for good. Only a thread that no longer exists is replaced; one that
+            // can't be resumed for another reason (most often the Codex App has it open, and a thread has one
+            // writer at a time) fails this command and is tried again with the next.
             Some(saved) => match self.resume(&client, &saved).await {
-                Err(ResidentError::Rpc(message)) if !client.is_closed() => {
+                Err(ResidentError::Rpc(message)) if !client.is_closed() && thread_is_gone(&message) => {
                     let thread = self.start_thread(&client).await?;
-                    warn!(old_thread = %saved, new_thread = %thread, %message, "the resident thread could not be resumed; started a new one");
+                    warn!(old_thread = %saved, new_thread = %thread, %message, "the resident thread no longer exists; started a new one");
                     thread
+                }
+                Err(ResidentError::Rpc(message)) if message.contains("active writer") => {
+                    warn!(thread = %saved, "the resident thread is open in another Codex process, most likely the Codex App; close it there");
+                    return Err(ResidentError::Rpc(message));
                 }
                 other => other?,
             },
@@ -565,6 +572,11 @@ fn save(path: &Path, saved: &Saved) -> std::io::Result<()> {
     std::fs::write(path, serde_json::to_string_pretty(saved).map_err(std::io::Error::other)?)
 }
 
+/// The app-server's answer to resuming a thread whose rollout is gone (deleted, or a different CODEX_HOME).
+fn thread_is_gone(message: &str) -> bool {
+    message.contains("no rollout found")
+}
+
 #[cfg(test)]
 pub(crate) mod tests {
     use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
@@ -578,6 +590,7 @@ pub(crate) mod tests {
         pub(crate) logged_in: bool,
         /// thread/resume fails, as if the rollout were gone.
         lose_thread: bool,
+        busy_thread: bool,
         /// Ends its output instead of completing this turn, as if the process died; only once.
         pub(crate) die_on_turn: Option<usize>,
         /// Server-to-client requests made during each turn, before it completes.
@@ -611,6 +624,7 @@ pub(crate) mod tests {
                 script.lock().unwrap().received.push(message.clone());
                 let id = message["id"].clone();
                 let lose_thread = script.lock().unwrap().lose_thread;
+                let busy_thread = script.lock().unwrap().busy_thread;
                 let result = match method.as_str() {
                     "initialized" => continue,
                     "initialize" => json!({"userAgent": "fake"}),
@@ -620,6 +634,12 @@ pub(crate) mod tests {
                         json!({"account": account, "requiresOpenaiAuth": true})
                     }
                     "thread/start" => json!({"thread": {"id": "new-thread"}}),
+                    "thread/resume" if busy_thread => {
+                        let message = "thread old-thread already has an active writer";
+                        let error = json!({"id": id, "error": {"code": -32600, "message": message}});
+                        out.write_all(format!("{error}\n").as_bytes()).await.unwrap();
+                        continue;
+                    }
                     "thread/resume" if lose_thread => {
                         let error = json!({"id": id, "error": {"code": -32600, "message": "no rollout found"}});
                         out.write_all(format!("{error}\n").as_bytes()).await.unwrap();
@@ -737,6 +757,19 @@ pub(crate) mod tests {
         assert_eq!(answer.thread_id, "new-thread");
         assert_eq!(methods(&script)[3..5], ["thread/resume", "thread/start"]);
         assert_eq!(load(&dir.join("resident.json")).thread_id.as_deref(), Some("new-thread"));
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[tokio::test]
+    async fn a_thread_open_elsewhere_fails_the_command_and_is_never_replaced() {
+        let dir = temp_dir("busy");
+        let saved = Saved { thread_id: Some("old-thread".to_owned()), codex_version: None };
+        save(&dir.join("resident.json"), &saved).unwrap();
+        let script = logged_in();
+        script.lock().unwrap().busy_thread = true;
+        assert!(resident(&dir, &script, Arc::default()).say("hi").await.is_err());
+        assert!(!methods(&script).contains(&"thread/start".to_owned()), "{:?}", methods(&script));
+        assert_eq!(load(&dir.join("resident.json")).thread_id.as_deref(), Some("old-thread"));
         let _ = std::fs::remove_dir_all(dir);
     }
 
