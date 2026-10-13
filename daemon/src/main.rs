@@ -95,7 +95,7 @@ struct AppState {
     updates: Arc<Mutex<Updates>>,
     /// "Check for updates" pressed: checks now instead of waiting for the daily one.
     check_updates: Arc<Notify>,
-    /// The resident session voice commands go to (ADR-0015); None without a state directory, and in tests
+    /// The resident session voice commands go to (ADR-0017); None without a state directory, and in tests
     /// unless one sets it. Present even when switched off, so its hook events are still recognised.
     resident: Option<Arc<resident::Resident>>,
     /// The box on the cable said `LINK NOISE` since its last `BOX KEY` (ADR-0015).
@@ -1202,7 +1202,7 @@ async fn post_codex_hook(
     State(state): State<AppState>,
     Json(hook): Json<CodexHook>,
 ) -> (StatusCode, Json<ApiResponse>) {
-    // The resident session is an Agent, but never an Activity: no card, announcement or stats (ADR-0015).
+    // The resident session is an Agent, but never an Activity: no card, announcement or stats (ADR-0017).
     if let Some(resident) = &state.resident
         && resident.owns_hook(&hook.session_id, hook.thread_id.as_deref(), hook.cwd.as_deref())
     {

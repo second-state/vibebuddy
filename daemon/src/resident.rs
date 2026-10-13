@@ -1,4 +1,4 @@
-//! The resident session (ADR-0015): the one long-running Codex thread every voice command goes to.
+//! The resident session (ADR-0017): the one long-running Codex thread every voice command goes to.
 //!
 //! The daemon drives the user's own `codex app-server` over stdio with the user's own login: `thread/start` once,
 //! `thread/resume` on every later start, `turn/start` per voice command. The session answers through the `speak`

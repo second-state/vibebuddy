@@ -184,7 +184,7 @@ pub struct TodaySummary {
     pub busy_seconds: u64,
 }
 
-/// One Activity as the resident session sees it (ADR-0015): only what the task cards already show, plus the agent,
+/// One Activity as the resident session sees it (ADR-0017): only what the task cards already show, plus the agent,
 /// where it runs and how long ago things happened. Never prompts or replies, which the daemon doesn't hold anyway.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct ActivitySummary {

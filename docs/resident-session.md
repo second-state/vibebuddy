@@ -1,6 +1,6 @@
 # Resident session
 
-The resident session is the one long-running Codex thread every voice command goes to ([ADR-0015](adr/0015-voice-commands-go-to-a-resident-session-that-speaks-as-the-buddy.md); see "Voice commands" in [`CONTEXT.md`](../CONTEXT.md)). This is the first, command-line-only cut: the box can't hear yet, so a voice command is typed.
+The resident session is the one long-running Codex thread every voice command goes to ([ADR-0017](adr/0017-voice-commands-go-to-a-resident-session-that-speaks-as-the-buddy.md); see "Voice commands" in [`CONTEXT.md`](../CONTEXT.md)). This is the first, command-line-only cut: the box can't hear yet, so a voice command is typed.
 
 It is experimental and off by default. Start `vibebuddyd` with `VIBEBUDDY_RESIDENT_SESSION=1` to turn it on. There is no App UI for it, on the Mac or on Linux.
 

@@ -16,4 +16,4 @@ Leisure can no longer be started on demand; demos use the time-compressed build.
 
 ## Amendment
 
-ADR-0015 (proposed) gives K0 long to push-to-talk. Giving up a Pomodoro phase then lives only in the menu's STOP FOCUS / END BREAK row.
+ADR-0017 (proposed) gives K0 long to push-to-talk. Giving up a Pomodoro phase then lives only in the menu's STOP FOCUS / END BREAK row.
