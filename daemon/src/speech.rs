@@ -156,15 +156,20 @@ impl Recognizer for OpenAiCompatible {
     }
 }
 
-fn send(request: HttpRequest) -> Result<(u16, String), String> {
-    let agent: ureq::Agent = ureq::Agent::config_builder()
-        .timeout_global(Some(TIMEOUT))
+/// An HTTP client on the system's certificate store that hands back every status as an answer: the recognizers
+/// here and the voice service in [`crate::synthesis`] share it.
+pub fn agent(timeout: Duration) -> ureq::Agent {
+    ureq::Agent::config_builder()
+        .timeout_global(Some(timeout))
         .http_status_as_error(false)
         .tls_config(ureq::tls::TlsConfig::builder().root_certs(ureq::tls::RootCerts::PlatformVerifier).build())
         .user_agent(concat!("vibebuddyd/", env!("CARGO_PKG_VERSION")))
         .build()
-        .into();
-    let mut builder = agent.post(&request.url);
+        .into()
+}
+
+fn send(request: HttpRequest) -> Result<(u16, String), String> {
+    let mut builder = agent(TIMEOUT).post(&request.url);
     for (name, value) in &request.headers {
         builder = builder.header(name, value);
     }

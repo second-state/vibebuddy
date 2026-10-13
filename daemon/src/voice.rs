@@ -6,6 +6,11 @@
 //! recognised ([`crate::speech`]), sends `voice.heard`, hands the text to the resident session and sends each spoken
 //! reply as `voice.reply` the moment the session says it, then `voice.done`. One turn at a time: a turn that ends
 //! while another is still running gets `voice.error` `busy`.
+//!
+//! With a synthesizer ([`crate::synthesis`]), each reply is also spoken: its audio follows its `voice.reply` as
+//! `voice.audio` pieces, streamed as the service makes them. Replies are synthesized one after another, in order,
+//! on their own task, so a reply's text never waits for an earlier reply's audio; `voice.done` waits for the last
+//! reply's audio `end`.
 
 use std::collections::BTreeMap;
 use std::sync::Arc;
@@ -20,8 +25,11 @@ use vibebuddy_protocol::{Event, MAX_MESSAGE_BYTES};
 use crate::resident::Resident;
 use crate::serial_transport::Transport;
 use crate::speech::Recognizer;
+use crate::synthesis::{self, Synthesizer};
 
 pub const SAMPLE_RATE: u32 = 24_000;
+/// The most MP3 bytes one `voice.audio` carries: 768 base64 characters.
+const AUDIO_BYTES: usize = 768 / 4 * 3;
 /// The box stops at 30 s; a little more is kept in case its clock and ours disagree, nothing beyond.
 const MAX_SAMPLES: usize = SAMPLE_RATE as usize * 31;
 const LINE_PREFIX: &str = "VOICE ";
@@ -209,6 +217,13 @@ fn error_event(turn: u32, reason: &str, message: &str) -> Event {
     })
 }
 
+fn audio_event(turn: u32, reply: u32, seq: u32) -> Event {
+    let mut event = turn_event("voice.audio", turn);
+    event.extra.insert("reply".to_owned(), reply.into());
+    event.extra.insert("seq".to_owned(), seq.into());
+    event
+}
+
 fn send(transport: &dyn Transport, event: Event) {
     match event.to_ndjson() {
         Ok(frame) => {
@@ -232,13 +247,19 @@ impl Drop for Running {
 pub struct Voice {
     recognizer: Option<Arc<dyn Recognizer>>,
     resident: Option<Arc<Resident>>,
+    /// Speaks the replies; without one they stay text.
+    synthesizer: Option<Arc<dyn Synthesizer>>,
     recording: std::sync::Mutex<Option<Recording>>,
     running: Arc<AtomicBool>,
 }
 
 impl Voice {
     pub fn new(recognizer: Option<Arc<dyn Recognizer>>, resident: Option<Arc<Resident>>) -> Self {
-        Self { recognizer, resident, recording: std::sync::Mutex::new(None), running: Arc::default() }
+        Self { recognizer, resident, synthesizer: None, recording: std::sync::Mutex::new(None), running: Arc::default() }
+    }
+
+    pub fn with_synthesizer(self, synthesizer: Option<Arc<dyn Synthesizer>>) -> Self {
+        Self { synthesizer, ..self }
     }
 
     /// Voice is offered when the resident session is on and speech recognition is configured.
@@ -246,8 +267,9 @@ impl Voice {
         self.recognizer.is_some() && self.resident.as_ref().is_some_and(|resident| resident.enabled())
     }
 
-    /// Takes one `VOICE` line from the box. A turn that ends starts a task, returned so tests can wait for it.
-    pub fn handle_line(&self, line: &str, transport: &Arc<dyn Transport>) -> Option<JoinHandle<()>> {
+    /// Takes one `VOICE` line from the box. A turn that ends starts a task, returned so tests can wait for it;
+    /// its replies are spoken in the voice of `character`, the Character the box wears.
+    pub fn handle_line(&self, line: &str, transport: &Arc<dyn Transport>, character: Option<&str>) -> Option<JoinHandle<()>> {
         let parsed = match parse_line(line) {
             None => return None,
             Some(Err(error)) => {
@@ -302,13 +324,21 @@ impl Voice {
                 if taken.as_ref().is_some_and(|taken| taken.refused) {
                     return None;
                 }
-                return self.end(turn, samples as usize, taken, transport.clone());
+                let speaker = self.synthesizer.clone().map(|synthesizer| (synthesizer, character.map(str::to_owned)));
+                return self.end(turn, samples as usize, taken, transport.clone(), speaker);
             }
         }
         None
     }
 
-    fn end(&self, turn: u32, samples: usize, recording: Option<Recording>, transport: Arc<dyn Transport>) -> Option<JoinHandle<()>> {
+    fn end(
+        &self,
+        turn: u32,
+        samples: usize,
+        recording: Option<Recording>,
+        transport: Arc<dyn Transport>,
+        speaker: Option<(Arc<dyn Synthesizer>, Option<String>)>,
+    ) -> Option<JoinHandle<()>> {
         let (Some(recognizer), Some(resident)) = (self.recognizer.clone(), self.resident.clone().filter(|resident| resident.enabled()))
         else {
             send(&*transport, error_event(turn, "unavailable", "voice commands are off on this computer"));
@@ -331,12 +361,115 @@ impl Voice {
         }
         Some(tokio::spawn(async move {
             let _running = running;
-            run_turn(turn, audio, recognizer, resident, transport).await;
+            run_turn(turn, audio, recognizer, resident, transport, speaker).await;
         }))
     }
 }
 
-async fn run_turn(turn: u32, audio: Vec<i16>, recognizer: Arc<dyn Recognizer>, resident: Arc<Resident>, transport: Arc<dyn Transport>) {
+/// Speaks a turn's replies one after another, in the order they were said, streaming each one's audio to the box
+/// as it arrives, on a task of its own so the text never waits for it.
+struct Speaker {
+    replies: tokio::sync::mpsc::UnboundedSender<String>,
+    stopped: Arc<AtomicBool>,
+    task: JoinHandle<()>,
+}
+
+impl Speaker {
+    fn start(turn: u32, synthesizer: Arc<dyn Synthesizer>, character: Option<String>, transport: Arc<dyn Transport>) -> Self {
+        let (replies, mut texts) = tokio::sync::mpsc::unbounded_channel::<String>();
+        let stopped = Arc::new(AtomicBool::new(false));
+        let task = tokio::spawn({
+            let stopped = stopped.clone();
+            async move {
+                let mut reply = 0;
+                while let Some(text) = texts.recv().await {
+                    let (synthesizer, character, transport, stopped) =
+                        (synthesizer.clone(), character.clone(), transport.clone(), stopped.clone());
+                    let spoken = tokio::task::spawn_blocking(move || {
+                        speak(turn, reply, &text, character.as_deref(), &*synthesizer, &*transport, &stopped)
+                    });
+                    if let Err(error) = spoken.await {
+                        warn!(turn, reply, %error, "speech synthesis panicked");
+                    }
+                    reply += 1;
+                }
+            }
+        });
+        Self { replies, stopped, task }
+    }
+
+    fn say(&self, text: &str) {
+        let _ = self.replies.send(text.to_owned());
+    }
+
+    /// Waits until every reply's audio has been sent.
+    async fn finish(self) {
+        drop(self.replies);
+        let _ = self.task.await;
+    }
+
+    /// Sends no more audio: the reply being spoken stops at its next piece, and the rest are never started.
+    async fn stop(self) {
+        self.stopped.store(true, Ordering::Release);
+        self.finish().await;
+    }
+}
+
+/// One reply's audio, as `voice.audio` pieces and then its `end`; a failure ends it early, marked as one, and the
+/// box keeps the text. Blocking.
+fn speak(
+    turn: u32,
+    reply: u32,
+    text: &str,
+    character: Option<&str>,
+    synthesizer: &dyn Synthesizer,
+    transport: &dyn Transport,
+    stopped: &AtomicBool,
+) {
+    if stopped.load(Ordering::Acquire) {
+        return;
+    }
+    let voice = synthesis::voice_for(character, text);
+    let started = Instant::now();
+    let (mut seq, mut bytes, mut first_byte_ms) = (0, 0, None);
+    let result = synthesizer.synthesize(text, voice, &mut |piece| {
+        if stopped.load(Ordering::Acquire) {
+            return false;
+        }
+        first_byte_ms.get_or_insert(started.elapsed().as_millis() as u64);
+        bytes += piece.len();
+        for chunk in piece.chunks(AUDIO_BYTES) {
+            let mut event = audio_event(turn, reply, seq);
+            event.extra.insert("data".to_owned(), base64::engine::general_purpose::STANDARD.encode(chunk).into());
+            send(transport, event);
+            seq += 1;
+        }
+        true
+    });
+    if stopped.load(Ordering::Acquire) {
+        return;
+    }
+    let total_ms = started.elapsed().as_millis() as u64;
+    let mut end = audio_event(turn, reply, seq);
+    end.extra.insert("end".to_owned(), true.into());
+    match result {
+        Ok(()) => info!(turn, reply, voice, first_byte_ms, total_ms, bytes, "spoken reply synthesized"),
+        Err(error) => {
+            warn!(turn, reply, voice, %error, bytes, "speech synthesis failed; the reply stays text");
+            end.extra.insert("error".to_owned(), "synthesis".into());
+        }
+    }
+    send(transport, end);
+}
+
+async fn run_turn(
+    turn: u32,
+    audio: Vec<i16>,
+    recognizer: Arc<dyn Recognizer>,
+    resident: Arc<Resident>,
+    transport: Arc<dyn Transport>,
+    speaker: Option<(Arc<dyn Synthesizer>, Option<String>)>,
+) {
     let started = Instant::now();
     let seconds = audio.len() as f32 / SAMPLE_RATE as f32;
     let wav = wav(&audio);
@@ -359,20 +492,31 @@ async fn run_turn(turn: u32, audio: Vec<i16>, recognizer: Arc<dyn Recognizer>, r
     }
     info!(turn, seconds, recognised_ms, language = transcript.language.as_deref().unwrap_or("unknown"), chars = transcript.text.chars().count(), "voice turn heard");
     send(&*transport, text_event("voice.heard", turn, &transcript.text));
+    let speaker = speaker.map(|(synthesizer, character)| Speaker::start(turn, synthesizer, character, transport.clone()));
     let mut replies = 0;
     let answered = resident
         .say_streaming(&transcript.text, &mut |reply| {
             replies += 1;
             info!(turn, elapsed_ms = started.elapsed().as_millis() as u64, "voice reply");
             send(&*transport, text_event("voice.reply", turn, reply));
+            if let Some(speaker) = &speaker {
+                speaker.say(reply);
+            }
         })
         .await;
     match answered {
         Ok(_) => {
+            // The turn is over once the last reply has been heard, not just said.
+            if let Some(speaker) = speaker {
+                speaker.finish().await;
+            }
             info!(turn, replies, elapsed_ms = started.elapsed().as_millis() as u64, "voice turn done");
             send(&*transport, turn_event("voice.done", turn));
         }
         Err(error) => {
+            if let Some(speaker) = speaker {
+                speaker.stop().await;
+            }
             warn!(turn, %error, "the resident session failed the voice turn");
             send(&*transport, error_event(turn, "unavailable", &error.to_string()));
         }
@@ -538,27 +682,62 @@ pub mod tests {
 
     use crate::resident::tests::{Shared, logged_in, resident, temp_dir, tool_call};
 
+    /// Answers every reply with the same pieces of "audio", failing after them for texts that start with "fail",
+    /// and keeps the text and voice of each call. With a gate, its first call waits until the gate opens.
+    #[derive(Default)]
+    struct FakeSynthesizer {
+        pieces: Vec<Vec<u8>>,
+        calls: std::sync::Mutex<Vec<(String, String)>>,
+        gate: std::sync::Mutex<Option<std::sync::mpsc::Receiver<()>>>,
+    }
+
+    impl Synthesizer for FakeSynthesizer {
+        fn synthesize(&self, text: &str, voice: &str, on_audio: &mut dyn FnMut(&[u8]) -> bool) -> Result<(), String> {
+            self.calls.lock().unwrap().push((text.to_owned(), voice.to_owned()));
+            if let Some(gate) = self.gate.lock().unwrap().take() {
+                let _ = gate.recv();
+            }
+            for piece in &self.pieces {
+                if !on_audio(piece) {
+                    return Ok(());
+                }
+            }
+            if text.starts_with("fail") { Err("the connection was cut".to_owned()) } else { Ok(()) }
+        }
+    }
+
     struct Rig {
         voice: Voice,
         transport: Arc<RecordingTransport>,
         recognizer: Arc<FakeRecognizer>,
         script: Shared,
         dir: std::path::PathBuf,
+        character: Option<&'static str>,
     }
 
     impl Rig {
         fn new(name: &str, answer: Result<&'static str, &'static str>, script: Shared) -> Self {
+            Self::speaking(name, answer, script, None, None)
+        }
+
+        fn speaking(
+            name: &str,
+            answer: Result<&'static str, &'static str>,
+            script: Shared,
+            synthesizer: Option<Arc<dyn Synthesizer>>,
+            character: Option<&'static str>,
+        ) -> Self {
             let dir = temp_dir(&format!("voice-{name}"));
             let recognizer = Arc::new(FakeRecognizer { answer, heard: Default::default() });
             let resident = Arc::new(resident(&dir, &script, Arc::default()));
-            let voice = Voice::new(Some(recognizer.clone()), Some(resident));
-            Self { voice, transport: Arc::default(), recognizer, script, dir }
+            let voice = Voice::new(Some(recognizer.clone()), Some(resident)).with_synthesizer(synthesizer);
+            Self { voice, transport: Arc::default(), recognizer, script, dir, character }
         }
 
         /// Feeds the lines; returns the task the last one started, if any.
         fn feed(&self, lines: &[String]) -> Option<JoinHandle<()>> {
             let transport: Arc<dyn Transport> = self.transport.clone();
-            lines.iter().filter_map(|line| self.voice.handle_line(line, &transport)).last()
+            lines.iter().filter_map(|line| self.voice.handle_line(line, &transport, self.character)).last()
         }
 
         fn names(&self) -> Vec<String> {
@@ -609,6 +788,114 @@ pub mod tests {
             ["params"]["input"][0]["text"]
             .clone();
         assert_eq!(turn_text, "what are my agents doing");
+    }
+
+    /// One `voice.audio`: reply, seq, its bytes (None for its end) and its error.
+    type Piece = (u64, u64, Option<Vec<u8>>, Option<String>);
+
+    /// Each reply's audio, in the order it was sent.
+    fn audio(events: &[Event]) -> Vec<Piece> {
+        events
+            .iter()
+            .filter(|event| event.event == "voice.audio")
+            .map(|event| {
+                let data = event.extra.get("data").map(|data| {
+                    let data = data.as_str().unwrap();
+                    assert!(data.len() <= 768, "{} base64 characters", data.len());
+                    base64::engine::general_purpose::STANDARD.decode(data).unwrap()
+                });
+                assert_eq!(data.is_none(), event.extra.get("end") == Some(&json!(true)));
+                let error = event.extra.get("error").map(|error| error.as_str().unwrap().to_owned());
+                (event.extra["reply"].as_u64().unwrap(), event.extra["seq"].as_u64().unwrap(), data, error)
+            })
+            .collect()
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn each_reply_is_spoken_in_order_without_holding_up_the_text_and_done_comes_after_the_audio() {
+        let script = logged_in();
+        let hold = Arc::new(tokio::sync::Notify::new());
+        script.lock().unwrap().hold = Some(hold.clone());
+        script.lock().unwrap().turn_requests =
+            vec![tool_call("speak", json!({"text": "Two agents are working."})), tool_call("speak", json!({"text": "One needs you."}))];
+        let (open, gate) = std::sync::mpsc::channel();
+        let pieces = vec![(0..=255).cycle().take(1300).collect(), vec![7; 10]];
+        let synthesizer = Arc::new(FakeSynthesizer { pieces, gate: std::sync::Mutex::new(Some(gate)), ..Default::default() });
+        let rig = Rig::speaking("speak", Ok("what are my agents doing"), script, Some(synthesizer.clone()), Some("ada"));
+
+        let task = rig.feed(&voice_lines(4, &sine(30_000))).expect("the turn runs");
+        // The first reply's audio is held up, and both replies' text still reach the box.
+        while rig.names().len() < 3 {
+            tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+        }
+        assert_eq!(rig.names(), ["voice.heard", "voice.reply", "voice.reply"]);
+        // The turn has completed in the session, but isn't done until the audio is.
+        hold.notify_one();
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        assert!(!task.is_finished());
+        open.send(()).unwrap();
+        task.await.unwrap();
+
+        let events = rig.transport.events();
+        assert!(events.iter().all(|event| event.extra["turn"] == 4));
+        assert!(events.iter().all(|event| event.to_ndjson().unwrap().len() <= MAX_MESSAGE_BYTES + 1));
+        assert_eq!(rig.names().last().map(String::as_str), Some("voice.done"));
+        let audio = audio(&events);
+        let order: Vec<(u64, u64, bool)> = audio.iter().map(|(reply, seq, data, _)| (*reply, *seq, data.is_none())).collect();
+        // 1300 bytes are three pieces of at most 576; then the 10, then the end.
+        let expected: Vec<(u64, u64, bool)> = [0, 1].into_iter().flat_map(|reply| (0..5).map(move |seq| (reply, seq, seq == 4))).collect();
+        assert_eq!(order, expected);
+        for reply in [0, 1] {
+            let bytes: Vec<u8> = audio.iter().filter(|(r, ..)| *r == reply).filter_map(|(_, _, data, _)| data.clone()).flatten().collect();
+            assert_eq!(bytes.len(), 1310);
+            assert_eq!(bytes[..1300], (0..=255).cycle().take(1300).collect::<Vec<u8>>()[..]);
+        }
+        assert!(audio.iter().all(|(.., error)| error.is_none()));
+        let calls = synthesizer.calls.lock().unwrap().clone();
+        let voice = "en-GB-SoniaNeural".to_owned();
+        assert_eq!(calls, [("Two agents are working.".to_owned(), voice.clone()), ("One needs you.".to_owned(), voice)]);
+    }
+
+    #[tokio::test]
+    async fn a_failed_synthesis_ends_its_reply_early_marked_and_the_next_one_is_still_spoken() {
+        let script = logged_in();
+        script.lock().unwrap().turn_requests =
+            vec![tool_call("speak", json!({"text": "fail: cut short"})), tool_call("speak", json!({"text": "还在。"}))];
+        let synthesizer = Arc::new(FakeSynthesizer { pieces: vec![vec![1; 100]], ..Default::default() });
+        let rig = Rig::speaking("speak-fail", Ok("hi"), script, Some(synthesizer.clone()), None);
+        rig.feed(&voice_lines(1, &sine(12_000))).unwrap().await.unwrap();
+
+        let audio = audio(&rig.transport.events());
+        assert_eq!(
+            audio,
+            [
+                (0, 0, Some(vec![1; 100]), None),
+                (0, 1, None, Some("synthesis".to_owned())),
+                (1, 0, Some(vec![1; 100]), None),
+                (1, 1, None, None),
+            ]
+        );
+        assert_eq!(rig.names().last().map(String::as_str), Some("voice.done"));
+        // No Character pack: the built-in Character's voice, and a Chinese one for Chinese.
+        let voices: Vec<String> = synthesizer.calls.lock().unwrap().iter().map(|(_, voice)| voice.clone()).collect();
+        assert_eq!(voices, ["en-US-JennyNeural", "zh-CN-XiaoxiaoNeural"]);
+    }
+
+    #[test]
+    fn a_stopped_speaker_sends_nothing_more() {
+        let synthesizer = FakeSynthesizer { pieces: vec![vec![1; 10]], ..Default::default() };
+        let transport = RecordingTransport::default();
+        speak(1, 0, "hello", None, &synthesizer, &transport, &AtomicBool::new(true));
+        assert!(transport.events().is_empty());
+        assert!(synthesizer.calls.lock().unwrap().is_empty());
+    }
+
+    #[test]
+    fn the_largest_audio_piece_fits_a_line() {
+        let mut event = audio_event(u32::MAX, u32::MAX, u32::MAX);
+        event.extra.insert("data".to_owned(), base64::engine::general_purpose::STANDARD.encode([255u8; AUDIO_BYTES]).into());
+        assert_eq!(event.extra["data"].as_str().unwrap().len(), 768);
+        assert!(event.to_ndjson().unwrap().len() <= MAX_MESSAGE_BYTES + 1);
     }
 
     #[tokio::test]
@@ -769,10 +1056,10 @@ pub mod tests {
         println!("{:.2} s of audio in {} lines", left.len() as f32 / SAMPLE_RATE as f32, lines.len());
         let (end, data) = lines.split_last().unwrap();
         for line in data {
-            assert!(voice.handle_line(line, &transport).is_none());
+            assert!(voice.handle_line(line, &transport, None).is_none());
         }
         *timed.end.lock().unwrap() = Some(Instant::now());
-        voice.handle_line(end, &transport).expect("the turn runs").await.unwrap();
+        voice.handle_line(end, &transport, None).expect("the turn runs").await.unwrap();
 
         let events = timed.events.lock().unwrap();
         let names: Vec<&str> = events.iter().map(|(_, event)| event.event.as_str()).collect();
@@ -780,6 +1067,44 @@ pub mod tests {
         assert_eq!(names.last(), Some(&"voice.done"), "{names:?}");
         assert!(names.contains(&"voice.reply"), "{names:?}");
         let _ = std::fs::remove_dir_all(dir);
+    }
+
+    /// Two replies through the real voice service, as the box would get them: the `voice.audio` pieces put back
+    /// together into `<dir>/reply-zh.mp3` and `reply-en.mp3`. Run by hand:
+    ///
+    /// ```sh
+    /// VIBEBUDDY_E2E_OUT=/some/dir cargo test -p vibebuddyd e2e_spoken -- --ignored --nocapture
+    /// ```
+    ///
+    /// `VIBEBUDDY_TTS_BASE_URL` picks the service as it does for the daemon; unset, staging.
+    #[test]
+    #[ignore = "uses the network and the voice service"]
+    fn e2e_spoken_replies_through_the_real_voice_service() {
+        let out = std::path::PathBuf::from(std::env::var("VIBEBUDDY_E2E_OUT").expect("VIBEBUDDY_E2E_OUT names a directory"));
+        let synthesizer = synthesis::from_env().expect("a voice service");
+        for (name, character, text) in [
+            ("zh", Some("wanwanxiaohe"), "两个智能体正在工作，有一个在等你回复。"),
+            ("en", Some("ada"), "Two agents are working, and one of them is waiting for you."),
+        ] {
+            let timed = TimedTransport { end: std::sync::Mutex::new(Some(Instant::now())), events: Default::default() };
+            speak(1, 0, text, character, &*synthesizer, &timed, &AtomicBool::new(false));
+            let events = timed.events.lock().unwrap();
+            let (first_ms, _) = events.first().expect("some audio");
+            let (total_ms, last) = events.last().unwrap();
+            assert_eq!(last.extra.get("end"), Some(&json!(true)));
+            assert!(!last.extra.contains_key("error"), "synthesis failed");
+            let pieces: Vec<Event> = events.iter().map(|(_, event)| event.clone()).collect();
+            let bytes: Vec<u8> = audio(&pieces).into_iter().filter_map(|(_, _, data, _)| data).flatten().collect();
+            let path = out.join(format!("reply-{name}.mp3"));
+            std::fs::write(&path, &bytes).unwrap();
+            println!(
+                "{name} {}: first audio after {first_ms} ms, end after {total_ms} ms, {} bytes in {} lines -> {}",
+                synthesis::voice_for(character, text),
+                bytes.len(),
+                events.len(),
+                path.display()
+            );
+        }
     }
 
     #[tokio::test]
@@ -798,7 +1123,7 @@ pub mod tests {
         let transport = Arc::new(RecordingTransport::default());
         let shared: Arc<dyn Transport> = transport.clone();
         for line in voice_lines(1, &sine(12_000)) {
-            voice.handle_line(&line, &shared);
+            voice.handle_line(&line, &shared, None);
         }
         assert_eq!(transport.events()[0].extra["reason"], "unavailable");
         let _ = std::fs::remove_dir_all(dir);

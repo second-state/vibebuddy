@@ -19,6 +19,7 @@ mod session_titles;
 mod source_opener;
 mod speech;
 mod status;
+mod synthesis;
 mod updates;
 mod voice;
 mod voice_writer;
@@ -263,7 +264,7 @@ async fn main() {
         }
         Arc::new(resident::Resident::new(enabled, dir, resident::Launcher::Codex, state.activities.clone()))
     });
-    state.voice = Arc::new(voice::Voice::new(speech::from_env(), state.resident.clone()));
+    state.voice = Arc::new(voice::Voice::new(speech::from_env(), state.resident.clone()).with_synthesizer(synthesis::from_env()));
     state.device.lock().await.pin = pin;
     state.updates = Arc::new(Mutex::new(Updates::new(
         updates::Source::configured(),
@@ -401,9 +402,9 @@ async fn publish_device_message(state: &AppState, message: DeviceMessage) {
 /// over the UART bridge, which is too slow for it, and over the Relay it will talk to the voice service itself, so
 /// voice isn't offered on either, and voice lines over the Relay are ignored.
 async fn handle_voice_line(state: &AppState, line: &str) -> Option<tokio::task::JoinHandle<()>> {
-    let (over_relay, on_bridge) = {
+    let (over_relay, on_bridge, character) = {
         let device = state.device.lock().await;
-        (device.relay, device.bridge)
+        (device.relay, device.bridge, device.voice.clone())
     };
     if line.contains(serial_transport::BUILD_MARKER) && state.voice.available() {
         if over_relay {
@@ -421,7 +422,12 @@ async fn handle_voice_line(state: &AppState, line: &str) -> Option<tokio::task::
         tracing::debug!("ignoring a voice line over the Relay");
         return None;
     }
-    state.voice.handle_line(line, &state.transport)
+    // The Character the box reported wearing; before it has, the one last written to it.
+    let character = match character {
+        Some(character) => Some(character),
+        None => state.config.lock().await.voice.clone(),
+    };
+    state.voice.handle_line(line, &state.transport, character.as_deref())
 }
 
 async fn open_k2_source(state: &AppState) {
