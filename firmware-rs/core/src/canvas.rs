@@ -1,4 +1,5 @@
-//! A 320×240 RGB565 frame buffer and the most basic drawing: filled rectangles, thick lines, 5×7 bitmap text.
+//! A 320×240 RGB565 frame buffer and the most basic drawing: filled rectangles, thick lines, 5×7 bitmap text,
+//! and UTF-8 text that adds Chinese from the 12 px font in font.rs.
 //!
 //! The buffer is in the byte order the panel wants: high byte first for each pixel. The C firmware stores
 //! little-endian u16 in memory and has the LCD driver swap bytes on send; here it is stored as it goes on
@@ -7,6 +8,8 @@
 pub const WIDTH: i32 = 320;
 pub const HEIGHT: i32 = 240;
 pub const FRAME_BYTES: usize = (WIDTH * HEIGHT * 2) as usize;
+
+use crate::font::{self, Glyph};
 
 const LETTER_GLYPHS: [[u8; 7]; 26] = [
     [0x0e, 0x11, 0x11, 0x1f, 0x11, 0x11, 0x11],
@@ -144,21 +147,62 @@ impl<'a> Canvas<'a> {
             if character == 0 {
                 break;
             }
-            for row in 0..7 {
-                let bits = glyph_row(character, row);
-                for column in 0..5 {
-                    if bits & (1 << (4 - column)) != 0 {
-                        self.fill_rect(
-                            x + index as i32 * 6 * scale + column * scale,
-                            y + row as i32 * scale,
-                            scale,
-                            scale,
-                            color,
-                        );
-                    }
+            self.draw_ascii(x + index as i32 * 6 * scale, y, character, scale, color);
+        }
+    }
+
+    fn draw_ascii(&mut self, x: i32, y: i32, character: u8, scale: i32, color: u16) {
+        for row in 0..7 {
+            let bits = glyph_row(character, row);
+            for column in 0..5 {
+                if bits & (1 << (4 - column)) != 0 {
+                    self.fill_rect(x + column * scale, y + row as i32 * scale, scale, scale, color);
                 }
             }
         }
+    }
+
+    /// Draws UTF-8 text from (x, y), as many whole characters as fit in `max_width` pixels; stops at NUL.
+    /// ASCII is the 5×7 font exactly as `draw_text` draws it, with (x, y) its top left; Chinese is the 12 px
+    /// font, centred on the ASCII line (font.rs). Returns the width drawn.
+    pub fn draw_str(&mut self, x: i32, y: i32, text: &[u8], scale: i32, color: u16, max_width: i32) -> i32 {
+        let text = &text[..font::fit(text, scale, max_width)];
+        let wide_scale = font::wide_scale(scale);
+        let top = font::wide_top(y, scale);
+        let mut left = x;
+        for (glyph, _) in font::glyphs(text) {
+            match glyph {
+                Glyph::Ascii(character) => self.draw_ascii(left, y, character, scale, color),
+                Glyph::Wide(index) => {
+                    for row in 0..font::CELL {
+                        let bits = font::row(index, row as usize);
+                        for column in 0..font::CELL {
+                            if bits & (0x800 >> column) != 0 {
+                                self.fill_rect(left + column * wide_scale, top + row * wide_scale, wide_scale, wide_scale, color);
+                            }
+                        }
+                    }
+                }
+                // A dotted box over the ink area, so it can't pass for 口.
+                Glyph::Missing => {
+                    for step in (0..11).step_by(2) {
+                        for (column, row) in [(step, 1), (step, 11), (0, 1 + step), (10, 1 + step)] {
+                            self.fill_rect(left + column * wide_scale, top + row * wide_scale, wide_scale, wide_scale, color);
+                        }
+                    }
+                }
+            }
+            left += font::advance(glyph, scale);
+        }
+        font::width(text, scale)
+    }
+
+    /// `draw_str` centred across the screen.
+    pub fn draw_str_centered(&mut self, y: i32, text: &[u8], scale: i32, color: u16) {
+        // As much as `draw_text_centered` allows, so ASCII lands where it always has.
+        let max_width = WIDTH / (6 * scale) * 6 * scale - scale;
+        let text = &text[..font::fit(text, scale, max_width)];
+        self.draw_str((WIDTH - font::width(text, scale)) / 2, y, text, scale, color, max_width);
     }
 
     pub fn draw_text_centered(&mut self, y: i32, text: &[u8], scale: i32, color: u16) {
@@ -174,5 +218,73 @@ impl<'a> Canvas<'a> {
             let dimmed = half_bright(u16::from_be_bytes([pair[0], pair[1]])).to_be_bytes();
             pair.copy_from_slice(&dimmed);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use alloc::vec;
+    use alloc::vec::Vec;
+
+    fn render(draw: impl FnOnce(&mut Canvas)) -> Vec<u8> {
+        let mut bytes = vec![0; FRAME_BYTES];
+        draw(&mut Canvas::new(&mut bytes));
+        bytes
+    }
+
+    /// The lit area as (top, bottom, left, right), inclusive.
+    fn ink(bytes: &[u8]) -> (i32, i32, i32, i32) {
+        let lit: Vec<(i32, i32)> =
+            (0..WIDTH * HEIGHT).filter(|&index| bytes[index as usize * 2] != 0).map(|index| (index / WIDTH, index % WIDTH)).collect();
+        let rows = || lit.iter().map(|&(row, _)| row);
+        let columns = || lit.iter().map(|&(_, column)| column);
+        (rows().min().unwrap(), rows().max().unwrap(), columns().min().unwrap(), columns().max().unwrap())
+    }
+
+    #[test]
+    fn ascii_draws_the_same_through_either_call() {
+        let text = b"Ready: 3 TASKS, 12m_ok?\x01~";
+        for scale in 1..=3 {
+            let old = render(|canvas| canvas.draw_text(4, 30, text, scale, 0xffff, 40));
+            let new = render(|canvas| {
+                canvas.draw_str(4, 30, text, scale, 0xffff, 40 * 6 * scale - scale);
+            });
+            assert!(old == new, "scale {scale}");
+            let old = render(|canvas| canvas.draw_text_centered(30, text, scale, 0xffff));
+            let new = render(|canvas| canvas.draw_str_centered(30, text, scale, 0xffff));
+            assert!(old == new, "centred, scale {scale}");
+        }
+    }
+
+    #[test]
+    fn chinese_sits_on_the_ascii_line() {
+        // Scale 1: the 5x7 glyph covers rows 100 to 106; the 12 px cell rows 97 to 108, ink from its second.
+        let (top, bottom, _, _) = ink(&render(|canvas| {
+            canvas.draw_str(10, 100, "国".as_bytes(), 1, 0xffff, 100);
+        }));
+        assert!(top >= 98 && (106..=108).contains(&bottom), "{top}..{bottom}");
+        // Scale 2: still 12 px, centred on the 14 px ASCII.
+        let (top, bottom, left, right) = ink(&render(|canvas| {
+            canvas.draw_str(10, 100, "国".as_bytes(), 2, 0xffff, 100);
+        }));
+        assert!(top >= 102 && bottom <= 112 && left >= 10 && right <= 20, "{top}..{bottom} {left}..{right}");
+    }
+
+    #[test]
+    fn mixed_text_advances_by_each_font_and_stops_at_the_width() {
+        let whole = render(|canvas| assert_eq!(canvas.draw_str(0, 50, "A你B".as_bytes(), 1, 0xffff, 100), 6 + 12 + 5));
+        assert_eq!(ink(&whole).3, 22);
+        // Whole characters only: 你 doesn't fit in 15 px after A.
+        let cut = render(|canvas| assert_eq!(canvas.draw_str(0, 50, "A你B".as_bytes(), 1, 0xffff, 15), 5));
+        assert_eq!(ink(&cut).3, 4);
+    }
+
+    #[test]
+    fn a_character_the_font_lacks_is_a_box() {
+        let lacking = render(|canvas| {
+            canvas.draw_str(0, 50, "\u{1F600}".as_bytes(), 1, 0xffff, 100);
+        });
+        assert_eq!(ink(&lacking), (48, 58, 0, 10));
     }
 }

@@ -110,7 +110,7 @@ A voice command has an overlay of its own, drawn like the menu's panel and, like
 - After the computer says the turn is done, the text stays up 15 s to be read. An error shows a short message for 6 s: NOT HEARD, UNAVAILABLE, BUSY, or NO MICROPHONE when the box couldn't start recording. With nothing from the computer for a minute, the overlay closes on its own.
 - K2 closes the overlay; a long K0 starts the next command; any other key closes it and does its own job.
 - **Events that need the user win**, as with the menu: input required, failed, or a Pomodoro phase ending closes the overlay, and a recording in progress is given up (`VOICE CANCEL`).
-- **Text only.** Spoken replies are text until there is speech synthesis, so mute changes nothing here. The firmware's 5×7 font is ASCII only: there are no CJK glyphs, so Chinese shows as one placeholder per character. Curly quotes become straight ones.
+- **Text only.** Spoken replies are text until there is speech synthesis, so mute changes nothing here. Chinese draws in a 12 px pixel font beside the 5×7 ASCII one, and text with Chinese in it uses small type throughout ([`firmware-bringup.md`](firmware-bringup.md), "Fonts").
 
 ## Constraints from the hardware
 

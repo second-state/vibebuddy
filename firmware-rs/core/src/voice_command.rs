@@ -11,7 +11,8 @@ use alloc::string::String;
 use alloc::vec::Vec;
 
 use crate::adpcm::Encoder;
-use crate::display::{Panel, PanelKind, Tone, VOICE_TEXT_LARGE, VOICE_TEXT_SMALL};
+use crate::display::{Panel, PanelKind, Tone, VOICE_TEXT_WIDTH, voice_text_rows};
+use crate::font;
 use crate::mic::encode_base64;
 
 /// The microphone runs at the speaker's rate (docs/firmware-bringup.md, "Microphone").
@@ -404,69 +405,26 @@ impl VoiceCommand {
 /// The heard text dimmed, then the replies, wrapped to the panel: large type while it fits, small type
 /// after that, and past what small type holds, the oldest rows give way.
 fn text_panel(title: &[u8], heard: Option<&str>, replies: &[String], hints: Vec<(&'static [u8], &'static [u8])>) -> Panel {
-    let layout = |(columns, rows): (usize, usize)| {
+    let layout = |scale: u8| {
         let mut lines: Vec<(Vec<u8>, Vec<u8>, Tone)> = Vec::new();
         if let Some(heard) = heard {
-            lines.extend(wrap(heard, columns).into_iter().map(|row| (row, Vec::new(), Tone::Dim)));
+            lines.extend(font::wrap(heard, VOICE_TEXT_WIDTH, scale as i32).into_iter().map(|row| (row, Vec::new(), Tone::Dim)));
         }
         for reply in replies {
-            lines.extend(wrap(reply, columns).into_iter().map(|row| (row, Vec::new(), Tone::Plain)));
+            lines.extend(font::wrap(reply, VOICE_TEXT_WIDTH, scale as i32).into_iter().map(|row| (row, Vec::new(), Tone::Plain)));
         }
+        let rows = voice_text_rows(scale, lines.iter().any(|(row, _, _)| font::has_wide(row)));
         let fits = lines.len() <= rows;
         if !fits {
             lines.drain(..lines.len() - rows);
         }
         (lines, fits)
     };
-    let (lines, scale) = match layout(VOICE_TEXT_LARGE) {
+    let (lines, scale) = match layout(2) {
         (lines, true) => (lines, 2),
-        _ => (layout(VOICE_TEXT_SMALL).0, 1),
+        _ => (layout(1).0, 1),
     };
     Panel { kind: PanelKind::Text(scale), title: title.to_vec(), lines, selected: None, hints }
-}
-
-/// What the 5x7 font can draw: ASCII as it is, and one placeholder glyph for each other character (the
-/// font has no CJK, so Chinese shows as a row of placeholders).
-fn drawable(text: &str) -> Vec<u8> {
-    text.chars()
-        .map(|character| match character {
-            ' '..='~' => character as u8,
-            '\n' | '\t' => b' ',
-            '\u{2018}' | '\u{2019}' => b'\'',
-            '\u{201C}' | '\u{201D}' => b'"',
-            _ => 0x7F,
-        })
-        .collect()
-}
-
-/// Word wrap to `columns`; a word longer than a row is cut.
-pub fn wrap(text: &str, columns: usize) -> Vec<Vec<u8>> {
-    let mut rows: Vec<Vec<u8>> = Vec::new();
-    let mut row: Vec<u8> = Vec::new();
-    for word in drawable(text).split(|&byte| byte == b' ').filter(|word| !word.is_empty()) {
-        let mut word = word;
-        if !row.is_empty() && row.len() + 1 + word.len() > columns {
-            rows.push(core::mem::take(&mut row));
-        }
-        while word.len() > columns {
-            if !row.is_empty() {
-                rows.push(core::mem::take(&mut row));
-            }
-            rows.push(word[..columns].to_vec());
-            word = &word[columns..];
-        }
-        if word.is_empty() {
-            continue;
-        }
-        if !row.is_empty() {
-            row.push(b' ');
-        }
-        row.extend_from_slice(word);
-    }
-    if !row.is_empty() {
-        rows.push(row);
-    }
-    rows
 }
 
 #[cfg(test)]
@@ -719,18 +677,7 @@ mod tests {
         }
         voice.event("voice.reply", 1, Some("the end"), None, 1000);
         let panel = voice.panel(1000).unwrap();
-        assert_eq!(panel.lines.len(), VOICE_TEXT_SMALL.1);
+        assert_eq!(panel.lines.len(), voice_text_rows(1, false));
         assert_eq!(panel.lines.last().unwrap().0, b"the end");
-    }
-
-    #[test]
-    fn wrapping_cuts_long_words_and_marks_what_the_font_lacks() {
-        assert_eq!(wrap("a bb ccc", 4), [b"a bb".to_vec(), b"ccc".to_vec()]);
-        assert_eq!(wrap("abcdefghij", 4), [b"abcd".to_vec(), b"efgh".to_vec(), b"ij".to_vec()]);
-        assert_eq!(wrap("  spaced\nout  ", 20), [b"spaced out".to_vec()]);
-        // Chinese has no glyphs: one placeholder per character, not per byte.
-        assert_eq!(wrap("你好 ok", 10), [[0x7F, 0x7F, b' ', b'o', b'k'].to_vec()]);
-        assert_eq!(wrap("it\u{2019}s", 10), [b"it's".to_vec()]);
-        assert!(wrap("", 10).is_empty());
     }
 }

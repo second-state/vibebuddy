@@ -31,6 +31,13 @@ terms of the service that produced it:
 - characters/*/pack.bin, the Characters' synthesized lines (Volcano Engine
   Doubao TTS)
 
+Not covered, because it is a third-party font under its own license:
+
+- firmware-rs/core/fonts/cjk-12px.bin, the firmware's Chinese glyphs: a
+  subset of Fusion Pixel Font 12 px by TakWolf, built from Ark Pixel Font
+  and Cubic 11, under the SIL Open Font License 1.1. Its license files are
+  next to it (OFL.txt, LICENSES/) and ship with the firmware as FONTS.txt.
+
 Neither license grants rights to the name "VibeBuddy" or to the buddy
 character as a trademark.
 
