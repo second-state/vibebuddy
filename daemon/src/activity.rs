@@ -3,7 +3,7 @@
 //! Adapters translate one agent's events into calls here; task-card ordering, global state
 //! priority, dedup, one-shot announcements and expiry are implemented here exactly once.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
@@ -26,6 +26,8 @@ const CHILD_TTL: Duration = Duration::from_secs(10 * 60);
 /// How long to remember project roots an agent worked in. If nobody has worked there for this long,
 /// its CI is no longer worth watching.
 const WORKSPACE_TTL: Duration = Duration::from_secs(60 * 60);
+/// How many ended Activities the resident session can look back on. Kept only in memory.
+const RECENTLY_ENDED: usize = 20;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ActivityStatus {
@@ -205,6 +207,51 @@ pub struct ActivitySummary {
     pub delegated: bool,
 }
 
+/// How an Activity ended, for the resident session's look back.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Ending {
+    /// Announced as done.
+    Done,
+    /// Announced as failed.
+    Failed,
+    /// Ended with no outcome: interrupted or stopped, its session closed, or a CI run cancelled or pushed out.
+    Stopped,
+    /// Nothing heard from the agent for too long: probably killed.
+    Expired,
+}
+
+/// An Activity that has ended, as the resident session sees it: what its task card showed, and how and when it ended.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+pub struct EndedSummary {
+    pub agent: String,
+    pub title: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub project: Option<String>,
+    pub ended: Ending,
+    /// Seconds since it ended.
+    pub ended_s: u64,
+}
+
+/// What the resident session's `list_activities` tool returns.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+pub struct ActivityReport {
+    /// Live Activities, newest first.
+    pub activities: Vec<ActivitySummary>,
+    /// The last Activities that ended since the daemon started, newest first.
+    pub recently_ended: Vec<EndedSummary>,
+    pub today: TodaySummary,
+}
+
+#[derive(Clone, Debug)]
+struct Ended {
+    agent: String,
+    title: String,
+    project: Option<String>,
+    ended: Ending,
+    at: Instant,
+}
+
 /// Today's stats rotated on the idle screen.
 #[derive(Debug, Default)]
 struct DailyStats {
@@ -262,6 +309,8 @@ pub struct ActivityTracker {
     projects: HashMap<String, String>,
     /// The greeting or welcome back the last activity earned, not yet sent.
     pending_say: Option<Event>,
+    /// The last Activities that ended, newest first, at most `RECENTLY_ENDED`; never written to disk.
+    recently_ended: VecDeque<Ended>,
 }
 
 impl ActivityTracker {
@@ -412,6 +461,7 @@ impl ActivityTracker {
             self.sync_busy();
             return self.visible_activity();
         }
+        self.remember_ended(&id.key, &finished, Ending::Done, Instant::now());
         self.remember_announced(finished);
         self.sync_busy();
         self.record(|stats| stats.done += 1);
@@ -488,6 +538,7 @@ impl ActivityTracker {
         let Some(failed) = self.activities.remove(&id.key) else {
             return self.visible_activity();
         };
+        self.remember_ended(&id.key, &failed, Ending::Failed, Instant::now());
         self.remember_announced(failed);
         self.sync_busy();
         self.announce_end("task.error", id, title, "failed")
@@ -495,13 +546,26 @@ impl ActivityTracker {
 
     /// Drop an activity without announcing success.
     pub fn discard(&mut self, id: &ActivityId, idle_title: &str) -> Option<Event> {
-        self.activities.remove(&id.key);
+        if let Some(discarded) = self.activities.remove(&id.key) {
+            self.remember_ended(&id.key, &discarded, Ending::Stopped, Instant::now());
+        }
         self.sync_busy();
         self.idle_or_refresh(&id.session_id, idle_title)
     }
 
     /// Drop all of a session's activities without announcing success.
     pub fn discard_session(&mut self, session_id: &str, idle_title: &str) -> Option<Event> {
+        let mut ended: Vec<(String, Activity)> = self
+            .activities
+            .iter()
+            .filter(|(_, activity)| activity.session_id == session_id)
+            .map(|(key, activity)| (key.clone(), activity.clone()))
+            .collect();
+        ended.sort_by_key(|(_, activity)| activity.sequence);
+        let now = Instant::now();
+        for (key, activity) in &ended {
+            self.remember_ended(key, activity, Ending::Stopped, now);
+        }
         self.clear_session(session_id);
         self.idle_or_refresh(session_id, idle_title)
     }
@@ -534,7 +598,8 @@ impl ActivityTracker {
 
     fn sweep_expired_at(&mut self, now: Instant) -> Option<Event> {
         let mut expired_session = None;
-        self.activities.retain(|_, activity| {
+        let mut expired = Vec::new();
+        self.activities.retain(|key, activity| {
             let ttl = match activity.status {
                 ActivityStatus::InputRequired => INPUT_REQUIRED_TTL,
                 ActivityStatus::Working if activity.child => CHILD_TTL,
@@ -543,9 +608,14 @@ impl ActivityTracker {
             let alive = now.duration_since(activity.updated_at) < ttl;
             if !alive {
                 expired_session = Some(activity.session_id.clone());
+                expired.push((key.clone(), activity.clone()));
             }
             alive
         });
+        expired.sort_by_key(|(_, activity)| activity.sequence);
+        for (key, activity) in &expired {
+            self.remember_ended(key, activity, Ending::Expired, now);
+        }
         self.sync_busy();
         let expired_session = expired_session?;
         self.idle_or_refresh(&expired_session, "TIMED OUT")
@@ -762,12 +832,13 @@ impl ActivityTracker {
         activities
             .into_iter()
             .map(|(key, activity)| {
-                let (agent, surface) = match &activity.source {
-                    Some(ActivitySource::Codex { surface, .. }) => ("codex".to_owned(), Some(surface)),
-                    Some(ActivitySource::ClaudeCode { surface, .. }) => ("claude-code".to_owned(), Some(surface)),
-                    Some(ActivitySource::GitHubActions { .. }) => ("github-actions".to_owned(), None),
-                    Some(ActivitySource::Cli { agent, surface, .. }) => (agent.clone(), Some(surface)),
-                    None => ("unknown".to_owned(), None),
+                let surface = match &activity.source {
+                    Some(
+                        ActivitySource::Codex { surface, .. }
+                        | ActivitySource::ClaudeCode { surface, .. }
+                        | ActivitySource::Cli { surface, .. },
+                    ) => Some(surface),
+                    Some(ActivitySource::GitHubActions { .. }) | None => None,
                 };
                 let host = match (&activity.source, surface) {
                     (Some(ActivitySource::GitHubActions { .. }), _) => "github".to_owned(),
@@ -777,7 +848,7 @@ impl ActivityTracker {
                     _ => "none".to_owned(),
                 };
                 ActivitySummary {
-                    agent,
+                    agent: agent_of(activity.source.as_ref()),
                     title: activity.title.clone(),
                     project: self.projects.get(key).cloned(),
                     state: match activity.status {
@@ -791,6 +862,44 @@ impl ActivityTracker {
                 }
             })
             .collect()
+    }
+
+    /// What the resident session's `list_activities` tool returns: the live Activities, the ones that ended lately,
+    /// and today's stats.
+    pub fn report(&mut self) -> ActivityReport {
+        self.roll_day();
+        let now = Instant::now();
+        ActivityReport {
+            activities: self.summaries(),
+            recently_ended: self
+                .recently_ended
+                .iter()
+                .map(|ended| EndedSummary {
+                    agent: ended.agent.clone(),
+                    title: ended.title.clone(),
+                    project: ended.project.clone(),
+                    ended: ended.ended,
+                    ended_s: now.saturating_duration_since(ended.at).as_secs(),
+                })
+                .collect(),
+            today: self.today(),
+        }
+    }
+
+    /// Remember how an Activity ended, for the resident session. Work an agent delegated inside its own session is
+    /// left out, as its end is never announced either.
+    fn remember_ended(&mut self, key: &str, activity: &Activity, ended: Ending, at: Instant) {
+        if activity.child {
+            return;
+        }
+        self.recently_ended.push_front(Ended {
+            agent: agent_of(activity.source.as_ref()),
+            title: activity.title.clone(),
+            project: self.projects.get(key).cloned(),
+            ended,
+            at,
+        });
+        self.recently_ended.truncate(RECENTLY_ENDED);
     }
 
     fn stats_lines(&self) -> Vec<String> {
@@ -873,6 +982,17 @@ impl ActivityTracker {
         }
         self.last_visible = Some(event.clone());
         Some(event)
+    }
+}
+
+/// The agent an Activity belongs to, by its source, as the resident session names it.
+fn agent_of(source: Option<&ActivitySource>) -> String {
+    match source {
+        Some(ActivitySource::Codex { .. }) => "codex".to_owned(),
+        Some(ActivitySource::ClaudeCode { .. }) => "claude-code".to_owned(),
+        Some(ActivitySource::GitHubActions { .. }) => "github-actions".to_owned(),
+        Some(ActivitySource::Cli { agent, .. }) => agent.clone(),
+        None => "unknown".to_owned(),
     }
 }
 
@@ -1055,6 +1175,80 @@ mod tests {
         assert_eq!(summaries[1].agent, "github-actions");
         assert_eq!(summaries[1].host, "github");
         assert_eq!(summaries[1].state, "working");
+    }
+
+    #[test]
+    fn the_report_remembers_how_activities_ended_newest_first() {
+        let mut tracker = ActivityTracker::default();
+        let done = id("a", "a:1");
+        tracker.note_project(&done, "VIBE-BUDDY");
+        tracker.observe(&done, "CX:REVIEW", ActivityStatus::Working);
+        tracker.associate_source(&done, ActivitySource::Codex { thread_id: "a".to_owned(), surface: Surface::default() });
+        tracker.finish(&done, "CX:REVIEW");
+        let failed = id("ci", "ci:1");
+        tracker.observe(&failed, "CI:BUILD", ActivityStatus::Working);
+        tracker.associate_source(&failed, ActivitySource::GitHubActions { repo: "o/r".to_owned(), run_id: 1 });
+        tracker.fail(&failed, "CI:BUILD");
+        let stopped = id("b", "b:1");
+        tracker.observe(&stopped, "CC:DOCS", ActivityStatus::Working);
+        tracker.discard(&stopped, "STOPPED");
+        let closed = id("c", "c:1");
+        tracker.require_input(&closed, "CC:ASK");
+        tracker.discard_session("c", "ALL QUIET");
+        tracker.observe(&id("d", "d:1"), "OC:OLD", ActivityStatus::Working);
+        tracker.sweep_expired_at(Instant::now() + WORKING_TTL + Duration::from_secs(1));
+        // Delegated work isn't the user's task: its end isn't remembered, as it isn't announced.
+        let parent = id("e", "e:1");
+        tracker.observe(&parent, "CC:MAIN", ActivityStatus::Working);
+        let child = id("e", "e:1:agent");
+        tracker.observe_child(&child, "CC:MAIN");
+        tracker.discard(&child, "ALL QUIET");
+        // An end for an Activity that isn't tracked is not an ending.
+        tracker.finish(&id("x", "x:1"), "CX:GHOST");
+
+        let report = tracker.report();
+        let ended: Vec<(&str, Ending)> =
+            report.recently_ended.iter().map(|ended| (ended.title.as_str(), ended.ended)).collect();
+        assert_eq!(
+            ended,
+            [
+                ("OC:OLD", Ending::Expired),
+                ("CC:ASK", Ending::Stopped),
+                ("CC:DOCS", Ending::Stopped),
+                ("CI:BUILD", Ending::Failed),
+                ("CX:REVIEW", Ending::Done),
+            ]
+        );
+        assert_eq!(report.recently_ended[4].agent, "codex");
+        assert_eq!(report.recently_ended[4].project.as_deref(), Some("VIBE-BUDDY"));
+        assert_eq!(report.recently_ended[3].agent, "github-actions");
+        assert_eq!(report.recently_ended[2].agent, "unknown");
+        assert!(report.recently_ended.iter().all(|ended| ended.ended_s < 5));
+        assert_eq!(report.activities.len(), 1, "only the parent still runs");
+        assert_eq!(report.activities[0].title, "CC:MAIN");
+        assert_eq!((report.today.done, report.today.asks), (1, 1));
+
+        let json = serde_json::to_value(&report).unwrap();
+        assert_eq!(json["recently_ended"][0]["ended"], "expired");
+        assert_eq!(json["recently_ended"][4]["ended"], "done");
+        assert_eq!(json["recently_ended"][4]["project"], "VIBE-BUDDY");
+        assert!(json["recently_ended"][4]["ended_s"].is_u64());
+        assert!(json["recently_ended"][0].get("project").is_none());
+        assert!(json["today"]["busy_seconds"].is_u64());
+    }
+
+    #[test]
+    fn the_ended_activities_are_bounded_and_the_oldest_go_first() {
+        let mut tracker = ActivityTracker::default();
+        for number in 0..RECENTLY_ENDED + 5 {
+            let task = id("s", &format!("s:{number}"));
+            tracker.observe(&task, &format!("TASK {number}"), ActivityStatus::Working);
+            tracker.finish(&task, &format!("TASK {number}"));
+        }
+        let ended = tracker.report().recently_ended;
+        assert_eq!(ended.len(), RECENTLY_ENDED);
+        assert_eq!(ended[0].title, format!("TASK {}", RECENTLY_ENDED + 4));
+        assert_eq!(ended[RECENTLY_ENDED - 1].title, "TASK 5");
     }
 
     #[test]
