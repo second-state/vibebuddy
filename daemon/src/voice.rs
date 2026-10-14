@@ -908,7 +908,7 @@ pub mod tests {
         }
         assert!(audio.iter().all(|(.., error)| error.is_none()));
         let calls = synthesizer.calls.lock().unwrap().clone();
-        let voice = "en-GB-SoniaNeural".to_owned();
+        let voice = "elevenlabs:tcSsCJFYrsHpK5rCQZMf".to_owned();
         assert_eq!(calls, [("Two agents are working.".to_owned(), voice.clone()), ("One needs you.".to_owned(), voice)]);
     }
 
