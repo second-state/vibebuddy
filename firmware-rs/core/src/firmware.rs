@@ -783,7 +783,13 @@ impl Firmware {
                 self.on_button(board, event);
             }
             Target::Buddy => self.display.pet(board, &scene!(self, now)),
-            Target::Card(_) => {}
+            // The daemon opens that card's agent, as K2 opens the most pressing one.
+            Target::Card(index) => {
+                if let Some(id) = self.display.card_id(index) {
+                    let line = text!(80, "{{\"version\":1,\"event\":\"focus\",\"task\":\"{}\"}}\n", core::str::from_utf8(id).unwrap_or_default());
+                    board.write(line.as_bytes());
+                }
+            }
         }
     }
 
@@ -1195,6 +1201,8 @@ impl Firmware {
                 state: task_state(status),
                 elapsed_s: number(item, "elapsed_s").map(|value| value as i32).unwrap_or(0),
                 project: string(item, "project").map(str::as_bytes),
+                // Only a short id of letters and digits goes back out in a JSON line as is.
+                id: string(item, "id").filter(|id| id.len() <= 16 && id.bytes().all(|byte| byte.is_ascii_alphanumeric())).map(str::as_bytes),
             });
         }
 

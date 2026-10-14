@@ -63,8 +63,8 @@ fn main() {
     display.set_look(&mut screen, &scene!(), Some(look));
 
     let cards = [
-        TaskInput { title: Some(b"CC:CHARACTERS"), state: State::Working, elapsed_s: 75, project: Some(b"VIBE-BUDDY") },
-        TaskInput { title: Some(b"CX:EROS-TRAINING"), state: State::Working, elapsed_s: 900, project: None },
+        TaskInput { title: Some(b"CC:CHARACTERS"), state: State::Working, elapsed_s: 75, project: Some(b"VIBE-BUDDY"), id: None },
+        TaskInput { title: Some(b"CX:EROS-TRAINING"), state: State::Working, elapsed_s: 900, project: None, id: None },
     ];
     let states: [(&str, State, &[TaskInput], u32); 6] = [
         ("idle", State::Idle, &[], 120),

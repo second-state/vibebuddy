@@ -1382,6 +1382,35 @@ mod touchscreen {
     }
 
     #[test]
+    fn a_tapped_card_asks_for_its_agent() {
+        let (mut firmware, mut board, _) = touch_box();
+        send(
+            &mut firmware,
+            &mut board,
+            r#"{"version":1,"event":"task.start","title":"B","tasks":[{"title":"B","status":"working","elapsed_s":5,"id":"9f2c01ab"},{"title":"A","status":"input_required","elapsed_s":60,"id":"0d4e77c3"}]}"#,
+        );
+        // The second card sits 38 px under the first.
+        assert_eq!(tap(&mut firmware, &mut board, 100, 104), ["TAP 100 104", r#"{"version":1,"event":"focus","task":"0d4e77c3"}"#]);
+        assert_eq!(tap(&mut firmware, &mut board, 100, 66), ["TAP 100 66", r#"{"version":1,"event":"focus","task":"9f2c01ab"}"#]);
+        // Under the cards there's nothing; in Pomodoro there are no cards.
+        assert_eq!(tap(&mut firmware, &mut board, 100, 130), ["TAP 100 130"]);
+        press(&mut firmware, &mut board, Key::K1, 50);
+        assert_eq!(tap(&mut firmware, &mut board, 100, 66), ["TAP 100 66"]);
+    }
+
+    #[test]
+    fn a_card_from_an_older_daemon_or_with_an_odd_id_names_nothing() {
+        let (mut firmware, mut board, _) = touch_box();
+        send(
+            &mut firmware,
+            &mut board,
+            r#"{"version":1,"event":"task.start","title":"B","tasks":[{"title":"B","status":"working","elapsed_s":5},{"title":"A","status":"working","elapsed_s":6,"id":"a\"b"}]}"#,
+        );
+        assert_eq!(tap(&mut firmware, &mut board, 100, 66), ["TAP 100 66"]);
+        assert_eq!(tap(&mut firmware, &mut board, 100, 104), ["TAP 100 104"]);
+    }
+
+    #[test]
     fn a_slide_is_not_a_tap() {
         let (mut firmware, mut board, _) = touch_box();
         press(&mut firmware, &mut board, Key::K1, 1100);

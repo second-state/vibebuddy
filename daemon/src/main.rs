@@ -369,6 +369,8 @@ async fn publish_device_message(state: &AppState, message: DeviceMessage) {
     };
     if is_k2_press(&event) {
         open_k2_source(state).await;
+    } else if let Some(card) = tapped_card(&event) {
+        open_card_source(state, card).await;
     } else if !event.event.starts_with("voice.") && event.event != "echo" {
         info!(event = %event.event, "ignoring unbound device event");
     }
@@ -398,6 +400,24 @@ async fn open_k2_source(state: &AppState) {
                 Err(error) => warn!(%error, "K2 failed to open source, trying the next candidate"),
             }
         }
+    }
+}
+
+/// A tap on a task card on a box with a touchscreen (ADR-0017): the card's id.
+fn tapped_card(event: &Event) -> Option<&str> {
+    (event.event == "focus").then(|| event.extra.get("task").and_then(|value| value.as_str())).flatten()
+}
+
+/// Opens the agent behind a tapped card. If it has ended since, or has nothing to open, nothing happens: opening
+/// something other than what was tapped would be more confusing than nothing.
+async fn open_card_source(state: &AppState, card: &str) {
+    let Some(source) = state.activities.lock().await.card_source(card) else {
+        info!(%card, "a tapped card's activity is gone or has no source");
+        return;
+    };
+    match source_opener::open(source).await {
+        Ok(link) => info!(%link, "opened a tapped card's source"),
+        Err(error) => warn!(%error, "failed to open a tapped card's source"),
     }
 }
 
@@ -1684,6 +1704,14 @@ mod tests {
         use chrono::TimeZone;
         let now = chrono::Local.with_ymd_and_hms(2026, 9, 15, 23, 59, 0).unwrap();
         assert_eq!(local_day(&now), 20260915);
+    }
+
+    #[test]
+    fn a_focus_event_names_the_tapped_card() {
+        let event: Event = serde_json::from_str(r#"{"version":1,"event":"focus","task":"0d4e77c3"}"#).expect("focus event should parse");
+        assert_eq!(tapped_card(&event), Some("0d4e77c3"));
+        let button: Event = serde_json::from_str(r#"{"version":1,"event":"button","button":"K2","action":"press"}"#).expect("button event should parse");
+        assert_eq!(tapped_card(&button), None);
     }
 
     #[test]

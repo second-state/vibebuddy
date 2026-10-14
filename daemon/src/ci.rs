@@ -403,7 +403,9 @@ mod tests {
             &mut tracker,
             vec![run(11, "in_progress", ""), run(10, "completed", "failure")],
         );
-        assert_eq!(names(&events), ["task.error"]);
+        // Run 11 moves to the top first. Both cards read CI:VIBE-BUDDY, but their ids swap places, and a box
+        // with a touchscreen needs them in their new order (ADR-0017).
+        assert_eq!(names(&events), ["task.start", "task.error"]);
 
         let events = poll(
             &mut watcher,

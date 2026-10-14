@@ -616,6 +616,7 @@ impl ActivityTracker {
                     .take(MAX_VISIBLE_TASKS)
                     .map(|(key, activity)| {
                         let mut task = json!({
+                            "id": card_id(key),
                             "title": activity.title,
                             "status": match activity.status {
                                 ActivityStatus::Working => "working",
@@ -683,6 +684,12 @@ impl ActivityTracker {
             };
             (priority, activity.sequence)
         })
+    }
+
+    /// Where a tapped card leads (ADR-0017): the source of the activity whose `card_id` the box named. None when
+    /// that activity has ended since, or has no source to open.
+    pub fn card_source(&self, card: &str) -> Option<ActivitySource> {
+        self.activities.iter().find(|(key, _)| card_id(key) == card).and_then(|(_, activity)| activity.source.clone())
     }
 
     /// Stamp the fields that only mean something at send time: card timers and today's stats.
@@ -826,6 +833,13 @@ fn format_duration(seconds: u64) -> String {
     }
 }
 
+/// A task card's id: short, so the box can send it back on a tap, and the same for an activity as long as it lasts.
+/// FNV-1a of the activity's key; a clash between the few cards on screen is unlikely, and would only open the other one.
+fn card_id(key: &str) -> String {
+    let hash = key.bytes().fold(0x811c_9dc5_u32, |hash, byte| (hash ^ u32::from(byte)).wrapping_mul(0x0100_0193));
+    format!("{hash:08x}")
+}
+
 fn event(name: &str, session_id: &str, title: &str) -> Event {
     Event {
         version: VERSION,
@@ -961,6 +975,31 @@ mod tests {
         tracker.associate_source(&waiting, codex.clone());
 
         assert_eq!(tracker.focus_source(), Some(codex));
+    }
+
+    #[test]
+    fn a_tapped_card_leads_to_its_own_activity() {
+        let mut tracker = ActivityTracker::default();
+        let older = id("older", "older:1");
+        tracker.observe(&older, "CC:OLDER", ActivityStatus::Working);
+        let codex = ActivitySource::Codex {
+            thread_id: "older".to_owned(),
+            surface: Surface::default(),
+        };
+        tracker.associate_source(&older, codex.clone());
+        let newer = id("newer", "newer:1");
+        tracker.require_input(&newer, "CX:NEWER");
+
+        let snapshot = tracker.activity_snapshot().expect("there should be a visible activity");
+        let tasks = snapshot.extra["tasks"].as_array().expect("cards");
+        let older_card = tasks[1]["id"].as_str().expect("every card has an id");
+        assert_eq!(tasks[1]["title"], "CC:OLDER");
+        assert_eq!(older_card, card_id("older:1"));
+        assert_eq!(older_card.len(), 8);
+        // Not K2's choice, which would be the one waiting for input: the card that was tapped.
+        assert_eq!(tracker.card_source(older_card), Some(codex));
+        assert_eq!(tracker.card_source(tasks[0]["id"].as_str().unwrap()), None, "no source to open");
+        assert_eq!(tracker.card_source("00000000"), None, "gone, or never there");
     }
 
     #[test]
