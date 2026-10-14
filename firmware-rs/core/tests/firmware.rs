@@ -1480,7 +1480,7 @@ fn the_computers_answers_fill_the_overlay_and_k2_closes_it() {
 }
 
 #[test]
-fn a_needs_input_event_takes_the_screen_and_gives_up_the_recording() {
+fn a_needs_input_event_waits_for_a_voice_command_and_is_said_after_it() {
     let (mut firmware, mut board, _) = booted(blank_flash());
     send(&mut firmware, &mut board, VOICE_ON);
     board.advance(100);
@@ -1489,14 +1489,23 @@ fn a_needs_input_event_takes_the_screen_and_gives_up_the_recording() {
     board.advance(1100);
     firmware.poll(&mut board);
     assert_eq!(board.take_lines(), ["VOICE START 1"]);
-    assert!(board.voice_running);
+    board.played.clear();
     let lines = send(&mut firmware, &mut board, r#"{"version":1,"event":"agent.input_required","title":"CC:ASK"}"#);
-    assert!(lines.contains(&"VOICE CANCEL 1".to_owned()), "{lines:?}");
-    assert!(!board.voice_running);
+    assert!(!lines.iter().any(|line| line.starts_with("VOICE CANCEL")), "the recording goes on: {lines:?}");
+    assert!(lines.contains(&"AUDIO HELD INPUT_REQUIRED".to_owned()), "{lines:?}");
+    assert!(board.voice_running);
+    assert!(board.played.is_empty(), "nothing is said over the conversation");
+    // The same Agent asking again is still one thing held.
+    send(&mut firmware, &mut board, r#"{"version":1,"event":"agent.input_required","title":"CC:ASK"}"#);
     board.advance(500);
     board.k0 = false;
     firmware.poll(&mut board);
-    assert!(board.take_lines().is_empty(), "letting go afterwards says nothing");
+    assert!(board.take_lines().iter().any(|line| line.starts_with("VOICE END 1")));
+    assert!(board.played.is_empty());
+    // K2 closes the overlay, and the held news is said once.
+    let lines = press(&mut firmware, &mut board, Key::K2, 50);
+    assert!(lines.contains(&"AUDIO QUEUED INPUT_REQUIRED".to_owned()), "{lines:?}");
+    assert_eq!(board.played.len(), 1, "{:?}", board.played);
 }
 
 #[test]
@@ -1650,7 +1659,7 @@ fn while_muted_replies_are_shown_and_not_played() {
 }
 
 #[test]
-fn an_announcement_stops_a_reply_and_the_rest_of_its_turn() {
+fn an_agents_news_during_a_reply_waits_and_the_reply_plays_on() {
     let (mut firmware, mut board, _) = booted(blank_flash());
     answered_turn(&mut firmware, &mut board);
     let lines = audio_lines(1, 0, &REPLY_MP3[..576 * 6], "");
@@ -1659,21 +1668,21 @@ fn an_announcement_stops_a_reply_and_the_rest_of_its_turn() {
     }
     board.reply_audio.clear();
     board.played.clear();
-    // A greeting with no line says nothing, so it leaves the reply alone.
-    send(&mut firmware, &mut board, r#"{"version":1,"event":"buddy.say","occasion":"greeting_morning"}"#);
-    assert!(board.reply_audio.is_empty());
-    send(
+    let out = send(
         &mut firmware,
         &mut board,
         r#"{"version":1,"event":"task.done","title":"CC:VIBE","tasks":[{"title":"CC:VIBE","status":"done","elapsed_s":3}]}"#,
     );
-    assert_eq!(board.reply_audio, [ReplyAudio::Stop], "the announcement wins");
-    assert_eq!(board.played, [Sound::Builtin(Prompt::Done)]);
+    assert!(out.contains(&"AUDIO HELD DONE".to_owned()), "{out:?}");
+    assert!(!board.reply_audio.contains(&ReplyAudio::Stop), "the reply isn't cut off");
+    assert!(board.played.is_empty(), "nothing is said over the reply");
     for line in &lines[3..] {
         send(&mut firmware, &mut board, line);
     }
-    send(&mut firmware, &mut board, &audio_lines(1, 1, &REPLY_MP3[..576], "")[0]);
-    assert_eq!(board.reply_audio, [ReplyAudio::Stop], "the turn's later audio is ignored");
+    assert!(board.reply_audio.iter().any(|audio| matches!(audio, ReplyAudio::Chunk { .. })), "the reply's audio still plays");
+    // Once the overlay closes, the news is said.
+    press(&mut firmware, &mut board, Key::K2, 50);
+    assert_eq!(board.played, [Sound::Builtin(Prompt::Done)]);
 }
 
 #[test]

@@ -254,6 +254,9 @@ pub struct Firmware {
     /// The turn whose spoken replies are played; None once they were stopped (an announcement, mute, K2, the
     /// overlay closing), and the rest of that turn's audio is then ignored.
     reply_turn: Option<u32>,
+    /// An Agent's news that came while the voice overlay was up: it doesn't take the screen from a conversation
+    /// the user is having, the overlay marks it, and it is announced once the overlay closes. The worst one wins.
+    voice_held: Option<Occasion>,
 }
 
 /// Borrows the Firmware's pomodoro and leisure director to build the context for one frame.
@@ -369,6 +372,7 @@ impl Firmware {
             voice: VoiceCommand::new(),
             voice_mic: false,
             reply_turn: None,
+            voice_held: None,
         }
     }
 
@@ -1045,13 +1049,40 @@ impl Firmware {
     /// Something that needs the user takes the screen back from the menu and from a voice command (a
     /// recording is given up).
     fn close_overlays<B: Board>(&mut self, board: &mut B) {
+        self.close_menu(board);
+        if self.voice.is_open() {
+            self.close_voice(board);
+        }
+    }
+
+    fn close_menu<B: Board>(&mut self, board: &mut B) {
         if self.menu.is_open() {
             self.menu.close();
             Self::write_literal(board, "MENU CLOSED\n");
             self.show_overlay(board);
         }
-        if self.voice.is_open() {
-            self.close_voice(board);
+    }
+
+    /// An Agent's news during a voice command waits for the overlay to close; the worst of what waits is said.
+    fn hold_for_voice<B: Board>(&mut self, board: &mut B, occasion: Occasion) {
+        let rank = |occasion: Occasion| match occasion.fallback().unwrap_or(occasion) {
+            Occasion::Failed => 2,
+            Occasion::InputRequired => 1,
+            _ => 0,
+        };
+        if self.voice_held.is_none_or(|held| rank(occasion) > rank(held)) {
+            self.voice_held = Some(occasion);
+        }
+        Self::write_value_line(board, "AUDIO HELD ", occasion_label(occasion).as_bytes());
+        self.show_overlay(board);
+    }
+
+    /// Once the voice overlay is gone, says what was held back during it.
+    fn release_held<B: Board>(&mut self, board: &mut B) {
+        if !self.voice.is_open()
+            && let Some(occasion) = self.voice_held.take()
+        {
+            self.announce(board, occasion);
         }
     }
 
@@ -1060,7 +1091,17 @@ impl Firmware {
         let now = board.now_ms();
         let panel = match self.menu.view() {
             Some(view) => Some(self.menu_panel(view, now)),
-            None => self.voice.panel(now),
+            None => self.voice.panel(now).map(|mut panel| {
+                let waiting: Option<&[u8]> = match self.voice_held.map(|held| held.fallback().unwrap_or(held)) {
+                    Some(Occasion::Failed) => Some(b"AN AGENT FAILED"),
+                    Some(Occasion::InputRequired) => Some(b"AN AGENT NEEDS YOU"),
+                    _ => None,
+                };
+                if let Some(waiting) = waiting {
+                    panel.lines.push((waiting.to_vec(), Vec::new(), Tone::Warn));
+                }
+                panel
+            }),
         };
         self.display.set_panel(board, &scene!(self, now), panel);
     }
@@ -1129,6 +1170,7 @@ impl Firmware {
         self.stop_voice_mic(board);
         self.stop_reply(board);
         self.show_overlay(board);
+        self.release_held(board);
     }
 
     /// Stops the turn's spoken replies, and ignores the rest of its audio.
@@ -1188,6 +1230,8 @@ impl Firmware {
             self.stop_reply(board);
             self.show_overlay(board);
         }
+        // However the overlay went (expired, K2, a lost link, voice withdrawn), what was held back is said now.
+        self.release_held(board);
         self.stop_voice_mic(board);
     }
 
@@ -1494,8 +1538,13 @@ impl Firmware {
             occasion = Some(special);
         }
 
+        let talking = self.voice.is_open();
         if matches!(state, State::InputRequired | State::Failed) {
-            self.close_overlays(board);
+            if talking {
+                self.close_menu(board);
+            } else {
+                self.close_overlays(board);
+            }
         }
         let shown = self.display.show_tasks(board, &scene!(self, now), state, title.map(str::as_bytes), &tasks);
         if shown.is_err() {
@@ -1504,7 +1553,9 @@ impl Firmware {
             Self::write_value_line(board, "DISPLAY STATE ", state_label.as_bytes());
         }
         if let Some(occasion) = occasion {
-            if self.end_speaks(occasion, now) {
+            if talking {
+                self.hold_for_voice(board, occasion);
+            } else if self.end_speaks(occasion, now) {
                 self.announce(board, occasion);
             } else {
                 Self::write_value_line(board, "AUDIO MERGED ", occasion_label(occasion).as_bytes());
