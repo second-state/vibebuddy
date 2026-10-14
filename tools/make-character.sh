@@ -3,7 +3,8 @@
 #
 # Reads characters/<id>/voice.env and characters/<id>/lines.tsv:
 # - voice.env sets ENGINE (volc or elevenlabs) and VOICE (the engine's voice id), and for a Doubao
-#   2.0 voice VOLC_RESOURCE_ID=seed-tts-2.0. The API keys stay in your environment, never in the repo:
+#   2.0 voice VOLC_RESOURCE_ID=seed-tts-2.0, and GENDER (female or male), which picks a stock voice for spoken
+#   replies when the voice service can't speak the Character's own. The API keys stay in your environment, never in the repo:
 #   VOLC_API_KEY or ELEVENLABS_API_KEY (a paid plan; the free one has no commercial license).
 # - lines.tsv has one line per row: occasion<TAB>text. Blank rows and rows starting with # are skipped.
 #   A line with {address} is said with each form of address of the Character's LANGUAGE (voice.env)

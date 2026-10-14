@@ -140,22 +140,25 @@ const VOICE_FILES: &[(&str, &str)] = &[
     ("mei", include_str!("../../characters/mei/voice.env")),
     ("wanwanxiaohe", include_str!("../../characters/wanwanxiaohe/voice.env")),
 ];
-/// ElevenLabs' own Jessica (voices/README.md), a stock voice that belongs to no Character but the built-in default.
-/// Every Character whose voice ElevenLabs doesn't have (the Doubao ones, until the service speaks Doubao) uses it,
-/// rather than borrowing another Character's voice; so does no Character pack, or one these files don't know.
+/// The built-in default Character speaks with ElevenLabs' Jessica (voices/README.md); so does no Character pack, or
+/// one these files don't know.
 const DEFAULT_VOICE: &str = "elevenlabs:cgSgspJ2msm6clMCkdW9";
+/// ElevenLabs' stock Sarah and George, voices of no Character: one whose voice ElevenLabs doesn't have (the Doubao
+/// ones, until the service speaks Doubao) gets the one of its `GENDER`, rather than another Character's voice.
+const STOCK_FEMALE: &str = "elevenlabs:EXAVITQu4vr4xnSDxMaL";
+const STOCK_MALE: &str = "elevenlabs:JBFqnCBsd6RMkjVDRZzb";
 
 /// The voice service's name for `character`'s voice (the id the box reports in `VOICES`), as `<vendor>:<voice>`.
 /// The model is multilingual, so a reply in another language than the Character's keeps the Character's voice.
 pub fn voice_for(character: Option<&str>) -> String {
-    let voice_of = |character: &str| {
-        let file = VOICE_FILES.iter().find(|(id, _)| *id == character)?.1;
-        let field = |key: &str| file.lines().find_map(|line| line.strip_prefix(key)?.strip_prefix('='));
-        Some((field("ENGINE")?, field("VOICE")?))
+    let Some(file) = character.and_then(|character| VOICE_FILES.iter().find(|(id, _)| *id == character)) else {
+        return DEFAULT_VOICE.to_owned();
     };
-    match character.and_then(voice_of) {
-        Some(("elevenlabs", voice)) => format!("elevenlabs:{voice}"),
-        _ => DEFAULT_VOICE.to_owned(),
+    let field = |key: &str| file.1.lines().find_map(|line| line.strip_prefix(key)?.strip_prefix('='));
+    match (field("ENGINE"), field("VOICE")) {
+        (Some("elevenlabs"), Some(voice)) => format!("elevenlabs:{voice}"),
+        _ if field("GENDER") == Some("male") => STOCK_MALE.to_owned(),
+        _ => STOCK_FEMALE.to_owned(),
     }
 }
 
@@ -190,7 +193,7 @@ mod tests {
     fn each_character_speaks_in_the_voice_of_its_lines() {
         assert_eq!(voice_for(Some("ada")), "elevenlabs:tcSsCJFYrsHpK5rCQZMf");
         assert_eq!(voice_for(Some("hank")), "elevenlabs:U6jH23hcPh0zH17nf3DT");
-        assert_eq!(voice_for(Some("wanwanxiaohe")), DEFAULT_VOICE, "a Doubao voice: the stock one");
+        assert_eq!(voice_for(Some("wanwanxiaohe")), STOCK_FEMALE, "a Doubao voice: the stock one of her gender");
         assert_eq!(voice_for(Some("robot")), DEFAULT_VOICE);
         assert_eq!(voice_for(None), DEFAULT_VOICE, "no Character pack");
         assert_eq!(voice_for(Some("hsiaoyu")), DEFAULT_VOICE, "an old voice pack");
