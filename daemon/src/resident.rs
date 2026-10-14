@@ -1047,9 +1047,15 @@ fn codex_command(program: &Path, codex_home: &Path) -> tokio::process::Command {
 /// Features that give a Codex thread tools of its own: the resident session gets none of them, only ours. Most are
 /// on by default even in an empty Codex home. Plugins and apps (connectors) bring tools and MCP servers; the rest
 /// are built-in tools. `memories` (off by default) would also start Codex's memory pipeline, which rewrites the
-/// memories folder of the Codex home it runs in; the daemon gives the session the user's memories itself. Set as
-/// `-c features.<name>=false` rather than `--disable`, which refuses a name another Codex version doesn't know.
-const FEATURES_OFF: [&str; 15] = [
+/// memories folder of the Codex home it runs in; the daemon gives the session the user's memories itself.
+/// `shell_snapshot` runs the user's login shell at every start and saves its whole environment, API keys included,
+/// in the Codex home, for a shell tool the session doesn't have. Set as `-c features.<name>=false` rather than
+/// `--disable`, which refuses a name another Codex version doesn't know.
+///
+/// `code_mode_host` stays on: the model calls every tool, ours included, through its `exec` JavaScript, and with
+/// the host off no tool call gets through. That JavaScript has no file system, network or process (checked on
+/// 2026-10-14: no `fetch`, `require` or `process`, and `import` is refused); it reaches only the thread's tools.
+const FEATURES_OFF: [&str; 16] = [
     "plugins",
     "apps",
     "shell_tool",
@@ -1065,6 +1071,7 @@ const FEATURES_OFF: [&str; 15] = [
     "sleep_tool",
     "tool_suggest",
     "skill_search",
+    "shell_snapshot",
 ];
 
 /// The config overrides for the resident session's Codex, before MCP servers. Besides the tools:
@@ -1073,6 +1080,9 @@ const FEATURES_OFF: [&str; 15] = [
 ///   path) and, on saving, would delete the link.
 /// - `memories.generate_memories=false`: the resident thread is never summarised into memories, should the feature
 ///   come on.
+/// - `skills.include_instructions=false` and `skills.bundled.enabled=false`: no skills. Codex lists the user's
+///   own skills (`~/.agents/skills`) whatever the Codex home, and installs its bundled ones (`imagegen` and the
+///   like) into it; the session can't run them, and the list costs every turn context.
 /// - `web_search`: Codex's built-in web search, so a question about now is looked up rather than made up. The
 ///   queries go to OpenAI, the model provider.
 /// - [`MODEL`] at [`REASONING_EFFORT`]: a voice command waits on the answer. Measured on 2026-10-13, a turn's first
@@ -1084,6 +1094,8 @@ fn tool_overrides() -> Vec<String> {
         format!("web_search=\"{WEB_SEARCH}\""),
         AUTH_STORE.to_owned(),
         "memories.generate_memories=false".to_owned(),
+        "skills.include_instructions=false".to_owned(),
+        "skills.bundled.enabled=false".to_owned(),
         format!("model=\"{MODEL}\""),
         format!("model_reasoning_effort=\"{REASONING_EFFORT}\""),
     ] {
@@ -1939,6 +1951,9 @@ pub(crate) mod tests {
             "features.unified_exec=false",
             "features.multi_agent=false",
             "features.memories=false",
+            "features.shell_snapshot=false",
+            "skills.include_instructions=false",
+            "skills.bundled.enabled=false",
             "web_search=\"live\"",
             "cli_auth_credentials_store=\"file\"",
             "memories.generate_memories=false",
