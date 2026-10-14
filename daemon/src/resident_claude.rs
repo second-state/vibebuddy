@@ -188,7 +188,7 @@ impl ClaudeBrain {
         let note = (changed && spoke_as.is_some()).then(|| change_note(persona));
         let (sender, spoken) = mpsc::unbounded_channel();
         *self.mcp.speak.lock().expect("speak lock") = Some(sender);
-        let result = run_turn(process, spoken, note.as_deref(), text, on_reply).await;
+        let result = run_turn(process, spoken, persona, note.as_deref(), text, on_reply).await;
         *self.mcp.speak.lock().expect("speak lock") = None;
         match &result {
             // The process is still there and the session intact: an API error, a refused key.
@@ -315,11 +315,12 @@ impl Session {
 async fn run_turn(
     process: &mut Process,
     mut spoken: mpsc::UnboundedReceiver<String>,
+    persona: &Persona,
     note: Option<&str>,
     text: &str,
     on_reply: &mut (dyn FnMut(&str) + Send),
 ) -> Result<(), ResidentError> {
-    let line = format!("{}\n", user_message(text, note, &chrono::Local::now(), local_time_zone().as_deref()));
+    let line = format!("{}\n", user_message(text, persona, note, &chrono::Local::now(), local_time_zone().as_deref()));
     let written = async {
         process.writer.write_all(line.as_bytes()).await?;
         process.writer.flush().await
@@ -384,9 +385,23 @@ fn local_time_zone() -> Option<String> {
 /// A voice command as a stream-json user message: the local time and time zone first, as context, then what was
 /// said. The time zone stands in for where the user is (Codex gets it from its own environment context), so a
 /// question about the weather or the news has a place. A `note` (the Character changed) goes with the context.
-fn user_message(text: &str, note: Option<&str>, now: &chrono::DateTime<chrono::Local>, time_zone: Option<&str>) -> Value {
+/// Every command also repeats who answers and in which language: with only the system prompt saying so, Haiku
+/// answered a Chinese question in Chinese as an English Character, carried by the user's language and the session's
+/// earlier replies.
+fn user_message(
+    text: &str,
+    persona: &Persona,
+    note: Option<&str>,
+    now: &chrono::DateTime<chrono::Local>,
+    time_zone: Option<&str>,
+) -> Value {
     let zone = time_zone.map(|zone| format!(", time zone {zone}")).unwrap_or_default();
-    let context = format!("{CONTEXT_PREFIX}The user's local time: {}{zone}</context>", now.format("%A %Y-%m-%d %H:%M (UTC%:z)"));
+    let Persona { name, language, .. } = persona;
+    let context = format!(
+        "{CONTEXT_PREFIX}The user's local time: {}{zone}. You are {name}: answer in {language} only, whatever language \
+         this is said in.</context>",
+        now.format("%A %Y-%m-%d %H:%M (UTC%:z)")
+    );
     let content: Vec<Value> =
         [context.as_str()].into_iter().chain(note).chain([text]).map(|text| json!({"type": "text", "text": text})).collect();
     json!({"type": "user", "message": {"role": "user", "content": content}})
@@ -720,12 +735,13 @@ pub(crate) mod tests {
     #[test]
     fn a_voice_command_carries_the_local_time_and_time_zone_as_context() {
         let now = chrono::Local::now();
-        let message = user_message("今天天气怎么样", None, &now, Some("Asia/Singapore"));
+        let message = user_message("今天天气怎么样", &Persona::of(&crate::resident::tests::wearing("ada")), None, &now, Some("Asia/Singapore"));
         let content = message["message"]["content"].as_array().unwrap();
         let context = content[0]["text"].as_str().unwrap();
         assert!(context.starts_with(CONTEXT_PREFIX) && context.contains("time zone Asia/Singapore"), "{context}");
+        assert!(context.contains("You are Ada: answer in English only"), "{context}");
         assert_eq!(content[1]["text"], "今天天气怎么样");
-        let without = user_message("hi", None, &now, None);
+        let without = user_message("hi", &Persona::of(&crate::resident::tests::wearing("ada")), None, &now, None);
         assert!(!without["message"]["content"][0]["text"].as_str().unwrap().contains("time zone"));
     }
     use crate::activity::{ActivityId, ActivityStatus};
