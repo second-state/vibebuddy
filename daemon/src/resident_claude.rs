@@ -282,7 +282,7 @@ async fn run_turn(
     text: &str,
     on_reply: &mut (dyn FnMut(&str) + Send),
 ) -> Result<(), ResidentError> {
-    let line = format!("{}\n", user_message(text, &chrono::Local::now()));
+    let line = format!("{}\n", user_message(text, &chrono::Local::now(), local_time_zone().as_deref()));
     let written = async {
         process.writer.write_all(line.as_bytes()).await?;
         process.writer.flush().await
@@ -331,9 +331,25 @@ async fn run_turn(
     }
 }
 
-/// A voice command as a stream-json user message: the local time first, as context, then what was said.
-fn user_message(text: &str, now: &chrono::DateTime<chrono::Local>) -> Value {
-    let context = format!("{CONTEXT_PREFIX}The user's local time: {}</context>", now.format("%A %Y-%m-%d %H:%M (UTC%:z)"));
+/// The computer's IANA time zone (`Asia/Singapore`): `TZ` if set, else where `/etc/localtime` points, on macOS
+/// and Linux alike.
+fn local_time_zone() -> Option<String> {
+    if let Ok(zone) = std::env::var("TZ")
+        && !zone.is_empty()
+    {
+        return Some(zone.trim_start_matches(':').to_owned());
+    }
+    let target = std::fs::read_link("/etc/localtime").ok()?;
+    let path = target.to_string_lossy();
+    path.split_once("zoneinfo/").map(|(_, zone)| zone.to_owned())
+}
+
+/// A voice command as a stream-json user message: the local time and time zone first, as context, then what was
+/// said. The time zone stands in for where the user is (Codex gets it from its own environment context), so a
+/// question about the weather or the news has a place.
+fn user_message(text: &str, now: &chrono::DateTime<chrono::Local>, time_zone: Option<&str>) -> Value {
+    let zone = time_zone.map(|zone| format!(", time zone {zone}")).unwrap_or_default();
+    let context = format!("{CONTEXT_PREFIX}The user's local time: {}{zone}</context>", now.format("%A %Y-%m-%d %H:%M (UTC%:z)"));
     json!({"type": "user", "message": {"role": "user", "content": [
         {"type": "text", "text": context},
         {"type": "text", "text": text},
@@ -663,6 +679,18 @@ pub(crate) mod tests {
     use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 
     use super::*;
+
+    #[test]
+    fn a_voice_command_carries_the_local_time_and_time_zone_as_context() {
+        let now = chrono::Local::now();
+        let message = user_message("今天天气怎么样", &now, Some("Asia/Singapore"));
+        let content = message["message"]["content"].as_array().unwrap();
+        let context = content[0]["text"].as_str().unwrap();
+        assert!(context.starts_with(CONTEXT_PREFIX) && context.contains("time zone Asia/Singapore"), "{context}");
+        assert_eq!(content[1]["text"], "今天天气怎么样");
+        let without = user_message("hi", &now, None);
+        assert!(!without["message"]["content"][0]["text"].as_str().unwrap().contains("time zone"));
+    }
     use crate::activity::{ActivityId, ActivityStatus};
     use crate::resident::tests::temp_dir;
 

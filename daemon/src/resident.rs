@@ -888,7 +888,8 @@ pub(crate) fn instructions(persona: Option<&str>, memories: Option<&str>, brain:
          OpenCode, GitHub Copilot CLI, Pi, GitHub Actions) and speaks up for them. {persona}\n\
          Every user message is one voice command, transcribed from speech. Answer only by calling the `speak` tool, \
          with one or two short sentences meant to be heard, not read: no Markdown, lists, code, paths or URLs. \
-         Reply in the language the user spoke. Do not write any other answer.\n\
+         Reply in the language the user spoke. Do not write any other answer: once you have called `speak`, end your \
+         turn without writing anything else.\n\
          To know what the Agents are doing, have just finished or did today, call `list_activities`; never guess. It \
          has the live tasks, the ones that ended lately with how and how long ago (`recently_ended`), and today's \
          counts (`today`). Titles there are short upper-case task-card names; say them naturally.\n\
