@@ -39,6 +39,7 @@ The review fixes applied before bring-up (see the PR) were in place, so it can't
 | UART receive | More `invalid_json` with only the UART bridge connected | The interrupt and ring buffer in `device/src/serial.rs` |
 | USB output blocking | Frozen screen after a night on the UART bridge alone (see LESSONS.md on output channels without a reader) | `write_usb` in `serial.rs` |
 | Settings storage | Wrong pomodoro tally or volume after a restart | `core/src/storage.rs` |
+| The box restarts by itself | The boot report again in the daemon's log, unasked | The `RESET` line just before `MEMORY`: esp-hal's reset reason, such as `Some(CoreMwdt0)` or `Some(RtcWdt…)` for a watchdog and `Some(SysBrownOut)` for a brownout, plus ` PANIC` when a panic caused it (its backtrace went out on the port before the reset). A panic and the restart after a new identity are both `Some(CoreSw)`; only the mark tells them apart. A reset from the flasher or the USB port shows as `Some(CoreUsbJtag)` or `Some(CoreUsbUart)`. `Some(ChipPowerOn)` can also be a brownout of the whole chip. |
 
 ## Intentional differences from the C firmware
 

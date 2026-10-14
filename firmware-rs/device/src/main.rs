@@ -67,8 +67,17 @@ esp_bootloader_esp_idf::esp_app_desc!();
 /// the box freezes until power is cut.
 #[unsafe(no_mangle)]
 fn custom_halt() -> ! {
+    // SAFETY: one word written just before the reset; nothing else runs.
+    unsafe { PANICKED = PANIC_MARK };
     esp_hal::system::software_reset()
 }
+
+/// Set by a panic just before its reset, so the next boot can tell it from a restart asked for: both are
+/// software resets to the chip. RTC fast memory keeps it across the reset; after power-on it holds noise,
+/// hence a mark rather than a flag.
+#[esp_hal::ram(unstable(rtc_fast, persistent))]
+static mut PANICKED: u32 = 0;
+const PANIC_MARK: u32 = 0x5041_4e43;
 
 const XL9555_ADDRESS: u8 = 0x20;
 const XL9555_INPUT_PORT0: u8 = 0x00;
@@ -495,6 +504,7 @@ async fn main(spawner: Spawner) -> ! {
     // Booting got this far, so an image installed over the air keeps its slot.
     storage::confirm_running_image();
     net::CREDENTIALS.signal(wifi_credentials(&firmware));
+    report_reset(&mut board);
     report_memory(&mut board);
     if let Some(stack) = stack {
         if let Some(link) = firmware.link() {
@@ -614,6 +624,16 @@ fn wifi_credentials(firmware: &Firmware) -> Option<(alloc::string::String, alloc
 }
 
 /// `MEMORY INTERNAL <free>/<total> PSRAM <free>/<total>` in bytes: what the heaps have left (#108).
+/// Why the box last started, so a box that restarted by itself shows in the daemon's log: a watchdog, a brownout or
+/// a panic.
+fn report_reset(board: &mut DeviceBoard) {
+    // SAFETY: read and cleared once at boot, before anything can panic again.
+    let panicked = unsafe { core::mem::replace(&mut *core::ptr::addr_of_mut!(PANICKED), 0) } == PANIC_MARK;
+    let reason = esp_hal::system::reset_reason();
+    let line = alloc::format!("RESET {reason:?}{}\n", if panicked { " PANIC" } else { "" });
+    board.write(line.as_bytes());
+}
+
 fn report_memory(board: &mut DeviceBoard) {
     let stats = esp_alloc::HEAP.stats();
     let internal = esp_alloc::HEAP.free_caps(esp_alloc::MemoryCapability::Internal.into());
