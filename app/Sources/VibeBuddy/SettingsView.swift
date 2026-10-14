@@ -14,7 +14,9 @@ struct SettingsView: View {
             if model.residentEnabled {
                 ConversationView(
                     load: { [client = model.client] in try await client.residentHistory(limit: ConversationView.limit) },
-                    info: { [client = model.client] in try await client.resident() }
+                    info: { [client = model.client] in try await client.resident() },
+                    setBrain: { [client = model.client] choice in try await client.setResidentBrain(choice) },
+                    setKey: { [client = model.client] key in try await client.setAnthropicKey(key) }
                 )
                     .tabItem { Label("Conversation", systemImage: "bubble.left.and.bubble.right") }
             }

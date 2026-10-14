@@ -152,6 +152,15 @@ enum Message {
     PollConversation,
     ConversationPolled(Result<client::ResidentInfo, client::HistoryError>),
     OpenCodexInstallPage,
+    OpenClaudeInstallPage,
+    OpenAnthropicConsole,
+    /// Which Agent answers voice commands.
+    PickBrain(client::BrainChoice),
+    AnthropicKeyDraft(String),
+    SaveAnthropicKey,
+    RemoveAnthropicKey,
+    /// The daemon's answer to a brain or key change.
+    ResidentSettingSaved(Result<client::ResidentInfo, String>),
     /// Ask `vibebuddy-hook` for each agent's state again.
     RefreshAgents,
     Agents(Result<Vec<agents::Setup>, String>),
@@ -235,8 +244,14 @@ struct App {
     /// The daemon has the change marker; an older one gets its history read every 5 seconds instead.
     conversation_marked: bool,
     conversation_polling: bool,
-    /// What voice commands are missing (the user's Codex), as the daemon last said.
+    /// What voice commands are missing (the user's Codex or Claude Code), as the daemon last said.
     resident_problem: Option<client::Problem>,
+    /// The daemon's last word on the resident session: which Agent the user picked, whether a key is stored.
+    resident_info: Option<client::ResidentInfo>,
+    /// The Anthropic API key being typed; cleared once the daemon has it, and never filled from the daemon.
+    anthropic_key_draft: String,
+    /// Why the last brain or key change failed.
+    resident_setting_error: Option<String>,
     /// The outcome of the last action, shown at the bottom of the window.
     notice: Option<Result<String, String>>,
     /// The language picked in Settings, and, while it differs from the UI's, the offer to restart.
@@ -295,6 +310,9 @@ impl App {
             conversation_marked: true,
             conversation_polling: false,
             resident_problem: None,
+            resident_info: None,
+            anthropic_key_draft: String::new(),
+            resident_setting_error: None,
             notice: None,
             language: UiLanguage::saved(),
             restart_offer: None,
@@ -512,7 +530,8 @@ impl App {
                     Ok(info) => {
                         self.conversation_marked = info.revision.is_some();
                         let became_ready = self.resident_problem.is_some() && info.problem.is_none();
-                        self.resident_problem = info.problem;
+                        self.resident_problem = info.problem.clone();
+                        self.resident_info = Some(info.clone());
                         let changed = info.revision.is_none() || info.revision != self.conversation_seen || became_ready;
                         // A read already under way is left alone; the next poll sees the change again.
                         if (changed || self.conversation.is_none()) && !self.conversation_loading {
@@ -533,6 +552,39 @@ impl App {
                 if let Err(error) = launch("xdg-open", &[std::ffi::OsStr::new(CODEX_INSTALL_PAGE)]) {
                     self.notice = Some(Err(error));
                 }
+            }
+            Message::OpenClaudeInstallPage => {
+                if let Err(error) = launch("xdg-open", &[std::ffi::OsStr::new(CLAUDE_INSTALL_PAGE)]) {
+                    self.notice = Some(Err(error));
+                }
+            }
+            Message::OpenAnthropicConsole => {
+                if let Err(error) = launch("xdg-open", &[std::ffi::OsStr::new(ANTHROPIC_CONSOLE)]) {
+                    self.notice = Some(Err(error));
+                }
+            }
+            Message::PickBrain(choice) => return Task::perform(client::set_resident_brain(choice), Message::ResidentSettingSaved),
+            Message::AnthropicKeyDraft(draft) => self.anthropic_key_draft = draft,
+            Message::SaveAnthropicKey => {
+                let key = self.anthropic_key_draft.trim().to_owned();
+                if !key.is_empty() {
+                    return Task::perform(client::set_anthropic_key(Some(key)), Message::ResidentSettingSaved);
+                }
+            }
+            Message::RemoveAnthropicKey => return Task::perform(client::set_anthropic_key(None), Message::ResidentSettingSaved),
+            Message::ResidentSettingSaved(result) => match result {
+                Ok(info) => {
+                    if info.anthropic_key_set == Some(true) {
+                        self.anthropic_key_draft.clear();
+                    }
+                    self.resident_problem = info.problem.clone();
+                    self.resident_info = Some(info);
+                    self.resident_setting_error = None;
+                    // Another Agent may answer now, with its own history.
+                    self.conversation_seen = None;
+                    return Task::done(Message::PollConversation);
+                }
+                Err(error) => self.resident_setting_error = Some(error),
             }
             Message::NotifyLink(enabled) => {
                 let mut config = self.status.as_ref().map(|status| status.config.clone()).unwrap_or_default();
@@ -1676,17 +1728,29 @@ impl App {
                 .center(Length::Fill)
                 .into()
         };
-        // Voice needs the user's Codex, installed and logged in: say what's missing first.
+        // A daemon older than the setting doesn't say it; then there is only Codex.
+        let choice = self.resident_info.as_ref().and_then(|info| info.brain_setting);
+        let header = column![header].push(choice.map(|choice| self.agent_setting(choice))).spacing(12);
+        // Voice needs the user's Codex, installed and logged in, or Claude Code with a key: say what's missing first.
         if let Some(problem) = &self.resident_problem {
-            let detail = match problem {
-                client::Problem::CodexMissing => tr("Voice commands are answered by Codex on this computer, and it isn't installed. Install the Codex CLI, then sign in with `codex login`. This tab notices within half a minute.", &[]),
-                client::Problem::CodexLoggedOut => tr("Voice commands are answered by Codex on this computer, and it isn't signed in. Run `codex login` in a terminal and sign in. This tab notices within half a minute.", &[]),
-                client::Problem::Other => tr("The buddy's session isn't available: %@", &[&"?"]),
+            let (title, detail) = match problem {
+                client::Problem::CodexMissing => (tr("Voice needs Codex", &[]), tr("Voice commands are answered by Codex on this computer, and it isn't installed. Install the Codex CLI, then sign in with `codex login`. This tab notices within half a minute.", &[])),
+                client::Problem::CodexLoggedOut => (tr("Voice needs Codex", &[]), tr("Voice commands are answered by Codex on this computer, and it isn't signed in. Run `codex login` in a terminal and sign in. This tab notices within half a minute.", &[])),
+                client::Problem::ClaudeMissing => (tr("Voice needs Claude Code", &[]), tr("Voice commands are answered by Claude Code on this computer, and it isn't installed. Install Claude Code; you don't need to sign in to it. This tab notices within half a minute.", &[])),
+                client::Problem::AnthropicKeyMissing => (tr("Voice needs Claude Code", &[]), tr("Claude Code answers voice commands only with your own Anthropic API key. Add your key above.", &[])),
+                client::Problem::Other => (tr("Voice needs Codex", &[]), tr("The buddy's session isn't available: %@", &[&"?"])),
             };
-            let install = (*problem == client::Problem::CodexMissing)
-                .then(|| button(text(tr("How to install the Codex CLI", &[]))).on_press(Message::OpenCodexInstallPage));
+            let codex_problem = matches!(problem, client::Problem::CodexMissing | client::Problem::CodexLoggedOut);
+            let or_claude = (codex_problem && choice == Some(client::BrainChoice::Auto))
+                .then(|| text(tr("Or let Claude Code answer, with your own Anthropic API key: add it above.", &[])).size(13).style(text::secondary));
+            let install = match problem {
+                client::Problem::CodexMissing => Some(button(text(tr("How to install the Codex CLI", &[]))).on_press(Message::OpenCodexInstallPage)),
+                client::Problem::ClaudeMissing => Some(button(text(tr("How to install Claude Code", &[]))).on_press(Message::OpenClaudeInstallPage)),
+                _ => None,
+            };
             let body = container(
-                column![text(tr("Voice needs Codex", &[])).size(16), text(detail).size(13).style(text::secondary)]
+                column![text(title).size(16), text(detail).size(13).style(text::secondary)]
+                    .push(or_claude)
                     .push(install)
                     .spacing(6)
                     .align_x(iced::Alignment::Center),
@@ -1725,6 +1789,59 @@ impl App {
             .into(),
         };
         column![header, body].spacing(12).into()
+    }
+
+    /// Which Agent answers, and the user's Anthropic API key for Claude Code, as on the Mac. The key is typed once
+    /// and never shown again: the daemon only says whether it has one.
+    fn agent_setting(&self, choice: client::BrainChoice) -> Element<'_, Message> {
+        let option = |label: String, option: client::BrainChoice| {
+            let style = if option == choice { button::primary } else { button::secondary };
+            button(text(label)).style(style).on_press(Message::PickBrain(option))
+        };
+        let mut setting = column![
+            row![
+                text(tr("Answered by", &[])),
+                option(tr("Automatic", &[]), client::BrainChoice::Auto),
+                option("Codex".to_owned(), client::BrainChoice::Codex),
+                option("Claude Code".to_owned(), client::BrainChoice::Claude),
+            ]
+            .spacing(8)
+            .align_y(iced::Alignment::Center)
+        ]
+        .spacing(6);
+        if choice == client::BrainChoice::Auto {
+            setting = setting.push(text(tr("Automatic: Codex when it's ready, else Claude Code with your API key.", &[])).size(12).style(text::secondary));
+        }
+        if choice != client::BrainChoice::Codex {
+            let saved = self.resident_info.as_ref().and_then(|info| info.anthropic_key_set) == Some(true);
+            let key = if saved {
+                row![
+                    text(tr("Anthropic API key saved", &[])),
+                    button(text(tr("Remove", &[]))).style(button::secondary).on_press(Message::RemoveAnthropicKey),
+                ]
+            } else {
+                let draft = self.anthropic_key_draft.trim();
+                row![
+                    text_input(&tr("Anthropic API key", &[]), &self.anthropic_key_draft)
+                        .secure(true)
+                        .on_input(Message::AnthropicKeyDraft)
+                        .on_submit(Message::SaveAnthropicKey)
+                        .width(320),
+                    button(text(tr("Save", &[]))).on_press_maybe((!draft.is_empty()).then_some(Message::SaveAnthropicKey)),
+                ]
+            };
+            setting = setting
+                .push(
+                    key.push(button(text(tr("Get an API key", &[]))).style(button::text).on_press(Message::OpenAnthropicConsole))
+                        .spacing(8)
+                        .align_y(iced::Alignment::Center),
+                )
+                .push(text(tr("Claude Code answers only with your own Anthropic API key, billed to your Anthropic account; a Claude subscription can't be used here. What you say and your Agents' task titles go to Anthropic.", &[])).size(12).style(text::secondary));
+        }
+        if let Some(error) = &self.resident_setting_error {
+            setting = setting.push(text(error.clone()).size(12).style(text::danger));
+        }
+        setting.into()
     }
 
     fn advanced(&self) -> Element<'_, Message> {
@@ -1827,6 +1944,10 @@ async fn export_diagnostics(summary: String, config: Option<Config>) -> Result<S
 const RELEASES_PAGE: &str = "https://github.com/second-state/vibebuddy/releases";
 /// OpenAI's page on installing the Codex CLI, which voice commands need.
 const CODEX_INSTALL_PAGE: &str = "https://learn.chatgpt.com/docs/codex/cli";
+/// Anthropic's page on installing Claude Code, the other Agent that can answer voice commands.
+const CLAUDE_INSTALL_PAGE: &str = "https://code.claude.com/docs/en/setup";
+/// The Claude Console, where the user makes the Anthropic API key Claude Code answers voice commands with.
+const ANTHROPIC_CONSOLE: &str = "https://platform.claude.com/";
 const NEW_ISSUE: &str = "https://github.com/second-state/vibebuddy/issues/new";
 
 /// The id under which the box wears the user's own Character.

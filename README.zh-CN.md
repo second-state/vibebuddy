@@ -256,7 +256,7 @@ cargo run -p vibebuddyd
 
 默认只监听 `127.0.0.1:7331`，并按 Espressif USB Serial/JTAG 的 `VID:PID 303A:1001` 自动发现设备。可用 `VIBEBUDDY_BIND` 修改监听地址、`VIBEBUDDY_SERIAL_PORT` 显式指定串口，或用 `VIBEBUDDY_USB_SERIAL` 在多块相同设备中选择目标；不指定时，daemon 连之前报出过 VibeBuddy 固件的那块；插着好几块、又都不是那块时，App 会问哪一块是盒子。这两个变量设了都会显示在 App 的设备页上，免得忘了撤的固定被当成找不到盒子。运行其他固件（比如 Muse）的盒子，daemon 不会往里写任何东西。HTTP `202 Accepted` 表示事件进入有界发送队列；设备实际接收结果以 daemon 记录的设备响应为准。
 
-语音指令还在实验阶段，默认关闭：`VIBEBUDDY_RESIDENT_SESSION=1` 打开常驻会话，再配好语音识别，盒子长按 K0 就成了按住说话。打开期间，Mac 和 Linux 的设置里都会多出“对话”页，列出你最近的语音指令和氛围小助手的口头回复。详见 [`docs/resident-session.md`](docs/resident-session.md)。
+语音指令还在实验阶段，默认关闭：`VIBEBUDDY_RESIDENT_SESSION=1` 打开常驻会话，再配好语音识别，盒子长按 K0 就成了按住说话。由你自己的 Codex 来回答；也可以换成你自己的 Claude Code，配你自己的 Anthropic API 密钥（不能用 Claude 订阅）。打开期间，Mac 和 Linux 的设置里都会多出“对话”页，列出你最近的语音指令和氛围小助手的口头回复，也在这里选由谁回答、填 API 密钥。详见 [`docs/resident-session.md`](docs/resident-session.md)。
 
 daemon 平时由 App 看管。没有 App 的开发机可以用 [`packaging/com.vibebuddy.vibebuddyd.plist`](packaging/com.vibebuddy.vibebuddyd.plist) 装成 LaunchAgent，但两者不能同时跑，会抢串口。daemon 还为 App 提供 `GET /v1/status`、SSE `/v1/status/stream`、`/v1/config`、`/v1/device/{identify,volume,choice,screenshot,voice-pack,firmware}` 与 `/v1/daemon/restart`。
 

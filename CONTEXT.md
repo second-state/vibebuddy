@@ -102,6 +102,10 @@ _Avoid_: voice assistant (an assistant means an Agent), prompt (that is the Agen
 The one long-running Agent Session every voice command goes to, so the user never has to say which work they mean. It answers from what it can see of the Activities and hands work on to other Sessions, but does no work itself: it runs no commands and changes no files. There is only one, and it is never restarted to make room: when its context grows long, it is compacted. It is an Agent that speaks as the buddy, in the persona of the Character the user picked, and changes persona when the Character changes; it is never an Activity: it makes no task cards, announcements or stats.
 _Avoid_: assistant, concierge, dispatcher, main session
 
+**Brain (大脑)**:
+The Agent the resident session runs on: the user's own Codex, or the user's own Claude Code with their own Anthropic API key (never a Claude subscription). The user picks one, or leaves it automatic: Codex when it is ready, else Claude Code. Each brain has its own resident session; the UI calls the setting "Answered by".
+_Avoid_: model (that is what the brain runs on), backend, engine, provider
+
 **Spoken reply (口头回复)**:
 The short sentence the resident session writes for the user to hear in answer to a voice command, synthesized when it is spoken, in the announcement voice of the Character the user picked. Unlike a line, it is written at the moment it is spoken and may talk about what the Agents are doing.
 _Avoid_: line (lines are written in advance), announcement, TTS, response
@@ -169,6 +173,8 @@ Fixed wording for the App's English UI and English logs. Use these words when wr
 | 常驻会话 | resident session | Not shown to users so far; in the UI the buddy is the one you talk to |
 | 口头回复 | spoken reply | |
 | 对话 | conversation | The settings tab (Conversation) listing voice commands and the buddy's spoken replies; shown only while the resident session is on |
+| 由谁回答 / 自动 | Answered by / Automatic | The brain setting on the Conversation tab: Automatic, Codex or Claude Code; "brain" stays a code word |
+| Anthropic API 密钥 | Anthropic API key | The user's own key for Claude Code; never "Claude key" or "token", and never a Claude subscription |
 
 ### Activity lifecycle
 

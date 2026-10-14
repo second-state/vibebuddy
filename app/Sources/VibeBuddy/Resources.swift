@@ -22,6 +22,12 @@ enum Resources {
     /// OpenAI's page on installing the Codex CLI, which voice commands need.
     static let codexInstallPage = URL(string: "https://learn.chatgpt.com/docs/codex/cli")!
 
+    /// Anthropic's page on installing Claude Code, the other Agent that can answer voice commands.
+    static let claudeInstallPage = URL(string: "https://code.claude.com/docs/en/setup")!
+
+    /// The Claude Console, where the user makes the Anthropic API key Claude Code answers voice commands with.
+    static let anthropicConsole = URL(string: "https://platform.claude.com/")!
+
     static var macOSDirectory: URL {
         Bundle.main.executableURL!.deletingLastPathComponent()
     }

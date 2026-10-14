@@ -139,6 +139,27 @@ struct DaemonClient {
         return try StatusCoding.decoder().decode(ResidentHistory.self, from: data).exchanges
     }
 
+    /// Which Agent answers voice commands. Its own endpoint, not part of the config.
+    func setResidentBrain(_ choice: ResidentBrainChoice) async throws -> ResidentInfo {
+        let body = try JSONSerialization.data(withJSONObject: ["brain": choice.rawValue])
+        return try await residentSetting("/v1/resident/brain", method: "PUT", body: body)
+    }
+
+    /// Stores the user's Anthropic API key in the daemon (nil removes it). The daemon never sends it back.
+    func setAnthropicKey(_ key: String?) async throws -> ResidentInfo {
+        guard let key else { return try await residentSetting("/v1/resident/anthropic-key", method: "DELETE", body: nil) }
+        let body = try JSONSerialization.data(withJSONObject: ["api_key": key])
+        return try await residentSetting("/v1/resident/anthropic-key", method: "PUT", body: body)
+    }
+
+    private func residentSetting(_ path: String, method: String, body: Data?) async throws -> ResidentInfo {
+        let request = request(path, method: method, body: body, contentType: body == nil ? nil : "application/json")
+        let (data, response) = try await URLSession.shared.data(for: request)
+        let code = (response as? HTTPURLResponse)?.statusCode ?? 0
+        guard code == 200 else { throw DaemonError(message: DaemonClient.message(in: data) ?? String(localized: "The daemon answered \(code)")) }
+        return try StatusCoding.decoder().decode(ResidentInfo.self, from: data)
+    }
+
     private static func message(in data: Data) -> String? {
         (try? JSONSerialization.jsonObject(with: data) as? [String: Any])?["message"] as? String
     }

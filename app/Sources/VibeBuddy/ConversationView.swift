@@ -8,13 +8,21 @@ struct ConversationView: View {
     let load: () async throws -> [ResidentExchange]
     /// `GET /v1/resident`: the history's change marker, and whether voice commands can be taken.
     let info: () async throws -> ResidentInfo
+    /// Picks the Agent that answers voice commands; the daemon answers with its info.
+    let setBrain: (ResidentBrainChoice) async throws -> ResidentInfo
+    /// Stores the user's Anthropic API key, or removes it with nil; the daemon answers with its info.
+    let setKey: (String?) async throws -> ResidentInfo
 
     static let limit = 20
 
     @State private var exchanges: [ResidentExchange]?
     @State private var failure: Failure?
-    /// What voice commands are missing (the user's Codex), as the daemon last said.
+    /// What voice commands are missing (the user's Codex or Claude Code), as the daemon last said.
     @State private var problem: ResidentProblem?
+    /// The daemon's last answer, for the Agent setting and whether a key is stored.
+    @State private var latest: ResidentInfo?
+    @State private var keyDraft = ""
+    @State private var settingError: String?
     @State private var loading = false
 
     enum Failure: Equatable {
@@ -31,6 +39,10 @@ struct ConversationView: View {
                 if loading { ProgressView().controlSize(.small) }
                 Button("Refresh") { Task { await reload() } }.disabled(loading)
             }
+            // A daemon older than the setting doesn't say it; then there is only Codex.
+            if let choice = latest?.brainSetting {
+                agentSetting(choice)
+            }
             content.frame(maxWidth: .infinity, maxHeight: .infinity)
         }
         .padding(16)
@@ -39,22 +51,104 @@ struct ConversationView: View {
         .task { await follow() }
     }
 
+    /// Which Agent answers, and the user's Anthropic API key for Claude Code. The key is typed once and never shown
+    /// again: the daemon only says whether it has one.
+    private func agentSetting(_ choice: ResidentBrainChoice) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Picker(selection: Binding(get: { choice }, set: { picked in Task { await apply { try await setBrain(picked) } } })) {
+                Text("Automatic").tag(ResidentBrainChoice.auto)
+                Text(verbatim: "Codex").tag(ResidentBrainChoice.codex)
+                Text(verbatim: "Claude Code").tag(ResidentBrainChoice.claude)
+            } label: {
+                Text("Answered by")
+            }
+            .pickerStyle(.segmented)
+            .fixedSize()
+            if choice == .auto {
+                Text("Automatic: Codex when it's ready, else Claude Code with your API key.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+            if choice != .codex {
+                HStack {
+                    if latest?.anthropicKeySet == true {
+                        Label("Anthropic API key saved", systemImage: "key.fill")
+                        Button("Remove") { Task { await apply { try await setKey(nil) } } }
+                    } else {
+                        SecureField(text: $keyDraft, prompt: Text("Anthropic API key")) { Text("Anthropic API key") }
+                            .labelsHidden()
+                            .textFieldStyle(.roundedBorder)
+                            .frame(maxWidth: 320)
+                            .onSubmit { saveKey() }
+                        Button("Save") { saveKey() }
+                            .disabled(keyDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                    }
+                    Link("Get an API key", destination: Resources.anthropicConsole)
+                }
+                Text("Claude Code answers only with your own Anthropic API key, billed to your Anthropic account; a Claude subscription can't be used here. What you say and your Agents' task titles go to Anthropic.")
+                    .font(.caption).foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            if let settingError {
+                Text(verbatim: settingError).font(.caption).foregroundStyle(.red)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private func saveKey() {
+        let key = keyDraft.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !key.isEmpty else { return }
+        Task {
+            await apply { try await setKey(key) }
+            if latest?.anthropicKeySet == true { keyDraft = "" }
+        }
+    }
+
+    /// Sends a setting and takes the daemon's answer as the new state.
+    private func apply(_ change: () async throws -> ResidentInfo) async {
+        do {
+            let now = try await change()
+            latest = now
+            problem = now.problem
+            settingError = nil
+        } catch {
+            settingError = error.localizedDescription
+        }
+    }
+
     @ViewBuilder private var content: some View {
         if let problem {
             ContentUnavailableView {
-                Label("Voice needs Codex", systemImage: "mic.slash")
-            } description: {
                 switch problem {
-                case .codexMissing:
-                    Text("Voice commands are answered by Codex on this computer, and it isn't installed. Install the Codex CLI, then sign in with `codex login`. This tab notices within half a minute.")
-                case .codexLoggedOut:
-                    Text("Voice commands are answered by Codex on this computer, and it isn't signed in. Run `codex login` in a terminal and sign in. This tab notices within half a minute.")
-                case .other(let why):
-                    Text("The buddy's session isn't available: \(why)")
+                case .claudeMissing, .anthropicKeyMissing:
+                    Label("Voice needs Claude Code", systemImage: "mic.slash")
+                default:
+                    Label("Voice needs Codex", systemImage: "mic.slash")
+                }
+            } description: {
+                VStack(spacing: 8) {
+                    switch problem {
+                    case .codexMissing:
+                        Text("Voice commands are answered by Codex on this computer, and it isn't installed. Install the Codex CLI, then sign in with `codex login`. This tab notices within half a minute.")
+                    case .codexLoggedOut:
+                        Text("Voice commands are answered by Codex on this computer, and it isn't signed in. Run `codex login` in a terminal and sign in. This tab notices within half a minute.")
+                    case .claudeMissing:
+                        Text("Voice commands are answered by Claude Code on this computer, and it isn't installed. Install Claude Code; you don't need to sign in to it. This tab notices within half a minute.")
+                    case .anthropicKeyMissing:
+                        Text("Claude Code answers voice commands only with your own Anthropic API key. Add your key above.")
+                    case .other(let why):
+                        Text("The buddy's session isn't available: \(why)")
+                    }
+                    if latest?.brainSetting == .auto, problem == .codexMissing || problem == .codexLoggedOut {
+                        Text("Or let Claude Code answer, with your own Anthropic API key: add it above.")
+                    }
                 }
             } actions: {
                 if problem == .codexMissing {
                     Link("How to install the Codex CLI", destination: Resources.codexInstallPage)
+                }
+                if problem == .claudeMissing {
+                    Link("How to install Claude Code", destination: Resources.claudeInstallPage)
                 }
             }
         } else if let failure {
@@ -101,6 +195,7 @@ struct ConversationView: View {
         if let first = try? await info() {
             seen = first.revision
             problem = first.problem
+            latest = first
         }
         await reload()
         while !Task.isCancelled {
@@ -111,6 +206,7 @@ struct ConversationView: View {
                 marked = now.revision != nil
                 let becameReady = problem != nil && now.problem == nil
                 problem = now.problem
+                latest = now
                 if now.revision == nil || now.revision != seen || becameReady {
                     seen = now.revision
                     await reload()
