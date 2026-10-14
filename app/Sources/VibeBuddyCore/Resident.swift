@@ -4,10 +4,33 @@ import Foundation
 public struct ResidentInfo: Decodable, Equatable {
     public var enabled: Bool
     public var threadId: String?
+    /// Goes up when a voice command's turn ends or the thread changes, so the Conversation tab reads the history again
+    /// only then. Kept in memory: it starts again at 0 when the daemon restarts. Nil from a daemon older than it.
+    public var revision: UInt64?
+    /// What voice commands are missing while the session is on but not ready (the user's Codex, installed and logged
+    /// in). Nil when ready, and from a daemon too old to say; a reason this App doesn't know is `.other`.
+    public var problem: ResidentProblem?
 
     enum CodingKeys: String, CodingKey {
         case enabled
         case threadId = "thread_id"
+        case revision
+        case problem
+    }
+}
+
+/// Why the resident session can't take voice commands now: voice needs the user's Codex.
+public enum ResidentProblem: Equatable, Decodable {
+    case codexMissing
+    case codexLoggedOut
+    case other(String)
+
+    public init(from decoder: Decoder) throws {
+        switch try decoder.singleValueContainer().decode(String.self) {
+        case "codex_missing": self = .codexMissing
+        case "codex_logged_out": self = .codexLoggedOut
+        case let other: self = .other(other)
+        }
     }
 }
 

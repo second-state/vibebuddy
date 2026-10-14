@@ -262,9 +262,10 @@ impl Voice {
         Self { synthesizer, ..self }
     }
 
-    /// Voice is offered when the resident session is on and speech recognition is configured.
+    /// Voice is offered when speech recognition is configured and the resident session is on and ready: the user's
+    /// Codex is installed and logged in.
     pub fn available(&self) -> bool {
-        self.recognizer.is_some() && self.resident.as_ref().is_some_and(|resident| resident.enabled())
+        self.recognizer.is_some() && self.resident.as_ref().is_some_and(|resident| resident.ready())
     }
 
     /// Takes one `VOICE` line from the box. A turn that ends starts a task, returned so tests can wait for it;
@@ -1164,15 +1165,25 @@ pub mod tests {
     }
 
     #[tokio::test]
-    async fn voice_is_offered_only_with_a_recognizer_and_the_resident_session_on() {
+    async fn voice_is_offered_only_with_a_recognizer_and_the_resident_session_on_and_ready() {
         let dir = temp_dir("voice-offer");
-        let on = || Some(Arc::new(resident(&dir, &logged_in(), Arc::default())));
-        let off = Some(Arc::new(Resident::new(false, &dir, crate::resident::Launcher::Codex, Arc::default())));
+        let with = |problem: Option<crate::resident::Problem>| {
+            let resident = resident(&dir, &logged_in(), Arc::default());
+            resident.note(problem);
+            Some(Arc::new(resident))
+        };
+        let on = || with(None);
+        let off = Resident::new(false, &dir, crate::resident::Launcher::Codex, Arc::default());
+        off.note(None);
         let recognizer = || Some(Arc::new(FakeRecognizer { answer: Ok(""), heard: Default::default() }) as Arc<dyn Recognizer>);
         assert!(Voice::new(recognizer(), on()).available());
         assert!(!Voice::new(None, on()).available());
-        assert!(!Voice::new(recognizer(), off).available());
+        assert!(!Voice::new(recognizer(), Some(Arc::new(off))).available());
         assert!(!Voice::new(recognizer(), None).available());
+        let unchecked = Some(Arc::new(resident(&dir, &logged_in(), Arc::default())));
+        assert!(!Voice::new(recognizer(), unchecked).available(), "not before the first check");
+        assert!(!Voice::new(recognizer(), with(Some(crate::resident::Problem::CodexMissing))).available());
+        assert!(!Voice::new(recognizer(), with(Some(crate::resident::Problem::CodexLoggedOut))).available());
 
         // Lines that arrive anyway are told voice is off.
         let voice = Voice::new(None, on());

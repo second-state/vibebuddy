@@ -327,3 +327,7 @@
 "Nothing said yet" = "还没说过话";
 "Hold K0 on the box and talk to the buddy. What you say and what it says back show up here." = "按住盒子上的 K0，对氛围小助手说话。你说的和它回的都会显示在这里。";
 "The daemon answered %lld" = "daemon 返回了 %lld";
+"Voice needs Codex" = "语音需要 Codex";
+"Voice commands are answered by Codex on this computer, and it isn't installed. Install the Codex CLI, then sign in with `codex login`. This tab notices within half a minute." = "语音指令由这台电脑上的 Codex 来回答，但它还没安装。先装好 Codex CLI，再用 `codex login` 登录。半分钟内这一页会自己更新。";
+"Voice commands are answered by Codex on this computer, and it isn't signed in. Run `codex login` in a terminal and sign in. This tab notices within half a minute." = "语音指令由这台电脑上的 Codex 来回答，但它还没登录。在终端里运行 `codex login` 登录即可。半分钟内这一页会自己更新。";
+"How to install the Codex CLI" = "如何安装 Codex CLI";

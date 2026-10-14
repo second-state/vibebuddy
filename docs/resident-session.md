@@ -2,7 +2,7 @@
 
 The resident session is the one long-running Codex thread every voice command goes to ([ADR-0017](adr/0017-voice-commands-go-to-a-resident-session-that-speaks-as-the-buddy.md); see "Voice commands" in [`CONTEXT.md`](../CONTEXT.md)). A voice command reaches it spoken to a box linked over USB or the local network (below), or typed with `vibebuddy say`.
 
-It is experimental and off by default. Start `vibebuddyd` with `VIBEBUDDY_RESIDENT_SESSION=1` to turn it on. While it is on, both Apps' settings windows have a Conversation tab that shows it (below); nothing else of it is in the App UI, on the Mac or on Linux.
+It is experimental and off by default. Start `vibebuddyd` with `VIBEBUDDY_RESIDENT_SESSION=1` to turn it on. For now voice needs the user's own Codex: the Codex CLI installed and signed in (`codex login`) on the computer the daemon runs on. Without it the box isn't offered voice, and the Conversation tab says what's missing. While it is on, both Apps' settings windows have a Conversation tab that shows it (below); nothing else of it is in the App UI, on the Mac or on Linux.
 
 ## Using it
 
@@ -17,6 +17,8 @@ The thread lives in a Codex home of the daemon's own (below), so the Codex App c
 
 Both Apps ask `GET /v1/resident` each time the daemon comes up (only its environment at start decides) and show a Conversation tab, between Device and Advanced, only while it says `enabled`. The tab reads the last 20 exchanges with `GET /v1/resident/history?limit=20` each time it is shown and on Refresh, and lists them oldest first, newest at the bottom: each voice command on the right, the buddy's spoken replies under it on the left. With none yet, it says how to talk to the buddy (hold K0); when the daemon can't be reached it points to Advanced → Restart daemon, and when the resident session can't be read (Codex missing or not logged in) it shows the daemon's reason. The last answer from `GET /v1/resident` is kept while the daemon is down, so an open tab says the daemon isn't running rather than vanishing.
 
+While the tab is shown it updates by itself: it asks `GET /v1/resident` every 2 seconds and reads the history again only when `revision` moved (or voice just became ready), so a new exchange shows up on its own and the list stays scrolled to the newest. It stops asking when another tab is picked or the window is closed. A daemon older than `revision` gets its history read every 5 seconds instead. When the answer says voice isn't ready, the tab says what's missing in place of the conversation: Codex not installed, with a link to OpenAI's [Codex CLI page](https://learn.chatgpt.com/docs/codex/cli); or not signed in, with `codex login` to run in a terminal. It notices the fix within half a minute.
+
 ![The Conversation tab on the Mac, in Chinese](images/app-conversation-zh.png)
 
 `vibebuddy` is a second binary of the daemon package (`daemon/src/bin/vibebuddy.rs`). Like every client, it only talks to the daemon's HTTP API, at `VIBEBUDDY_BIND` (default `127.0.0.1:7331`):
@@ -24,8 +26,14 @@ Both Apps ask `GET /v1/resident` each time the daemon comes up (only its environ
 | Endpoint | Does |
 | --- | --- |
 | `POST /v1/resident/say` `{"text"}` | Runs one turn; answers `{"thread_id","replies":[...],"elapsed_ms"}`. 404 when off, 503 when Codex is missing or not logged in, 504 after two minutes. |
-| `GET /v1/resident` | `{"enabled","thread_id"}` |
+| `GET /v1/resident` | `{"enabled","thread_id","revision","ready","problem"}`. `revision` goes up when a voice command's turn ends (answered or not, from the box or `say`) and when the thread changes; it is kept in memory and starts at 0 with the daemon. `ready` is on and Codex found installed and logged in; `problem` is then `null`, else `codex_missing` or `codex_logged_out` (`null` while off). Never starts the app-server; see Readiness below. |
 | `GET /v1/resident/history?limit=n` | `{"thread_id","exchanges":[{"said","replies":[...]}]}`, oldest first, read from the thread with `thread/turns/list` (default 5, at most 50). Starts the app-server if it isn't running; the daemon keeps no record of its own. |
+
+## Readiness
+
+Voice needs the user's Codex, so the daemon keeps a readiness check that never starts the app-server or a turn: it looks `codex` up as a start does (`VIBEBUDDY_CODEX`, PATH, the usual install places) and runs `codex -c cli_auth_credentials_store="file" login status` in the resident Codex home (with `auth.json` linked as for a start), which reads the same login `account/read` would and exits 0 only when signed in. The answer stands for 30 seconds: `GET /v1/resident` checks again once it is older, and so does a timer in the daemon every 30 seconds while the session is on. Every start of the app-server is a check too: one that ends in "codex not found" or "not logged in" marks the session not ready, and one that gets through marks it ready.
+
+The box is offered voice (`voice.available`, below) only while the session is on and ready and a recognizer is configured. When readiness flips, the daemon tells a box that has reported its build `"on":true` or `"on":false` right away (not over the Relay or the UART bridge, where voice is never offered), so a long K0 goes back to giving up the Pomodoro phase while Codex is missing or signed out.
 
 ## How it works
 

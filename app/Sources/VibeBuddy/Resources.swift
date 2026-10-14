@@ -19,6 +19,9 @@ enum Resources {
     /// Where every release lives, for downloading firmware by hand when the daemon can't.
     static let releasesPage = URL(string: "https://github.com/second-state/vibebuddy/releases")!
 
+    /// OpenAI's page on installing the Codex CLI, which voice commands need.
+    static let codexInstallPage = URL(string: "https://learn.chatgpt.com/docs/codex/cli")!
+
     static var macOSDirectory: URL {
         Bundle.main.executableURL!.deletingLastPathComponent()
     }

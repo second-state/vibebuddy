@@ -22,7 +22,7 @@ use std::time::Duration;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use tokio::io::{AsyncRead, AsyncWrite};
-use tokio::sync::{Mutex, mpsc};
+use tokio::sync::{Mutex, mpsc, watch};
 use tracing::{info, warn};
 
 use crate::activity::ActivityTracker;
@@ -50,6 +50,10 @@ const MEMORY_SEARCH_MAX_BYTES: usize = 8_000;
 /// session only talks, looks things up and hands work on. See [`tool_overrides`] for what was measured.
 const MODEL: &str = "gpt-6-luna";
 const REASONING_EFFORT: &str = "low";
+/// How long a readiness check (is `codex` there, is the user logged in) stands before it is made again.
+pub const READINESS_TTL: Duration = Duration::from_secs(30);
+/// The login store the resident Codex uses: the user's `auth.json`, linked in (see [`tool_overrides`]).
+const AUTH_STORE: &str = "cli_auth_credentials_store=\"file\"";
 /// Codex's built-in web search (`disabled`, `cached`, `indexed` or `live` in codex 0.162.0): `live`, since the
 /// questions it is for (weather, news, prices) are about now, which a cached index may not have yet.
 const WEB_SEARCH: &str = "live";
@@ -85,6 +89,27 @@ impl std::fmt::Display for ResidentError {
 impl From<RpcError> for ResidentError {
     fn from(error: RpcError) -> Self {
         Self::Rpc(error.to_string())
+    }
+}
+
+/// Why the resident session can't take a voice command now: voice needs the user's Codex, installed and logged in.
+#[derive(Clone, Copy, Debug, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Problem {
+    CodexMissing,
+    CodexLoggedOut,
+}
+
+/// The last readiness check: none yet, or when it was made and what it found.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct Readiness {
+    pub checked: Option<tokio::time::Instant>,
+    pub problem: Option<Problem>,
+}
+
+impl Readiness {
+    pub fn ready(&self) -> bool {
+        self.checked.is_some() && self.problem.is_none()
     }
 }
 
@@ -147,6 +172,13 @@ pub struct Resident {
     session: Mutex<Option<Session>>,
     /// Read synchronously by the hook filter.
     thread_id: std::sync::Mutex<Option<String>>,
+    /// Bumped when a turn ends or the thread changes, so a client can tell the history moved without reading it.
+    revision: std::sync::atomic::AtomicU64,
+    /// The last readiness check; watchers hear when `ready()` flips.
+    readiness: watch::Sender<Readiness>,
+    /// What the readiness check finds with the fake app-server.
+    #[cfg(test)]
+    fake_problem: std::sync::Mutex<Option<Problem>>,
 }
 
 impl Resident {
@@ -168,6 +200,10 @@ impl Resident {
             activities,
             session: Mutex::new(None),
             thread_id: std::sync::Mutex::new(saved.thread_id),
+            revision: std::sync::atomic::AtomicU64::new(0),
+            readiness: watch::channel(Readiness::default()).0,
+            #[cfg(test)]
+            fake_problem: std::sync::Mutex::new(None),
         }
     }
 
@@ -177,6 +213,84 @@ impl Resident {
 
     pub fn thread_id(&self) -> Option<String> {
         self.thread_id.lock().expect("thread id lock").clone()
+    }
+
+    /// A change marker for the history, kept in memory only: it starts at 0 with the daemon and goes up each time a
+    /// voice command's turn ends (answered or not) and when the thread changes.
+    pub fn revision(&self) -> u64 {
+        self.revision.load(std::sync::atomic::Ordering::Relaxed)
+    }
+
+    fn bump_revision(&self) {
+        self.revision.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    }
+
+    /// The last readiness check, as it stands; see [`Resident::check_readiness`].
+    pub fn readiness(&self) -> Readiness {
+        *self.readiness.borrow()
+    }
+
+    /// Whether the session can take a voice command: on, and the last check found Codex installed and logged in.
+    pub fn ready(&self) -> bool {
+        self.enabled && self.readiness().ready()
+    }
+
+    /// Changes each time [`Resident::ready`] flips.
+    pub fn watch_ready(&self) -> watch::Receiver<Readiness> {
+        self.readiness.subscribe()
+    }
+
+    /// Checks again whether `codex` is there and the user logged in, unless the last check is younger than
+    /// [`READINESS_TTL`]. Starts no app-server and no turn: it looks `codex` up as a start would and asks
+    /// `codex login status` in the resident Codex home, which reads the login the app-server's `account/read` would.
+    pub async fn check_readiness(&self) -> Readiness {
+        let last = self.readiness();
+        if !self.enabled || last.checked.is_some_and(|checked| checked.elapsed() < READINESS_TTL) {
+            return last;
+        }
+        let problem = match &self.launcher {
+            Launcher::Codex => self.login_problem().await,
+            #[cfg(test)]
+            Launcher::Fake(_) => *self.fake_problem.lock().unwrap(),
+        };
+        self.note(problem);
+        self.readiness()
+    }
+
+    async fn login_problem(&self) -> Option<Problem> {
+        let Some(program) = find_codex() else { return Some(Problem::CodexMissing) };
+        if let Err(error) = prepare_codex_home(&self.codex_home, &self.user_codex_home) {
+            warn!(%error, "cannot prepare the resident Codex home to check the login");
+            return Some(Problem::CodexLoggedOut);
+        }
+        let status = codex_command(&program, &self.codex_home)
+            .args(["-c", AUTH_STORE, "login", "status"])
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .status()
+            .await;
+        match status {
+            Ok(status) if status.success() => None,
+            Ok(_) => Some(Problem::CodexLoggedOut),
+            Err(error) => {
+                warn!(program = %program.display(), %error, "cannot run codex to check the login");
+                Some(Problem::CodexMissing)
+            }
+        }
+    }
+
+    /// Records what a check or a start found; watchers are told only when readiness itself flips.
+    pub(crate) fn note(&self, problem: Option<Problem>) {
+        let now = Readiness { checked: Some(tokio::time::Instant::now()), problem };
+        self.readiness.send_if_modified(|readiness| {
+            let flipped = readiness.ready() != now.ready();
+            if readiness.problem != now.problem {
+                info!(?problem, "resident session readiness changed");
+            }
+            *readiness = now;
+            flipped
+        });
     }
 
     /// Whether a Codex hook event comes from the resident session: by its thread, or by its working directory. The
@@ -211,6 +325,8 @@ impl Resident {
         if session.client.is_closed() {
             *slot = None;
         }
+        // Even a failed or timed-out turn may have left the command in the thread.
+        self.bump_revision();
         result
     }
 
@@ -254,7 +370,15 @@ impl Resident {
             *slot = None;
         }
         if slot.is_none() {
-            *slot = Some(self.start().await?);
+            let started = self.start().await;
+            // A start is a readiness check too, and the most recent one.
+            match &started {
+                Ok(_) => self.note(None),
+                Err(ResidentError::NoCodex) => self.note(Some(Problem::CodexMissing)),
+                Err(ResidentError::NotLoggedIn) => self.note(Some(Problem::CodexLoggedOut)),
+                Err(_) => {}
+            }
+            *slot = Some(started?);
         }
         Ok(slot.as_mut().expect("session was just started"))
     }
@@ -312,7 +436,10 @@ impl Resident {
             },
             None => self.start_thread(&client).await?,
         };
-        *self.thread_id.lock().expect("thread id lock") = Some(thread_id.clone());
+        let previous = self.thread_id.lock().expect("thread id lock").replace(thread_id.clone());
+        if previous.as_deref() != Some(thread_id.as_str()) {
+            self.bump_revision();
+        }
         let saved = Saved { thread_id: Some(thread_id.clone()), codex_version: version };
         if let Err(error) = save(&self.state_file, &saved) {
             warn!(%error, "failed to save the resident thread id");
@@ -629,7 +756,7 @@ fn tool_overrides() -> Vec<String> {
         FEATURES_OFF.iter().flat_map(|feature| ["-c".to_owned(), format!("features.{feature}=false")]).collect();
     for setting in [
         format!("web_search=\"{WEB_SEARCH}\""),
-        "cli_auth_credentials_store=\"file\"".to_owned(),
+        AUTH_STORE.to_owned(),
         "memories.generate_memories=false".to_owned(),
         format!("model=\"{MODEL}\""),
         format!("model_reasoning_effort=\"{REASONING_EFFORT}\""),
@@ -1302,6 +1429,71 @@ pub(crate) mod tests {
         );
         let list = script.lock().unwrap().received.last().unwrap()["params"].clone();
         assert_eq!(list, json!({"threadId": "new-thread", "limit": 2, "sortDirection": "desc", "itemsView": "full"}));
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn readiness_is_checked_without_a_turn_cached_and_follows_what_a_start_finds() {
+        let dir = temp_dir("readiness");
+        let script = Arc::new(std::sync::Mutex::new(Script::default()));
+        let resident = resident(&dir, &script, Arc::default());
+        let mut watcher = resident.watch_ready();
+        assert!(!resident.ready(), "not ready before the first check");
+
+        assert_eq!(resident.check_readiness().await.problem, None);
+        assert!(resident.ready());
+        assert!(watcher.has_changed().unwrap(), "watchers hear it come on");
+        watcher.mark_unchanged();
+        assert_eq!(script.lock().unwrap().starts, 0, "the check starts no app-server");
+
+        // A check younger than the TTL stands.
+        *resident.fake_problem.lock().unwrap() = Some(Problem::CodexLoggedOut);
+        assert!(resident.check_readiness().await.ready());
+        tokio::time::advance(READINESS_TTL).await;
+        assert_eq!(resident.check_readiness().await.problem, Some(Problem::CodexLoggedOut));
+        assert!(!resident.ready());
+        assert!(watcher.has_changed().unwrap(), "and go off");
+        watcher.mark_unchanged();
+
+        // A start that finds the user logged in is the newer word, and so is one that finds them logged out.
+        script.lock().unwrap().logged_in = true;
+        resident.say("hi").await.unwrap();
+        assert!(resident.ready());
+        let script = Arc::new(std::sync::Mutex::new(Script::default()));
+        let logged_out = super::tests::resident(&dir, &script, Arc::default());
+        assert!(logged_out.check_readiness().await.ready());
+        let watcher = logged_out.watch_ready();
+        assert_eq!(logged_out.say("hi").await.unwrap_err(), ResidentError::NotLoggedIn);
+        assert_eq!(logged_out.readiness().problem, Some(Problem::CodexLoggedOut));
+        assert!(watcher.has_changed().unwrap());
+
+        let off = Resident::new(false, &dir, Launcher::Codex, Arc::default());
+        assert!(!off.check_readiness().await.ready() && !off.ready(), "switched off, nothing is checked");
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[tokio::test]
+    async fn the_revision_moves_when_a_turn_ends_or_the_thread_changes_but_not_on_reads() {
+        let dir = temp_dir("revision");
+        let saved = Saved { thread_id: Some("old-thread".to_owned()), codex_version: None };
+        save(&dir.join("resident.json"), &saved).unwrap();
+        let script = logged_in();
+        let first = resident(&dir, &script, Arc::default());
+        assert_eq!(first.revision(), 0);
+        first.history(5).await.unwrap();
+        assert_eq!(first.revision(), 0, "resuming the same thread and reading it changes nothing");
+        first.say("hi").await.unwrap();
+        assert_eq!(first.revision(), 1);
+        first.history(5).await.unwrap();
+        assert_eq!(first.revision(), 1);
+
+        // A lost thread replaced by a new one counts, and so does a turn that fails.
+        let script = logged_in();
+        script.lock().unwrap().lose_thread = true;
+        script.lock().unwrap().die_on_turn = Some(1);
+        let second = resident(&dir, &script, Arc::default());
+        assert!(second.say("one").await.is_err());
+        assert_eq!(second.revision(), 2, "the new thread and the failed turn");
         let _ = std::fs::remove_dir_all(dir);
     }
 

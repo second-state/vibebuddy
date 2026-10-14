@@ -6,11 +6,15 @@ import VibeBuddyCore
 struct ConversationView: View {
     /// Reads the exchanges, oldest first; the daemon in the App, canned ones when rendering a screenshot.
     let load: () async throws -> [ResidentExchange]
+    /// `GET /v1/resident`: the history's change marker, and whether voice commands can be taken.
+    let info: () async throws -> ResidentInfo
 
     static let limit = 20
 
     @State private var exchanges: [ResidentExchange]?
     @State private var failure: Failure?
+    /// What voice commands are missing (the user's Codex), as the daemon last said.
+    @State private var problem: ResidentProblem?
     @State private var loading = false
 
     enum Failure: Equatable {
@@ -30,12 +34,30 @@ struct ConversationView: View {
             content.frame(maxWidth: .infinity, maxHeight: .infinity)
         }
         .padding(16)
-        // Each time the tab is shown: the conversation goes on on the box while the window is closed.
-        .task { await reload() }
+        // Read each time the tab is shown (the conversation goes on on the box while the window is closed), then
+        // followed while it stays shown. SwiftUI cancels the task when the tab is left or the window closed.
+        .task { await follow() }
     }
 
     @ViewBuilder private var content: some View {
-        if let failure {
+        if let problem {
+            ContentUnavailableView {
+                Label("Voice needs Codex", systemImage: "mic.slash")
+            } description: {
+                switch problem {
+                case .codexMissing:
+                    Text("Voice commands are answered by Codex on this computer, and it isn't installed. Install the Codex CLI, then sign in with `codex login`. This tab notices within half a minute.")
+                case .codexLoggedOut:
+                    Text("Voice commands are answered by Codex on this computer, and it isn't signed in. Run `codex login` in a terminal and sign in. This tab notices within half a minute.")
+                case .other(let why):
+                    Text("The buddy's session isn't available: \(why)")
+                }
+            } actions: {
+                if problem == .codexMissing {
+                    Link("How to install the Codex CLI", destination: Resources.codexInstallPage)
+                }
+            }
+        } else if let failure {
             ContentUnavailableView {
                 Label("Couldn't read the conversation", systemImage: "exclamationmark.bubble")
             } description: {
@@ -68,6 +90,39 @@ struct ConversationView: View {
             }
         } else {
             ProgressView()
+        }
+    }
+
+    /// Asks `GET /v1/resident` every 2 seconds and reads the history again only when its change marker moved, or
+    /// when voice has just become ready. A daemon without the marker gets its history read every 5 seconds instead.
+    private func follow() async {
+        var seen: UInt64?
+        var marked = true
+        if let first = try? await info() {
+            seen = first.revision
+            problem = first.problem
+        }
+        await reload()
+        while !Task.isCancelled {
+            try? await Task.sleep(for: .seconds(marked ? 2 : 5))
+            if Task.isCancelled { return }
+            do {
+                let now = try await info()
+                marked = now.revision != nil
+                let becameReady = problem != nil && now.problem == nil
+                problem = now.problem
+                if now.revision == nil || now.revision != seen || becameReady {
+                    seen = now.revision
+                    await reload()
+                }
+            } catch let error as URLError where error.code == .cannotConnectToHost {
+                // Read again once it answers: a restarted daemon counts from 0 again.
+                seen = nil
+                problem = nil
+                failure = .daemonDown
+            } catch {
+                // A slow or cancelled ask; the next one tries again.
+            }
         }
     }
 

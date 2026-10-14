@@ -148,6 +148,10 @@ enum Message {
     Resident(Result<bool, String>),
     RefreshConversation,
     Conversation(Result<Vec<client::Exchange>, client::HistoryError>),
+    /// Ask `GET /v1/resident` again while the Conversation tab shows.
+    PollConversation,
+    ConversationPolled(Result<client::ResidentInfo, client::HistoryError>),
+    OpenCodexInstallPage,
     /// Ask `vibebuddy-hook` for each agent's state again.
     RefreshAgents,
     Agents(Result<Vec<agents::Setup>, String>),
@@ -226,6 +230,13 @@ struct App {
     /// The last voice commands and spoken replies read, or why they couldn't be; None before the first read.
     conversation: Option<Result<Vec<client::Exchange>, client::HistoryError>>,
     conversation_loading: bool,
+    /// The history's change marker when it was last read; None before that, and after the daemon went away.
+    conversation_seen: Option<u64>,
+    /// The daemon has the change marker; an older one gets its history read every 5 seconds instead.
+    conversation_marked: bool,
+    conversation_polling: bool,
+    /// What voice commands are missing (the user's Codex), as the daemon last said.
+    resident_problem: Option<client::Problem>,
     /// The outcome of the last action, shown at the bottom of the window.
     notice: Option<Result<String, String>>,
     /// The language picked in Settings, and, while it differs from the UI's, the offer to restart.
@@ -280,6 +291,10 @@ impl App {
             resident: false,
             conversation: None,
             conversation_loading: false,
+            conversation_seen: None,
+            conversation_marked: true,
+            conversation_polling: false,
+            resident_problem: None,
             notice: None,
             language: UiLanguage::saved(),
             restart_offer: None,
@@ -335,12 +350,20 @@ impl App {
         );
         #[cfg(not(target_os = "linux"))]
         let (tray, instance) = (Subscription::none(), Subscription::none());
+        // Only while the Conversation tab is in an open window: the history is read again when it changed.
+        let conversation = if self.settings.is_some() && self.resident && self.tab == Tab::Conversation {
+            let every = if self.conversation_marked { 2 } else { 5 };
+            iced::time::every(Duration::from_secs(every)).map(|_| Message::PollConversation)
+        } else {
+            Subscription::none()
+        };
         Subscription::batch([
             Subscription::run(client::status_updates).map(Message::Daemon),
             iced::time::every(Duration::from_secs(2)).map(|_| Message::ThemeTick),
             window::close_events().map(Message::WindowClosed),
             tray,
             instance,
+            conversation,
         ])
     }
 
@@ -428,8 +451,15 @@ impl App {
                     ..Default::default()
                 });
                 self.settings = Some(id);
+                // Reopened on the Conversation tab: read it again, as when the tab opens.
+                let conversation = if self.tab == Tab::Conversation {
+                    self.conversation_seen = None;
+                    Task::done(Message::PollConversation)
+                } else {
+                    Task::none()
+                };
                 // The Agents tab reads each agent's config from disk; have it ready, whichever tab shows first.
-                return Task::batch([open.discard(), Task::done(Message::RefreshAgents)]);
+                return Task::batch([open.discard(), Task::done(Message::RefreshAgents), conversation]);
             }
             Message::WindowClosed(id) => {
                 if self.settings == Some(id) {
@@ -447,9 +477,10 @@ impl App {
                 if tab == Tab::Agents {
                     return Task::done(Message::RefreshAgents);
                 }
-                // The conversation goes on on the box while the window is elsewhere.
+                // The conversation goes on on the box while the window is elsewhere: read it each time the tab opens.
                 if tab == Tab::Conversation {
-                    return Task::done(Message::RefreshConversation);
+                    self.conversation_seen = None;
+                    return Task::done(Message::PollConversation);
                 }
             }
             Message::Resident(Ok(enabled)) => {
@@ -468,6 +499,40 @@ impl App {
             Message::Conversation(result) => {
                 self.conversation_loading = false;
                 self.conversation = Some(result);
+            }
+            Message::PollConversation => {
+                if !self.conversation_polling {
+                    self.conversation_polling = true;
+                    return Task::perform(client::resident_info(), Message::ConversationPolled);
+                }
+            }
+            Message::ConversationPolled(result) => {
+                self.conversation_polling = false;
+                match result {
+                    Ok(info) => {
+                        self.conversation_marked = info.revision.is_some();
+                        let became_ready = self.resident_problem.is_some() && info.problem.is_none();
+                        self.resident_problem = info.problem;
+                        let changed = info.revision.is_none() || info.revision != self.conversation_seen || became_ready;
+                        // A read already under way is left alone; the next poll sees the change again.
+                        if (changed || self.conversation.is_none()) && !self.conversation_loading {
+                            self.conversation_seen = info.revision;
+                            return Task::done(Message::RefreshConversation);
+                        }
+                    }
+                    Err(client::HistoryError::DaemonDown) => {
+                        // Read again once it answers: a restarted daemon counts from 0 again.
+                        self.conversation_seen = None;
+                        self.resident_problem = None;
+                        self.conversation = Some(Err(client::HistoryError::DaemonDown));
+                    }
+                    Err(client::HistoryError::Unavailable(_)) => {}
+                }
+            }
+            Message::OpenCodexInstallPage => {
+                if let Err(error) = launch("xdg-open", &[std::ffi::OsStr::new(CODEX_INSTALL_PAGE)]) {
+                    self.notice = Some(Err(error));
+                }
             }
             Message::NotifyLink(enabled) => {
                 let mut config = self.status.as_ref().map(|status| status.config.clone()).unwrap_or_default();
@@ -1611,6 +1676,24 @@ impl App {
                 .center(Length::Fill)
                 .into()
         };
+        // Voice needs the user's Codex, installed and logged in: say what's missing first.
+        if let Some(problem) = &self.resident_problem {
+            let detail = match problem {
+                client::Problem::CodexMissing => tr("Voice commands are answered by Codex on this computer, and it isn't installed. Install the Codex CLI, then sign in with `codex login`. This tab notices within half a minute.", &[]),
+                client::Problem::CodexLoggedOut => tr("Voice commands are answered by Codex on this computer, and it isn't signed in. Run `codex login` in a terminal and sign in. This tab notices within half a minute.", &[]),
+                client::Problem::Other => tr("The buddy's session isn't available: %@", &[&"?"]),
+            };
+            let install = (*problem == client::Problem::CodexMissing)
+                .then(|| button(text(tr("How to install the Codex CLI", &[]))).on_press(Message::OpenCodexInstallPage));
+            let body = container(
+                column![text(tr("Voice needs Codex", &[])).size(16), text(detail).size(13).style(text::secondary)]
+                    .push(install)
+                    .spacing(6)
+                    .align_x(iced::Alignment::Center),
+            )
+            .center(Length::Fill);
+            return column![header, body].spacing(12).into();
+        }
         let body = match &self.conversation {
             None => container(text(tr("Refreshing…", &[])).style(text::secondary)).center(Length::Fill).into(),
             Some(Err(client::HistoryError::DaemonDown)) => placeholder(
@@ -1742,6 +1825,8 @@ async fn export_diagnostics(summary: String, config: Option<Config>) -> Result<S
 
 /// Where every release lives: the new App, and the firmware zip for flashing by hand when the daemon can't get it.
 const RELEASES_PAGE: &str = "https://github.com/second-state/vibebuddy/releases";
+/// OpenAI's page on installing the Codex CLI, which voice commands need.
+const CODEX_INSTALL_PAGE: &str = "https://learn.chatgpt.com/docs/codex/cli";
 const NEW_ISSUE: &str = "https://github.com/second-state/vibebuddy/issues/new";
 
 /// The id under which the box wears the user's own Character.

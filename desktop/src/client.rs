@@ -151,13 +151,47 @@ pub async fn restart_daemon() -> Result<(), String> {
 
 /// Whether the daemon runs the experimental resident session (`VIBEBUDDY_RESIDENT_SESSION=1`).
 pub async fn resident_enabled() -> Result<bool, String> {
-    #[derive(Deserialize)]
-    struct Info {
-        enabled: bool,
-    }
-    let response = reqwest::get(format!("{BASE}/v1/resident")).await.map_err(|error| error.to_string())?;
-    let info: Info = response.json().await.map_err(|error| error.to_string())?;
-    Ok(info.enabled)
+    resident_info().await.map(|info| info.enabled).map_err(|error| match error {
+        HistoryError::DaemonDown => "the daemon isn't running".to_owned(),
+        HistoryError::Unavailable(why) => why,
+    })
+}
+
+/// `GET /v1/resident`.
+#[derive(Clone, Debug, Deserialize, PartialEq)]
+pub struct ResidentInfo {
+    pub enabled: bool,
+    /// Goes up when a voice command's turn ends or the thread changes, so the Conversation tab reads the history
+    /// again only then. Kept in memory: it starts again at 0 when the daemon restarts. None from an older daemon.
+    #[serde(default)]
+    pub revision: Option<u64>,
+    /// What voice commands are missing while the session is on but not ready; None when ready, and from a daemon
+    /// too old to say.
+    #[serde(default)]
+    pub problem: Option<Problem>,
+}
+
+/// Why the resident session can't take voice commands now: voice needs the user's Codex.
+#[derive(Clone, Debug, Deserialize, PartialEq)]
+#[serde(rename_all = "snake_case")]
+pub enum Problem {
+    CodexMissing,
+    CodexLoggedOut,
+    /// A reason this app doesn't know yet.
+    #[serde(other)]
+    Other,
+}
+
+/// Asked every 2 seconds while the Conversation tab shows, so it answers quickly or not at all.
+pub async fn resident_info() -> Result<ResidentInfo, HistoryError> {
+    let response = reqwest::Client::new()
+        .get(format!("{BASE}/v1/resident"))
+        .timeout(Duration::from_secs(5))
+        .send()
+        .await
+        .map_err(|error| if error.is_connect() { HistoryError::DaemonDown } else { HistoryError::Unavailable(error.to_string()) })?;
+    let body = response.bytes().await.map_err(|error| HistoryError::Unavailable(error.to_string()))?;
+    serde_json::from_slice(&body).map_err(|error| HistoryError::Unavailable(error.to_string()))
 }
 
 /// One voice command and the buddy's spoken replies to it.
@@ -242,5 +276,20 @@ mod tests {
         assert_eq!(statuses.len(), 1);
         assert_eq!(statuses[0].today.done, 3);
         assert!(buffer.is_empty());
+    }
+
+    #[test]
+    fn the_resident_info_reads_its_revision_and_problem_and_an_older_daemons_without_them() {
+        let parse = |json: &str| serde_json::from_str::<ResidentInfo>(json).unwrap();
+        let older = parse(r#"{"enabled":true,"thread_id":null}"#);
+        assert_eq!(older, ResidentInfo { enabled: true, revision: None, problem: None });
+        let ready = parse(r#"{"enabled":true,"thread_id":"t1","revision":7,"ready":true,"problem":null}"#);
+        assert_eq!(ready, ResidentInfo { enabled: true, revision: Some(7), problem: None });
+        let missing = parse(r#"{"enabled":true,"thread_id":null,"revision":0,"ready":false,"problem":"codex_missing"}"#);
+        assert_eq!(missing.problem, Some(Problem::CodexMissing));
+        let logged_out = parse(r#"{"enabled":true,"thread_id":null,"revision":0,"ready":false,"problem":"codex_logged_out"}"#);
+        assert_eq!(logged_out.problem, Some(Problem::CodexLoggedOut));
+        let later = parse(r#"{"enabled":true,"thread_id":null,"revision":0,"ready":false,"problem":"something_new"}"#);
+        assert_eq!(later.problem, Some(Problem::Other));
     }
 }

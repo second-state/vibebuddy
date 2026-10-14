@@ -63,6 +63,11 @@ fn resident(limit: usize) -> Result<(), String> {
     if info["enabled"] != true {
         return Err("the resident session is off; start vibebuddyd with VIBEBUDDY_RESIDENT_SESSION=1".to_owned());
     }
+    match info["problem"].as_str() {
+        Some("codex_missing") => eprintln!("voice is off: Codex isn't installed (https://learn.chatgpt.com/docs/codex/cli)"),
+        Some("codex_logged_out") => eprintln!("voice is off: Codex isn't logged in; run `codex login`"),
+        _ => {}
+    }
     let Some(thread) = info["thread_id"].as_str() else {
         println!("no resident thread yet; it starts with the first `vibebuddy say`");
         return Ok(());

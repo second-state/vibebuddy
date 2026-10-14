@@ -285,6 +285,9 @@ async fn main() {
     tokio::spawn(poll_ci(state.clone()));
     tokio::spawn(handle_device_events(state.clone(), device_events));
     tokio::spawn(check_for_updates(state.clone()));
+    if let Some(resident) = state.resident.clone().filter(|resident| resident.enabled()) {
+        follow_resident_readiness(&state, resident);
+    }
     // On macOS the app reports a lost link; elsewhere there is no app, so the daemon does it.
     if !cfg!(target_os = "macos") {
         tokio::spawn(link_alert::watch(state.clone()));
@@ -431,6 +434,38 @@ async fn handle_voice_line(state: &AppState, line: &str) -> Option<tokio::task::
         None => state.config.lock().await.voice.clone(),
     };
     state.voice.handle_line(line, &state.transport, character.as_deref())
+}
+
+/// Tells a box that has reported its build whether voice is on now, after the resident session's readiness flipped
+/// (the user's Codex installed or gone, logged in or out). Told `false`, a long K0 gives up the Pomodoro phase as it
+/// did before voice. Never over the Relay or the UART bridge, where voice is never offered.
+async fn offer_voice_again(state: &AppState) {
+    let (booted, over_relay, on_bridge) = {
+        let device = state.device.lock().await;
+        (device.connected && device.firmware_build.is_some(), device.relay, device.bridge)
+    };
+    if booted && !over_relay && !on_bridge {
+        let on = state.voice.available();
+        info!(on, "the resident session's readiness changed; telling the box whether voice is on");
+        send_event(state, voice::available_event(on));
+    }
+}
+
+/// Checks the resident session's readiness every [`resident::READINESS_TTL`] and tells the box each time it flips.
+fn follow_resident_readiness(state: &AppState, resident: Arc<resident::Resident>) {
+    let mut flips = resident.watch_ready();
+    let follower = state.clone();
+    tokio::spawn(async move {
+        while flips.changed().await.is_ok() {
+            offer_voice_again(&follower).await;
+        }
+    });
+    tokio::spawn(async move {
+        loop {
+            resident.check_readiness().await;
+            tokio::time::sleep(resident::READINESS_TTL).await;
+        }
+    });
 }
 
 async fn open_k2_source(state: &AppState) {
@@ -1340,12 +1375,27 @@ struct SayRequest {
 struct ResidentInfo {
     enabled: bool,
     thread_id: Option<String>,
+    /// Goes up when a voice command's turn ends or the thread changes; the Conversation tab polls it.
+    revision: u64,
+    /// On, and the user's Codex was last found installed and logged in: voice commands can be taken.
+    ready: bool,
+    /// What is missing when it is on but not ready: `codex_missing` or `codex_logged_out`.
+    problem: Option<resident::Problem>,
 }
 
+/// Asking checks the resident session's readiness again when the last check is older than
+/// [`resident::READINESS_TTL`]; it never starts the app-server.
 async fn get_resident(State(state): State<AppState>) -> Json<ResidentInfo> {
+    let Some(resident) = state.resident.as_ref() else {
+        return Json(ResidentInfo { enabled: false, thread_id: None, revision: 0, ready: false, problem: None });
+    };
+    let readiness = resident.check_readiness().await;
     Json(ResidentInfo {
-        enabled: state.resident.as_ref().is_some_and(|resident| resident.enabled()),
-        thread_id: state.resident.as_ref().and_then(|resident| resident.thread_id()),
+        enabled: resident.enabled(),
+        thread_id: resident.thread_id(),
+        revision: resident.revision(),
+        ready: resident.ready(),
+        problem: if resident.enabled() { readiness.problem } else { None },
     })
 }
 
@@ -1654,6 +1704,7 @@ mod tests {
             let transport = Arc::new(RecordingTransport::default());
             let mut state = test_state(transport.clone());
             let resident = Arc::new(resident::Resident::new(enabled, &dir, resident::Launcher::Codex, Arc::default()));
+            resident.note(None);
             state.voice = Arc::new(voice::Voice::new(Some(Arc::new(SilentRecognizer)), Some(resident)));
 
             publish_device_message(&state, DeviceMessage::Connected { port: "/dev/cu.x".to_owned(), bridge: false, usb_serial: None }).await;
@@ -1674,6 +1725,65 @@ mod tests {
             publish_device_message(&state, build()).await;
             assert_eq!(offers(&transport), expected, "not over the UART bridge");
         }
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[tokio::test]
+    async fn the_box_is_told_each_time_the_resident_session_becomes_ready_or_stops_being() {
+        let dir = resident::tests::temp_dir("main-readiness-offer");
+        let transport = Arc::new(RecordingTransport::default());
+        let mut state = test_state(transport.clone());
+        let resident = Arc::new(resident::tests::resident(&dir, &resident::tests::logged_in(), Arc::default()));
+        state.resident = Some(resident.clone());
+        state.voice = Arc::new(voice::Voice::new(Some(Arc::new(SilentRecognizer)), Some(resident.clone())));
+        let offers = || {
+            transport.events().iter().filter(|event| event.event == "voice.available").map(|event| event.extra["on"].clone()).collect::<Vec<_>>()
+        };
+        let settle = || tokio::time::sleep(Duration::from_millis(50));
+        let build = || DeviceMessage::Line("DISPLAY READY BUILD v9 2026-10-01".to_owned());
+
+        publish_device_message(&state, DeviceMessage::Connected { port: "/dev/cu.x".to_owned(), bridge: false, usb_serial: None }).await;
+        publish_device_message(&state, build()).await;
+        assert!(offers().is_empty(), "not offered before the session is found ready");
+
+        // The first check finds Codex installed and logged in.
+        follow_resident_readiness(&state, resident.clone());
+        settle().await;
+        assert_eq!(offers(), [serde_json::json!(true)]);
+        resident.note(Some(resident::Problem::CodexLoggedOut));
+        settle().await;
+        assert_eq!(offers(), [serde_json::json!(true), serde_json::json!(false)], "withdrawn when the user logs out");
+        resident.note(Some(resident::Problem::CodexMissing));
+        settle().await;
+        assert_eq!(offers().len(), 2, "still not ready: nothing new to tell");
+
+        // Never over the UART bridge, where voice isn't offered at all.
+        publish_device_message(&state, DeviceMessage::Connected { port: "/dev/cu.wchusbserial1".to_owned(), bridge: true, usb_serial: None }).await;
+        publish_device_message(&state, build()).await;
+        resident.note(None);
+        settle().await;
+        assert_eq!(offers().len(), 2);
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[tokio::test]
+    async fn the_resident_info_carries_a_revision_without_starting_the_app_server() {
+        let dir = resident::tests::temp_dir("main-revision");
+        let script = resident::tests::logged_in();
+        let mut state = test_state(Arc::new(RecordingTransport::default()));
+        state.resident = Some(Arc::new(resident::tests::resident(&dir, &script, Arc::default())));
+
+        let Json(info) = get_resident(State(state.clone())).await;
+        assert_eq!(
+            serde_json::to_value(&info).unwrap(),
+            serde_json::json!({"enabled": true, "thread_id": null, "revision": 0, "ready": true, "problem": null})
+        );
+        assert_eq!(script.lock().unwrap().starts, 0, "asking never starts the app-server");
+
+        state.resident.as_ref().unwrap().say("hi").await.unwrap();
+        let Json(info) = get_resident(State(state.clone())).await;
+        assert_eq!(info.thread_id.as_deref(), Some("new-thread"));
+        assert_eq!(info.revision, 2, "a new thread and one turn");
         let _ = std::fs::remove_dir_all(dir);
     }
 

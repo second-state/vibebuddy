@@ -197,7 +197,7 @@ A voice command (ADR-0017) on a box linked over USB or the local network: the bo
 
 The computer offers voice, and the box only treats a long K0 as push-to-talk while it is offered:
 
-- `{"version":1,"event":"voice.available","on":true}`: sent after `device.hello` is answered (the daemon sends it on every `DISPLAY READY BUILD`, so a box that rebooted on the same link is told again), and again whenever it changes, when the resident session is switched on and speech recognition is configured; `"on":false` withdraws it. A box that hasn't been told, or was told `false`, keeps K0 long as it was. A new link starts with voice off until the computer says otherwise.
+- `{"version":1,"event":"voice.available","on":true}`: sent after `device.hello` is answered (the daemon sends it on every `DISPLAY READY BUILD`, so a box that rebooted on the same link is told again), and again whenever it changes, when the resident session is switched on and ready (the user's Codex installed and signed in; see [`resident-session.md`](resident-session.md#readiness)) and speech recognition is configured; `"on":false` withdraws it. A box that hasn't been told, or was told `false`, keeps K0 long as it was. A new link starts with voice off until the computer says otherwise.
 
 One recording is a turn, numbered by the box from 1 after each boot. The box sends diagnostic lines, each under 1024 bytes:
 
