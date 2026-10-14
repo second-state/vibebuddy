@@ -140,12 +140,10 @@ const VOICE_FILES: &[(&str, &str)] = &[
     ("mei", include_str!("../../characters/mei/voice.env")),
     ("wanwanxiaohe", include_str!("../../characters/wanwanxiaohe/voice.env")),
 ];
-/// The built-in default Character speaks with ElevenLabs' Jessica (voices/README.md); so does no Character pack, or
-/// one these files don't know.
+/// ElevenLabs' own Jessica (voices/README.md), a stock voice that belongs to no Character but the built-in default.
+/// Every Character whose voice ElevenLabs doesn't have (the Doubao ones, until the service speaks Doubao) uses it,
+/// rather than borrowing another Character's voice; so does no Character pack, or one these files don't know.
 const DEFAULT_VOICE: &str = "elevenlabs:cgSgspJ2msm6clMCkdW9";
-/// Until the voice service speaks Doubao, a Character whose voice is there (the Chinese ones) borrows Mei's: she
-/// is Chinese-American, and ElevenLabs' multilingual model reads Chinese in her voice.
-const NOT_YET_SPOKEN: &str = "mei";
 
 /// The voice service's name for `character`'s voice (the id the box reports in `VOICES`), as `<vendor>:<voice>`.
 /// The model is multilingual, so a reply in another language than the Character's keeps the Character's voice.
@@ -157,8 +155,7 @@ pub fn voice_for(character: Option<&str>) -> String {
     };
     match character.and_then(voice_of) {
         Some(("elevenlabs", voice)) => format!("elevenlabs:{voice}"),
-        Some(_) => voice_of(NOT_YET_SPOKEN).map_or(DEFAULT_VOICE.to_owned(), |(_, voice)| format!("elevenlabs:{voice}")),
-        None => DEFAULT_VOICE.to_owned(),
+        _ => DEFAULT_VOICE.to_owned(),
     }
 }
 
@@ -193,7 +190,7 @@ mod tests {
     fn each_character_speaks_in_the_voice_of_its_lines() {
         assert_eq!(voice_for(Some("ada")), "elevenlabs:tcSsCJFYrsHpK5rCQZMf");
         assert_eq!(voice_for(Some("hank")), "elevenlabs:U6jH23hcPh0zH17nf3DT");
-        assert_eq!(voice_for(Some("wanwanxiaohe")), voice_for(Some("mei")), "Doubao isn't spoken yet");
+        assert_eq!(voice_for(Some("wanwanxiaohe")), DEFAULT_VOICE, "a Doubao voice: the stock one");
         assert_eq!(voice_for(Some("robot")), DEFAULT_VOICE);
         assert_eq!(voice_for(None), DEFAULT_VOICE, "no Character pack");
         assert_eq!(voice_for(Some("hsiaoyu")), DEFAULT_VOICE, "an old voice pack");
