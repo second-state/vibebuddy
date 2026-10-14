@@ -72,9 +72,17 @@ pub async fn set_volume(level: u8, preview: bool) -> Result<(), String> {
 }
 
 /// The daemon accepts the pack and writes it in the background; progress arrives in the status stream.
-pub async fn write_voice_pack(pack: Vec<u8>) -> Result<(), String> {
+/// `lender` (the Character lending a custom one its voice, persona and lines) and `address` (the form of address
+/// its lines carry) aren't in the pack; the daemon keeps them for the buddy's spoken replies.
+pub async fn write_voice_pack(pack: Vec<u8>, lender: Option<&str>, address: Option<&str>) -> Result<(), String> {
+    // Both are ids from fixed lists (`ada`, `laoban`): nothing to escape.
+    let query: Vec<String> = [("lender", lender), ("address", address)]
+        .into_iter()
+        .filter_map(|(name, value)| Some(format!("{name}={}", value?)))
+        .collect();
+    let query = if query.is_empty() { String::new() } else { format!("?{}", query.join("&")) };
     let request = reqwest::Client::new()
-        .post(format!("{BASE}/v1/device/voice-pack"))
+        .post(format!("{BASE}/v1/device/voice-pack{query}"))
         .header("content-type", "application/octet-stream")
         .body(pack);
     accepted(request).await

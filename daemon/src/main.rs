@@ -13,6 +13,7 @@ mod resident;
 mod resident_claude;
 mod link_alert;
 mod occasions;
+mod persona;
 mod rom_flasher;
 mod screenshot;
 mod serial_transport;
@@ -106,6 +107,9 @@ struct AppState {
     voice: Arc<voice::Voice>,
     /// The box on the cable said `LINK NOISE` since its last `BOX KEY` (ADR-0015).
     noise_seen: Arc<std::sync::atomic::AtomicBool>,
+    /// What the App said about the Character pack it last wrote (who lends a custom one, the form of address),
+    /// kept in [`persona::RECORD_FILE`] in the state directory.
+    written: Arc<Mutex<persona::Written>>,
 }
 
 impl AppState {
@@ -142,6 +146,7 @@ impl AppState {
             resident: None,
             voice: Arc::new(voice::Voice::new(None, None)),
             noise_seen: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            written: Arc::default(),
         }
     }
 
@@ -258,7 +263,10 @@ async fn main() {
     state.identity = identity;
     state.relay = relay_config;
     state.state_dir = config::state_dir();
-    state.resident = state.state_dir.as_deref().map(|dir| {
+    if let Some(dir) = &state.state_dir {
+        state.written = Arc::new(Mutex::new(persona::Written::load(&dir.join(persona::RECORD_FILE))));
+    }
+    state.resident =state.state_dir.as_deref().map(|dir| {
         let enabled = resident::enabled_by_env();
         if enabled {
             warn!("the experimental resident session is on");
@@ -271,7 +279,8 @@ async fn main() {
     });
     state.voice = Arc::new(voice::Voice::new(speech::from_env(), state.resident.clone()).with_synthesizer(synthesis::from_env()));
     if let Some(resident) = state.resident.clone() {
-        tokio::spawn(async move { resident.warm().await });
+        let wearing = wearing(&state).await;
+        tokio::spawn(async move { resident.warm(&wearing).await });
     }
     state.device.lock().await.pin = pin;
     state.updates = Arc::new(Mutex::new(Updates::new(
@@ -413,9 +422,9 @@ async fn publish_device_message(state: &AppState, message: DeviceMessage) {
 /// over the UART bridge, which is too slow for it, and over the Relay it will talk to the voice service itself, so
 /// voice isn't offered on either, and voice lines over the Relay are ignored.
 async fn handle_voice_line(state: &AppState, line: &str) -> Option<tokio::task::JoinHandle<()>> {
-    let (over_relay, on_bridge, character) = {
+    let (over_relay, on_bridge) = {
         let device = state.device.lock().await;
-        (device.relay, device.bridge, device.voice.clone())
+        (device.relay, device.bridge)
     };
     if line.contains(serial_transport::BUILD_MARKER) && state.voice.available() {
         if over_relay {
@@ -433,12 +442,18 @@ async fn handle_voice_line(state: &AppState, line: &str) -> Option<tokio::task::
         tracing::debug!("ignoring a voice line over the Relay");
         return None;
     }
-    // The Character the box reported wearing; before it has, the one last written to it.
-    let character = match character {
-        Some(character) => Some(character),
+    state.voice.handle_line(line, &state.transport, &wearing(state).await)
+}
+
+/// What the buddy wears for spoken replies: the Character the box reported wearing, before it has the one last
+/// written to it, with what the App said when it wrote it (a custom Character's lender, the form of address).
+async fn wearing(state: &AppState) -> persona::Wearing {
+    let reported = state.device.lock().await.voice.clone();
+    let id = match reported {
+        Some(id) => Some(id),
         None => state.config.lock().await.voice.clone(),
     };
-    state.voice.handle_line(line, &state.transport, character.as_deref())
+    persona::Wearing::of(id, &*state.written.lock().await)
 }
 
 /// Tells a box that has reported its build whether voice is on now, after the resident session's readiness flipped
@@ -947,9 +962,18 @@ async fn post_choice(
     (StatusCode::ACCEPTED, Json(ApiResponse { accepted: true, message: "remembered".to_owned() }))
 }
 
+/// What the App may say about a Character pack it writes, which the pack itself doesn't carry: the preset lending a
+/// custom Character its voice, persona and lines, and the form of address its lines were made with.
+#[derive(Default, serde::Deserialize)]
+struct PackQuery {
+    lender: Option<String>,
+    address: Option<String>,
+}
+
 /// Write a voice pack: the request body is the pack itself. The write runs in the background with progress in the status stream.
 async fn post_voice_pack(
     State(state): State<AppState>,
+    axum::extract::Query(query): axum::extract::Query<PackQuery>,
     body: Bytes,
 ) -> (StatusCode, Json<ApiResponse>) {
     let Some(voice) = voice_writer::voice_id_of(&body) else {
@@ -974,6 +998,13 @@ async fn post_voice_pack(
             Ok(written) => {
                 info!(voice = %written, "voice pack written to device");
                 task_state.save_config(|config| config.voice = Some(written.clone())).await;
+                let record = persona::Written { id: Some(written.clone()), lender: query.lender, address: query.address };
+                if let Some(dir) = &task_state.state_dir
+                    && let Err(error) = record.save(&dir.join(persona::RECORD_FILE))
+                {
+                    warn!(%error, "failed to save what the App said about the Character");
+                }
+                *task_state.written.lock().await = record;
                 task_state
                     .set_operation(Some(Operation {
                         kind: OperationKind::VoicePack,
@@ -1529,7 +1560,7 @@ async fn post_resident_say(State(state): State<AppState>, Json(request): Json<Sa
         return (StatusCode::BAD_REQUEST, Json(ApiResponse { accepted: false, message: "text is empty".to_owned() })).into_response();
     }
     let started = std::time::Instant::now();
-    match resident.say(text).await {
+    match resident.say(text, &wearing(&state).await).await {
         Ok(answer) => {
             info!(elapsed_ms = started.elapsed().as_millis() as u64, replies = answer.replies.len(), "voice command answered");
             Json(serde_json::json!({
@@ -1793,7 +1824,7 @@ mod tests {
         assert_eq!((info["brain_setting"].as_str(), info["brain"].as_str(), info["ready"].as_bool()), (Some("claude"), Some("claude"), Some(true)));
 
         let resident = state.resident.clone().unwrap();
-        resident.say("hi").await.unwrap();
+        resident.say("hi", &persona::Wearing::default()).await.unwrap();
         let session = resident.thread_id().unwrap();
         for event in ["UserPromptSubmit", "Stop"] {
             let hook: ClaudeHook = serde_json::from_value(serde_json::json!({
@@ -1929,7 +1960,7 @@ mod tests {
         );
         assert_eq!(script.lock().unwrap().starts, 0, "asking never starts the app-server");
 
-        state.resident.as_ref().unwrap().say("hi").await.unwrap();
+        state.resident.as_ref().unwrap().say("hi", &persona::Wearing::default()).await.unwrap();
         let Json(info) = get_resident(State(state.clone())).await;
         assert_eq!(info.thread_id.as_deref(), Some("new-thread"));
         assert_eq!(info.revision, 2, "a new thread and one turn");
@@ -2054,6 +2085,10 @@ mod tests {
         assert!(transport.events().is_empty());
     }
 
+    fn no_query() -> axum::extract::Query<PackQuery> {
+        axum::extract::Query(PackQuery::default())
+    }
+
     fn sample_pack(voice: &str, payload_len: usize) -> Vec<u8> {
         let mut pack = vec![0_u8; 256 + payload_len];
         pack[0..4].copy_from_slice(b"VBVP");
@@ -2068,9 +2103,10 @@ mod tests {
     async fn writing_a_voice_pack_waits_for_each_acknowledgement() {
         let transport = Arc::new(RecordingTransport::default());
         let state = test_state(transport.clone());
-        let pack = sample_pack("hsiaoyu", 1000); // 1256 bytes → two chunks
+        let pack = sample_pack("custom", 1000); // 1256 bytes → two chunks
 
-        let (status, _) = post_voice_pack(State(state.clone()), Bytes::from(pack.clone())).await;
+        let query = PackQuery { lender: Some("ada".to_owned()), address: Some("boss".to_owned()) };
+        let (status, _) = post_voice_pack(State(state.clone()), axum::extract::Query(query), Bytes::from(pack.clone())).await;
         assert_eq!(status, StatusCode::ACCEPTED);
 
         let begin = nth_event(&transport, 0).await;
@@ -2095,7 +2131,7 @@ mod tests {
         let end = nth_event(&transport, 3).await;
         assert_eq!(end.event, "voice.end");
 
-        publish_device_message(&state, device_event(r#"{"version":1,"event":"voice.written","voice":"hsiaoyu"}"#)).await;
+        publish_device_message(&state, device_event(r#"{"version":1,"event":"voice.written","voice":"custom"}"#)).await;
         for _ in 0..200 {
             if state.operation.lock().await.as_ref().map(|op| op.state) == Some(OperationState::Done) {
                 break;
@@ -2104,7 +2140,12 @@ mod tests {
         }
         let operation = state.operation.lock().await.clone().expect("an operation should be recorded");
         assert_eq!(operation.state, OperationState::Done);
-        assert_eq!(state.config.lock().await.voice.as_deref(), Some("hsiaoyu"));
+        assert_eq!(state.config.lock().await.voice.as_deref(), Some("custom"));
+        // What the App said about it is kept: the custom Character speaks with Ada's persona and calls the user boss.
+        assert_eq!(
+            wearing(&state).await,
+            persona::Wearing { character: Some("ada".to_owned()), address: Some("boss".to_owned()) }
+        );
     }
 
     #[tokio::test]
@@ -2112,7 +2153,7 @@ mod tests {
         let transport = Arc::new(RecordingTransport::default());
         let state = test_state(transport.clone());
         let pack = sample_pack("hsiaoyu", 100);
-        let _ = post_voice_pack(State(state.clone()), Bytes::from(pack)).await;
+        let _ = post_voice_pack(State(state.clone()), no_query(), Bytes::from(pack)).await;
         nth_event(&transport, 0).await;
         publish_device_message(
             &state,
@@ -2135,10 +2176,10 @@ mod tests {
     async fn a_second_write_is_refused_while_one_is_running_and_garbage_is_rejected() {
         let transport = Arc::new(RecordingTransport::default());
         let state = test_state(transport.clone());
-        let (status, _) = post_voice_pack(State(state.clone()), Bytes::from_static(b"not a pack")).await;
+        let (status, _) = post_voice_pack(State(state.clone()), no_query(), Bytes::from_static(b"not a pack")).await;
         assert_eq!(status, StatusCode::BAD_REQUEST);
-        let _ = post_voice_pack(State(state.clone()), Bytes::from(sample_pack("a", 10))).await;
-        let (status, _) = post_voice_pack(State(state.clone()), Bytes::from(sample_pack("b", 10))).await;
+        let _ = post_voice_pack(State(state.clone()), no_query(), Bytes::from(sample_pack("a", 10))).await;
+        let (status, _) = post_voice_pack(State(state.clone()), no_query(), Bytes::from(sample_pack("b", 10))).await;
         assert_eq!(status, StatusCode::CONFLICT);
     }
 

@@ -95,8 +95,17 @@ struct DaemonClient {
         guard code == 202 else { throw DaemonError(message: DaemonClient.message(in: data) ?? String(localized: "Forgetting Wi-Fi was rejected (\(code))")) }
     }
 
-    func writeVoicePack(_ pack: Data) async throws {
-        let (code, data) = try await post("/v1/device/voice-pack", body: pack, contentType: "application/octet-stream")
+    /// `lender` (the Character lending a custom one its voice, persona and lines) and `address` (the form of
+    /// address its lines carry) aren't in the pack; the daemon keeps them for the buddy's spoken replies.
+    func writeVoicePack(_ pack: Data, lender: String? = nil, address: String? = nil) async throws {
+        var request = self.request("/v1/device/voice-pack", method: "POST", body: pack, contentType: "application/octet-stream")
+        let query = [("lender", lender), ("address", address)].compactMap { name, value in value.map { URLQueryItem(name: name, value: $0) } }
+        if !query.isEmpty, let url = request.url, var components = URLComponents(url: url, resolvingAgainstBaseURL: false) {
+            components.queryItems = query
+            request.url = components.url
+        }
+        let (data, response) = try await URLSession.shared.data(for: request)
+        let code = (response as? HTTPURLResponse)?.statusCode ?? 0
         guard code == 202 else { throw DaemonError(message: DaemonClient.message(in: data) ?? String(localized: "Voice pack write was rejected (\(code))")) }
     }
 

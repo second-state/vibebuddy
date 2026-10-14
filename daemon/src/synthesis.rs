@@ -131,7 +131,7 @@ pub fn split(text: &str, max: usize) -> Vec<&str> {
 
 /// Each Character's voice file (`characters/<id>/voice.env`), so a spoken reply is in the very voice its lines
 /// were made with: `ENGINE=elevenlabs` voices are the ones in our ElevenLabs account, which the voice service uses.
-const VOICE_FILES: &[(&str, &str)] = &[
+pub(crate) const VOICE_FILES: &[(&str, &str)] = &[
     ("ada", include_str!("../../characters/ada/voice.env")),
     ("dave", include_str!("../../characters/dave/voice.env")),
     ("hank", include_str!("../../characters/hank/voice.env")),
@@ -154,12 +154,17 @@ pub fn voice_for(character: Option<&str>) -> String {
     let Some(file) = character.and_then(|character| VOICE_FILES.iter().find(|(id, _)| *id == character)) else {
         return DEFAULT_VOICE.to_owned();
     };
-    let field = |key: &str| file.1.lines().find_map(|line| line.strip_prefix(key)?.strip_prefix('='));
+    let field = |key: &str| voice_field(file.1, key);
     match (field("ENGINE"), field("VOICE")) {
         (Some("elevenlabs"), Some(voice)) => format!("elevenlabs:{voice}"),
         _ if field("GENDER") == Some("male") => STOCK_MALE.to_owned(),
         _ => STOCK_FEMALE.to_owned(),
     }
+}
+
+/// One `KEY=value` of a `voice.env`.
+pub(crate) fn voice_field<'a>(file: &'a str, key: &str) -> Option<&'a str> {
+    file.lines().find_map(|line| line.strip_prefix(key)?.strip_prefix('='))
 }
 
 /// The synthesizer the environment configures, if any.

@@ -30,7 +30,8 @@ use tracing::{info, warn};
 
 use crate::activity::ActivityTracker;
 use crate::app_server::{Client, Incoming, RpcError};
-use crate::resident_claude::ClaudeBrain;
+use crate::persona::{Persona, Wearing};
+use crate::resident_claude::{CONTEXT_PREFIX, ClaudeBrain};
 
 /// The Codex version the app-server protocol was verified with. app-server and `dynamicTools` are experimental,
 /// so other versions get a warning in the log, but are still tried.
@@ -218,6 +219,8 @@ struct Session {
     client: Client,
     incoming: mpsc::UnboundedReceiver<Incoming>,
     thread_id: String,
+    /// Who its instructions make the buddy: they are set only when the thread starts or is resumed.
+    persona: Persona,
     _child: Option<tokio::process::Child>,
 }
 
@@ -226,6 +229,9 @@ struct Saved {
     thread_id: Option<String>,
     /// The Codex version the thread was last resumed with, for diagnosing a protocol change.
     codex_version: Option<String>,
+    /// The Character whose persona the thread last answered in.
+    #[serde(default)]
+    persona: Option<String>,
 }
 
 pub struct Resident {
@@ -245,6 +251,10 @@ pub struct Resident {
     session: Mutex<Option<Session>>,
     /// Read synchronously by the hook filter.
     thread_id: std::sync::Mutex<Option<String>>,
+    /// The Character whose persona the thread last answered in (kept in `resident.json`).
+    spoke_as: std::sync::Mutex<Option<String>>,
+    /// The persona of the last voice command, for starting the session when no command asks (history).
+    persona: std::sync::Mutex<Option<Persona>>,
     /// Bumped when a turn ends or the thread changes, so a client can tell the history moved without reading it.
     revision: std::sync::atomic::AtomicU64,
     /// The last Codex check (its `brain` unused).
@@ -281,6 +291,8 @@ impl Resident {
             activities,
             session: Mutex::new(None),
             thread_id: std::sync::Mutex::new(saved.thread_id),
+            spoke_as: std::sync::Mutex::new(saved.persona),
+            persona: std::sync::Mutex::new(None),
             revision: std::sync::atomic::AtomicU64::new(0),
             codex_readiness: std::sync::Mutex::new(Readiness::default()),
             readiness: watch::channel(Readiness::default()).0,
@@ -502,62 +514,113 @@ impl Resident {
     }
 
     /// Hands one voice command to the resident session and waits for its spoken replies.
-    pub async fn say(&self, text: &str) -> Result<Answer, ResidentError> {
+    pub async fn say(&self, text: &str, wearing: &Wearing) -> Result<Answer, ResidentError> {
         let mut replies = Vec::new();
-        let thread_id = self.say_streaming(text, &mut |reply| replies.push(reply.to_owned())).await?;
+        let thread_id = self.say_streaming(text, wearing, &mut |reply| replies.push(reply.to_owned())).await?;
         Ok(Answer { thread_id, replies })
     }
 
-    /// Hands one voice command to the resident session; each spoken reply goes to `on_reply` the moment the
-    /// session calls `speak`, not when the turn completes, which in testing was 4 to 6 seconds later. Returns the
-    /// thread id once the turn has completed.
-    pub async fn say_streaming(&self, text: &str, on_reply: &mut (dyn FnMut(&str) + Send)) -> Result<String, ResidentError> {
+    /// Hands one voice command to the resident session, answered as the Character the buddy is `wearing`; each
+    /// spoken reply goes to `on_reply` the moment the session calls `speak`, not when the turn completes, which in
+    /// testing was 4 to 6 seconds later. Returns the thread id once the turn has completed.
+    pub async fn say_streaming(
+        &self,
+        text: &str,
+        wearing: &Wearing,
+        on_reply: &mut (dyn FnMut(&str) + Send),
+    ) -> Result<String, ResidentError> {
         if !self.enabled {
             return Err(ResidentError::Disabled);
         }
+        let persona = Persona::of(wearing);
+        *self.persona.lock().expect("persona lock") = Some(persona.clone());
         let result = match self.brain() {
-            Brain::Codex => self.say_codex(text, on_reply).await,
-            Brain::Claude => self.say_claude(text, on_reply).await,
+            Brain::Codex => self.say_codex(text, &persona, on_reply).await,
+            Brain::Claude => self.say_claude(text, &persona, on_reply).await,
         };
         // Even a failed or timed-out turn may have left the command in the thread.
         self.bump_revision();
         result
     }
 
-    async fn say_codex(&self, text: &str, on_reply: &mut (dyn FnMut(&str) + Send)) -> Result<String, ResidentError> {
+    async fn say_codex(
+        &self,
+        text: &str,
+        persona: &Persona,
+        on_reply: &mut (dyn FnMut(&str) + Send),
+    ) -> Result<String, ResidentError> {
         let mut slot = self.session.lock().await;
-        let session = self.running(&mut slot).await?;
-        let result = self.run_turn(session, text, on_reply).await;
+        // A running thread keeps the instructions it was resumed with, so a new Character resumes it again.
+        if slot.as_ref().is_some_and(|session| session.persona != *persona) {
+            info!(character = persona.id, "the Character changed; resuming the resident thread with its persona");
+            *slot = None;
+        }
+        let session = self.running(&mut slot, persona).await?;
+        let spoke_as = self.spoke_as.lock().expect("spoke as lock").clone();
+        let changed = spoke_as.as_deref() != Some(persona.id);
+        let note = (changed && spoke_as.is_some()).then(|| change_note(persona));
+        let result = self.run_turn(session, note.as_deref(), text, on_reply).await;
         if session.client.is_closed() {
             *slot = None;
+        }
+        if result.is_ok() && changed {
+            self.remember_persona(persona.id);
         }
         result
     }
 
-    async fn say_claude(&self, text: &str, on_reply: &mut (dyn FnMut(&str) + Send)) -> Result<String, ResidentError> {
+    /// Keeps the Character the thread now answers as, so a change is noticed after a restart too.
+    fn remember_persona(&self, id: &str) {
+        *self.spoke_as.lock().expect("spoke as lock") = Some(id.to_owned());
+        let mut saved = load(&self.state_file);
+        saved.persona = Some(id.to_owned());
+        if let Err(error) = save(&self.state_file, &saved) {
+            warn!(%error, "failed to save the resident session's Character");
+        }
+    }
+
+    async fn say_claude(
+        &self,
+        text: &str,
+        persona: &Persona,
+        on_reply: &mut (dyn FnMut(&str) + Send),
+    ) -> Result<String, ResidentError> {
         let key = self.anthropic_key().ok_or(ResidentError::NoAnthropicKey)?;
-        let result = self.claude.say_streaming(&key, &instructions(None, None, Brain::Claude), text, on_reply).await;
+        let instructions = instructions(persona, None, Brain::Claude);
+        let result = self.claude.say_streaming(&key, &instructions, persona, text, on_reply).await;
         if result == Err(ResidentError::NoClaude) {
             self.publish();
         }
         result
     }
 
+    /// The persona of the last voice command, else the one the thread last answered in.
+    fn last_persona(&self) -> Persona {
+        if let Some(persona) = self.persona.lock().expect("persona lock").clone() {
+            return persona;
+        }
+        let character = self.spoke_as.lock().expect("spoke as lock").clone();
+        Persona::of(&Wearing { character, address: None })
+    }
+
     /// Starts the app-server and resumes the thread ahead of the first voice command, which otherwise waits for
-    /// both. Does nothing when switched off or already running; a failure is logged and the next command tries again.
-    pub async fn warm(&self) {
+    /// both, as the Character the buddy is `wearing`. Does nothing when switched off or already running; a failure
+    /// is logged and the next command tries again.
+    pub async fn warm(&self, wearing: &Wearing) {
         if !self.enabled {
             return;
         }
         self.check_readiness().await;
+        let persona = Persona::of(wearing);
+        *self.persona.lock().expect("persona lock") = Some(persona.clone());
         if self.brain() == Brain::Claude {
             if let Some(key) = self.anthropic_key() {
-                self.claude.warm(&key, &instructions(None, None, Brain::Claude)).await;
+                self.claude.warm(&key, &instructions(&persona, None, Brain::Claude)).await;
             }
             return;
         }
         let mut slot = self.session.lock().await;
-        match self.running(&mut slot).await {
+        match self.running(&mut slot, &persona).await {
             Ok(session) => info!(thread = %session.thread_id, "the resident session is ready"),
             Err(error) => warn!(%error, "the resident session could not be started ahead of time"),
         }
@@ -576,7 +639,7 @@ impl Resident {
             return Ok(Vec::new());
         }
         let mut slot = self.session.lock().await;
-        let session = self.running(&mut slot).await?;
+        let session = self.running(&mut slot, &self.last_persona()).await?;
         let params = json!({"threadId": session.thread_id, "limit": limit, "sortDirection": "desc", "itemsView": "full"});
         let listed = request(&session.client, "thread/turns/list", params).await;
         if session.client.is_closed() {
@@ -587,13 +650,13 @@ impl Resident {
     }
 
     /// The running session, started (again) if there is none or its app-server has exited.
-    async fn running<'a>(&self, slot: &'a mut Option<Session>) -> Result<&'a mut Session, ResidentError> {
+    async fn running<'a>(&self, slot: &'a mut Option<Session>, persona: &Persona) -> Result<&'a mut Session, ResidentError> {
         if slot.as_ref().is_some_and(|session| session.client.is_closed()) {
             warn!("the resident app-server exited; starting it again");
             *slot = None;
         }
         if slot.is_none() {
-            let started = self.start().await;
+            let started = self.start(persona).await;
             // A start is a readiness check too, and the most recent one.
             match &started {
                 Ok(_) => self.note(None),
@@ -606,7 +669,7 @@ impl Resident {
         Ok(slot.as_mut().expect("session was just started"))
     }
 
-    async fn start(&self) -> Result<Session, ResidentError> {
+    async fn start(&self, persona: &Persona) -> Result<Session, ResidentError> {
         prepare_codex_home(&self.codex_home, &self.user_codex_home)
             .map_err(|error| ResidentError::Rpc(format!("cannot prepare {}: {error}", self.codex_home.display())))?;
         let (pipes, version) = match &self.launcher {
@@ -645,9 +708,9 @@ impl Resident {
             // saved before the resident session had its own Codex home is one); one that can't be resumed for
             // another reason (another Codex process is its writer) fails this command and is tried again with the
             // next.
-            Some(saved) => match self.resume(&client, &saved).await {
+            Some(saved) => match self.resume(&client, &saved, persona).await {
                 Err(ResidentError::Rpc(message)) if !client.is_closed() && thread_is_gone(&message) => {
-                    let thread = self.start_thread(&client).await?;
+                    let thread = self.start_thread(&client, persona).await?;
                     warn!(old_thread = %saved, new_thread = %thread, %message, "the resident thread no longer exists; started a new one");
                     thread
                 }
@@ -657,48 +720,50 @@ impl Resident {
                 }
                 other => other?,
             },
-            None => self.start_thread(&client).await?,
+            None => self.start_thread(&client, persona).await?,
         };
         let previous = self.thread_id.lock().expect("thread id lock").replace(thread_id.clone());
         if previous.as_deref() != Some(thread_id.as_str()) {
             self.bump_revision();
         }
-        let saved = Saved { thread_id: Some(thread_id.clone()), codex_version: version };
+        let spoke_as = self.spoke_as.lock().expect("spoke as lock").clone();
+        let saved = Saved { thread_id: Some(thread_id.clone()), codex_version: version, persona: spoke_as };
         if let Err(error) = save(&self.state_file, &saved) {
             warn!(%error, "failed to save the resident thread id");
         }
         info!(thread = %thread_id, "resident session ready");
-        Ok(Session { client, incoming, thread_id, _child: pipes.child })
+        Ok(Session { client, incoming, thread_id, persona: persona.clone(), _child: pipes.child })
     }
 
-    async fn start_thread(&self, client: &Client) -> Result<String, ResidentError> {
-        let mut params = self.thread_params();
+    async fn start_thread(&self, client: &Client, persona: &Persona) -> Result<String, ResidentError> {
+        let mut params = self.thread_params(persona);
         params["dynamicTools"] = tools();
         let started = request(client, "thread/start", params).await?;
         thread_id_of(&started)
     }
 
-    async fn resume(&self, client: &Client, thread_id: &str) -> Result<String, ResidentError> {
+    async fn resume(&self, client: &Client, thread_id: &str, persona: &Persona) -> Result<String, ResidentError> {
         // Dynamic tools live with the thread and survive a resume; the instructions are sent again so a change
-        // (a new Character, later) takes effect.
-        let mut params = self.thread_params();
+        // (a new Character) takes effect.
+        let mut params = self.thread_params(persona);
         params["threadId"] = json!(thread_id);
         let resumed = request(client, "thread/resume", params).await?;
         thread_id_of(&resumed)
     }
 
-    fn thread_params(&self) -> Value {
+    fn thread_params(&self, persona: &Persona) -> Value {
         json!({
             "cwd": self.dir,
             "sandbox": "read-only",
             "approvalPolicy": "on-request",
-            "developerInstructions": instructions(None, memory_summary(&self.user_codex_home).as_deref(), Brain::Codex),
+            "developerInstructions": instructions(persona, memory_summary(&self.user_codex_home).as_deref(), Brain::Codex),
         })
     }
 
     async fn run_turn(
         &self,
         session: &mut Session,
+        note: Option<&str>,
         text: &str,
         on_reply: &mut (dyn FnMut(&str) + Send),
     ) -> Result<String, ResidentError> {
@@ -706,12 +771,10 @@ impl Resident {
         while let Ok(message) = session.incoming.try_recv() {
             self.handle(&session.client, message, &mut |_| {}).await;
         }
-        let started = request(
-            &session.client,
-            "turn/start",
-            json!({"threadId": session.thread_id, "input": [{"type": "text", "text": text}]}),
-        )
-        .await?;
+        let input: Vec<Value> =
+            note.into_iter().chain([text]).map(|text| json!({"type": "text", "text": text})).collect();
+        let started =
+            request(&session.client, "turn/start", json!({"threadId": session.thread_id, "input": input})).await?;
         let turn_id = started.pointer("/turn/id").and_then(Value::as_str).unwrap_or_default().to_owned();
         let deadline = tokio::time::Instant::now() + TURN_TIMEOUT;
         loop {
@@ -867,12 +930,18 @@ pub(crate) fn tools() -> Value {
     ])
 }
 
-/// The developer instructions. `persona` is the seam for the Character the user picked (CONTEXT.md, Persona);
-/// until Characters carry one, the buddy speaks plainly. `memories` is the user's Codex memory summary, if any.
-/// `brain` says where today's date is: in Codex's environment context, or in the context block the daemon puts
-/// before each voice command for Claude Code.
-pub(crate) fn instructions(persona: Option<&str>, memories: Option<&str>, brain: Brain) -> String {
-    let persona = persona.unwrap_or("You are friendly, calm and brief.");
+/// The developer instructions: the buddy as the Character it wears (CONTEXT.md, Persona), in that Character's one
+/// language and with the user's form of address. `memories` is the user's Codex memory summary, if any. `brain`
+/// says where today's date is: in Codex's environment context, or in the context block the daemon puts before each
+/// voice command for Claude Code.
+pub(crate) fn instructions(persona: &Persona, memories: Option<&str>, brain: Brain) -> String {
+    let Persona { name, text, language, address, .. } = persona;
+    let address = address.map_or_else(String::new, |words| {
+        format!(
+            " The user likes to be called \"{words}\": call them that now and then, naturally, as your lines do, not \
+             in every reply."
+        )
+    });
     let memories = memories.map_or_else(String::new, |summary| {
         format!(
             "\n\nWhat Codex remembers about the user from their past sessions, in summary. For more, call \
@@ -885,11 +954,15 @@ pub(crate) fn instructions(persona: Option<&str>, memories: Option<&str>, brain:
     };
     format!(
         "You are the buddy of VibeBuddy: a small desk box that watches the user's coding Agents (Codex, Claude Code, \
-         OpenCode, GitHub Copilot CLI, Pi, GitHub Actions) and speaks up for them. {persona}\n\
+         OpenCode, GitHub Copilot CLI, Pi, GitHub Actions) and speaks up for them. Right now you are {name}, the \
+         Character the user picked. This is {name}'s persona, written for the short lines {name} says when an Agent \
+         needs the user or is done; speak every reply as {name}, in this persona:\n<persona>\n{text}\n</persona>\n\
+         You speak {language} only. The user may talk to you in any language and you understand it, but you always \
+         reply in {language}: a question asked in another language still gets its answer in {language}, never in the \
+         language it was asked in, whatever earlier replies or the memories below say about language.{address}\n\
          Every user message is one voice command, transcribed from speech. Answer only by calling the `speak` tool, \
          with one or two short sentences meant to be heard, not read: no Markdown, lists, code, paths or URLs. \
-         Reply in the language the user spoke. Do not write any other answer: once you have called `speak`, end your \
-         turn without writing anything else.\n\
+         Do not write any other answer: once you have called `speak`, end your turn without writing anything else.\n\
          To know what the Agents are doing, have just finished or did today, call `list_activities`; never guess. It \
          has the live tasks, the ones that ended lately with how and how long ago (`recently_ended`), and today's \
          counts (`today`). Titles there are short upper-case task-card names; say them naturally.\n\
@@ -900,6 +973,16 @@ pub(crate) fn instructions(persona: Option<&str>, memories: Option<&str>, brain:
          find out, say so plainly in one sentence; never make up an answer that sounds likely.\n\
          You do no work yourself: run no commands, read or edit no files. If the user asks for work to be done, say \
          briefly that you can't start it yet.{memories}"
+    )
+}
+
+/// A context line put before the next voice command once the Character has changed, so the session takes up the
+/// new voice rather than carrying on in the old one's. The history leaves it out, as it does every context block.
+pub(crate) fn change_note(persona: &Persona) -> String {
+    let Persona { name, language, .. } = persona;
+    format!(
+        "{CONTEXT_PREFIX}The user just switched you to another Character: from now on you are {name}. Speak only as \
+         {name}, in {language}, whatever your earlier replies in this conversation sounded like.</context>"
     )
 }
 
@@ -1157,6 +1240,7 @@ fn exchange_of(turn: &Value) -> Option<Exchange> {
         .filter(|item| item["type"] == "userMessage")
         .flat_map(|item| item["content"].as_array().cloned().unwrap_or_default())
         .filter_map(|input| input["text"].as_str().map(str::to_owned))
+        .filter(|text| !text.starts_with(CONTEXT_PREFIX))
         .collect::<Vec<_>>()
         .join(" ");
     let replies = items
@@ -1323,6 +1407,15 @@ pub(crate) mod tests {
         resident
     }
 
+    /// The persona with no Character pack: the robot's.
+    pub(crate) fn robot() -> Persona {
+        Persona::of(&Wearing::default())
+    }
+
+    pub(crate) fn wearing(character: &str) -> Wearing {
+        Wearing { character: Some(character.to_owned()), address: None }
+    }
+
     pub(crate) fn logged_in() -> Shared {
         Arc::new(std::sync::Mutex::new(Script { logged_in: true, ..Script::default() }))
     }
@@ -1342,7 +1435,7 @@ pub(crate) mod tests {
         let script = logged_in();
         let resident = resident(&dir, &script, Arc::default());
 
-        let answer = resident.say("hello").await.unwrap();
+        let answer = resident.say("hello", &Wearing::default()).await.unwrap();
         assert_eq!(answer.thread_id, "new-thread");
         assert_eq!(methods(&script), ["initialize", "initialized", "account/read", "thread/start", "turn/start"]);
         let received = script.lock().unwrap().received.clone();
@@ -1372,10 +1465,10 @@ pub(crate) mod tests {
     #[tokio::test]
     async fn a_later_start_resumes_the_saved_thread_and_a_lost_one_is_replaced() {
         let dir = temp_dir("resume");
-        let saved = Saved { thread_id: Some("old-thread".to_owned()), codex_version: None };
+        let saved = Saved { thread_id: Some("old-thread".to_owned()), codex_version: None, persona: None };
         save(&dir.join("resident.json"), &saved).unwrap();
         let script = logged_in();
-        let answer = resident(&dir, &script, Arc::default()).say("hi").await.unwrap();
+        let answer = resident(&dir, &script, Arc::default()).say("hi", &Wearing::default()).await.unwrap();
         assert_eq!(answer.thread_id, "old-thread");
         assert_eq!(methods(&script), ["initialize", "initialized", "account/read", "thread/resume", "turn/start"]);
         let resume = script.lock().unwrap().received[3]["params"].clone();
@@ -1385,7 +1478,7 @@ pub(crate) mod tests {
 
         let script = logged_in();
         script.lock().unwrap().lose_thread = true;
-        let answer = resident(&dir, &script, Arc::default()).say("hi").await.unwrap();
+        let answer = resident(&dir, &script, Arc::default()).say("hi", &Wearing::default()).await.unwrap();
         assert_eq!(answer.thread_id, "new-thread");
         assert_eq!(methods(&script)[3..5], ["thread/resume", "thread/start"]);
         assert_eq!(load(&dir.join("resident.json")).thread_id.as_deref(), Some("new-thread"));
@@ -1395,11 +1488,11 @@ pub(crate) mod tests {
     #[tokio::test]
     async fn a_thread_open_elsewhere_fails_the_command_and_is_never_replaced() {
         let dir = temp_dir("busy");
-        let saved = Saved { thread_id: Some("old-thread".to_owned()), codex_version: None };
+        let saved = Saved { thread_id: Some("old-thread".to_owned()), codex_version: None, persona: None };
         save(&dir.join("resident.json"), &saved).unwrap();
         let script = logged_in();
         script.lock().unwrap().busy_thread = true;
-        assert!(resident(&dir, &script, Arc::default()).say("hi").await.is_err());
+        assert!(resident(&dir, &script, Arc::default()).say("hi", &Wearing::default()).await.is_err());
         assert!(!methods(&script).contains(&"thread/start".to_owned()), "{:?}", methods(&script));
         assert_eq!(load(&dir.join("resident.json")).thread_id.as_deref(), Some("old-thread"));
         let _ = std::fs::remove_dir_all(dir);
@@ -1409,7 +1502,7 @@ pub(crate) mod tests {
     async fn without_a_login_nothing_starts_and_no_login_flow_is_begun() {
         let dir = temp_dir("login");
         let script = Arc::new(std::sync::Mutex::new(Script::default()));
-        let error = resident(&dir, &script, Arc::default()).say("hi").await.unwrap_err();
+        let error = resident(&dir, &script, Arc::default()).say("hi", &Wearing::default()).await.unwrap_err();
         assert_eq!(error, ResidentError::NotLoggedIn);
         assert_eq!(methods(&script), ["initialize", "initialized", "account/read"]);
         let _ = std::fs::remove_dir_all(dir);
@@ -1432,7 +1525,7 @@ pub(crate) mod tests {
             tool_call("speak", json!({"text": ""})),
             tool_call("run_shell", json!({"command": "ls"})),
         ];
-        let answer = resident(&dir, &script, Arc::new(Mutex::new(tracker))).say("what's up?").await.unwrap();
+        let answer = resident(&dir, &script, Arc::new(Mutex::new(tracker))).say("what's up?", &Wearing::default()).await.unwrap();
         assert_eq!(answer.replies, ["One task is running."]);
 
         let answers = script.lock().unwrap().answers.clone();
@@ -1467,7 +1560,7 @@ pub(crate) mod tests {
         let (sender, mut receiver) = tokio::sync::mpsc::unbounded_channel();
         let turn = tokio::spawn({
             let resident = resident.clone();
-            async move { resident.say_streaming("hi", &mut |reply| sender.send(reply.to_owned()).unwrap()).await }
+            async move { resident.say_streaming("hi", &Wearing::default(), &mut |reply| sender.send(reply.to_owned()).unwrap()).await }
         });
         assert_eq!(receiver.recv().await.as_deref(), Some("On it."));
         assert!(!turn.is_finished(), "the turn is still running");
@@ -1491,7 +1584,7 @@ pub(crate) mod tests {
         ]
         .map(|method| (method.to_owned(), json!({})))
         .to_vec();
-        resident(&dir, &script, Arc::default()).say("delete everything").await.unwrap();
+        resident(&dir, &script, Arc::default()).say("delete everything", &Wearing::default()).await.unwrap();
         let answers = script.lock().unwrap().answers.clone();
         assert_eq!(answers[0]["result"], json!({"decision": "decline"}));
         assert_eq!(answers[1]["result"], json!({"decision": "decline"}));
@@ -1509,8 +1602,8 @@ pub(crate) mod tests {
         let script = logged_in();
         script.lock().unwrap().die_on_turn = Some(1);
         let resident = resident(&dir, &script, Arc::default());
-        assert!(matches!(resident.say("one").await, Err(ResidentError::Rpc(_))));
-        let answer = resident.say("two").await.unwrap();
+        assert!(matches!(resident.say("one", &Wearing::default()).await, Err(ResidentError::Rpc(_))));
+        let answer = resident.say("two", &Wearing::default()).await.unwrap();
         assert_eq!(answer.thread_id, "new-thread");
         assert_eq!(script.lock().unwrap().starts, 2);
         // The second start resumes the thread the first one made.
@@ -1523,7 +1616,8 @@ pub(crate) mod tests {
         let dir = temp_dir("queue");
         let script = logged_in();
         let resident = Arc::new(resident(&dir, &script, Arc::default()));
-        let (first, second) = tokio::join!(resident.say("one"), resident.say("two"));
+        let robot = Wearing::default();
+        let (first, second) = tokio::join!(resident.say("one", &robot), resident.say("two", &robot));
         assert!(first.is_ok() && second.is_ok());
         let turns: Vec<Value> = script
             .lock()
@@ -1544,7 +1638,7 @@ pub(crate) mod tests {
         let script = logged_in();
         let launch = script.clone();
         let resident = Resident::new(false, &dir, Launcher::Fake(Box::new(move || fake_server(launch.clone()))), Arc::default());
-        assert_eq!(resident.say("hi").await.unwrap_err(), ResidentError::Disabled);
+        assert_eq!(resident.say("hi", &Wearing::default()).await.unwrap_err(), ResidentError::Disabled);
         assert_eq!(script.lock().unwrap().starts, 0);
         let _ = std::fs::remove_dir_all(dir);
     }
@@ -1555,7 +1649,7 @@ pub(crate) mod tests {
         let dir = temp_dir("home");
         std::fs::create_dir_all(dir.join("user-codex")).unwrap();
         std::fs::write(dir.join("user-codex/auth.json"), "{}").unwrap();
-        resident(&dir, &logged_in(), Arc::default()).say("hi").await.unwrap();
+        resident(&dir, &logged_in(), Arc::default()).say("hi", &Wearing::default()).await.unwrap();
         let home = dir.join(CODEX_HOME_DIR);
         assert_eq!(std::fs::metadata(&home).unwrap().permissions().mode() & 0o777, 0o700);
         assert_eq!(std::fs::read_link(home.join("auth.json")).unwrap(), dir.join("user-codex/auth.json"));
@@ -1611,7 +1705,7 @@ pub(crate) mod tests {
             tool_call("search_memories", json!({"query": "BISCUIT"})),
             tool_call("search_memories", json!({"query": "zebra"})),
         ];
-        resident(&dir, &script, Arc::default()).say("what's my cat called?").await.unwrap();
+        resident(&dir, &script, Arc::default()).say("what's my cat called?", &Wearing::default()).await.unwrap();
 
         let start = script.lock().unwrap().received[3]["params"].clone();
         let instructions = start["developerInstructions"].as_str().unwrap();
@@ -1644,7 +1738,7 @@ pub(crate) mod tests {
 
     #[test]
     fn without_memories_the_instructions_say_nothing_of_them_and_a_long_summary_is_cut() {
-        assert!(!instructions(None, None, Brain::Codex).contains("memory"));
+        assert!(!instructions(&robot(), None, Brain::Codex).contains("memory"));
         let dir = temp_dir("summary");
         std::fs::create_dir_all(dir.join("memories")).unwrap();
         assert_eq!(memory_summary(&dir), None);
@@ -1654,6 +1748,91 @@ pub(crate) mod tests {
         let _ = std::fs::remove_dir_all(dir);
     }
 
+    #[test]
+    fn the_instructions_make_the_buddy_the_character_in_its_one_language() {
+        let ada = instructions(&Persona::of(&wearing("ada")), None, Brain::Codex);
+        assert!(ada.contains("Right now you are Ada") && ada.contains("Londoner"), "{ada}");
+        assert!(ada.contains("always reply in English"));
+        assert!(!ada.contains("in the language the user spoke"));
+        let xiaohe = instructions(&Persona::of(&wearing("wanwanxiaohe")), None, Brain::Claude);
+        assert!(xiaohe.contains("Right now you are Xiaohe (小何)") && xiaohe.contains("Taiwan"), "{xiaohe}");
+        assert!(xiaohe.contains("always reply in Chinese"));
+        let robot = instructions(&robot(), None, Brain::Codex);
+        assert!(robot.contains("Right now you are VibeBuddy") && robot.contains("always reply in English"));
+        // Every rule is still there, whoever the buddy is.
+        for text in [&ada, &xiaohe, &robot] {
+            assert!(text.contains("Answer only by calling the `speak` tool"));
+            assert!(text.contains("call `list_activities`; never guess"));
+            assert!(text.contains("Never state a fact you have not seen"));
+            assert!(text.contains("You do no work yourself"));
+        }
+        assert!(!ada.contains("likes to be called"), "no form of address picked");
+        let boss = Wearing { character: Some("ada".to_owned()), address: Some("boss".to_owned()) };
+        assert!(instructions(&Persona::of(&boss), None, Brain::Codex).contains("likes to be called \"boss\""));
+        let laoban = Wearing { character: Some("wanwanxiaohe".to_owned()), address: Some("laoban".to_owned()) };
+        assert!(instructions(&Persona::of(&laoban), None, Brain::Codex).contains("likes to be called \"老板\""));
+    }
+
+    #[tokio::test]
+    async fn a_new_character_resumes_the_same_thread_with_its_persona_and_a_note() {
+        let dir = temp_dir("character");
+        let script = logged_in();
+        let resident = resident(&dir, &script, Arc::default());
+        let received = |method: &str| -> Vec<Value> {
+            let script = script.lock().unwrap();
+            script.received.iter().filter(|message| message["method"] == method).map(|message| message["params"].clone()).collect()
+        };
+        let texts = |input: &Value| -> Vec<String> {
+            input["input"].as_array().unwrap().iter().map(|item| item["text"].as_str().unwrap().to_owned()).collect()
+        };
+
+        resident.say("hi", &wearing("ada")).await.unwrap();
+        resident.say("again", &wearing("ada")).await.unwrap();
+        assert_eq!(script.lock().unwrap().starts, 1, "the same Character keeps the running thread");
+        let start = &received("thread/start")[0];
+        assert!(start["developerInstructions"].as_str().unwrap().contains("Right now you are Ada"));
+
+        resident.say("你好", &wearing("wanwanxiaohe")).await.unwrap();
+        assert_eq!(script.lock().unwrap().starts, 2, "a new Character starts the app-server again");
+        let resume = &received("thread/resume")[0];
+        assert_eq!(resume["threadId"], "new-thread", "the same thread, never a fork");
+        let instructions = resume["developerInstructions"].as_str().unwrap();
+        assert!(instructions.contains("Right now you are Xiaohe (小何)") && instructions.contains("always reply in Chinese"));
+        assert_eq!(received("thread/start").len(), 1, "never a new thread");
+        let turns = received("turn/start");
+        assert_eq!(texts(&turns[0]), ["hi"], "the first command has nothing to switch from");
+        assert_eq!(texts(&turns[1]), ["again"]);
+        let switched = texts(&turns[2]);
+        assert!(switched[0].starts_with(CONTEXT_PREFIX) && switched[0].contains("from now on you are Xiaohe (小何)"), "{switched:?}");
+        assert_eq!(switched[1], "你好");
+
+        resident.say("还在吗", &wearing("wanwanxiaohe")).await.unwrap();
+        assert_eq!(script.lock().unwrap().starts, 2);
+        assert_eq!(texts(&received("turn/start")[3]), ["还在吗"], "the note goes once");
+
+        // Whom the thread spoke as is kept, so a change while the daemon was down is noticed too.
+        let restarted = self::resident(&dir, &script, Arc::default());
+        restarted.say("hello", &wearing("ada")).await.unwrap();
+        let after = texts(&received("turn/start")[4]);
+        assert!(after[0].contains("from now on you are Ada"), "{after:?}");
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn the_history_leaves_out_context_notes() {
+        let turn = json!({"items": [
+            {"type": "userMessage", "content": [
+                {"type": "text", "text": "<context>The user just switched you to another Character: from now on you are Ada.</context>"},
+                {"type": "text", "text": "what's up?"},
+            ]},
+            {"type": "dynamicToolCall", "tool": "speak", "arguments": {"text": "All quiet."}},
+        ]});
+        assert_eq!(
+            exchange_of(&turn),
+            Some(Exchange { said: "what's up?".to_owned(), replies: vec!["All quiet.".to_owned()] })
+        );
+    }
+
     #[tokio::test]
     async fn the_history_is_read_from_the_thread_oldest_first() {
         let dir = temp_dir("history");
@@ -1661,7 +1840,7 @@ pub(crate) mod tests {
         let resident = resident(&dir, &script, Arc::default());
         assert_eq!(resident.history(5).await.unwrap(), [], "no thread yet, so nothing is started");
         assert_eq!(script.lock().unwrap().starts, 0);
-        resident.say("hi").await.unwrap();
+        resident.say("hi", &Wearing::default()).await.unwrap();
         let history = resident.history(2).await.unwrap();
         assert_eq!(
             history,
@@ -1700,13 +1879,13 @@ pub(crate) mod tests {
 
         // A start that finds the user logged in is the newer word, and so is one that finds them logged out.
         script.lock().unwrap().logged_in = true;
-        resident.say("hi").await.unwrap();
+        resident.say("hi", &Wearing::default()).await.unwrap();
         assert!(resident.ready());
         let script = Arc::new(std::sync::Mutex::new(Script::default()));
         let logged_out = super::tests::resident(&dir, &script, Arc::default());
         assert!(logged_out.check_readiness().await.ready());
         let watcher = logged_out.watch_ready();
-        assert_eq!(logged_out.say("hi").await.unwrap_err(), ResidentError::NotLoggedIn);
+        assert_eq!(logged_out.say("hi", &Wearing::default()).await.unwrap_err(), ResidentError::NotLoggedIn);
         assert_eq!(logged_out.readiness().problem, Some(Problem::CodexLoggedOut));
         assert!(watcher.has_changed().unwrap());
 
@@ -1718,14 +1897,14 @@ pub(crate) mod tests {
     #[tokio::test]
     async fn the_revision_moves_when_a_turn_ends_or_the_thread_changes_but_not_on_reads() {
         let dir = temp_dir("revision");
-        let saved = Saved { thread_id: Some("old-thread".to_owned()), codex_version: None };
+        let saved = Saved { thread_id: Some("old-thread".to_owned()), codex_version: None, persona: None };
         save(&dir.join("resident.json"), &saved).unwrap();
         let script = logged_in();
         let first = resident(&dir, &script, Arc::default());
         assert_eq!(first.revision(), 0);
         first.history(5).await.unwrap();
         assert_eq!(first.revision(), 0, "resuming the same thread and reading it changes nothing");
-        first.say("hi").await.unwrap();
+        first.say("hi", &Wearing::default()).await.unwrap();
         assert_eq!(first.revision(), 1);
         first.history(5).await.unwrap();
         assert_eq!(first.revision(), 1);
@@ -1735,7 +1914,7 @@ pub(crate) mod tests {
         script.lock().unwrap().lose_thread = true;
         script.lock().unwrap().die_on_turn = Some(1);
         let second = resident(&dir, &script, Arc::default());
-        assert!(second.say("one").await.is_err());
+        assert!(second.say("one", &Wearing::default()).await.is_err());
         assert_eq!(second.revision(), 2, "the new thread and the failed turn");
         let _ = std::fs::remove_dir_all(dir);
     }
@@ -1827,7 +2006,7 @@ pub(crate) mod tests {
         assert_eq!(stored, json!({"brain": "auto", "anthropic_api_key": "sk-ant-secret"}));
 
         // The voice command goes to Claude Code, with the stored key, and its session is the one reported.
-        let answer = resident.say("hi").await.unwrap();
+        let answer = resident.say("hi", &Wearing::default()).await.unwrap();
         assert_eq!(Some(answer.thread_id.clone()), resident.thread_id());
         let launches = claude.lock().unwrap().launches.clone();
         assert!(launches[0].1.contains(&("ANTHROPIC_API_KEY".to_owned(), "sk-ant-secret".to_owned())));
@@ -1845,7 +2024,7 @@ pub(crate) mod tests {
         resident.set_anthropic_key(None).await.unwrap();
         assert_eq!(resident.readiness().problem, Some(Problem::AnthropicKeyMissing));
         assert!(!resident.ready());
-        assert_eq!(resident.say("hi").await.unwrap_err(), ResidentError::NoAnthropicKey);
+        assert_eq!(resident.say("hi", &Wearing::default()).await.unwrap_err(), ResidentError::NoAnthropicKey);
         let stored: Value = serde_json::from_str(&std::fs::read_to_string(&file).unwrap()).unwrap();
         assert_eq!(stored, json!({"brain": "claude"}), "the key is gone from the file");
 
@@ -1865,7 +2044,7 @@ pub(crate) mod tests {
         resident.set_anthropic_key(Some("key".to_owned())).await.unwrap();
         resident.set_brain(BrainChoice::Claude).await.unwrap();
         assert_eq!(resident.history(5).await.unwrap(), [], "no session yet");
-        resident.say("hi").await.unwrap();
+        resident.say("hi", &Wearing::default()).await.unwrap();
         let session = resident.thread_id().unwrap();
         assert!(resident.owns_claude_hook(&session, None));
         assert!(resident.owns_claude_hook("other", Some(&dir.join("resident").display().to_string())));
@@ -1877,7 +2056,7 @@ pub(crate) mod tests {
     #[test]
     fn hooks_from_the_resident_thread_or_its_directory_are_recognised() {
         let dir = temp_dir("hooks");
-        let saved = Saved { thread_id: Some("resident-thread".to_owned()), codex_version: None };
+        let saved = Saved { thread_id: Some("resident-thread".to_owned()), codex_version: None, persona: None };
         save(&dir.join("resident.json"), &saved).unwrap();
         let resident = Resident::new(false, &dir, Launcher::Codex, Arc::default());
         let cwd = dir.join("resident").display().to_string();

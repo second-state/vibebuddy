@@ -35,7 +35,8 @@ use tokio::sync::{Mutex, OnceCell, mpsc};
 use tracing::{info, warn};
 
 use crate::activity::ActivityTracker;
-use crate::resident::{Exchange, Pipes, ResidentError, run_tool, tools};
+use crate::persona::Persona;
+use crate::resident::{Exchange, Pipes, ResidentError, change_note, run_tool, tools};
 
 /// The model the resident session runs on: a voice command waits on the answer.
 pub const MODEL: &str = "claude-haiku-4-5";
@@ -63,7 +64,7 @@ const TURN_TIMEOUT: Duration = Duration::from_secs(120);
 /// What the `system/init` line must report as the credential in use.
 const API_KEY_SOURCE: &str = "ANTHROPIC_API_KEY";
 /// Starts a voice command's context block, which carries the local time; the history leaves it out.
-const CONTEXT_PREFIX: &str = "<context>";
+pub(crate) const CONTEXT_PREFIX: &str = "<context>";
 
 /// How `claude` is reached: the real binary, or an in-memory fake in tests.
 pub enum Launcher {
@@ -83,6 +84,9 @@ struct Process {
     lines: Lines<BufReader<Box<dyn AsyncRead + Send + Unpin>>>,
     /// The key it was started with: a new key needs a new process.
     key: String,
+    /// The instructions it was started with: `--system-prompt` is per process, so new ones (a new Character) need
+    /// a new process on the same session.
+    instructions: String,
     _child: Option<tokio::process::Child>,
 }
 
@@ -91,6 +95,9 @@ struct Saved {
     session_id: Option<String>,
     /// The Claude Code version the session was last started with, for diagnosing a change in the stream.
     claude_version: Option<String>,
+    /// The Character whose persona the session last answered in.
+    #[serde(default)]
+    persona: Option<String>,
 }
 
 /// What the daemon's MCP server shares with the turn in progress.
@@ -114,6 +121,8 @@ pub struct ClaudeBrain {
     process: Mutex<Option<Process>>,
     /// Read synchronously by the hook filter.
     session_id: std::sync::Mutex<Option<String>>,
+    /// The Character whose persona the session last answered in (kept in the state file).
+    spoke_as: std::sync::Mutex<Option<String>>,
 }
 
 impl ClaudeBrain {
@@ -132,6 +141,7 @@ impl ClaudeBrain {
             mcp_url: OnceCell::new(),
             process: Mutex::new(None),
             session_id: std::sync::Mutex::new(saved.session_id),
+            spoke_as: std::sync::Mutex::new(saved.persona),
         }
     }
 
@@ -161,27 +171,47 @@ impl ClaudeBrain {
         }
     }
 
-    /// Hands one voice command to the session; each spoken reply goes to `on_reply` when `speak` is called.
-    /// Returns the session id once the turn is over.
+    /// Hands one voice command to the session, answered in `instructions`, which make the buddy `persona`; each
+    /// spoken reply goes to `on_reply` when `speak` is called. Returns the session id once the turn is over.
     pub async fn say_streaming(
         &self,
         key: &str,
         instructions: &str,
+        persona: &Persona,
         text: &str,
         on_reply: &mut (dyn FnMut(&str) + Send),
     ) -> Result<String, ResidentError> {
         let mut slot = self.process.lock().await;
         let process = self.running(&mut slot, key, instructions).await?;
+        let spoke_as = self.spoke_as.lock().expect("spoke as lock").clone();
+        let changed = spoke_as.as_deref() != Some(persona.id);
+        let note = (changed && spoke_as.is_some()).then(|| change_note(persona));
         let (sender, spoken) = mpsc::unbounded_channel();
         *self.mcp.speak.lock().expect("speak lock") = Some(sender);
-        let result = run_turn(process, spoken, text, on_reply).await;
+        let result = run_turn(process, spoken, note.as_deref(), text, on_reply).await;
         *self.mcp.speak.lock().expect("speak lock") = None;
         match &result {
             // The process is still there and the session intact: an API error, a refused key.
             Err(ResidentError::TurnEnded(_)) | Ok(()) => {}
             Err(_) => *slot = None,
         }
+        if result.is_ok() && changed {
+            self.remember_persona(persona.id);
+        }
         result.map(|()| self.session_id().unwrap_or_default())
+    }
+
+    /// Keeps the Character the session now answers as, so a change is noticed after a restart too.
+    fn remember_persona(&self, id: &str) {
+        *self.spoke_as.lock().expect("spoke as lock") = Some(id.to_owned());
+        let mut saved: Saved = std::fs::read_to_string(&self.state_file)
+            .ok()
+            .and_then(|text| serde_json::from_str(&text).ok())
+            .unwrap_or_default();
+        saved.persona = Some(id.to_owned());
+        if let Err(error) = write_private(&self.state_file, &serde_json::to_string_pretty(&saved).unwrap_or_default()) {
+            warn!(%error, "failed to save the resident Claude session's Character");
+        }
     }
 
     /// The last `limit` voice commands and their spoken replies, oldest first, read from the session's transcript
@@ -209,6 +239,10 @@ impl ClaudeBrain {
     ) -> Result<&'a mut Process, ResidentError> {
         if slot.as_ref().is_some_and(|process| process.key != key) {
             info!("the Anthropic API key changed; starting the resident Claude session again");
+            *slot = None;
+        }
+        if slot.as_ref().is_some_and(|process| process.instructions != instructions) {
+            info!("the instructions changed (a new Character); resuming the resident Claude session with them");
             *slot = None;
         }
         if slot.is_none() {
@@ -248,7 +282,8 @@ impl ClaudeBrain {
         };
         let id = session.id().to_owned();
         *self.session_id.lock().expect("session id lock") = Some(id.clone());
-        let saved = Saved { session_id: Some(id.clone()), claude_version: version };
+        let spoke_as = self.spoke_as.lock().expect("spoke as lock").clone();
+        let saved = Saved { session_id: Some(id.clone()), claude_version: version, persona: spoke_as };
         if let Err(error) = write_private(&self.state_file, &serde_json::to_string_pretty(&saved).unwrap_or_default()) {
             warn!(%error, "failed to save the resident Claude session id");
         }
@@ -257,6 +292,7 @@ impl ClaudeBrain {
             writer: pipes.writer,
             lines: BufReader::new(pipes.reader).lines(),
             key: key.to_owned(),
+            instructions: instructions.to_owned(),
             _child: pipes.child,
         })
     }
@@ -279,10 +315,11 @@ impl Session {
 async fn run_turn(
     process: &mut Process,
     mut spoken: mpsc::UnboundedReceiver<String>,
+    note: Option<&str>,
     text: &str,
     on_reply: &mut (dyn FnMut(&str) + Send),
 ) -> Result<(), ResidentError> {
-    let line = format!("{}\n", user_message(text, &chrono::Local::now(), local_time_zone().as_deref()));
+    let line = format!("{}\n", user_message(text, note, &chrono::Local::now(), local_time_zone().as_deref()));
     let written = async {
         process.writer.write_all(line.as_bytes()).await?;
         process.writer.flush().await
@@ -346,14 +383,13 @@ fn local_time_zone() -> Option<String> {
 
 /// A voice command as a stream-json user message: the local time and time zone first, as context, then what was
 /// said. The time zone stands in for where the user is (Codex gets it from its own environment context), so a
-/// question about the weather or the news has a place.
-fn user_message(text: &str, now: &chrono::DateTime<chrono::Local>, time_zone: Option<&str>) -> Value {
+/// question about the weather or the news has a place. A `note` (the Character changed) goes with the context.
+fn user_message(text: &str, note: Option<&str>, now: &chrono::DateTime<chrono::Local>, time_zone: Option<&str>) -> Value {
     let zone = time_zone.map(|zone| format!(", time zone {zone}")).unwrap_or_default();
     let context = format!("{CONTEXT_PREFIX}The user's local time: {}{zone}</context>", now.format("%A %Y-%m-%d %H:%M (UTC%:z)"));
-    json!({"type": "user", "message": {"role": "user", "content": [
-        {"type": "text", "text": context},
-        {"type": "text", "text": text},
-    ]}})
+    let content: Vec<Value> =
+        [context.as_str()].into_iter().chain(note).chain([text]).map(|text| json!({"type": "text", "text": text})).collect();
+    json!({"type": "user", "message": {"role": "user", "content": content}})
 }
 
 /// The arguments for `claude`; see the module docs for why each is there.
@@ -679,16 +715,17 @@ pub(crate) mod tests {
     use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 
     use super::*;
+    use crate::resident::tests::robot;
 
     #[test]
     fn a_voice_command_carries_the_local_time_and_time_zone_as_context() {
         let now = chrono::Local::now();
-        let message = user_message("今天天气怎么样", &now, Some("Asia/Singapore"));
+        let message = user_message("今天天气怎么样", None, &now, Some("Asia/Singapore"));
         let content = message["message"]["content"].as_array().unwrap();
         let context = content[0]["text"].as_str().unwrap();
         assert!(context.starts_with(CONTEXT_PREFIX) && context.contains("time zone Asia/Singapore"), "{context}");
         assert_eq!(content[1]["text"], "今天天气怎么样");
-        let without = user_message("hi", &now, None);
+        let without = user_message("hi", None, &now, None);
         assert!(!without["message"]["content"][0]["text"].as_str().unwrap().contains("time zone"));
     }
     use crate::activity::{ActivityId, ActivityStatus};
@@ -812,7 +849,7 @@ pub(crate) mod tests {
 
     async fn say(brain: &ClaudeBrain, key: &str, text: &str) -> Result<Vec<String>, ResidentError> {
         let mut replies = Vec::new();
-        brain.say_streaming(key, "You are the buddy of VibeBuddy.", text, &mut |reply| replies.push(reply.to_owned())).await?;
+        brain.say_streaming(key, "You are the buddy of VibeBuddy.", &robot(), text, &mut |reply| replies.push(reply.to_owned())).await?;
         Ok(replies)
     }
 
@@ -900,7 +937,7 @@ pub(crate) mod tests {
         let turn = tokio::spawn({
             let brain = brain.clone();
             async move {
-                brain.say_streaming("key", "instructions", "hi", &mut |reply| sender.send(reply.to_owned()).unwrap()).await
+                brain.say_streaming("key", "instructions", &robot(), "hi", &mut |reply| sender.send(reply.to_owned()).unwrap()).await
             }
         });
         assert_eq!(receiver.recv().await.as_deref(), Some("On it."));
@@ -998,6 +1035,49 @@ pub(crate) mod tests {
         let new = argument(&launches(&third)[0].0, "--session-id").unwrap();
         assert_ne!(new, session);
         assert_eq!(replaced.session_id().as_deref(), Some(new.as_str()));
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[tokio::test]
+    async fn a_new_character_resumes_the_same_session_with_its_instructions_and_a_note() {
+        let dir = temp_dir("claude-character");
+        let script = script();
+        let brain = brain(&dir, &script, Arc::default());
+        async fn say_as(brain: &ClaudeBrain, character: &str, text: &str) {
+            let persona = Persona::of(&crate::resident::tests::wearing(character));
+            let instructions = crate::resident::instructions(&persona, None, crate::resident::Brain::Claude);
+            brain.say_streaming("key", &instructions, &persona, text, &mut |_| {}).await.unwrap();
+        }
+        let texts = |script: &Shared, index: usize| -> Vec<String> {
+            let message = script.lock().unwrap().received[index].clone();
+            let content = message["message"]["content"].as_array().unwrap().clone();
+            content.iter().skip(1).map(|block| block["text"].as_str().unwrap().to_owned()).collect()
+        };
+
+        say_as(&brain, "ada", "hi").await;
+        let session = argument(&launches(&script)[0].0, "--session-id").unwrap();
+        let project = dir.join("resident-claude/projects/-state-resident");
+        std::fs::create_dir_all(&project).unwrap();
+        std::fs::write(project.join(format!("{session}.jsonl")), "").unwrap();
+        say_as(&brain, "ada", "again").await;
+        assert_eq!(launches(&script).len(), 1, "the same Character keeps the process");
+        assert_eq!(texts(&script, 0), ["hi"], "the first command has nothing to switch from");
+
+        say_as(&brain, "wanwanxiaohe", "你好").await;
+        let launched = launches(&script);
+        assert_eq!(launched.len(), 2, "--system-prompt is per process");
+        assert_eq!(argument(&launched[1].0, "--resume").as_deref(), Some(session.as_str()), "the same session, never a fork");
+        let prompt = argument(&launched[1].0, "--system-prompt").unwrap();
+        assert!(prompt.contains("Right now you are Xiaohe (小何)") && prompt.contains("always reply in Chinese"), "{prompt}");
+        let switched = texts(&script, 2);
+        assert!(switched[0].starts_with(CONTEXT_PREFIX) && switched[0].contains("from now on you are Xiaohe (小何)"), "{switched:?}");
+        assert_eq!(switched[1], "你好");
+
+        say_as(&brain, "wanwanxiaohe", "还在吗").await;
+        assert_eq!(launches(&script).len(), 2);
+        assert_eq!(texts(&script, 3), ["还在吗"], "the note goes once");
+        // Whom the session spoke as is kept across a restart.
+        assert!(std::fs::read_to_string(dir.join(STATE_FILE)).unwrap().contains("\"wanwanxiaohe\""));
         let _ = std::fs::remove_dir_all(dir);
     }
 

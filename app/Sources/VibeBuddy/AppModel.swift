@@ -230,7 +230,8 @@ final class AppModel: ObservableObject {
 
     func writeVoice(_ id: String) {
         guard let pack = Resources.voicePack(id) else { lastError = String(localized: "This app has no voice pack for \(id)"); return }
-        run { try await self.client.writeVoicePack(self.addressed(pack, id: id).data) }
+        let address = VoiceCatalogEntry.language(ofVoice: id).flatMap(formOfAddress)
+        run { try await self.client.writeVoicePack(self.addressed(pack, id: id).data, address: address) }
     }
 
     /// The form of address picked for a language; nil for none.
@@ -280,9 +281,10 @@ final class AppModel: ObservableObject {
         return addressed
     }
 
-    /// Writes a pack the app put together itself, such as a custom Character.
-    func writePack(_ data: Data) {
-        run { try await self.client.writeVoicePack(data) }
+    /// Writes a pack the app put together itself, such as a custom Character with the Character lending it
+    /// voice, persona and lines, and the form of address they carry.
+    func writePack(_ data: Data, lender: String? = nil, address: String? = nil) {
+        run { try await self.client.writeVoicePack(data, lender: lender, address: address) }
     }
 
     private static let customLookURL = Resources.applicationSupport.appendingPathComponent("custom-look.bin")
@@ -303,7 +305,7 @@ final class AppModel: ObservableObject {
         try? FileManager.default.createDirectory(at: Resources.applicationSupport, withIntermediateDirectories: true)
         try? look.write(to: Self.customLookURL)
         UserDefaults.standard.set(lender, forKey: Self.customLenderKey)
-        writePack(pack)
+        writePack(pack, lender: lender, address: VoiceCatalogEntry.language(ofVoice: lender).flatMap(formOfAddress))
         return true
     }
 

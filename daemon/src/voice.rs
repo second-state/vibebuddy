@@ -22,6 +22,7 @@ use tokio::task::JoinHandle;
 use tracing::{debug, info, warn};
 use vibebuddy_protocol::{Event, MAX_MESSAGE_BYTES};
 
+use crate::persona::Wearing;
 use crate::resident::Resident;
 use crate::serial_transport::{Transport, TransportError};
 use crate::speech::Recognizer;
@@ -269,8 +270,8 @@ impl Voice {
     }
 
     /// Takes one `VOICE` line from the box. A turn that ends starts a task, returned so tests can wait for it;
-    /// its replies are spoken in the voice of `character`, the Character the box wears.
-    pub fn handle_line(&self, line: &str, transport: &Arc<dyn Transport>, character: Option<&str>) -> Option<JoinHandle<()>> {
+    /// its replies are written in the persona and spoken in the voice of what the box `wearing`.
+    pub fn handle_line(&self, line: &str, transport: &Arc<dyn Transport>, wearing: &Wearing) -> Option<JoinHandle<()>> {
         let parsed = match parse_line(line) {
             None => return None,
             Some(Err(error)) => {
@@ -325,8 +326,8 @@ impl Voice {
                 if taken.as_ref().is_some_and(|taken| taken.refused) {
                     return None;
                 }
-                let speaker = self.synthesizer.clone().map(|synthesizer| (synthesizer, character.map(str::to_owned)));
-                return self.end(turn, samples as usize, taken, transport.clone(), speaker);
+                let speaker = self.synthesizer.clone().map(|synthesizer| (synthesizer, wearing.character.clone()));
+                return self.end(turn, samples as usize, taken, transport.clone(), speaker, wearing.clone());
             }
         }
         None
@@ -339,6 +340,7 @@ impl Voice {
         recording: Option<Recording>,
         transport: Arc<dyn Transport>,
         speaker: Option<(Arc<dyn Synthesizer>, Option<String>)>,
+        wearing: Wearing,
     ) -> Option<JoinHandle<()>> {
         let (Some(recognizer), Some(resident)) = (self.recognizer.clone(), self.resident.clone().filter(|resident| resident.enabled()))
         else {
@@ -362,7 +364,7 @@ impl Voice {
         }
         Some(tokio::spawn(async move {
             let _running = running;
-            run_turn(turn, audio, recognizer, resident, transport, speaker).await;
+            run_turn(turn, audio, recognizer, resident, transport, speaker, wearing).await;
         }))
     }
 }
@@ -499,6 +501,7 @@ async fn run_turn(
     resident: Arc<Resident>,
     transport: Arc<dyn Transport>,
     speaker: Option<(Arc<dyn Synthesizer>, Option<String>)>,
+    wearing: Wearing,
 ) {
     let started = Instant::now();
     let seconds = audio.len() as f32 / SAMPLE_RATE as f32;
@@ -525,7 +528,7 @@ async fn run_turn(
     let speaker = speaker.map(|(synthesizer, character)| Speaker::start(turn, synthesizer, character, transport.clone()));
     let mut replies = 0;
     let answered = resident
-        .say_streaming(&transcript.text, &mut |reply| {
+        .say_streaming(&transcript.text, &wearing, &mut |reply| {
             replies += 1;
             info!(turn, elapsed_ms = started.elapsed().as_millis() as u64, "voice reply");
             send(&*transport, text_event("voice.reply", turn, reply));
@@ -794,7 +797,8 @@ pub mod tests {
         /// Feeds the lines; returns the task the last one started, if any.
         fn feed(&self, lines: &[String]) -> Option<JoinHandle<()>> {
             let transport: Arc<dyn Transport> = self.transport.clone();
-            lines.iter().filter_map(|line| self.voice.handle_line(line, &transport, self.character)).last()
+            let wearing = Wearing { character: self.character.map(str::to_owned), address: None };
+            lines.iter().filter_map(|line| self.voice.handle_line(line, &transport, &wearing)).last()
         }
 
         fn names(&self) -> Vec<String> {
@@ -1113,10 +1117,10 @@ pub mod tests {
         println!("{:.2} s of audio in {} lines", left.len() as f32 / SAMPLE_RATE as f32, lines.len());
         let (end, data) = lines.split_last().unwrap();
         for line in data {
-            assert!(voice.handle_line(line, &transport, None).is_none());
+            assert!(voice.handle_line(line, &transport, &Wearing::default()).is_none());
         }
         *timed.end.lock().unwrap() = Some(Instant::now());
-        voice.handle_line(end, &transport, None).expect("the turn runs").await.unwrap();
+        voice.handle_line(end, &transport, &Wearing::default()).expect("the turn runs").await.unwrap();
 
         let events = timed.events.lock().unwrap();
         let names: Vec<&str> = events.iter().map(|(_, event)| event.event.as_str()).collect();
@@ -1190,7 +1194,7 @@ pub mod tests {
         let transport = Arc::new(RecordingTransport::default());
         let shared: Arc<dyn Transport> = transport.clone();
         for line in voice_lines(1, &sine(12_000)) {
-            voice.handle_line(&line, &shared, None);
+            voice.handle_line(&line, &shared, &Wearing::default());
         }
         assert_eq!(transport.events()[0].extra["reason"], "unavailable");
         let _ = std::fs::remove_dir_all(dir);

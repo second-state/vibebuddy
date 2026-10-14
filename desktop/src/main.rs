@@ -688,7 +688,7 @@ impl App {
                 let form = assets::language_of(id).and_then(|language| self.characters.address(language)).map(str::to_owned);
                 let write = async move {
                     let pack = assets::read_character(id, form.as_deref()).await?;
-                    client::write_voice_pack(pack.build().ok_or("the Character pack doesn't fit")?).await
+                    client::write_voice_pack(pack.build().ok_or("the Character pack doesn't fit")?, None, form.as_deref()).await
                 };
                 return Task::perform(write, Message::Done);
             }
@@ -720,7 +720,7 @@ impl App {
             Message::UseRobot => {
                 self.characters.robot_lender = None;
                 self.characters.save();
-                let write = async move { client::write_voice_pack(assets::read_pack(ROBOT).await?).await };
+                let write = async move { client::write_voice_pack(assets::read_pack(ROBOT).await?, None, None).await };
                 return Task::perform(write, Message::Done);
             }
             Message::UseCustom => {
@@ -733,7 +733,7 @@ impl App {
                 let form = assets::language_of(lender.id).and_then(|language| self.characters.address(language)).map(str::to_owned);
                 let write = async move {
                     let pack = assets::read_character(lender.id, form.as_deref()).await?.with_look(look, CUSTOM);
-                    client::write_voice_pack(pack.build().ok_or("that character can't lend its voice")?).await
+                    client::write_voice_pack(pack.build().ok_or("that character can't lend its voice")?, Some(lender.id), form.as_deref()).await
                 };
                 return Task::perform(write, Message::Done);
             }
