@@ -46,6 +46,13 @@ const CODEX_HOME_DIR: &str = "resident-codex";
 const MEMORY_SUMMARY_MAX_BYTES: usize = 10_000;
 /// How much one `search_memories` call returns at most.
 const MEMORY_SEARCH_MAX_BYTES: usize = 8_000;
+/// The model the resident session runs on, and its reasoning effort: a voice command waits on the answer, and the
+/// session only talks, looks things up and hands work on. See [`tool_overrides`] for what was measured.
+const MODEL: &str = "gpt-6-luna";
+const REASONING_EFFORT: &str = "low";
+/// Codex's built-in web search (`disabled`, `cached`, `indexed` or `live` in codex 0.162.0): `live`, since the
+/// questions it is for (weather, news, prices) are about now, which a cached index may not have yet.
+const WEB_SEARCH: &str = "live";
 
 pub fn enabled_by_env() -> bool {
     matches!(std::env::var(ENABLE_VARIABLE).as_deref(), Ok("1" | "true"))
@@ -430,8 +437,8 @@ impl Resident {
                 }
             }
             "list_activities" => {
-                let activities = self.activities.lock().await.summaries();
-                (true, json!({"activities": activities}).to_string())
+                let report = self.activities.lock().await.report();
+                (true, json!(report).to_string())
             }
             "search_memories" => {
                 let query = params.pointer("/arguments/query").and_then(Value::as_str).unwrap_or_default();
@@ -472,8 +479,13 @@ fn tools() -> Value {
         {
             "type": "function",
             "name": "list_activities",
-            "description": "List what the user's coding Agents are doing right now, newest first: agent, task card title, \
-                project, state (working or needs_input), where it runs, and seconds in that state.",
+            "description": "What the user's coding Agents are doing and have done. `activities`: what runs right now, \
+                newest first: agent, task card title, project, state (working or needs_input), where it runs, and \
+                seconds in that state. `recently_ended`: the last tasks that ended since VibeBuddy started, newest \
+                first: agent, title, project, how it ended (done, failed, stopped: interrupted or closed with no \
+                outcome, or expired: nothing heard for too long) and `ended_s`, seconds ago. `today`: tasks done, \
+                times an Agent asked for input, and seconds with at least one Agent busy, today. Use it for what is \
+                happening now, what just finished, and how today went.",
             "inputSchema": {"type": "object", "properties": {}, "additionalProperties": false},
         },
         {
@@ -508,10 +520,16 @@ fn instructions(persona: Option<&str>, memories: Option<&str>) -> String {
          Every user message is one voice command, transcribed from speech. Answer only by calling the `speak` tool, \
          with one or two short sentences meant to be heard, not read: no Markdown, lists, code, paths or URLs. \
          Reply in the language the user spoke. Do not write any other answer.\n\
-         To know what the Agents are doing, call `list_activities`; never guess. Titles there are short upper-case \
-         task-card names; say them naturally.\n\
-         You do no work yourself: run no commands, read or edit no files, browse nothing. If the user asks for work \
-         to be done, say briefly that you can't start it yet.{memories}"
+         To know what the Agents are doing, have just finished or did today, call `list_activities`; never guess. It \
+         has the live tasks, the ones that ended lately with how and how long ago (`recently_ended`), and today's \
+         counts (`today`). Titles there are short upper-case task-card names; say them naturally.\n\
+         Never state a fact you have not seen in a tool result, a web search result or the memories below: not the \
+         weather, news, prices, scores, schedules or anything else about now, and nothing about the user's world. \
+         For things about now, search the web, and answer only from what the search found; today's date and the \
+         user's time zone are in the environment context, so work out today and tomorrow from them. If you can't \
+         find out, say so plainly in one sentence; never make up an answer that sounds likely.\n\
+         You do no work yourself: run no commands, read or edit no files. If the user asks for work to be done, say \
+         briefly that you can't start it yet.{memories}"
     )
 }
 
@@ -602,20 +620,21 @@ const FEATURES_OFF: [&str; 15] = [
 ///   path) and, on saving, would delete the link.
 /// - `memories.generate_memories=false`: the resident thread is never summarised into memories, should the feature
 ///   come on.
-/// - `model="gpt-6-luna"`, `model_reasoning_effort="low"`: a voice command waits on the answer, and the resident
-///   session only talks and hands work on. Measured on 2026-10-13, a turn's first `speak` came 2.7 s in on
-///   gpt-6-luna at low, against 4.3 s on gpt-6.1-sol at high.
+/// - `web_search`: Codex's built-in web search, so a question about now is looked up rather than made up. The
+///   queries go to OpenAI, the model provider.
+/// - [`MODEL`] at [`REASONING_EFFORT`]: a voice command waits on the answer. Measured on 2026-10-13, a turn's first
+///   `speak` came 2.7 s in on gpt-6-luna at low, against 4.3 s on gpt-6.1-sol at high.
 fn tool_overrides() -> Vec<String> {
     let mut args: Vec<String> =
         FEATURES_OFF.iter().flat_map(|feature| ["-c".to_owned(), format!("features.{feature}=false")]).collect();
     for setting in [
-        "web_search=\"disabled\"",
-        "cli_auth_credentials_store=\"file\"",
-        "memories.generate_memories=false",
-        "model=\"gpt-6-luna\"",
-        "model_reasoning_effort=\"low\"",
+        format!("web_search=\"{WEB_SEARCH}\""),
+        "cli_auth_credentials_store=\"file\"".to_owned(),
+        "memories.generate_memories=false".to_owned(),
+        format!("model=\"{MODEL}\""),
+        format!("model_reasoning_effort=\"{REASONING_EFFORT}\""),
     ] {
-        args.extend(["-c".to_owned(), setting.to_owned()]);
+        args.extend(["-c".to_owned(), setting]);
     }
     args
 }
@@ -963,10 +982,17 @@ pub(crate) mod tests {
         assert_eq!(start["cwd"], json!(dir.join("resident")));
         assert_eq!(start["sandbox"], "read-only");
         assert_eq!(start["approvalPolicy"], "on-request");
-        assert!(start["developerInstructions"].as_str().unwrap().contains("speak"));
+        let instructions = start["developerInstructions"].as_str().unwrap();
+        assert!(instructions.contains("speak"));
+        assert!(instructions.contains("Never state a fact you have not seen in a tool result"), "{instructions}");
+        assert!(instructions.contains("not the weather, news, prices"));
+        assert!(instructions.contains("search the web"));
+        assert!(instructions.contains("`recently_ended`"));
         let tools: Vec<&str> =
             start["dynamicTools"].as_array().unwrap().iter().map(|tool| tool["name"].as_str().unwrap()).collect();
         assert_eq!(tools, ["speak", "list_activities", "search_memories"]);
+        let listing = start["dynamicTools"][1]["description"].as_str().unwrap();
+        assert!(listing.contains("`recently_ended`") && listing.contains("`today`"), "{listing}");
         assert_eq!(received[4]["params"], json!({"threadId": "new-thread", "input": [{"type": "text", "text": "hello"}]}));
         assert!(dir.join("resident").is_dir());
         assert_eq!(load(&dir.join("resident.json")).thread_id.as_deref(), Some("new-thread"));
@@ -1025,6 +1051,10 @@ pub(crate) mod tests {
         let mut tracker = ActivityTracker::default();
         let id = ActivityId { session_id: "s".to_owned(), key: "s:t".to_owned() };
         tracker.observe(&id, "CX:REVIEW", ActivityStatus::Working);
+        let ended = ActivityId { session_id: "e".to_owned(), key: "e:t".to_owned() };
+        tracker.note_project(&ended, "VIBE-BUDDY");
+        tracker.observe(&ended, "CC:DOCS", ActivityStatus::Working);
+        tracker.finish(&ended, "CC:DOCS");
         let script = logged_in();
         script.lock().unwrap().turn_requests = vec![
             tool_call("list_activities", json!({})),
@@ -1042,6 +1072,13 @@ pub(crate) mod tests {
         let listed: Value = serde_json::from_str(&text(0)).unwrap();
         assert_eq!(listed["activities"][0]["title"], "CX:REVIEW");
         assert_eq!(listed["activities"][0]["state"], "working");
+        assert_eq!(listed["activities"].as_array().unwrap().len(), 1);
+        assert_eq!(listed["recently_ended"][0]["title"], "CC:DOCS");
+        assert_eq!(listed["recently_ended"][0]["project"], "VIBE-BUDDY");
+        assert_eq!(listed["recently_ended"][0]["ended"], "done");
+        assert!(listed["recently_ended"][0]["ended_s"].is_u64());
+        assert_eq!(listed["today"]["done"], 1);
+        assert!(listed["today"]["asks"].is_u64() && listed["today"]["busy_seconds"].is_u64());
         assert_eq!(answers[1]["result"]["success"], true);
         assert_eq!(answers[2]["result"]["success"], false);
         assert_eq!(answers[3]["result"]["success"], false);
@@ -1288,7 +1325,7 @@ pub(crate) mod tests {
             "features.unified_exec=false",
             "features.multi_agent=false",
             "features.memories=false",
-            "web_search=\"disabled\"",
+            "web_search=\"live\"",
             "cli_auth_credentials_store=\"file\"",
             "memories.generate_memories=false",
             "model=\"gpt-6-luna\"",
