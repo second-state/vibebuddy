@@ -429,7 +429,8 @@ fn speak(
     if stopped.load(Ordering::Acquire) {
         return;
     }
-    let voice = synthesis::voice_for(character, text);
+    let voice = synthesis::voice_for(character);
+    let voice = voice.as_str();
     let started = Instant::now();
     let (mut seq, mut bytes, mut first_byte_ms) = (0, 0, None);
     let result = synthesizer.synthesize(text, voice, &mut |piece| {
@@ -933,7 +934,7 @@ pub mod tests {
         assert_eq!(rig.names().last().map(String::as_str), Some("voice.done"));
         // No Character pack: the built-in Character's voice, and a Chinese one for Chinese.
         let voices: Vec<String> = synthesizer.calls.lock().unwrap().iter().map(|(_, voice)| voice.clone()).collect();
-        assert_eq!(voices, ["en-US-JennyNeural", "zh-CN-XiaoxiaoNeural"]);
+        assert_eq!(voices, ["elevenlabs:cgSgspJ2msm6clMCkdW9", "elevenlabs:cgSgspJ2msm6clMCkdW9"]);
     }
 
     #[test]
@@ -1154,7 +1155,7 @@ pub mod tests {
             std::fs::write(&path, &bytes).unwrap();
             println!(
                 "{name} {}: first audio after {first_ms} ms, end after {total_ms} ms, {} bytes in {} lines -> {}",
-                synthesis::voice_for(character, text),
+                synthesis::voice_for(character),
                 bytes.len(),
                 events.len(),
                 path.display()

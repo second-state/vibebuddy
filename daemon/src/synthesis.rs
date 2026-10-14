@@ -129,41 +129,37 @@ pub fn split(text: &str, max: usize) -> Vec<&str> {
     pieces
 }
 
-/// DEVELOPMENT ONLY: an Edge voice for each Character, picked to roughly match its persona (docs/characters.md)
-/// while the voice service speaks with Edge voices. The voices spoken replies use in production are still to be
-/// decided; this table is the one place to change.
-const CHARACTER_VOICES: &[(&str, &str)] = &[
-    // A soft Taiwanese accent.
-    ("wanwanxiaohe", "zh-TW-HsiaoChenNeural"),
-    // A witty Londoner.
-    ("ada", "en-GB-SoniaNeural"),
-    // Calm late-night lofi.
-    ("luna", "en-US-AvaNeural"),
-    // Upbeat, from the Bay Area.
-    ("mei", "en-US-AriaNeural"),
-    // A greybeard in his fifties: low and dry.
-    ("hank", "en-US-ChristopherNeural"),
-    // A laid-back San Diego surfer.
-    ("kai", "en-US-AndrewNeural"),
-    // Fast and punchy; there is no Danish-accented English voice, so a European one.
-    ("dave", "en-GB-RyanNeural"),
-    // The built-in default Character, whose voice is Jessica.
-    ("robot", "en-US-JennyNeural"),
+/// Each Character's voice file (`characters/<id>/voice.env`), so a spoken reply is in the very voice its lines
+/// were made with: `ENGINE=elevenlabs` voices are the ones in our ElevenLabs account, which the voice service uses.
+const VOICE_FILES: &[(&str, &str)] = &[
+    ("ada", include_str!("../../characters/ada/voice.env")),
+    ("dave", include_str!("../../characters/dave/voice.env")),
+    ("hank", include_str!("../../characters/hank/voice.env")),
+    ("kai", include_str!("../../characters/kai/voice.env")),
+    ("luna", include_str!("../../characters/luna/voice.env")),
+    ("mei", include_str!("../../characters/mei/voice.env")),
+    ("wanwanxiaohe", include_str!("../../characters/wanwanxiaohe/voice.env")),
 ];
-/// No Character pack, or one this table doesn't know: the built-in default Character's.
-const DEFAULT_VOICE: &str = "en-US-JennyNeural";
-/// A reply in Chinese from a Character whose voice is English: an English voice can't read it.
-const CHINESE_VOICE: &str = "zh-CN-XiaoxiaoNeural";
+/// The built-in default Character speaks with ElevenLabs' Jessica (voices/README.md); so does no Character pack, or
+/// one these files don't know.
+const DEFAULT_VOICE: &str = "elevenlabs:cgSgspJ2msm6clMCkdW9";
+/// Until the voice service speaks Doubao, a Character whose voice is there (the Chinese ones) borrows Mei's: she
+/// is Chinese-American, and ElevenLabs' multilingual model reads Chinese in her voice.
+const NOT_YET_SPOKEN: &str = "mei";
 
-/// The voice to speak `text` in for `character` (the id the box reports in `VOICES`). A Character speaks one
-/// language, but the resident session answers in the user's: Chinese text gets a Chinese voice whatever the
-/// Character.
-pub fn voice_for(character: Option<&str>, text: &str) -> &'static str {
-    let voice = character
-        .and_then(|character| CHARACTER_VOICES.iter().find(|(id, _)| *id == character))
-        .map_or(DEFAULT_VOICE, |(_, voice)| voice);
-    let chinese = text.chars().any(|character| ('\u{4e00}'..='\u{9fff}').contains(&character));
-    if chinese && !voice.starts_with("zh-") { CHINESE_VOICE } else { voice }
+/// The voice service's name for `character`'s voice (the id the box reports in `VOICES`), as `<vendor>:<voice>`.
+/// The model is multilingual, so a reply in another language than the Character's keeps the Character's voice.
+pub fn voice_for(character: Option<&str>) -> String {
+    let voice_of = |character: &str| {
+        let file = VOICE_FILES.iter().find(|(id, _)| *id == character)?.1;
+        let field = |key: &str| file.lines().find_map(|line| line.strip_prefix(key)?.strip_prefix('='));
+        Some((field("ENGINE")?, field("VOICE")?))
+    };
+    match character.and_then(voice_of) {
+        Some(("elevenlabs", voice)) => format!("elevenlabs:{voice}"),
+        Some(_) => voice_of(NOT_YET_SPOKEN).map_or(DEFAULT_VOICE.to_owned(), |(_, voice)| format!("elevenlabs:{voice}")),
+        None => DEFAULT_VOICE.to_owned(),
+    }
 }
 
 /// The synthesizer the environment configures, if any.
@@ -194,19 +190,13 @@ mod tests {
     use super::*;
 
     #[test]
-    fn each_character_has_its_voice_and_chinese_text_gets_a_chinese_one() {
-        assert_eq!(voice_for(Some("wanwanxiaohe"), "你好"), "zh-TW-HsiaoChenNeural");
-        assert_eq!(voice_for(Some("wanwanxiaohe"), "OK, done."), "zh-TW-HsiaoChenNeural");
-        assert_eq!(voice_for(Some("ada"), "Two agents are working."), "en-GB-SoniaNeural");
-        assert_eq!(voice_for(Some("hank"), "Done."), "en-US-ChristopherNeural");
-        assert_eq!(voice_for(Some("robot"), "Hi"), DEFAULT_VOICE);
-        assert_eq!(voice_for(None, "Hi"), DEFAULT_VOICE, "no Character pack");
-        assert_eq!(voice_for(Some("hsiaoyu"), "Hi"), DEFAULT_VOICE, "an old voice pack");
-        assert_eq!(voice_for(Some("ada"), "两个智能体在工作"), CHINESE_VOICE);
-        assert_eq!(voice_for(None, "Codex 在跑测试"), CHINESE_VOICE);
-        for (id, voice) in CHARACTER_VOICES {
-            assert!(voice.ends_with("Neural"), "{id}");
-        }
+    fn each_character_speaks_in_the_voice_of_its_lines() {
+        assert_eq!(voice_for(Some("ada")), "elevenlabs:tcSsCJFYrsHpK5rCQZMf");
+        assert_eq!(voice_for(Some("hank")), "elevenlabs:U6jH23hcPh0zH17nf3DT");
+        assert_eq!(voice_for(Some("wanwanxiaohe")), voice_for(Some("mei")), "Doubao isn't spoken yet");
+        assert_eq!(voice_for(Some("robot")), DEFAULT_VOICE);
+        assert_eq!(voice_for(None), DEFAULT_VOICE, "no Character pack");
+        assert_eq!(voice_for(Some("hsiaoyu")), DEFAULT_VOICE, "an old voice pack");
     }
 
     #[test]
