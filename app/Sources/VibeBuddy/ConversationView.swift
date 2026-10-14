@@ -171,20 +171,30 @@ struct ConversationView: View {
         } else if let exchanges {
             ScrollViewReader { proxy in
                 ScrollView {
-                    LazyVStack(spacing: 16) {
+                    // A plain stack: at most 20 exchanges, and a lazy one can't be scrolled to rows it hasn't laid
+                    // out, which left the view scrolled past a shorter history (switching from Codex to Claude).
+                    VStack(spacing: 16) {
                         ForEach(Array(exchanges.enumerated()), id: \.offset) { index, exchange in
                             ExchangeRow(exchange: exchange).id(index)
                         }
                     }
                     .padding(12)
                 }
+                // A new thread (the other Agent answering) gets a new scroll view, so no offset carries over.
+                .id(latest?.threadId ?? "")
                 .background(.background, in: RoundedRectangle(cornerRadius: 8))
-                .onAppear { proxy.scrollTo(exchanges.count - 1, anchor: .bottom) }
-                .onChange(of: exchanges) { proxy.scrollTo(exchanges.count - 1, anchor: .bottom) }
+                .onAppear { scrollToEnd(proxy) }
+                .onChange(of: exchanges) { scrollToEnd(proxy) }
             }
         } else {
             ProgressView()
         }
+    }
+
+    /// Scrolls to the newest exchange once the rows are laid out.
+    private func scrollToEnd(_ proxy: ScrollViewProxy) {
+        guard let exchanges, !exchanges.isEmpty else { return }
+        DispatchQueue.main.async { proxy.scrollTo(exchanges.count - 1, anchor: .bottom) }
     }
 
     /// Asks `GET /v1/resident` every 2 seconds and reads the history again only when its change marker moved, or
