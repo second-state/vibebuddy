@@ -10,6 +10,7 @@ mod lan;
 mod noise_link;
 mod relay;
 mod resident;
+mod resident_claude;
 mod link_alert;
 mod occasions;
 mod rom_flasher;
@@ -262,7 +263,11 @@ async fn main() {
         if enabled {
             warn!("the experimental resident session is on");
         }
-        Arc::new(resident::Resident::new(enabled, dir, resident::Launcher::Codex, state.activities.clone()))
+        let resident = resident::Resident::new(enabled, dir, resident::Launcher::Codex, state.activities.clone());
+        Arc::new(match config::config_dir() {
+            Some(config) => resident.with_settings_file(config.join(resident::SETTINGS_FILE)),
+            None => resident,
+        })
     });
     state.voice = Arc::new(voice::Voice::new(speech::from_env(), state.resident.clone()).with_synthesizer(synthesis::from_env()));
     if let Some(resident) = state.resident.clone() {
@@ -592,6 +597,8 @@ fn app(state: AppState) -> Router {
         .route("/v1/resident", get(get_resident))
         .route("/v1/resident/say", post(post_resident_say))
         .route("/v1/resident/history", get(get_resident_history))
+        .route("/v1/resident/brain", axum::routing::put(put_resident_brain))
+        .route("/v1/resident/anthropic-key", axum::routing::put(put_anthropic_key).delete(delete_anthropic_key))
         .with_state(state)
 }
 
@@ -1311,6 +1318,16 @@ async fn post_claude_hook(
     State(state): State<AppState>,
     Json(hook): Json<ClaudeHook>,
 ) -> (StatusCode, Json<ApiResponse>) {
+    // The resident session on Claude Code is never an Activity either (ADR-0017).
+    if let Some(resident) = &state.resident
+        && resident.owns_claude_hook(&hook.session_id, hook.cwd.as_deref())
+    {
+        tracing::debug!(event = %hook.hook_event_name, "ignoring a Claude Code hook from the resident session");
+        return (
+            StatusCode::ACCEPTED,
+            Json(ApiResponse { accepted: true, message: "resident session, ignored".to_owned() }),
+        );
+    }
     state.hooks_seen.lock().await.claude = Some(chrono::Local::now());
     state.notify_status();
     let event = {
@@ -1379,24 +1396,98 @@ struct ResidentInfo {
     revision: u64,
     /// On, and the user's Codex was last found installed and logged in: voice commands can be taken.
     ready: bool,
-    /// What is missing when it is on but not ready: `codex_missing` or `codex_logged_out`.
+    /// What is missing when it is on but not ready: `codex_missing`, `codex_logged_out`, `claude_missing` or
+    /// `anthropic_key_missing`.
     problem: Option<resident::Problem>,
+    /// The brain voice commands go to while ready: `codex` or `claude`.
+    brain: Option<resident::Brain>,
+    /// The user's setting: `auto`, `codex` or `claude`.
+    brain_setting: resident::BrainChoice,
+    /// Whether an Anthropic API key is stored; the key itself is never sent back.
+    anthropic_key_set: bool,
 }
 
 /// Asking checks the resident session's readiness again when the last check is older than
-/// [`resident::READINESS_TTL`]; it never starts the app-server.
+/// [`resident::READINESS_TTL`]; it never starts the app-server or Claude Code.
 async fn get_resident(State(state): State<AppState>) -> Json<ResidentInfo> {
     let Some(resident) = state.resident.as_ref() else {
-        return Json(ResidentInfo { enabled: false, thread_id: None, revision: 0, ready: false, problem: None });
+        return Json(ResidentInfo {
+            enabled: false,
+            thread_id: None,
+            revision: 0,
+            ready: false,
+            problem: None,
+            brain: None,
+            brain_setting: resident::BrainChoice::default(),
+            anthropic_key_set: false,
+        });
     };
     let readiness = resident.check_readiness().await;
+    let on = resident.enabled();
     Json(ResidentInfo {
-        enabled: resident.enabled(),
+        enabled: on,
         thread_id: resident.thread_id(),
         revision: resident.revision(),
         ready: resident.ready(),
-        problem: if resident.enabled() { readiness.problem } else { None },
+        problem: if on { readiness.problem } else { None },
+        brain: if resident.ready() { readiness.brain } else { None },
+        brain_setting: resident.brain_setting(),
+        anthropic_key_set: resident.anthropic_key_set(),
     })
+}
+
+#[derive(serde::Deserialize)]
+struct BrainRequest {
+    brain: resident::BrainChoice,
+}
+
+/// Sets which brain the resident session runs on. Its own endpoint, kept out of `PUT /v1/config`.
+async fn put_resident_brain(State(state): State<AppState>, Json(request): Json<BrainRequest>) -> axum::response::Response {
+    use axum::response::IntoResponse;
+    let Some(resident) = state.resident.clone() else {
+        return no_state_directory();
+    };
+    if let Err(error) = resident.set_brain(request.brain).await {
+        warn!(%error, "failed to save the resident session's brain setting");
+        return (StatusCode::INTERNAL_SERVER_ERROR, Json(ApiResponse { accepted: false, message: error.to_string() })).into_response();
+    }
+    get_resident(State(state)).await.into_response()
+}
+
+#[derive(serde::Deserialize)]
+struct AnthropicKeyRequest {
+    api_key: String,
+}
+
+/// Stores the user's Anthropic API key for Claude Code (mode 0600, in its own file); it is never sent back or
+/// logged. Its own endpoint, so an App that doesn't know it can't wipe it.
+async fn put_anthropic_key(State(state): State<AppState>, Json(request): Json<AnthropicKeyRequest>) -> axum::response::Response {
+    use axum::response::IntoResponse;
+    if request.api_key.trim().is_empty() {
+        return (StatusCode::BAD_REQUEST, Json(ApiResponse { accepted: false, message: "api_key is empty".to_owned() })).into_response();
+    }
+    set_anthropic_key(state, Some(request.api_key)).await
+}
+
+async fn delete_anthropic_key(State(state): State<AppState>) -> axum::response::Response {
+    set_anthropic_key(state, None).await
+}
+
+async fn set_anthropic_key(state: AppState, key: Option<String>) -> axum::response::Response {
+    use axum::response::IntoResponse;
+    let Some(resident) = state.resident.clone() else {
+        return no_state_directory();
+    };
+    if let Err(error) = resident.set_anthropic_key(key).await {
+        warn!(%error, "failed to save the Anthropic API key");
+        return (StatusCode::INTERNAL_SERVER_ERROR, Json(ApiResponse { accepted: false, message: error.to_string() })).into_response();
+    }
+    get_resident(State(state)).await.into_response()
+}
+
+fn no_state_directory() -> axum::response::Response {
+    use axum::response::IntoResponse;
+    (StatusCode::SERVICE_UNAVAILABLE, Json(ApiResponse { accepted: false, message: "no state directory".to_owned() })).into_response()
 }
 
 #[derive(serde::Deserialize)]
@@ -1675,6 +1766,55 @@ mod tests {
         let _ = std::fs::remove_dir_all(dir);
     }
 
+    #[tokio::test]
+    async fn the_resident_claude_sessions_hooks_make_no_card_and_the_key_is_never_sent_back() {
+        let dir = resident::tests::temp_dir("main-claude");
+        let transport = Arc::new(RecordingTransport::default());
+        let mut state = test_state(transport.clone());
+        let claude = resident_claude::tests::script();
+        state.resident = Some(Arc::new(
+            resident::tests::resident(&dir, &resident::tests::logged_in(), state.activities.clone())
+                .with_claude(resident_claude::tests::brain(&dir, &claude, state.activities.clone())),
+        ));
+
+        let request = AnthropicKeyRequest { api_key: " ".to_owned() };
+        assert_eq!(put_anthropic_key(State(state.clone()), Json(request)).await.status(), StatusCode::BAD_REQUEST);
+        let request = AnthropicKeyRequest { api_key: "sk-ant-secret".to_owned() };
+        let response = put_anthropic_key(State(state.clone()), Json(request)).await;
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = http_body_util::BodyExt::collect(response.into_body()).await.unwrap().to_bytes();
+        let info: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(info["anthropic_key_set"], true);
+        assert!(!String::from_utf8_lossy(&body).contains("sk-ant-secret"));
+        let request = BrainRequest { brain: resident::BrainChoice::Claude };
+        let response = put_resident_brain(State(state.clone()), Json(request)).await;
+        let body = http_body_util::BodyExt::collect(response.into_body()).await.unwrap().to_bytes();
+        let info: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!((info["brain_setting"].as_str(), info["brain"].as_str(), info["ready"].as_bool()), (Some("claude"), Some("claude"), Some(true)));
+
+        let resident = state.resident.clone().unwrap();
+        resident.say("hi").await.unwrap();
+        let session = resident.thread_id().unwrap();
+        for event in ["UserPromptSubmit", "Stop"] {
+            let hook: ClaudeHook = serde_json::from_value(serde_json::json!({
+                "session_id": session,
+                "prompt_id": "p1",
+                "hook_event_name": event,
+                "cwd": dir.join("resident").display().to_string(),
+            }))
+            .unwrap();
+            let _ = post_claude_hook(State(state.clone()), Json(hook)).await;
+        }
+        assert!(transport.events().is_empty());
+        assert!(state.activities.lock().await.summaries().is_empty());
+
+        let response = delete_anthropic_key(State(state.clone())).await;
+        let body = http_body_util::BodyExt::collect(response.into_body()).await.unwrap().to_bytes();
+        let info: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!((info["anthropic_key_set"].as_bool(), info["problem"].as_str()), (Some(false), Some("anthropic_key_missing")));
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
     #[test]
     fn the_app_version_leads_the_build_identity() {
         assert_eq!(
@@ -1776,7 +1916,16 @@ mod tests {
         let Json(info) = get_resident(State(state.clone())).await;
         assert_eq!(
             serde_json::to_value(&info).unwrap(),
-            serde_json::json!({"enabled": true, "thread_id": null, "revision": 0, "ready": true, "problem": null})
+            serde_json::json!({
+                "enabled": true,
+                "thread_id": null,
+                "revision": 0,
+                "ready": true,
+                "problem": null,
+                "brain": "codex",
+                "brain_setting": "auto",
+                "anthropic_key_set": false,
+            })
         );
         assert_eq!(script.lock().unwrap().starts, 0, "asking never starts the app-server");
 

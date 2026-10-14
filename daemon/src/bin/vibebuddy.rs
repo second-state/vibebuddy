@@ -3,8 +3,8 @@
 //!
 //! - `vibebuddy say <text>`: hands a voice command, typed, to the resident session and prints its spoken replies.
 //! - `vibebuddy resident [n]`: prints the resident thread's id and its last `n` (default 5) voice commands with the
-//!   spoken replies, read from the thread. The thread lives in a Codex home of the daemon's own, so the Codex App
-//!   can't open it.
+//!   spoken replies, read from the thread (or, on Claude Code, the session). Both live in a home of the daemon's
+//!   own, so neither Agent's App can open them.
 //!
 //! The resident session is experimental: the daemon has it only when started with `VIBEBUDDY_RESIDENT_SESSION=1`.
 
@@ -66,7 +66,12 @@ fn resident(limit: usize) -> Result<(), String> {
     match info["problem"].as_str() {
         Some("codex_missing") => eprintln!("voice is off: Codex isn't installed (https://learn.chatgpt.com/docs/codex/cli)"),
         Some("codex_logged_out") => eprintln!("voice is off: Codex isn't logged in; run `codex login`"),
+        Some("claude_missing") => eprintln!("voice is off: Claude Code isn't installed (https://code.claude.com/docs/en/setup)"),
+        Some("anthropic_key_missing") => eprintln!("voice is off: no Anthropic API key is set for Claude Code (Settings → Conversation)"),
         _ => {}
+    }
+    if let Some(brain) = info["brain"].as_str() {
+        println!("brain {brain}");
     }
     let Some(thread) = info["thread_id"].as_str() else {
         println!("no resident thread yet; it starts with the first `vibebuddy say`");

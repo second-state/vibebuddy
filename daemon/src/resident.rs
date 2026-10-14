@@ -1,4 +1,7 @@
-//! The resident session (ADR-0017): the one long-running Codex thread every voice command goes to.
+//! The resident session (ADR-0017): the one long-running Agent session every voice command goes to, on one of two
+//! brains: the user's Codex (this module) or the user's Claude Code with their own Anthropic API key
+//! ([`crate::resident_claude`]). Which one is a setting (`codex`, `claude` or `auto`: Codex when it is ready, else
+//! Claude Code when a key is set); each brain keeps its own session for good.
 //!
 //! The daemon drives `codex app-server` over stdio with the user's own login, in a Codex home of its own
 //! (`resident-codex/` in the daemon's state directory) that the user's Codex and the ChatGPT App never list, so they
@@ -27,6 +30,7 @@ use tracing::{info, warn};
 
 use crate::activity::ActivityTracker;
 use crate::app_server::{Client, Incoming, RpcError};
+use crate::resident_claude::ClaudeBrain;
 
 /// The Codex version the app-server protocol was verified with. app-server and `dynamicTools` are experimental,
 /// so other versions get a warning in the log, but are still tried.
@@ -57,6 +61,10 @@ const AUTH_STORE: &str = "cli_auth_credentials_store=\"file\"";
 /// Codex's built-in web search (`disabled`, `cached`, `indexed` or `live` in codex 0.162.0): `live`, since the
 /// questions it is for (weather, news, prices) are about now, which a cached index may not have yet.
 const WEB_SEARCH: &str = "live";
+/// The user's brain setting and Anthropic API key, in the config directory (mode 0600). A file of its own, written
+/// only through its own endpoints, because `PUT /v1/config` replaces the whole config and an older App would wipe a
+/// key it doesn't know.
+pub const SETTINGS_FILE: &str = "resident-settings.json";
 
 pub fn enabled_by_env() -> bool {
     matches!(std::env::var(ENABLE_VARIABLE).as_deref(), Ok("1" | "true"))
@@ -67,6 +75,8 @@ pub enum ResidentError {
     Disabled,
     NoCodex,
     NotLoggedIn,
+    NoClaude,
+    NoAnthropicKey,
     Rpc(String),
     Timeout,
     /// The turn ended without completing: interrupted or failed.
@@ -79,6 +89,10 @@ impl std::fmt::Display for ResidentError {
             Self::Disabled => write!(formatter, "the resident session is experimental and off; start vibebuddyd with {ENABLE_VARIABLE}=1"),
             Self::NoCodex => write!(formatter, "codex was not found on PATH (set {CODEX_VARIABLE} to its path)"),
             Self::NotLoggedIn => write!(formatter, "Codex is not logged in; run `codex login` first"),
+            Self::NoClaude => {
+                write!(formatter, "claude was not found on PATH (set {} to its path)", crate::resident_claude::CLAUDE_VARIABLE)
+            }
+            Self::NoAnthropicKey => write!(formatter, "no Anthropic API key is set for Claude Code"),
             Self::Rpc(message) => write!(formatter, "{message}"),
             Self::Timeout => write!(formatter, "the resident session took longer than {} s and was interrupted", TURN_TIMEOUT.as_secs()),
             Self::TurnEnded(message) => write!(formatter, "the turn ended without completing: {message}"),
@@ -92,19 +106,78 @@ impl From<RpcError> for ResidentError {
     }
 }
 
-/// Why the resident session can't take a voice command now: voice needs the user's Codex, installed and logged in.
+/// Why the resident session can't take a voice command now: voice needs the user's Codex, installed and logged in,
+/// or the user's Claude Code, installed, with their Anthropic API key.
 #[derive(Clone, Copy, Debug, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Problem {
     CodexMissing,
     CodexLoggedOut,
+    ClaudeMissing,
+    AnthropicKeyMissing,
 }
 
-/// The last readiness check: none yet, or when it was made and what it found.
+/// The Agent the resident session runs on.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Brain {
+    Codex,
+    Claude,
+}
+
+/// Which brain the user wants: `auto` is Codex when it is ready, else Claude Code when an Anthropic API key is set.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum BrainChoice {
+    #[default]
+    Auto,
+    Codex,
+    Claude,
+}
+
+/// The last readiness check: none yet, or when it was made, what it found, and the brain that answers.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct Readiness {
     pub checked: Option<tokio::time::Instant>,
     pub problem: Option<Problem>,
+    /// The brain voice commands go to; None while not ready under `auto`.
+    pub brain: Option<Brain>,
+}
+
+/// What the user set: the brain, and their Anthropic API key (never sent back to a client).
+#[derive(Clone, Default, Deserialize, Serialize)]
+struct Settings {
+    #[serde(default)]
+    brain: BrainChoice,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    anthropic_api_key: Option<String>,
+}
+
+/// Readiness under a brain setting, from the last Codex check and whether Claude Code is there with a key.
+fn decide(choice: BrainChoice, codex: Readiness, claude_installed: bool, key_set: bool) -> Readiness {
+    let claude_problem = if !claude_installed {
+        Some(Problem::ClaudeMissing)
+    } else if !key_set {
+        Some(Problem::AnthropicKeyMissing)
+    } else {
+        None
+    };
+    let codex_side = Readiness { brain: Some(Brain::Codex), ..codex };
+    let claude_side = Readiness { checked: Some(tokio::time::Instant::now()), problem: claude_problem, brain: Some(Brain::Claude) };
+    match choice {
+        BrainChoice::Codex => codex_side,
+        BrainChoice::Claude => claude_side,
+        BrainChoice::Auto if codex.ready() => codex_side,
+        BrainChoice::Auto if claude_problem.is_none() => claude_side,
+        // Codex hasn't been looked at yet: no answer either way.
+        BrainChoice::Auto if codex.checked.is_none() => Readiness::default(),
+        // A key says the user means Claude Code, so its problem is the one to fix; else Codex's.
+        BrainChoice::Auto => Readiness {
+            checked: codex.checked,
+            problem: if key_set { claude_problem } else { codex.problem },
+            brain: None,
+        },
+    }
 }
 
 impl Readiness {
@@ -174,8 +247,15 @@ pub struct Resident {
     thread_id: std::sync::Mutex<Option<String>>,
     /// Bumped when a turn ends or the thread changes, so a client can tell the history moved without reading it.
     revision: std::sync::atomic::AtomicU64,
-    /// The last readiness check; watchers hear when `ready()` flips.
+    /// The last Codex check (its `brain` unused).
+    codex_readiness: std::sync::Mutex<Readiness>,
+    /// Readiness under the brain setting; watchers hear when `ready()` flips.
     readiness: watch::Sender<Readiness>,
+    /// The session on the user's Claude Code.
+    claude: ClaudeBrain,
+    settings: std::sync::Mutex<Settings>,
+    /// Where the settings are kept; None keeps them in memory only (tests).
+    settings_file: Option<PathBuf>,
     /// What the readiness check finds with the fake app-server.
     #[cfg(test)]
     fake_problem: std::sync::Mutex<Option<Problem>>,
@@ -197,21 +277,99 @@ impl Resident {
             codex_home: state_dir.join(CODEX_HOME_DIR),
             user_codex_home: user_codex_home(),
             launcher,
+            claude: ClaudeBrain::new(state_dir, crate::resident_claude::Launcher::Claude, activities.clone()),
             activities,
             session: Mutex::new(None),
             thread_id: std::sync::Mutex::new(saved.thread_id),
             revision: std::sync::atomic::AtomicU64::new(0),
+            codex_readiness: std::sync::Mutex::new(Readiness::default()),
             readiness: watch::channel(Readiness::default()).0,
+            settings: std::sync::Mutex::new(Settings::default()),
+            settings_file: None,
             #[cfg(test)]
             fake_problem: std::sync::Mutex::new(None),
         }
+    }
+
+    /// Keeps the brain setting and the Anthropic API key in `path` (see [`SETTINGS_FILE`]), reading them now.
+    pub fn with_settings_file(mut self, path: PathBuf) -> Self {
+        let settings = std::fs::read_to_string(&path).ok().and_then(|text| serde_json::from_str(&text).ok());
+        self.settings = std::sync::Mutex::new(settings.unwrap_or_default());
+        self.settings_file = Some(path);
+        self
+    }
+
+    #[cfg(test)]
+    pub(crate) fn with_claude(mut self, claude: ClaudeBrain) -> Self {
+        self.claude = claude;
+        self
+    }
+
+    pub fn brain_setting(&self) -> BrainChoice {
+        self.settings.lock().expect("settings lock").brain
+    }
+
+    pub fn anthropic_key_set(&self) -> bool {
+        self.anthropic_key().is_some()
+    }
+
+    fn anthropic_key(&self) -> Option<String> {
+        self.settings.lock().expect("settings lock").anthropic_api_key.clone()
+    }
+
+    pub async fn set_brain(&self, choice: BrainChoice) -> std::io::Result<()> {
+        self.change_settings(|settings| settings.brain = choice)?;
+        info!(?choice, "the resident session's brain setting changed");
+        self.check_readiness_now().await;
+        Ok(())
+    }
+
+    /// Sets or clears the user's Anthropic API key. A running Claude Code session is stopped, so the next command
+    /// starts one with the new key.
+    pub async fn set_anthropic_key(&self, key: Option<String>) -> std::io::Result<()> {
+        let key = key.map(|key| key.trim().to_owned()).filter(|key| !key.is_empty());
+        let set = key.is_some();
+        self.change_settings(|settings| settings.anthropic_api_key = key)?;
+        info!(set, "the Anthropic API key for the resident session changed");
+        self.claude.stop().await;
+        self.check_readiness_now().await;
+        Ok(())
+    }
+
+    fn change_settings(&self, change: impl FnOnce(&mut Settings)) -> std::io::Result<()> {
+        let mut settings = self.settings.lock().expect("settings lock");
+        let mut changed = settings.clone();
+        change(&mut changed);
+        if let Some(path) = &self.settings_file {
+            let text = serde_json::to_string_pretty(&changed).map_err(std::io::Error::other)?;
+            crate::resident_claude::write_private(path, &text)?;
+        }
+        *settings = changed;
+        Ok(())
+    }
+
+    /// The brain a voice command goes to now: the ready one, else the one the setting points at (Codex under
+    /// `auto`), whose start then says what is missing.
+    pub fn brain(&self) -> Brain {
+        self.readiness().brain.unwrap_or(match self.brain_setting() {
+            BrainChoice::Claude => Brain::Claude,
+            BrainChoice::Codex | BrainChoice::Auto => Brain::Codex,
+        })
     }
 
     pub fn enabled(&self) -> bool {
         self.enabled
     }
 
+    /// The session voice commands go to now: the Codex thread or the Claude Code session.
     pub fn thread_id(&self) -> Option<String> {
+        match self.brain() {
+            Brain::Codex => self.codex_thread_id(),
+            Brain::Claude => self.claude.session_id(),
+        }
+    }
+
+    fn codex_thread_id(&self) -> Option<String> {
         self.thread_id.lock().expect("thread id lock").clone()
     }
 
@@ -230,7 +388,8 @@ impl Resident {
         *self.readiness.borrow()
     }
 
-    /// Whether the session can take a voice command: on, and the last check found Codex installed and logged in.
+    /// Whether the session can take a voice command: on, and the last check found the brain the setting picks
+    /// ready (Codex installed and logged in, or Claude Code installed with a key).
     pub fn ready(&self) -> bool {
         self.enabled && self.readiness().ready()
     }
@@ -241,20 +400,33 @@ impl Resident {
     }
 
     /// Checks again whether `codex` is there and the user logged in, unless the last check is younger than
-    /// [`READINESS_TTL`]. Starts no app-server and no turn: it looks `codex` up as a start would and asks
-    /// `codex login status` in the resident Codex home, which reads the login the app-server's `account/read` would.
+    /// [`READINESS_TTL`] or the setting is Claude Code; and whether `claude` is there and a key set, which costs
+    /// nothing. Starts no app-server, process or turn: it looks `codex` up as a start would and asks `codex login
+    /// status` in the resident Codex home, which reads the login the app-server's `account/read` would.
     pub async fn check_readiness(&self) -> Readiness {
-        let last = self.readiness();
-        if !self.enabled || last.checked.is_some_and(|checked| checked.elapsed() < READINESS_TTL) {
-            return last;
+        if !self.enabled {
+            return self.readiness();
         }
-        let problem = match &self.launcher {
-            Launcher::Codex => self.login_problem().await,
-            #[cfg(test)]
-            Launcher::Fake(_) => *self.fake_problem.lock().unwrap(),
-        };
-        self.note(problem);
+        let last = *self.codex_readiness.lock().expect("readiness lock");
+        if self.brain_setting() != BrainChoice::Claude
+            && !last.checked.is_some_and(|checked| checked.elapsed() < READINESS_TTL)
+        {
+            let problem = match &self.launcher {
+                Launcher::Codex => self.login_problem().await,
+                #[cfg(test)]
+                Launcher::Fake(_) => *self.fake_problem.lock().unwrap(),
+            };
+            self.note(problem);
+        } else {
+            self.publish();
+        }
         self.readiness()
+    }
+
+    /// The same check, but Codex is asked again whatever the age of its last answer: a setting changed.
+    async fn check_readiness_now(&self) {
+        self.codex_readiness.lock().expect("readiness lock").checked = None;
+        self.check_readiness().await;
     }
 
     async fn login_problem(&self) -> Option<Problem> {
@@ -280,17 +452,31 @@ impl Resident {
         }
     }
 
-    /// Records what a check or a start found; watchers are told only when readiness itself flips.
+    /// Records what a Codex check or start found; see [`Resident::publish`].
     pub(crate) fn note(&self, problem: Option<Problem>) {
-        let now = Readiness { checked: Some(tokio::time::Instant::now()), problem };
+        *self.codex_readiness.lock().expect("readiness lock") =
+            Readiness { checked: Some(tokio::time::Instant::now()), problem, brain: None };
+        self.publish();
+    }
+
+    /// Works out readiness under the brain setting; watchers are told only when it flips. A change of brain moves
+    /// the revision, since the history shown is the other brain's now.
+    fn publish(&self) {
+        let codex = *self.codex_readiness.lock().expect("readiness lock");
+        let now = decide(self.brain_setting(), codex, self.claude.installed(), self.anthropic_key_set());
+        let mut switched = false;
         self.readiness.send_if_modified(|readiness| {
             let flipped = readiness.ready() != now.ready();
-            if readiness.problem != now.problem {
-                info!(?problem, "resident session readiness changed");
+            if (readiness.problem, readiness.brain) != (now.problem, now.brain) {
+                info!(problem = ?now.problem, brain = ?now.brain, "resident session readiness changed");
             }
+            switched = readiness.brain.is_some() && now.brain.is_some() && readiness.brain != now.brain;
             *readiness = now;
             flipped
         });
+        if switched {
+            self.bump_revision();
+        }
     }
 
     /// Whether a Codex hook event comes from the resident session: by its thread, or by its working directory. The
@@ -301,6 +487,16 @@ impl Resident {
         {
             return true;
         }
+        self.owns_cwd(cwd)
+    }
+
+    /// Whether a Claude Code hook event comes from the resident session: by its session, or by its working
+    /// directory. Its config dir loads none of the user's hooks, but managed ones may.
+    pub fn owns_claude_hook(&self, session_id: &str, cwd: Option<&str>) -> bool {
+        self.claude.owns_session(session_id) || self.owns_cwd(cwd)
+    }
+
+    fn owns_cwd(&self, cwd: Option<&str>) -> bool {
         cwd.map(Path::new)
             .is_some_and(|cwd| cwd.starts_with(&self.dir) || cwd.starts_with(&self.canonical_dir))
     }
@@ -319,14 +515,31 @@ impl Resident {
         if !self.enabled {
             return Err(ResidentError::Disabled);
         }
+        let result = match self.brain() {
+            Brain::Codex => self.say_codex(text, on_reply).await,
+            Brain::Claude => self.say_claude(text, on_reply).await,
+        };
+        // Even a failed or timed-out turn may have left the command in the thread.
+        self.bump_revision();
+        result
+    }
+
+    async fn say_codex(&self, text: &str, on_reply: &mut (dyn FnMut(&str) + Send)) -> Result<String, ResidentError> {
         let mut slot = self.session.lock().await;
         let session = self.running(&mut slot).await?;
         let result = self.run_turn(session, text, on_reply).await;
         if session.client.is_closed() {
             *slot = None;
         }
-        // Even a failed or timed-out turn may have left the command in the thread.
-        self.bump_revision();
+        result
+    }
+
+    async fn say_claude(&self, text: &str, on_reply: &mut (dyn FnMut(&str) + Send)) -> Result<String, ResidentError> {
+        let key = self.anthropic_key().ok_or(ResidentError::NoAnthropicKey)?;
+        let result = self.claude.say_streaming(&key, &instructions(None, None, Brain::Claude), text, on_reply).await;
+        if result == Err(ResidentError::NoClaude) {
+            self.publish();
+        }
         result
     }
 
@@ -334,6 +547,13 @@ impl Resident {
     /// both. Does nothing when switched off or already running; a failure is logged and the next command tries again.
     pub async fn warm(&self) {
         if !self.enabled {
+            return;
+        }
+        self.check_readiness().await;
+        if self.brain() == Brain::Claude {
+            if let Some(key) = self.anthropic_key() {
+                self.claude.warm(&key, &instructions(None, None, Brain::Claude)).await;
+            }
             return;
         }
         let mut slot = self.session.lock().await;
@@ -349,7 +569,10 @@ impl Resident {
         if !self.enabled {
             return Err(ResidentError::Disabled);
         }
-        if self.thread_id().is_none() {
+        if self.brain() == Brain::Claude {
+            return Ok(self.claude.history(limit));
+        }
+        if self.codex_thread_id().is_none() {
             return Ok(Vec::new());
         }
         let mut slot = self.session.lock().await;
@@ -417,7 +640,7 @@ impl Resident {
         }
         std::fs::create_dir_all(&self.dir)
             .map_err(|error| ResidentError::Rpc(format!("cannot create {}: {error}", self.dir.display())))?;
-        let thread_id = match self.thread_id() {
+        let thread_id = match self.codex_thread_id() {
             // There is one resident thread for good. Only a thread that no longer exists is replaced (a thread
             // saved before the resident session had its own Codex home is one); one that can't be resumed for
             // another reason (another Codex process is its writer) fails this command and is tried again with the
@@ -469,7 +692,7 @@ impl Resident {
             "cwd": self.dir,
             "sandbox": "read-only",
             "approvalPolicy": "on-request",
-            "developerInstructions": instructions(None, memory_summary(&self.user_codex_home).as_deref()),
+            "developerInstructions": instructions(None, memory_summary(&self.user_codex_home).as_deref(), Brain::Codex),
         })
     }
 
@@ -552,28 +775,41 @@ impl Resident {
 
     async fn call_tool(&self, params: &Value, on_reply: &mut (dyn FnMut(&str) + Send)) -> Value {
         let tool = params.get("tool").and_then(Value::as_str).unwrap_or_default();
-        let (success, text) = match tool {
-            "speak" => {
-                let text = params.pointer("/arguments/text").and_then(Value::as_str).unwrap_or_default().trim();
-                if text.is_empty() {
-                    (false, "text is empty".to_owned())
-                } else {
-                    info!(chars = text.chars().count(), "the resident session spoke");
-                    on_reply(text);
-                    (true, "spoken".to_owned())
-                }
-            }
-            "list_activities" => {
-                let report = self.activities.lock().await.report();
-                (true, json!(report).to_string())
-            }
-            "search_memories" => {
-                let query = params.pointer("/arguments/query").and_then(Value::as_str).unwrap_or_default();
-                (true, search_memories(&self.user_codex_home.join("memories"), query))
-            }
-            other => (false, format!("unknown tool {other}")),
-        };
+        let memories = self.user_codex_home.join("memories");
+        let (success, text) = run_tool(tool, &params["arguments"], &self.activities, Some(&memories), on_reply).await;
         json!({"success": success, "contentItems": [{"type": "inputText", "text": text}]})
+    }
+}
+
+/// Runs one of our tools, for either brain: whether it succeeded, and what the session reads back. `memories` is
+/// the user's Codex memories folder; without it there is no `search_memories`.
+pub(crate) async fn run_tool(
+    tool: &str,
+    arguments: &Value,
+    activities: &Mutex<ActivityTracker>,
+    memories: Option<&Path>,
+    on_reply: &mut (dyn FnMut(&str) + Send),
+) -> (bool, String) {
+    match (tool, memories) {
+        ("speak", _) => {
+            let text = arguments.get("text").and_then(Value::as_str).unwrap_or_default().trim();
+            if text.is_empty() {
+                (false, "text is empty".to_owned())
+            } else {
+                info!(chars = text.chars().count(), "the resident session spoke");
+                on_reply(text);
+                (true, "spoken".to_owned())
+            }
+        }
+        ("list_activities", _) => {
+            let report = activities.lock().await.report();
+            (true, json!(report).to_string())
+        }
+        ("search_memories", Some(memories)) => {
+            let query = arguments.get("query").and_then(Value::as_str).unwrap_or_default();
+            (true, search_memories(memories, query))
+        }
+        (other, _) => (false, format!("unknown tool {other}")),
     }
 }
 
@@ -590,7 +826,7 @@ fn decline(method: &str) -> Option<Value> {
 }
 
 /// The tools the resident session gets. Nothing here may run a command or write a file.
-fn tools() -> Value {
+pub(crate) fn tools() -> Value {
     json!([
         {
             "type": "function",
@@ -633,7 +869,9 @@ fn tools() -> Value {
 
 /// The developer instructions. `persona` is the seam for the Character the user picked (CONTEXT.md, Persona);
 /// until Characters carry one, the buddy speaks plainly. `memories` is the user's Codex memory summary, if any.
-fn instructions(persona: Option<&str>, memories: Option<&str>) -> String {
+/// `brain` says where today's date is: in Codex's environment context, or in the context block the daemon puts
+/// before each voice command for Claude Code.
+pub(crate) fn instructions(persona: Option<&str>, memories: Option<&str>, brain: Brain) -> String {
     let persona = persona.unwrap_or("You are friendly, calm and brief.");
     let memories = memories.map_or_else(String::new, |summary| {
         format!(
@@ -641,6 +879,10 @@ fn instructions(persona: Option<&str>, memories: Option<&str>) -> String {
              `search_memories`. Use it when it helps; never read it out.\n<memory_summary>\n{summary}\n</memory_summary>"
         )
     });
+    let date = match brain {
+        Brain::Codex => "today's date and the user's time zone are in the environment context",
+        Brain::Claude => "the user's local date, time and time zone come with each voice command, in a context block",
+    };
     format!(
         "You are the buddy of VibeBuddy: a small desk box that watches the user's coding Agents (Codex, Claude Code, \
          OpenCode, GitHub Copilot CLI, Pi, GitHub Actions) and speaks up for them. {persona}\n\
@@ -652,8 +894,8 @@ fn instructions(persona: Option<&str>, memories: Option<&str>) -> String {
          counts (`today`). Titles there are short upper-case task-card names; say them naturally.\n\
          Never state a fact you have not seen in a tool result, a web search result or the memories below: not the \
          weather, news, prices, scores, schedules or anything else about now, and nothing about the user's world. \
-         For things about now, search the web, and answer only from what the search found; today's date and the \
-         user's time zone are in the environment context, so work out today and tomorrow from them. If you can't \
+         For things about now, search the web, and answer only from what the search found; {date}, so work out \
+         today and tomorrow from them. If you can't \
          find out, say so plainly in one sentence; never make up an answer that sounds likely.\n\
          You do no work yourself: run no commands, read or edit no files. If the user asks for work to be done, say \
          briefly that you can't start it yet.{memories}"
@@ -1401,7 +1643,7 @@ pub(crate) mod tests {
 
     #[test]
     fn without_memories_the_instructions_say_nothing_of_them_and_a_long_summary_is_cut() {
-        assert!(!instructions(None, None).contains("memory"));
+        assert!(!instructions(None, None, Brain::Codex).contains("memory"));
         let dir = temp_dir("summary");
         std::fs::create_dir_all(dir.join("memories")).unwrap();
         assert_eq!(memory_summary(&dir), None);
@@ -1530,6 +1772,105 @@ pub(crate) mod tests {
         // Hooks stay on: the daemon filters them.
         assert!(!args.iter().any(|arg| arg.contains("hooks")));
         assert!(!args.iter().any(|arg| arg == "--disable"));
+    }
+
+    #[test]
+    fn the_brain_setting_decides_readiness_and_auto_prefers_a_ready_codex() {
+        let now = Some(tokio::time::Instant::now());
+        let codex_ready = Readiness { checked: now, problem: None, brain: None };
+        let logged_out = Readiness { checked: now, problem: Some(Problem::CodexLoggedOut), brain: None };
+        let missing = Readiness { checked: now, problem: Some(Problem::CodexMissing), brain: None };
+        let unchecked = Readiness::default();
+        let brain = |readiness: Readiness| readiness.ready().then_some(readiness.brain).flatten();
+        let problem = |readiness: Readiness| readiness.problem;
+
+        // auto: Codex when ready, else Claude Code when it is there with a key.
+        assert_eq!(brain(decide(BrainChoice::Auto, codex_ready, true, true)), Some(Brain::Codex));
+        assert_eq!(brain(decide(BrainChoice::Auto, logged_out, true, true)), Some(Brain::Claude));
+        assert_eq!(brain(decide(BrainChoice::Auto, unchecked, true, true)), Some(Brain::Claude));
+        assert!(!decide(BrainChoice::Auto, unchecked, true, false).ready(), "nothing known yet");
+        assert_eq!(decide(BrainChoice::Auto, unchecked, true, false).problem, None);
+        // Not ready: without a key it is Codex's problem; with one, Claude Code's.
+        assert_eq!(problem(decide(BrainChoice::Auto, missing, true, false)), Some(Problem::CodexMissing));
+        assert_eq!(problem(decide(BrainChoice::Auto, logged_out, true, false)), Some(Problem::CodexLoggedOut));
+        assert_eq!(problem(decide(BrainChoice::Auto, logged_out, false, true)), Some(Problem::ClaudeMissing));
+        assert_eq!(decide(BrainChoice::Auto, logged_out, false, true).brain, None);
+
+        // codex and claude stick to their brain.
+        assert_eq!(brain(decide(BrainChoice::Codex, codex_ready, true, true)), Some(Brain::Codex));
+        assert_eq!(problem(decide(BrainChoice::Codex, logged_out, true, true)), Some(Problem::CodexLoggedOut));
+        assert_eq!(brain(decide(BrainChoice::Claude, codex_ready, true, true)), Some(Brain::Claude));
+        assert_eq!(problem(decide(BrainChoice::Claude, codex_ready, false, true)), Some(Problem::ClaudeMissing));
+        assert_eq!(problem(decide(BrainChoice::Claude, codex_ready, true, false)), Some(Problem::AnthropicKeyMissing));
+    }
+
+    #[tokio::test]
+    async fn the_key_and_brain_are_kept_in_a_private_file_and_switching_brains_moves_the_revision() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = temp_dir("settings");
+        let file = dir.join("config").join(SETTINGS_FILE);
+        let script = Arc::new(std::sync::Mutex::new(Script::default()));
+        let claude = crate::resident_claude::tests::script();
+        let resident = resident(&dir, &script, Arc::default())
+            .with_claude(crate::resident_claude::tests::brain(&dir, &claude, Arc::default()))
+            .with_settings_file(file.clone());
+        *resident.fake_problem.lock().unwrap() = Some(Problem::CodexLoggedOut);
+        assert_eq!(resident.check_readiness().await.problem, Some(Problem::CodexLoggedOut));
+        assert_eq!(resident.brain(), Brain::Codex);
+
+        resident.set_anthropic_key(Some("  sk-ant-secret \n".to_owned())).await.unwrap();
+        assert!(resident.ready() && resident.anthropic_key_set());
+        assert_eq!(resident.brain(), Brain::Claude, "auto falls back to Claude Code with a key");
+        assert_eq!(std::fs::metadata(&file).unwrap().permissions().mode() & 0o777, 0o600);
+        let stored: Value = serde_json::from_str(&std::fs::read_to_string(&file).unwrap()).unwrap();
+        assert_eq!(stored, json!({"brain": "auto", "anthropic_api_key": "sk-ant-secret"}));
+
+        // The voice command goes to Claude Code, with the stored key, and its session is the one reported.
+        let answer = resident.say("hi").await.unwrap();
+        assert_eq!(Some(answer.thread_id.clone()), resident.thread_id());
+        let launches = claude.lock().unwrap().launches.clone();
+        assert!(launches[0].1.contains(&("ANTHROPIC_API_KEY".to_owned(), "sk-ant-secret".to_owned())));
+        assert_eq!(script.lock().unwrap().starts, 0, "Codex wasn't started");
+
+        // Codex comes back: auto goes back to it, and the history to show is another one.
+        let before = resident.revision();
+        *resident.fake_problem.lock().unwrap() = None;
+        resident.set_brain(BrainChoice::Auto).await.unwrap();
+        assert_eq!(resident.brain(), Brain::Codex);
+        assert_eq!(resident.revision(), before + 1);
+
+        resident.set_brain(BrainChoice::Claude).await.unwrap();
+        assert_eq!(resident.brain(), Brain::Claude);
+        resident.set_anthropic_key(None).await.unwrap();
+        assert_eq!(resident.readiness().problem, Some(Problem::AnthropicKeyMissing));
+        assert!(!resident.ready());
+        assert_eq!(resident.say("hi").await.unwrap_err(), ResidentError::NoAnthropicKey);
+        let stored: Value = serde_json::from_str(&std::fs::read_to_string(&file).unwrap()).unwrap();
+        assert_eq!(stored, json!({"brain": "claude"}), "the key is gone from the file");
+
+        // Read back at the next start.
+        let again = Resident::new(true, &dir, Launcher::Codex, Arc::default()).with_settings_file(file);
+        assert_eq!(again.brain_setting(), BrainChoice::Claude);
+        assert!(!again.anthropic_key_set());
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[tokio::test]
+    async fn the_claude_history_and_hooks_are_the_claude_sessions() {
+        let dir = temp_dir("claude-hooks");
+        let claude = crate::resident_claude::tests::script();
+        let resident = resident(&dir, &logged_in(), Arc::default())
+            .with_claude(crate::resident_claude::tests::brain(&dir, &claude, Arc::default()));
+        resident.set_anthropic_key(Some("key".to_owned())).await.unwrap();
+        resident.set_brain(BrainChoice::Claude).await.unwrap();
+        assert_eq!(resident.history(5).await.unwrap(), [], "no session yet");
+        resident.say("hi").await.unwrap();
+        let session = resident.thread_id().unwrap();
+        assert!(resident.owns_claude_hook(&session, None));
+        assert!(resident.owns_claude_hook("other", Some(&dir.join("resident").display().to_string())));
+        assert!(!resident.owns_claude_hook("other", Some("/work/vibe-buddy")));
+        assert!(!resident.owns_hook(&session, None, None), "a Claude session id isn't a Codex thread");
+        let _ = std::fs::remove_dir_all(dir);
     }
 
     #[test]
