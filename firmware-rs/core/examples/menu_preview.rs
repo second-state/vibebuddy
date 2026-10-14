@@ -13,6 +13,7 @@ use vibebuddy_firmware_core::canvas::{FRAME_BYTES, HEIGHT, WIDTH};
 use vibebuddy_firmware_core::display::Screen;
 use vibebuddy_firmware_core::firmware::{AudioStatus, Board, Firmware, FrameAction, VolumeError};
 use vibebuddy_firmware_core::storage::{Flash, FlashError};
+use vibebuddy_firmware_core::touch;
 
 /// No partitions: settings and voice packs aren't what these pictures are about.
 struct NoFlash;
@@ -34,6 +35,8 @@ struct PreviewBoard {
     frame: Vec<u8>,
     flash: NoFlash,
     keys: (bool, bool, bool),
+    /// Where a finger is on the touchscreen: the preview box has one.
+    finger: Option<(i32, i32)>,
 }
 
 impl Screen for PreviewBoard {
@@ -69,6 +72,20 @@ impl Board for PreviewBoard {
     fn read_buttons(&mut self) -> (bool, Option<(bool, bool)>) {
         (self.keys.0, Some((self.keys.1, self.keys.2)))
     }
+    fn init_touch(&mut self) -> Option<&'static str> {
+        Some("CHSC5432")
+    }
+    fn read_touch(&mut self) -> Option<[u8; touch::REPORT_BYTES]> {
+        let mut report = [0; touch::REPORT_BYTES];
+        if let Some((x, y)) = self.finger {
+            let (short, long) = ((239 - y) as u16, x as u16);
+            report[1] = 1;
+            report[2] = short as u8;
+            report[3] = long as u8;
+            report[5] = ((long >> 8) as u8) << 4 | (short >> 8) as u8;
+        }
+        Some(report)
+    }
     fn play(&mut self, _sound: Sound) -> Result<(), ()> {
         Ok(())
     }
@@ -89,7 +106,7 @@ struct Preview {
 
 impl Preview {
     fn new(directory: &Path) -> Self {
-        let mut board = PreviewBoard { now: Cell::new(1000), frame: vec![0; FRAME_BYTES], flash: NoFlash, keys: (false, false, false) };
+        let mut board = PreviewBoard { now: Cell::new(1000), frame: vec![0; FRAME_BYTES], flash: NoFlash, keys: (false, false, false), finger: None };
         let mut firmware = Firmware::new(1, 1000, b"v0.3.2-11-g0adc18b 2026-10-06 16:34", "0.3.2");
         firmware.boot(&mut board);
         let mut preview = Self { directory: directory.to_path_buf(), board, firmware };
@@ -121,6 +138,18 @@ impl Preview {
             self.firmware.poll(&mut self.board);
         }
         set(&mut self.board, false);
+        self.firmware.poll(&mut self.board);
+    }
+
+    /// A finger down at (x, y) for 80 ms; leaves the screen as it is right after the tap.
+    fn tap(&mut self, x: i32, y: i32) {
+        self.board.now.set(self.board.now.get() + 100);
+        self.board.finger = Some((x, y));
+        for _ in 0..4 {
+            self.firmware.poll(&mut self.board);
+            self.board.now.set(self.board.now.get() + 20);
+        }
+        self.board.finger = None;
         self.firmware.poll(&mut self.board);
     }
 
@@ -162,4 +191,15 @@ fn main() {
     preview.press(0, 50);
     preview.press(1, 1100);
     preview.snapshot("menu-focus");
+
+    // Touch (ADR-0017): a tapped row is outlined as it acts, and the buddy beside the cards can be petted.
+    let mut preview = Preview::new(&directory);
+    preview.press(1, 1100);
+    preview.tap(160, 84);
+    preview.snapshot("touch-row");
+    preview.press(2, 50);
+    preview.board.now.set(preview.board.now.get() + 1000);
+    preview.firmware.poll(&mut preview.board);
+    preview.tap(256, 100);
+    preview.snapshot("touch-pet");
 }

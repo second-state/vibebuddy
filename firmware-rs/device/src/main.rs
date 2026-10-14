@@ -50,6 +50,7 @@ use vibebuddy_firmware_core::firmware::{AudioStatus, Board, Firmware, FrameActio
 use vibebuddy_firmware_core::noise::{self, SealedLines, Sealer};
 use vibebuddy_firmware_core::relay_box::{self, RelayBox};
 use vibebuddy_firmware_core::storage::Flash;
+use vibebuddy_firmware_core::touch;
 
 use crate::audio::{PLAYING, PlayCommand, QUEUE, STOP, STREAM_BYTES, STREAM_CHUNK};
 use crate::lcd::Lcd;
@@ -293,6 +294,20 @@ impl Board for DeviceBoard {
         let k0 = self.k0.is_low();
         let expander = self.expander().read(XL9555_INPUT_PORT0).ok().map(|port| (port & XL9555_K1 == 0, port & XL9555_K2 == 0));
         (k0, expander)
+    }
+
+    /// Only some boxes have the touch controller; it answers at its ID register straight after power-on, with no
+    /// reset pulse (docs/hardware.md).
+    fn init_touch(&mut self) -> Option<&'static str> {
+        let mut id = [0u8; 4];
+        self.i2c.write_read(touch::ADDRESS, &touch::ID_REGISTER.to_be_bytes(), &mut id).ok()?;
+        Some("CHSC5432")
+    }
+
+    fn read_touch(&mut self) -> Option<[u8; touch::REPORT_BYTES]> {
+        let mut report = [0u8; touch::REPORT_BYTES];
+        self.i2c.write_read(touch::ADDRESS, &touch::REPORT_REGISTER.to_be_bytes(), &mut report).ok()?;
+        Some(report)
     }
 
     fn play(&mut self, sound: Sound) -> Result<(), ()> {

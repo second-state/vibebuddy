@@ -145,6 +145,56 @@ pub struct Panel {
     pub hints: Vec<(&'static [u8], &'static [u8])>,
 }
 
+/// Something on the screen a tap can land on (ADR-0017).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Target {
+    /// A task card, by its place in the stack.
+    Card(usize),
+    /// The buddy on duty.
+    Buddy,
+    /// A row of a menu list.
+    Row(usize),
+    /// A key hint along the bottom of the menu, by its place among the panel's hints.
+    Hint(usize),
+}
+
+/// How long a tapped target stays outlined.
+const HIGHLIGHT_MS: u32 = 150;
+/// How long the buddy enjoys being petted.
+const PET_MS: u32 = 1200;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct Rect {
+    x: i32,
+    y: i32,
+    width: i32,
+    height: i32,
+}
+
+impl Rect {
+    fn contains(&self, x: i32, y: i32) -> bool {
+        (self.x..self.x + self.width).contains(&x) && (self.y..self.y + self.height).contains(&y)
+    }
+
+    fn outline(&self, canvas: &mut Canvas, color: u16) {
+        canvas.fill_rect(self.x, self.y, self.width, 2, color);
+        canvas.fill_rect(self.x, self.y + self.height - 2, self.width, 2, color);
+        canvas.fill_rect(self.x, self.y, 2, self.height, color);
+        canvas.fill_rect(self.x + self.width - 2, self.y, 2, self.height, color);
+    }
+}
+
+/// The task card at `index` in the stack, drawn and tapped alike.
+fn card_rect(index: usize) -> Rect {
+    let index = index as i32;
+    Rect { x: 8 + index * 4, y: 50 + index * 38, width: 188 - index * 4, height: 32 }
+}
+
+/// The buddy on duty, robot or look, with the tasks' shift to the right: a tap anywhere on it pets it.
+fn buddy_rect(x_offset: i32) -> Rect {
+    Rect { x: 104 + x_offset, y: 28, width: 112, height: 128 }
+}
+
 /// External state needed to draw a frame: the pomodoro and the leisure director belong to the main program.
 pub struct Scene<'a> {
     pub now_ms: u32,
@@ -182,6 +232,10 @@ pub struct Display {
     panel: Option<Panel>,
     /// The current Character's look; None draws the robot.
     look: Option<Box<Look>>,
+    /// A tapped target outlined until this time. It goes when the panel changes: what was tapped is gone.
+    highlight: Option<(Target, u32)>,
+    /// The buddy is being petted until this time.
+    petted_until: Option<u32>,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -794,6 +848,8 @@ impl Display {
             ring_alarm_shake_frames: 0,
             panel: None,
             look: None,
+            highlight: None,
+            petted_until: None,
         }
     }
 
@@ -852,10 +908,7 @@ impl Display {
 
     fn draw_task_cards(&self, canvas: &mut Canvas, now_ms: u32) {
         for (index, task) in self.tasks.iter().enumerate() {
-            let index = index as i32;
-            let x = 8 + index * 4;
-            let y = 50 + index * 38;
-            let width = 188 - index * 4;
+            let Rect { x, y, width, .. } = card_rect(index);
             let card_color = if index == 0 { 0x18c6 } else { 0x1083 };
             let color = self.state_color(task.state);
             canvas.fill_rect(x, y, width, 32, COLOR_MUTED);
@@ -1105,11 +1158,16 @@ impl Display {
         if !self.tasks.is_empty() {
             self.draw_task_cards(canvas, scene.now_ms);
         }
-        let state = if self.link_lost { State::Offline } else { self.state };
-        let x_offset = if self.tasks.is_empty() { 0 } else { 96 };
+        let petted = self.petted(scene.now_ms);
+        // Petted, it hops for joy the way it does when work is done.
+        let state = if self.link_lost { State::Offline } else if petted { State::Done } else { self.state };
+        let x_offset = self.buddy_offset();
         match &self.look {
             Some(look) => draw_look_on_duty(canvas, look, state, self.animation_frame, LOOK_CENTER_X + x_offset, status_color),
             None => draw_buddy(canvas, state, self.animation_frame, x_offset, status_color),
+        }
+        if petted {
+            draw_heart(canvas, buddy_rect(x_offset).x + 96, 34 + if self.animation_frame.is_multiple_of(2) { 0 } else { 4 });
         }
         // The third task card ends at y = 158: the label and the line under it move down, into the free space at the bottom, to keep clear of it.
         let crowded = self.tasks.len() >= 3;
@@ -1175,6 +1233,11 @@ impl Display {
         if let Some(panel) = &self.panel {
             draw_panel(&mut canvas, panel);
         }
+        if let Some((target, _)) = self.highlight
+            && let Some(rect) = self.target_rect(target)
+        {
+            rect.outline(&mut canvas, COLOR_TEXT);
+        }
         screen.present()
     }
 
@@ -1184,6 +1247,7 @@ impl Display {
             // The countdown changes every second; blinking while paused needs a frame every half second; the alarm
             // shake is faster still.
             Mode::Pomodoro => if self.ring_alarm_shaking() { RING_ALARM_SHAKE_FRAME_MS } else { 500 },
+            Mode::Duty if self.petted_until.is_some() => 200,
             Mode::Duty => match self.state {
                 State::Working => 250,
                 State::Done => 200,
@@ -1348,6 +1412,9 @@ impl Display {
         if self.panel == panel {
             return;
         }
+        if self.panel.as_ref().map(|panel| &panel.title) != panel.as_ref().map(|panel| &panel.title) {
+            self.highlight = None;
+        }
         self.panel = panel;
         if self.ready {
             let _ = self.render(screen, scene);
@@ -1400,6 +1467,22 @@ impl Display {
                 self.identify_next_toggle = now.wrapping_add(150);
             }
         }
+        let mut ended = false;
+        if let Some((_, until)) = self.highlight
+            && now.wrapping_sub(until) as i32 >= 0
+        {
+            self.highlight = None;
+            ended = true;
+        }
+        if let Some(until) = self.petted_until
+            && now.wrapping_sub(until) as i32 >= 0
+        {
+            self.petted_until = None;
+            ended = true;
+        }
+        if ended {
+            let _ = self.render(screen, scene);
+        }
         if (now.wrapping_sub(self.next_animation_at) as i32) < 0 {
             return;
         }
@@ -1411,6 +1494,61 @@ impl Display {
         if self.render(screen, scene).is_err() {
             self.next_animation_at = now.wrapping_add(1000);
         }
+    }
+
+    /// How far right the buddy stands on duty: beside the cards when there are any.
+    fn buddy_offset(&self) -> i32 {
+        if self.tasks.is_empty() { 0 } else { 96 }
+    }
+
+    fn petted(&self, now_ms: u32) -> bool {
+        self.petted_until.is_some_and(|until| (now_ms.wrapping_sub(until) as i32) < 0)
+    }
+
+    /// Where a target is drawn now, if it's on the screen at all.
+    fn target_rect(&self, target: Target) -> Option<Rect> {
+        match (target, &self.panel) {
+            (Target::Row(index), Some(panel)) if panel.kind == PanelKind::List && index < panel.lines.len() => Some(panel_row_rect(index)),
+            (Target::Hint(index), Some(panel)) => hint_rects(panel).get(index).copied(),
+            (Target::Card(index), None) if self.mode == Mode::Duty && index < self.tasks.len() => Some(card_rect(index)),
+            (Target::Buddy, None) if self.mode == Mode::Duty => Some(buddy_rect(self.buddy_offset())),
+            _ => None,
+        }
+    }
+
+    /// What a tap at (x, y) lands on: the menu panel's rows and key hints while it's open, otherwise the task
+    /// cards and the buddy on duty. The rectangles are the ones the screen is drawn with, so the targets move
+    /// with the layout. The Pomodoro and Leisure screens have nothing to tap.
+    pub fn target_at(&self, x: i32, y: i32) -> Option<Target> {
+        if let Some(panel) = &self.panel {
+            if let Some(index) = hint_rects(panel).iter().position(|rect| rect.contains(x, y)) {
+                return Some(Target::Hint(index));
+            }
+            if panel.kind == PanelKind::List {
+                return (0..panel.lines.len()).find(|&index| panel_row_rect(index).contains(x, y)).map(Target::Row);
+            }
+            return None;
+        }
+        if self.mode != Mode::Duty {
+            return None;
+        }
+        if let Some(index) = (0..self.tasks.len()).find(|&index| card_rect(index).contains(x, y)) {
+            return Some(Target::Card(index));
+        }
+        buddy_rect(self.buddy_offset()).contains(x, y).then_some(Target::Buddy)
+    }
+
+    /// Outlines a tapped target for a moment, so the user sees the tap landed.
+    pub fn highlight(&mut self, screen: &mut dyn Screen, scene: &Scene, target: Target) {
+        self.highlight = Some((target, scene.now_ms.wrapping_add(HIGHLIGHT_MS)));
+        self.refresh(screen, scene);
+    }
+
+    /// The buddy was petted: it hops with a heart for a moment. Decoration only.
+    pub fn pet(&mut self, screen: &mut dyn Screen, scene: &Scene) {
+        self.petted_until = Some(scene.now_ms.wrapping_add(PET_MS));
+        self.next_animation_at = scene.now_ms.wrapping_add(self.animation_period());
+        self.refresh(screen, scene);
     }
 
     pub fn backlight_on(&self) -> bool {
@@ -1451,6 +1589,45 @@ fn tone_color(tone: Tone) -> u16 {
     }
 }
 
+/// A row of a menu list, as drawn with the selection bar.
+fn panel_row_rect(index: usize) -> Rect {
+    Rect { x: 38, y: 51 + index as i32 * 23, width: 244, height: 21 }
+}
+
+/// Where a Facts panel's lines go: closer together when there are more than five, to stay above the hints.
+fn facts_line_y(panel: &Panel, index: usize) -> i32 {
+    let step = if panel.lines.len() > 5 { 23 } else { 26 };
+    58 + index as i32 * step
+}
+
+/// Each key hint along the bottom: the key's chip and what it does, and the space down to the panel's edge, so a
+/// finger needn't hit the small text.
+fn hint_rects(panel: &Panel) -> Vec<Rect> {
+    let mut x = PANEL_LEFT;
+    panel
+        .hints
+        .iter()
+        .map(|(key, action)| {
+            let width = text_width(key, 1) + 10 + text_width(action, 1) + 14;
+            let rect = Rect { x: x - 4, y: 199, width, height: 25 };
+            x += width;
+            rect
+        })
+        .collect()
+}
+
+/// A small heart over the petted buddy, 16 pixels wide.
+fn draw_heart(canvas: &mut Canvas, x: i32, y: i32) {
+    const ROWS: [u8; 6] = [0b0110_0110, 0b1111_1111, 0b1111_1111, 0b0111_1110, 0b0011_1100, 0b0001_1000];
+    for (row, bits) in ROWS.iter().enumerate() {
+        for column in 0..8 {
+            if bits & (0x80 >> column) != 0 {
+                canvas.fill_rect(x + column * 2, y + row as i32 * 2, 2, 2, COLOR_FAILED);
+            }
+        }
+    }
+}
+
 /// The menu panel: the screen underneath dimmed twice, a bordered box, the title, the lines, and
 /// key hints along the bottom.
 fn draw_panel(canvas: &mut Canvas, panel: &Panel) {
@@ -1466,7 +1643,8 @@ fn draw_panel(canvas: &mut Canvas, panel: &Panel) {
             PanelKind::List => {
                 let y = 54 + index * 23;
                 if panel.selected == Some(index as usize) {
-                    canvas.fill_rect(38, y - 3, 244, 21, PANEL_SELECTED);
+                    let bar = panel_row_rect(index as usize);
+                    canvas.fill_rect(bar.x, bar.y, bar.width, bar.height, PANEL_SELECTED);
                     canvas.draw_text(42, y, b">", 2, COLOR_PET_HIGHLIGHT, 1);
                 }
                 canvas.draw_text(58, y, label, 2, COLOR_TEXT, 12);
@@ -1474,7 +1652,7 @@ fn draw_panel(canvas: &mut Canvas, panel: &Panel) {
                 canvas.draw_text(PANEL_RIGHT - text_width(value, 2), y, value, 2, tone_color(*tone), 8);
             }
             PanelKind::Facts => {
-                let y = 58 + index * 26;
+                let y = facts_line_y(panel, index as usize);
                 let mut label = label.splitn(2, |&byte| byte == b'\n');
                 canvas.draw_text(PANEL_LEFT, y, label.next().unwrap_or_default(), 1, COLOR_MUTED, 12);
                 if let Some(note) = label.next() {

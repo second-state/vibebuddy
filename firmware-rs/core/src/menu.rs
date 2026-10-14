@@ -202,6 +202,20 @@ impl Menu {
         }
     }
 
+    /// A tap on a row of a list (ADR-0017): selects it and acts on it, as K1 to the row and then K0 would.
+    /// Views without rows ignore it.
+    pub fn tap_row(&mut self, index: usize, context: Context, now_ms: u32) -> Action {
+        match self.view {
+            Some(View::List) => match Self::rows(context).get(index) {
+                Some(&row) => self.selected = row,
+                None => return Action::None,
+            },
+            Some(View::Computers) if index < Self::computers_rows(context).len() => self.computers_selected = index,
+            _ => return Action::None,
+        }
+        self.key(ButtonEvent::K0Short, context, now_ms)
+    }
+
     fn show(&mut self, view: View) -> Action {
         self.view = Some(view);
         Action::Redraw
@@ -303,6 +317,22 @@ mod tests {
     fn rows_follow_the_context() {
         assert_eq!(Menu::rows(PLAIN), [Row::Volume, Row::Mute, Row::Network, Row::Status]);
         assert_eq!(Menu::rows(FULL), [Row::StopPhase, Row::Volume, Row::Mute, Row::Computers, Row::Network, Row::Status]);
+    }
+
+    #[test]
+    fn a_tapped_row_is_selected_and_acted_on() {
+        let mut menu = Menu::new();
+        menu.open(FULL, 0);
+        assert_eq!(menu.tap_row(2, FULL, 0), Action::ToggleMute);
+        assert_eq!(menu.selected(FULL), 2, "the selection follows the finger");
+        assert_eq!(menu.tap_row(3, FULL, 0), Action::Redraw);
+        assert_eq!(menu.view(), Some(View::Computers));
+        assert_eq!(menu.tap_row(2, FULL, 0), Action::Redraw, "BACK");
+        assert_eq!(menu.view(), Some(View::List));
+        assert_eq!(menu.tap_row(9, FULL, 0), Action::None, "below the last row");
+        menu.tap_row(5, FULL, 0);
+        assert_eq!(menu.view(), Some(View::Status));
+        assert_eq!(menu.tap_row(0, FULL, 0), Action::None, "a view of facts has no rows");
     }
 
     #[test]
