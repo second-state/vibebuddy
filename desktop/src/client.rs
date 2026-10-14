@@ -149,6 +149,59 @@ pub async fn restart_daemon() -> Result<(), String> {
     post("/v1/daemon/restart", None).await
 }
 
+/// Whether the daemon runs the experimental resident session (`VIBEBUDDY_RESIDENT_SESSION=1`).
+pub async fn resident_enabled() -> Result<bool, String> {
+    #[derive(Deserialize)]
+    struct Info {
+        enabled: bool,
+    }
+    let response = reqwest::get(format!("{BASE}/v1/resident")).await.map_err(|error| error.to_string())?;
+    let info: Info = response.json().await.map_err(|error| error.to_string())?;
+    Ok(info.enabled)
+}
+
+/// One voice command and the buddy's spoken replies to it.
+#[derive(Clone, Debug, Deserialize, PartialEq)]
+pub struct Exchange {
+    pub said: String,
+    pub replies: Vec<String>,
+}
+
+#[derive(Clone, Debug)]
+pub enum HistoryError {
+    DaemonDown,
+    /// The resident session couldn't be read (Codex missing or not logged in, say), with the daemon's reason.
+    Unavailable(String),
+}
+
+/// The last `limit` voice commands and their spoken replies, oldest first. Slow the first time: the daemon may have
+/// to start Codex's app-server to read the thread.
+pub async fn resident_history(limit: usize) -> Result<Vec<Exchange>, HistoryError> {
+    #[derive(Deserialize)]
+    struct History {
+        exchanges: Vec<Exchange>,
+    }
+    let response = reqwest::Client::new()
+        .get(format!("{BASE}/v1/resident/history?limit={limit}"))
+        .timeout(Duration::from_secs(60))
+        .send()
+        .await
+        .map_err(|error| if error.is_connect() { HistoryError::DaemonDown } else { HistoryError::Unavailable(error.to_string()) })?;
+    if !response.status().is_success() {
+        let status = response.status();
+        return Err(HistoryError::Unavailable(
+            response
+                .json::<serde_json::Value>()
+                .await
+                .ok()
+                .and_then(|body| body["message"].as_str().map(str::to_owned))
+                .unwrap_or_else(|| format!("the daemon answered {status}")),
+        ));
+    }
+    let history: History = response.json().await.map_err(|error| HistoryError::Unavailable(error.to_string()))?;
+    Ok(history.exchanges)
+}
+
 async fn post(path: &str, body: Option<serde_json::Value>) -> Result<(), String> {
     let mut request = reqwest::Client::new().post(format!("{BASE}{path}"));
     if let Some(body) = body {

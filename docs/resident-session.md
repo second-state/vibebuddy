@@ -2,7 +2,7 @@
 
 The resident session is the one long-running Codex thread every voice command goes to ([ADR-0017](adr/0017-voice-commands-go-to-a-resident-session-that-speaks-as-the-buddy.md); see "Voice commands" in [`CONTEXT.md`](../CONTEXT.md)). A voice command reaches it spoken to a box linked over USB or the local network (below), or typed with `vibebuddy say`.
 
-It is experimental and off by default. Start `vibebuddyd` with `VIBEBUDDY_RESIDENT_SESSION=1` to turn it on. There is no App UI for it, on the Mac or on Linux.
+It is experimental and off by default. Start `vibebuddyd` with `VIBEBUDDY_RESIDENT_SESSION=1` to turn it on. While it is on, both Apps' settings windows have a Conversation tab that shows it (below); nothing else of it is in the App UI, on the Mac or on Linux.
 
 ## Using it
 
@@ -11,7 +11,13 @@ vibebuddy say "What are my agents doing?"   # prints the spoken reply(ies); the 
 vibebuddy resident [n]                      # prints the thread id and the last n (default 5) commands with their replies
 ```
 
-The thread lives in a Codex home of the daemon's own (below), so the Codex App can't open it; `vibebuddy resident` is how to look back at it.
+The thread lives in a Codex home of the daemon's own (below), so the Codex App can't open it; `vibebuddy resident`, or the Apps' Conversation tab, is how to look back at it.
+
+### The Conversation tab
+
+Both Apps ask `GET /v1/resident` each time the daemon comes up (only its environment at start decides) and show a Conversation tab, between Device and Advanced, only while it says `enabled`. The tab reads the last 20 exchanges with `GET /v1/resident/history?limit=20` each time it is shown and on Refresh, and lists them oldest first, newest at the bottom: each voice command on the right, the buddy's spoken replies under it on the left. With none yet, it says how to talk to the buddy (hold K0); when the daemon can't be reached it points to Advanced → Restart daemon, and when the resident session can't be read (Codex missing or not logged in) it shows the daemon's reason. The last answer from `GET /v1/resident` is kept while the daemon is down, so an open tab says the daemon isn't running rather than vanishing.
+
+![The Conversation tab on the Mac, in Chinese](images/app-conversation-zh.png)
 
 `vibebuddy` is a second binary of the daemon package (`daemon/src/bin/vibebuddy.rs`). Like every client, it only talks to the daemon's HTTP API, at `VIBEBUDDY_BIND` (default `127.0.0.1:7331`):
 

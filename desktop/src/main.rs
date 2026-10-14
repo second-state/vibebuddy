@@ -29,6 +29,9 @@ use iced::{Element, Font, Length, Subscription, Task, Theme, window};
 use i18n::{UiLanguage, tr};
 use status::{Config, MenuState, Status};
 
+/// How many exchanges the Conversation tab reads, as on the Mac.
+const CONVERSATION_LIMIT: usize = 20;
+
 /// Omarchy's monospace font, used when Omarchy's theme is: the window should look like the rest of the desktop.
 const OMARCHY_FONT: &str = "JetBrainsMono Nerd Font";
 
@@ -66,6 +69,8 @@ enum Tab {
     Sound,
     Agents,
     Device,
+    /// Only while the daemon runs the resident session (experimental).
+    Conversation,
     Advanced,
 }
 
@@ -139,6 +144,10 @@ enum Message {
     /// Play a Character's preview lines here, or stop the one playing.
     TogglePreview(&'static str),
     PreviewDone(String, Result<(), String>),
+    /// Whether the daemon runs the resident session, asked each time it comes up.
+    Resident(Result<bool, String>),
+    RefreshConversation,
+    Conversation(Result<Vec<client::Exchange>, client::HistoryError>),
     /// Ask `vibebuddy-hook` for each agent's state again.
     RefreshAgents,
     Agents(Result<Vec<agents::Setup>, String>),
@@ -211,6 +220,12 @@ struct App {
     agents: Vec<agents::Setup>,
     /// A change to an agent's config, shown before it's written.
     hook_plan: Option<agents::Plan>,
+    /// The daemon runs the experimental resident session, so the Conversation tab shows. Kept while the daemon is
+    /// down, so the tab can say so.
+    resident: bool,
+    /// The last voice commands and spoken replies read, or why they couldn't be; None before the first read.
+    conversation: Option<Result<Vec<client::Exchange>, client::HistoryError>>,
+    conversation_loading: bool,
     /// The outcome of the last action, shown at the bottom of the window.
     notice: Option<Result<String, String>>,
     /// The language picked in Settings, and, while it differs from the UI's, the offer to restart.
@@ -262,6 +277,9 @@ impl App {
             previewing: None,
             agents: Vec::new(),
             hook_plan: None,
+            resident: false,
+            conversation: None,
+            conversation_loading: false,
             notice: None,
             language: UiLanguage::saved(),
             restart_offer: None,
@@ -336,8 +354,18 @@ impl App {
                     .then(|| self.pending_voice.take())
                     .flatten();
                 notify_new_firmware(&status);
+                // Only the daemon's environment at start decides, so ask once each time it comes up.
+                let resident = if self.status.is_none() {
+                    Task::perform(client::resident_enabled(), Message::Resident)
+                } else {
+                    Task::none()
+                };
                 self.status = Some(*status);
-                return Task::batch([self.refresh_tray(), voice.map_or_else(Task::none, |id| Task::done(Message::UseVoice(id)))]);
+                return Task::batch([
+                    self.refresh_tray(),
+                    voice.map_or_else(Task::none, |id| Task::done(Message::UseVoice(id))),
+                    resident,
+                ]);
             }
             Message::Daemon(client::Update::Down) => {
                 self.status = None;
@@ -419,6 +447,27 @@ impl App {
                 if tab == Tab::Agents {
                     return Task::done(Message::RefreshAgents);
                 }
+                // The conversation goes on on the box while the window is elsewhere.
+                if tab == Tab::Conversation {
+                    return Task::done(Message::RefreshConversation);
+                }
+            }
+            Message::Resident(Ok(enabled)) => {
+                self.resident = enabled;
+                if !enabled && self.tab == Tab::Conversation {
+                    self.tab = Tab::General;
+                }
+            }
+            Message::Resident(Err(_)) => {}
+            Message::RefreshConversation => {
+                if !self.conversation_loading {
+                    self.conversation_loading = true;
+                    return Task::perform(client::resident_history(CONVERSATION_LIMIT), Message::Conversation);
+                }
+            }
+            Message::Conversation(result) => {
+                self.conversation_loading = false;
+                self.conversation = Some(result);
             }
             Message::NotifyLink(enabled) => {
                 let mut config = self.status.as_ref().map(|status| status.config.clone()).unwrap_or_default();
@@ -717,9 +766,12 @@ impl App {
             (Tab::Sound, tr("Character", &[])),
             (Tab::Agents, tr("Agents", &[])),
             (Tab::Device, tr("Device", &[])),
+            (Tab::Conversation, tr("Conversation", &[])),
             (Tab::Advanced, tr("Advanced", &[])),
         ];
-        let tab_bar = row(tabs.into_iter().map(|(tab, label)| {
+        // Voice commands are experimental (VIBEBUDDY_RESIDENT_SESSION=1): no tab while the daemon has them off.
+        let tabs = tabs.into_iter().filter(|(tab, _)| *tab != Tab::Conversation || self.resident);
+        let tab_bar = row(tabs.map(|(tab, label)| {
             let style = if tab == self.tab { button::primary } else { button::text };
             button(text(label)).style(style).on_press(Message::Tab(tab)).into()
         }))
@@ -729,6 +781,7 @@ impl App {
             Tab::Sound => self.sound(),
             Tab::Agents => self.agents(),
             Tab::Device => self.device(),
+            Tab::Conversation => self.conversation(),
             Tab::Advanced => self.advanced(),
         };
         let notice = self.notice.as_ref().map(|notice| match notice {
@@ -1542,6 +1595,55 @@ impl App {
         })
     }
 
+    /// The user's last voice commands and the buddy's spoken replies, newest at the bottom, as on the Mac.
+    fn conversation(&self) -> Element<'_, Message> {
+        let header = row![
+            text(tr("Your last voice commands and the buddy's spoken replies, newest at the bottom.", &[]))
+                .size(13)
+                .style(text::secondary)
+                .width(Length::Fill),
+            button(text(tr("Refresh", &[]))).on_press_maybe((!self.conversation_loading).then_some(Message::RefreshConversation)),
+        ]
+        .spacing(12)
+        .align_y(iced::Alignment::Center);
+        let placeholder = |title: String, detail: String| -> Element<'_, Message> {
+            container(column![text(title).size(16), text(detail).size(13).style(text::secondary)].spacing(6).align_x(iced::Alignment::Center))
+                .center(Length::Fill)
+                .into()
+        };
+        let body = match &self.conversation {
+            None => container(text(tr("Refreshing…", &[])).style(text::secondary)).center(Length::Fill).into(),
+            Some(Err(client::HistoryError::DaemonDown)) => placeholder(
+                tr("Couldn't read the conversation", &[]),
+                tr("The daemon isn't running. Restart it on the Advanced tab.", &[]),
+            ),
+            Some(Err(client::HistoryError::Unavailable(why))) => placeholder(
+                tr("Couldn't read the conversation", &[]),
+                tr("The buddy's session isn't available: %@", &[why]),
+            ),
+            Some(Ok(exchanges)) if exchanges.is_empty() => placeholder(
+                tr("Nothing said yet", &[]),
+                tr("Hold K0 on the box and talk to the buddy. What you say and what it says back show up here.", &[]),
+            ),
+            Some(Ok(exchanges)) => scrollable(
+                column(exchanges.iter().map(|exchange| {
+                    column![bubble(&exchange.said, true)]
+                        .extend(exchange.replies.iter().map(|reply| bubble(reply, false)))
+                        .spacing(6)
+                        .into()
+                }))
+                .spacing(10)
+                // Room for the scroll bar, which otherwise covers the ends of the lines.
+                .padding(iced::Padding::ZERO.right(16)),
+            )
+            // Opens on the newest, at the bottom.
+            .anchor_bottom()
+            .height(Length::Fill)
+            .into(),
+        };
+        column![header, body].spacing(12).into()
+    }
+
     fn advanced(&self) -> Element<'_, Message> {
         let daemon = match &self.status {
             Some(status) => tr("Running · %@", &[&status.daemon.short_build()]),
@@ -1652,6 +1754,21 @@ const BUILTIN: &str = "builtin";
 const CUSTOM_PROMPT: &str = "Pixel art game sprite of [describe your character], chibi proportions, standing, front view, full body, centered, arms down, flat colors, thick dark outline, limited 16-color palette, plain solid white background. Then the same character in exactly the same pose with the eyes closed; with a big happy smile; with a sad face.";
 
 /// A look frame as an image to draw, each pixel `scale` pixels wide.
+/// The user's words on the right in the accent color, the buddy's replies on the left, as in a chat.
+fn bubble(words: &str, mine: bool) -> Element<'_, Message> {
+    let bubble = container(text(words).size(14)).padding([7, 12]).max_width(440).style(move |theme: &Theme| {
+        let palette = theme.extended_palette();
+        let pair = if mine { palette.primary.base } else { palette.background.weak };
+        container::Style {
+            background: Some(pair.color.into()),
+            text_color: Some(pair.text),
+            border: iced::border::rounded(12),
+            ..container::Style::default()
+        }
+    });
+    if mine { row![space::horizontal(), bubble] } else { row![bubble, space::horizontal()] }.into()
+}
+
 fn handle(frame: &character::Image, scale: usize) -> image::Handle {
     let (w, h) = (frame.width * scale, frame.height * scale);
     let mut pixels = vec![0u8; w * h * 4];

@@ -10,6 +10,11 @@ struct SettingsView: View {
             VoicesView(model: model).tabItem { Label("Character", systemImage: "person.crop.square") }
             HooksView(model: model).tabItem { Label("Agents", systemImage: "link") }
             DeviceView(model: model).tabItem { Label("Device", systemImage: "cpu") }
+            // Voice commands are experimental (VIBEBUDDY_RESIDENT_SESSION=1): no tab while the daemon has them off.
+            if model.residentEnabled {
+                ConversationView { [client = model.client] in try await client.residentHistory(limit: ConversationView.limit) }
+                    .tabItem { Label("Conversation", systemImage: "bubble.left.and.bubble.right") }
+            }
             AdvancedView(model: model).tabItem { Label("Advanced", systemImage: "wrench.and.screwdriver") }
         }
         .padding(20)

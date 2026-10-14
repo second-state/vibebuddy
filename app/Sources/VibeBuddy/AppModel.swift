@@ -18,6 +18,9 @@ final class AppModel: ObservableObject {
     @Published private(set) var previewingVoice: String?
     /// Serial port open but no build ID ever reported: the box isn't running our firmware (a factory box), so offer to flash it.
     @Published private(set) var foreignFirmware = false
+    /// The daemon runs the experimental resident session, so the Conversation tab shows. Asked each time the daemon
+    /// comes up, since only its environment at start decides; kept while it is down, so the tab can say so.
+    @Published private(set) var residentEnabled = false
 
     let client = DaemonClient()
     let supervisor = DaemonSupervisor()
@@ -96,6 +99,7 @@ final class AppModel: ObservableObject {
     }
 
     private func apply(_ status: Status) {
+        if !daemonAlive { refreshResident() }
         self.status = status
         daemonAlive = true
         refreshMenu()
@@ -106,6 +110,12 @@ final class AppModel: ObservableObject {
         if let voice = pendingVoice, status.device.connected, status.device.firmwareBuild != nil, !operationRunning {
             pendingVoice = nil
             writeVoice(voice)
+        }
+    }
+
+    private func refreshResident() {
+        Task {
+            if let info = try? await client.resident() { residentEnabled = info.enabled }
         }
     }
 

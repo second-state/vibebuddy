@@ -310,6 +310,17 @@ check(BundleName.step(for: newBundle, exists: { _ in false }) == .none, "bundle:
 let devBuild = URL(fileURLWithPath: "/Users/me/vibe-buddy/app/build").appendingPathComponent(BundleName.old)
 check(BundleName.step(for: devBuild, exists: { _ in false }) == .none, "bundle: a build outside Applications is left alone")
 
+// 6. The resident session's info and history, as the daemon writes them (the Conversation tab).
+do {
+    let info = try StatusCoding.decoder().decode(ResidentInfo.self, from: Data(#"{"enabled":true,"thread_id":null}"#.utf8))
+    check(info.enabled && info.threadId == nil, "resident info decodes")
+    let history = try StatusCoding.decoder().decode(ResidentHistory.self, from: Data(#"{"exchanges":[{"replies":["现在没有 Agent 在工作。"],"said":"现在有几个agent在工作呀"},{"replies":["a","b"],"said":"two"}],"thread_id":"t1"}"#.utf8))
+    check(history.threadId == "t1" && history.exchanges.count == 2, "resident history decodes")
+    check(history.exchanges.last == ResidentExchange(said: "two", replies: ["a", "b"]), "exchanges keep their order and every reply")
+} catch {
+    check(false, "resident JSON fails to decode: \(error)")
+}
+
 if failures > 0 {
     print("\(failures) failure(s)")
     exit(1)

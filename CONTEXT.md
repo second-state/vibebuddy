@@ -168,6 +168,7 @@ Fixed wording for the App's English UI and English logs. Use these words when wr
 | 语音指令 | voice command | |
 | 常驻会话 | resident session | Not shown to users so far; in the UI the buddy is the one you talk to |
 | 口头回复 | spoken reply | |
+| 对话 | conversation | The settings tab (Conversation) listing voice commands and the buddy's spoken replies; shown only while the resident session is on |
 
 ### Activity lifecycle
 

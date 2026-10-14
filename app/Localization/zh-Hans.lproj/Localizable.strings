@@ -317,3 +317,13 @@
 "The network name is too long: 32 bytes at most." = "网络名太长了，最多 32 字节。";
 "Status" = "状态";
 "Change network" = "更换网络";
+
+/* Conversation (the resident session, experimental) */
+"Conversation" = "对话";
+"Your last voice commands and the buddy's spoken replies, newest at the bottom." = "你最近的语音指令和氛围小助手的口头回复，最新的在最下面。";
+"Couldn't read the conversation" = "读不到对话";
+"The daemon isn't running. Restart it on the Advanced tab." = "daemon 没在运行，到“高级”页重启它。";
+"The buddy's session isn't available: %@" = "氛围小助手的会话现在用不了：%@";
+"Nothing said yet" = "还没说过话";
+"Hold K0 on the box and talk to the buddy. What you say and what it says back show up here." = "按住盒子上的 K0，对氛围小助手说话。你说的和它回的都会显示在这里。";
+"The daemon answered %lld" = "daemon 返回了 %lld";

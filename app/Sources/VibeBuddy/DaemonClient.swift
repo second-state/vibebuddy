@@ -122,6 +122,23 @@ struct DaemonClient {
         guard code == 202 else { throw DaemonError(message: DaemonClient.message(in: data) ?? String(localized: "Update check was rejected (\(code))")) }
     }
 
+    func resident() async throws -> ResidentInfo {
+        let (data, _) = try await URLSession.shared.data(for: request("/v1/resident"))
+        return try StatusCoding.decoder().decode(ResidentInfo.self, from: data)
+    }
+
+    /// The last `limit` voice commands and their spoken replies, oldest first. Slow the first time: the daemon may have to
+    /// start Codex's app-server to read the thread.
+    func residentHistory(limit: Int) async throws -> [ResidentExchange] {
+        var request = self.request("/v1/resident/history")
+        request.url = URL(string: "\(base.absoluteString)/v1/resident/history?limit=\(limit)")
+        request.timeoutInterval = 60
+        let (data, response) = try await URLSession.shared.data(for: request)
+        let code = (response as? HTTPURLResponse)?.statusCode ?? 0
+        guard code == 200 else { throw DaemonError(message: DaemonClient.message(in: data) ?? String(localized: "The daemon answered \(code)")) }
+        return try StatusCoding.decoder().decode(ResidentHistory.self, from: data).exchanges
+    }
+
     private static func message(in data: Data) -> String? {
         (try? JSONSerialization.jsonObject(with: data) as? [String: Any])?["message"] as? String
     }
