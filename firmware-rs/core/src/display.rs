@@ -1610,10 +1610,11 @@ fn facts_line_y(panel: &Panel, index: usize) -> i32 {
 }
 
 /// Each key hint along the bottom: the key's chip and what it does, and the space down to the panel's edge, so a
-/// finger needn't hit the small text.
+/// finger needn't hit the small text. The last hint takes the rest of the bar: on the box, fingers went for the
+/// empty right half to close the menu.
 fn hint_rects(panel: &Panel) -> Vec<Rect> {
     let mut x = PANEL_LEFT;
-    panel
+    let mut rects: Vec<Rect> = panel
         .hints
         .iter()
         .map(|(key, action)| {
@@ -1622,7 +1623,11 @@ fn hint_rects(panel: &Panel) -> Vec<Rect> {
             x += width;
             rect
         })
-        .collect()
+        .collect();
+    if let Some(last) = rects.last_mut() {
+        last.width = 288 - last.x;
+    }
+    rects
 }
 
 /// A small heart over the petted buddy, 16 pixels wide.

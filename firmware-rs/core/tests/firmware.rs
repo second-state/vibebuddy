@@ -1359,6 +1359,10 @@ mod touchscreen {
         assert_eq!(tap(&mut firmware, &mut board, 60, 210), ["TAP 60 210"]);
         assert_eq!(press(&mut firmware, &mut board, Key::K0, 50), ["MUTE ON"], "K1's hint moved to MUTE");
         assert_eq!(tap(&mut firmware, &mut board, 190, 210), ["TAP 190 210", "MENU CLOSED"]);
+        // On the STATUS view the hints are BACK and CLOSE, and the empty bar to the right is CLOSE too.
+        press(&mut firmware, &mut board, Key::K1, 1100);
+        tap(&mut firmware, &mut board, 160, 185);
+        assert_eq!(tap(&mut firmware, &mut board, 260, 210), ["TAP 260 210", "MENU CLOSED"]);
         // Closed, the same place is just the screen.
         assert_eq!(tap(&mut firmware, &mut board, 190, 210), ["TAP 190 210"]);
     }
