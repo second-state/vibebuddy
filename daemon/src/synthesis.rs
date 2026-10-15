@@ -144,8 +144,8 @@ pub(crate) const VOICE_FILES: &[(&str, &str)] = &[
 /// The built-in default Character speaks with ElevenLabs' Jessica (voices/README.md); so does no Character pack, or
 /// one these files don't know.
 const DEFAULT_VOICE: &str = "elevenlabs:cgSgspJ2msm6clMCkdW9";
-/// ElevenLabs' stock Sarah and George, voices of no Character: one whose voice ElevenLabs doesn't have (the Doubao
-/// ones, until the service speaks Doubao) gets the one of its `GENDER`, rather than another Character's voice.
+/// ElevenLabs' stock Sarah and George, voices of no Character: one whose voice the service can't speak (a Doubao
+/// 2.0 voice, which needs another resource id) gets the one of its `GENDER`, rather than another Character's voice.
 const STOCK_FEMALE: &str = "elevenlabs:EXAVITQu4vr4xnSDxMaL";
 const STOCK_MALE: &str = "elevenlabs:JBFqnCBsd6RMkjVDRZzb";
 
@@ -158,6 +158,8 @@ pub fn voice_for(character: Option<&str>) -> String {
     let field = |key: &str| voice_field(file.1, key);
     match (field("ENGINE"), field("VOICE")) {
         (Some("elevenlabs"), Some(voice)) => format!("elevenlabs:{voice}"),
+        // The service speaks Doubao's 1.0 voices only.
+        (Some("volc"), Some(voice)) if field("VOLC_RESOURCE_ID").is_none() => format!("volc:{voice}"),
         _ if field("GENDER") == Some("male") => STOCK_MALE.to_owned(),
         _ => STOCK_FEMALE.to_owned(),
     }
@@ -206,7 +208,7 @@ mod tests {
     fn each_character_speaks_in_the_voice_of_its_lines() {
         assert_eq!(voice_for(Some("ada")), "elevenlabs:tcSsCJFYrsHpK5rCQZMf");
         assert_eq!(voice_for(Some("hank")), "elevenlabs:U6jH23hcPh0zH17nf3DT");
-        assert_eq!(voice_for(Some("wanwanxiaohe")), STOCK_FEMALE, "a Doubao voice: the stock one of her gender");
+        assert_eq!(voice_for(Some("wanwanxiaohe")), "volc:zh_female_wanwanxiaohe_moon_bigtts", "a Doubao 1.0 voice");
         assert_eq!(voice_for(Some("robot")), DEFAULT_VOICE);
         assert_eq!(voice_for(None), DEFAULT_VOICE, "no Character pack");
         assert_eq!(voice_for(Some("hsiaoyu")), DEFAULT_VOICE, "an old voice pack");
