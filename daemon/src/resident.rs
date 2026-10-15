@@ -31,7 +31,7 @@ use tracing::{info, warn};
 use crate::activity::ActivityTracker;
 use crate::app_server::{Client, Incoming, RpcError};
 use crate::persona::{Persona, Wearing};
-use crate::resident_claude::{CONTEXT_PREFIX, ClaudeBrain};
+use crate::resident_claude::{CONTEXT_PREFIX, ClaudeBrain, command_context, local_time_zone};
 
 /// The Codex version the app-server protocol was verified with. app-server and `dynamicTools` are experimental,
 /// so other versions get a warning in the log, but are still tried.
@@ -559,7 +559,8 @@ impl Resident {
         let spoke_as = self.spoke_as.lock().expect("spoke as lock").clone();
         let changed = spoke_as.as_deref() != Some(persona.id);
         let note = (changed && spoke_as.is_some()).then(|| change_note(persona));
-        let result = self.run_turn(session, note.as_deref(), text, on_reply).await;
+        let context = command_context(persona, &chrono::Local::now(), local_time_zone().as_deref());
+        let result = self.run_turn(session, &context, note.as_deref(), text, on_reply).await;
         if session.client.is_closed() {
             *slot = None;
         }
@@ -763,6 +764,7 @@ impl Resident {
     async fn run_turn(
         &self,
         session: &mut Session,
+        context: &str,
         note: Option<&str>,
         text: &str,
         on_reply: &mut (dyn FnMut(&str) + Send),
@@ -772,7 +774,7 @@ impl Resident {
             self.handle(&session.client, message, &mut |_| {}).await;
         }
         let input: Vec<Value> =
-            note.into_iter().chain([text]).map(|text| json!({"type": "text", "text": text})).collect();
+            [context].into_iter().chain(note).chain([text]).map(|text| json!({"type": "text", "text": text})).collect();
         let started =
             request(&session.client, "turn/start", json!({"threadId": session.thread_id, "input": input})).await?;
         let turn_id = started.pointer("/turn/id").and_then(Value::as_str).unwrap_or_default().to_owned();
@@ -1468,7 +1470,12 @@ pub(crate) mod tests {
         assert_eq!(tools, ["speak", "list_activities", "search_memories"]);
         let listing = start["dynamicTools"][1]["description"].as_str().unwrap();
         assert!(listing.contains("`recently_ended`") && listing.contains("`today`"), "{listing}");
-        assert_eq!(received[4]["params"], json!({"threadId": "new-thread", "input": [{"type": "text", "text": "hello"}]}));
+        assert_eq!(received[4]["params"]["threadId"], "new-thread");
+        let input = received[4]["params"]["input"].as_array().unwrap();
+        assert_eq!(input.len(), 2);
+        let context = input[0]["text"].as_str().unwrap();
+        assert!(context.starts_with("<context>The user's local time: ") && context.contains("You are"), "{context}");
+        assert_eq!(input[1], json!({"type": "text", "text": "hello"}));
         assert!(dir.join("resident").is_dir());
         assert_eq!(load(&dir.join("resident.json")).thread_id.as_deref(), Some("new-thread"));
         let _ = std::fs::remove_dir_all(dir);
@@ -1637,7 +1644,7 @@ pub(crate) mod tests {
             .received
             .iter()
             .filter(|message| message["method"] == "turn/start")
-            .map(|message| message["params"]["input"][0]["text"].clone())
+            .map(|message| message["params"]["input"][1]["text"].clone())
             .collect();
         assert_eq!(turns, [json!("one"), json!("two")]);
         assert_eq!(script.lock().unwrap().starts, 1);
@@ -1794,8 +1801,11 @@ pub(crate) mod tests {
             let script = script.lock().unwrap();
             script.received.iter().filter(|message| message["method"] == method).map(|message| message["params"].clone()).collect()
         };
+        // What follows the context every command starts with.
         let texts = |input: &Value| -> Vec<String> {
-            input["input"].as_array().unwrap().iter().map(|item| item["text"].as_str().unwrap().to_owned()).collect()
+            let items = input["input"].as_array().unwrap();
+            assert!(items[0]["text"].as_str().unwrap().contains("The user's local time"));
+            items[1..].iter().map(|item| item["text"].as_str().unwrap().to_owned()).collect()
         };
 
         resident.say("hi", &wearing("ada")).await.unwrap();

@@ -371,7 +371,7 @@ async fn run_turn(
 
 /// The computer's IANA time zone (`Asia/Singapore`): `TZ` if set, else where `/etc/localtime` points, on macOS
 /// and Linux alike.
-fn local_time_zone() -> Option<String> {
+pub(crate) fn local_time_zone() -> Option<String> {
     if let Ok(zone) = std::env::var("TZ")
         && !zone.is_empty()
     {
@@ -382,12 +382,8 @@ fn local_time_zone() -> Option<String> {
     path.split_once("zoneinfo/").map(|(_, zone)| zone.to_owned())
 }
 
-/// A voice command as a stream-json user message: the local time and time zone first, as context, then what was
-/// said. The time zone stands in for where the user is (Codex gets it from its own environment context), so a
-/// question about the weather or the news has a place. A `note` (the Character changed) goes with the context.
-/// Every command also repeats who answers and in which language: with only the system prompt saying so, Haiku
-/// answered a Chinese question in Chinese as an English Character, carried by the user's language and the session's
-/// earlier replies.
+/// A voice command as a stream-json user message: the [`command_context`] first, then a `note` (the Character
+/// changed) if any, then what was said.
 fn user_message(
     text: &str,
     persona: &Persona,
@@ -395,16 +391,25 @@ fn user_message(
     now: &chrono::DateTime<chrono::Local>,
     time_zone: Option<&str>,
 ) -> Value {
-    let zone = time_zone.map(|zone| format!(", time zone {zone}")).unwrap_or_default();
-    let Persona { name, language, .. } = persona;
-    let context = format!(
-        "{CONTEXT_PREFIX}The user's local time: {}{zone}. You are {name}: answer in {language} only, whatever language \
-         this is said in.</context>",
-        now.format("%A %Y-%m-%d %H:%M (UTC%:z)")
-    );
+    let context = command_context(persona, now, time_zone);
     let content: Vec<Value> =
         [context.as_str()].into_iter().chain(note).chain([text]).map(|text| json!({"type": "text", "text": text})).collect();
     json!({"type": "user", "message": {"role": "user", "content": content}})
+}
+
+/// The context put before every voice command, for both brains: the local time and time zone, and who answers in
+/// which language. The time zone stands in for where the user is, so a question about the weather or the news has a
+/// place; Codex's own clock tool answers in UTC. The reminder is there because with only the instructions saying
+/// so, Haiku answered a Chinese question in Chinese as an English Character, carried by the user's language and the
+/// session's earlier replies.
+pub(crate) fn command_context(persona: &Persona, now: &chrono::DateTime<chrono::Local>, time_zone: Option<&str>) -> String {
+    let zone = time_zone.map(|zone| format!(", time zone {zone}")).unwrap_or_default();
+    let Persona { name, language, .. } = persona;
+    format!(
+        "{CONTEXT_PREFIX}The user's local time: {}{zone}. You are {name}: answer in {language} only, whatever language \
+         this is said in.</context>",
+        now.format("%A %Y-%m-%d %H:%M (UTC%:z)")
+    )
 }
 
 /// The arguments for `claude`; see the module docs for why each is there.

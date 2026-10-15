@@ -846,7 +846,7 @@ pub mod tests {
         let wav = rig.recognizer.heard.lock().unwrap()[0].clone();
         assert_eq!(wav.len(), 44 + 30_000 * 2, "the whole recording, as 16-bit samples");
         let turn_text = rig.script.lock().unwrap().received.iter().find(|message| message["method"] == "turn/start").unwrap()
-            ["params"]["input"][0]["text"]
+            ["params"]["input"][1]["text"]
             .clone();
         assert_eq!(turn_text, "what are my agents doing");
     }
