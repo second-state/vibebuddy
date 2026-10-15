@@ -108,20 +108,21 @@ The end-to-end check is an ignored test, `e2e_a_real_recording_through_the_real_
 
 ### Speech recognition
 
-Behind the `Recognizer` trait, so the planned voice service in `vibebuddy-cloud` (called with the account session) can take over. For now there are two backends, picked at start:
+Behind the `Recognizer` trait. Three backends, picked at start:
 
 | Backend | Settings | Used |
 | --- | --- | --- |
-| The user's own recognizer: any OpenAI-compatible `POST {base}/audio/transcriptions` | `VIBEBUDDY_STT_BASE_URL`, `VIBEBUDDY_STT_API_KEY` (optional), `VIBEBUDDY_STT_MODEL` (default `whisper-1`) | When set; it wins over Cloudflare |
-| Cloudflare Workers AI, `@cf/openai/whisper-large-v3-turbo` | `CLOUDFLARE_ACCOUNT_ID`, `CLOUDFLARE_AI_TOKEN` | Otherwise; for development |
+| The user's own recognizer: any OpenAI-compatible `POST {base}/audio/transcriptions` | `VIBEBUDDY_STT_BASE_URL`, `VIBEBUDDY_STT_API_KEY` (optional), `VIBEBUDDY_STT_MODEL` (default `whisper-1`) | When set |
+| The voice service in `vibebuddy-cloud`: `POST {base}/v0/voice/transcribe` with the WAV as the body and `?language=` when set, answering `{"text","language"}`. It runs Groq's `whisper-large-v3-turbo` (about 1 s), falling back to Workers AI's | The base spoken replies use (`VIBEBUDDY_TTS_BASE_URL`, below): staging outside a release | Otherwise. A release has no voice service until production's is deployed with accounts, so a release has no recognizer unless the user sets their own |
+| Cloudflare Workers AI, `@cf/openai/whisper-large-v3-turbo`, called directly | `CLOUDFLARE_ACCOUNT_ID`, `CLOUDFLARE_AI_TOKEN` | Only when named; for development before the service recognized |
 
-`VIBEBUDDY_STT=cloudflare|openai|off` forces the choice. `VIBEBUDDY_STT_LANGUAGE` (`zh`, `en`, …) tells the recognizer the language; unset, it detects it, and the log names what it detected.
+`VIBEBUDDY_STT=service|openai|cloudflare|off` forces the choice. `VIBEBUDDY_STT_LANGUAGE` (`zh`, `en`, …) tells the recognizer the language; unset, it detects it, and the log names what it detected.
 
 Each setting is taken from the environment, else from `speech.json` in the config directory (`{"base_url","api_key","model","language"}`, the user's own recognizer), else from a `KEY=VALUE` file named by `VIBEBUDDY_STT_ENV_FILE` (development credentials, so they stay out of the daemon's environment and out of the repository). All are read when the daemon starts. `speech.json` is a file of its own, not part of `config.json`, because `PUT /v1/config` replaces the whole config and an App that doesn't know the field would wipe the key; whoever writes it (an App setting, later) writes it with mode 0600. Credentials are never logged, and errors name only the recognizer's host.
 
 ### Speech synthesis
 
-Each spoken reply is also synthesized and streamed to the box (`daemon/src/synthesis.rs`, `Speaker` in `voice.rs`), behind the `Synthesizer` trait so the backend can change. There is one backend, the voice service in `vibebuddy-cloud`: `POST {base}/v0/voice/speak` with `{"text","voice"}` (text 1 to 1000 characters, `voice` as `<vendor>:<voice id>`, today `elevenlabs:<voice_id>`), answering a chunked `audio/mpeg` stream (MPEG-2 Layer III, 24 kHz mono, 48 kbps) that starts as soon as there is audio. v0 takes no credentials; the account session's header goes in `VoiceService::speak` when it does.
+Each spoken reply is also synthesized and streamed to the box (`daemon/src/synthesis.rs`, `Speaker` in `voice.rs`), behind the `Synthesizer` trait so the backend can change. There is one backend, the voice service in `vibebuddy-cloud`: `POST {base}/v0/voice/speak` with `{"text","voice"}` (text 1 to 1000 characters, `voice` as `<vendor>:<voice id>`, today `elevenlabs:<voice_id>`), answering a chunked `audio/mpeg` stream (MPEG-2 Layer III, 24 kHz mono, 48 kbps) that starts as soon as there is audio. v0 takes no credentials, for synthesis or recognition; the account session's header goes in `VoiceService::speak` and `speech::VoiceService` when it does.
 
 | Setting | Effect |
 | --- | --- |

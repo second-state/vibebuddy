@@ -4,7 +4,8 @@
 //! Behind [`Synthesizer`] so the backend can change. There is one: the voice service in `vibebuddy-cloud`,
 //! `POST {base}/v0/voice/speak` with `{"text","voice"}`, answering a chunked `audio/mpeg` stream (MPEG-2 Layer III,
 //! 24 kHz mono, 48 kbps) that starts as soon as there is audio. Builds other than releases use staging; a release
-//! has none until the production service is deployed. `VIBEBUDDY_TTS_BASE_URL` sets the base by hand, or `off`.
+//! has none until the production service is deployed. `VIBEBUDDY_TTS_BASE_URL` sets the base by hand, or `off`;
+//! speech recognition ([`crate::speech`]) goes to the same service.
 
 use std::io::Read;
 use std::sync::Arc;
@@ -169,10 +170,12 @@ pub(crate) fn voice_field<'a>(file: &'a str, key: &str) -> Option<&'a str> {
 
 /// The synthesizer the environment configures, if any.
 pub fn from_env() -> Option<Arc<dyn Synthesizer>> {
-    configure(std::env::var(BASE_URL_VARIABLE).ok(), crate::relay::release())
+    configure(service_base(std::env::var(BASE_URL_VARIABLE).ok(), crate::relay::release()))
 }
 
-fn configure(base_url: Option<String>, release: bool) -> Option<Arc<dyn Synthesizer>> {
+/// The voice service's base URL, which speech recognition ([`crate::speech`]) uses too: the variable's, else
+/// staging outside a release. None when it is `off`, not http(s), or a release has none.
+pub fn service_base(base_url: Option<String>, release: bool) -> Option<String> {
     let base_url = match base_url.map(|url| url.trim().to_owned()).filter(|url| !url.is_empty()) {
         Some(url) if url == "off" => return None,
         Some(url) => url,
@@ -180,9 +183,14 @@ fn configure(base_url: Option<String>, release: bool) -> Option<Arc<dyn Synthesi
         None => STAGING_URL.to_owned(),
     };
     if !base_url.starts_with("https://") && !base_url.starts_with("http://") {
-        warn!(%base_url, "the voice service's base URL is not http(s); spoken replies stay text only");
+        warn!(%base_url, "the voice service's base URL is not http(s); it is not used");
         return None;
     }
+    Some(base_url)
+}
+
+fn configure(base_url: Option<String>) -> Option<Arc<dyn Synthesizer>> {
+    let base_url = base_url?;
     info!(%base_url, "speech synthesis: the voice service");
     Some(Arc::new(VoiceService { base_url }))
 }
@@ -223,9 +231,7 @@ mod tests {
 
     #[test]
     fn the_service_is_staging_outside_a_release_and_can_be_set_or_switched_off() {
-        let base = |url: Option<&str>, release| {
-            configure(url.map(str::to_owned), release).map(|_| ()).is_some()
-        };
+        let base = |url: Option<&str>, release| configure(service_base(url.map(str::to_owned), release)).is_some();
         assert!(base(None, false));
         assert!(!base(None, true), "no production voice service yet");
         assert!(base(Some("https://api.korekore.ai"), true));
