@@ -1328,6 +1328,29 @@ mod touchscreen {
         assert_eq!(press(&mut firmware, &mut board, Key::K0, 50), ["VOLUME 100", "AUDIO MUTED DONE"]);
     }
 
+    /// The panel's inside, which covers whatever the screen underneath is doing.
+    fn panel(board: &FakeBoard) -> Vec<u16> {
+        (20..196).flat_map(|y| (34..286).map(move |x| (x, y))).map(|(x, y)| pixel(board, x, y)).collect()
+    }
+
+    #[test]
+    fn under_the_last_row_is_still_the_last_row() {
+        let (mut firmware, mut board, _) = touch_box();
+        // STATUS by the keys: VOLUME, MUTE, COMPUTERS, NETWORK, STATUS.
+        press(&mut firmware, &mut board, Key::K1, 1100);
+        for _ in 0..4 {
+            press(&mut firmware, &mut board, Key::K1, 50);
+        }
+        press(&mut firmware, &mut board, Key::K0, 50);
+        let status = panel(&board);
+        press(&mut firmware, &mut board, Key::K2, 50);
+
+        // On the box a finger aimed at STATUS landed 15 px under it, between the row and the hints.
+        press(&mut firmware, &mut board, Key::K1, 1100);
+        tap(&mut firmware, &mut board, 160, 185);
+        assert!(panel(&board) == status, "the tap opened STATUS");
+    }
+
     #[test]
     fn a_tapped_key_hint_is_that_key() {
         let (mut firmware, mut board, _) = touch_box();

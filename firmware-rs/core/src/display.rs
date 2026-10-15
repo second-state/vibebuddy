@@ -1525,7 +1525,8 @@ impl Display {
                 return Some(Target::Hint(index));
             }
             if panel.kind == PanelKind::List {
-                return (0..panel.lines.len()).find(|&index| panel_row_rect(index).contains(x, y)).map(Target::Row);
+                let rows = panel.lines.len();
+                return (0..rows).find(|&index| panel_row_hit_rect(index, rows).contains(x, y)).map(Target::Row);
             }
             return None;
         }
@@ -1592,6 +1593,14 @@ fn tone_color(tone: Tone) -> u16 {
 /// A row of a menu list, as drawn with the selection bar.
 fn panel_row_rect(index: usize) -> Rect {
     Rect { x: 38, y: 51 + index as i32 * 23, width: 244, height: 21 }
+}
+
+/// Where a tap picks a row: the whole pitch, gaps included, and the last row down to the line above the hints. A
+/// finger on the box landed up to 15 px under the row it aimed at.
+fn panel_row_hit_rect(index: usize, rows: usize) -> Rect {
+    let row = panel_row_rect(index);
+    let bottom = if index + 1 == rows { 196 } else { row.y + 23 };
+    Rect { x: row.x, y: row.y - 1, width: row.width, height: bottom - row.y + 1 }
 }
 
 /// Where a Facts panel's lines go: closer together when there are more than five, to stay above the hints.
