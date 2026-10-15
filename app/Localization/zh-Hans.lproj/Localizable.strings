@@ -281,6 +281,7 @@
 "Not set" = "未设置";
 "Plug in the cable to change the box's network." = "要更换盒子的网络，请插上数据线。";
 "Plug in the cable to update the box's firmware." = "要更新盒子的固件，请插上数据线。";
+"Plug in the cable to see the paired computers." = "插上数据线才能看到已配对的电脑。";
 "Network name" = "网络名称";
 "Password" = "密码";
 "Join" = "加入";

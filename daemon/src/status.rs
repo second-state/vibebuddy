@@ -212,7 +212,11 @@ impl DeviceState {
                     self.wifi_network = None;
                     self.wifi_address = None;
                     self.wifi_error = None;
+                } else if line.starts_with("WIFI CONNECTING ") {
+                    // Joining again, say with a new password for the same network: the last join's address is gone.
+                    self.wifi_address = None;
                 } else if let Some(why) = line.strip_prefix("WIFI FAILED ") {
+                    self.wifi_address = None;
                     self.wifi_error = Some(wifi_failure(why.trim()));
                 } else if line.trim() == "WIFI CONNECTED" {
                     self.wifi_error = None;
@@ -478,6 +482,19 @@ mod tests {
         state.apply(&line("WIFI ADDRESS 10.0.0.7"));
         state.apply(&line("WIFI DISCONNECTED"));
         assert_eq!(state.wifi_address, None);
+    }
+
+    #[test]
+    fn joining_the_same_network_again_forgets_the_last_address() {
+        let mut state = DeviceState::default();
+        state.apply(&line("WIFI NETWORK Home"));
+        state.apply(&line("WIFI ADDRESS 192.168.1.23"));
+        state.apply(&line("WIFI NETWORK Home"));
+        state.apply(&line("WIFI CONNECTING Home"));
+        assert_eq!(state.wifi_address, None, "not joined while it tries again");
+        state.apply(&line("WIFI ADDRESS 192.168.1.23"));
+        state.apply(&line("WIFI FAILED AuthenticationExpired"));
+        assert_eq!((state.wifi_address, state.wifi_error.as_deref()), (None, Some("wrong_password")));
     }
 
     #[test]

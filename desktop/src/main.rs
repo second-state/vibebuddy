@@ -1421,8 +1421,11 @@ impl App {
                 };
                 row![text(name).size(13), space::horizontal(), action].spacing(12).into()
             });
+            // The box lists them over the cable only (ERROR cable_only otherwise), so the list would be empty.
+            let unlisted = device.network.then(|| text(tr("Plug in the cable to see the paired computers.", &[])).size(13));
             column![text(tr("Paired computers", &[]))]
                 .extend(rows)
+                .push(unlisted)
                 .push(
                     text(tr("A computer pairs with the box when it's plugged in. To forget them all, use COMPUTERS in the box's menu.", &[]))
                         .size(13),

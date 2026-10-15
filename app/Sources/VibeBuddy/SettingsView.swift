@@ -505,6 +505,10 @@ struct PairedComputersSection: View {
 
     var body: some View {
         Section {
+            // The box lists them over the cable only (ERROR cable_only otherwise), so the list would be empty.
+            if device.network == true {
+                Text("Plug in the cable to see the paired computers.").foregroundStyle(.secondary)
+            }
             ForEach(device.pairedComputers ?? []) { computer in
                 LabeledContent(computer.name.isEmpty ? String(localized: "Unnamed computer") : computer.name) {
                     if computer.key == device.computerKey {
