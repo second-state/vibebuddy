@@ -114,3 +114,7 @@ Hooks stay synchronous; don't use `async`. Async would let events arrive out of 
 ## vibebuddy-hook
 
 Since 2026-09-16, hooks are handled by the Rust binary `vibebuddy-hook claude` (source in `hook/`). Its predecessor `tools/claude-hook.py` is retired, and its test cases were carried over one by one. The App copies it to `~/Library/Application Support/VibeBuddy/bin/vibebuddy-hook`, and the command in the configuration is written as `"<that path>" claude`. Use this path when configuring by hand too; don't point it inside the App bundle, or it breaks when the App moves (ADR-0005).
+
+## The resident session
+
+The daemon's own resident session (ADR-0017) can run on Claude Code, with the user's own Anthropic API key. Its config dir is the daemon's own, so the user's VibeBuddy hook doesn't load for it, but managed hooks could; they are dropped at the entry point, by its `session_id` or by a `cwd` inside its working directory, so it never becomes an Activity. See [`resident-session.md`](resident-session.md#on-claude-code).

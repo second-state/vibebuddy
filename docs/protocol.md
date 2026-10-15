@@ -104,6 +104,8 @@ These messages are the app operating on the device itself. They don't count as a
 
 `device.screenshot` asks for the current screen. The device replies with `SHOT BEGIN 320x240 BACKLIGHT ON|OFF`, then `SHOT` lines of space-separated `rgb565:length` runs (the colour as four hex digits, row by row from the top left), then `SHOT END`; the daemon turns them into a PNG (`POST /v1/device/screenshot`), as does `tools/device-screenshot.py` over the cable. Over the cable the whole frame goes out at once, 16 runs a line. Over the local network or the Relay the device copies the frame when asked and sends one line every 30 ms, up to 180 runs (under 2 KB) a line, so it stays inside the Relay's 50 messages a second ([`relay-protocol.md`](relay-protocol.md)) and waits for room in the box's network buffer rather than drop part of a line; the picture is the screen at the moment of asking, however long the lines take. The idle screen takes one to two seconds; a screen with no two neighbouring pixels alike, about 13 s or more. Older firmware sends screenshots over the cable only, so over the network the request times out.
 
+`device.mic.record` is a bring-up diagnostic for the microphone, over the cable only (over the network it gets `ERROR cable_only`): `ms` is the length, 100 to 5000 (default 3000), and `gain_db` the ES8311 microphone gain, 0 to 42 (default 30). The box reports what answers on I2C (`MIC PROBE`), records, then sends `MIC LEVEL` lines (RMS and peak per 100 ms), `MIC BEGIN`, one `MIC DATA <seq> <base64>` line of 576 sample bytes per main loop pass, and `MIC END <bytes> <crc32>`. The daemon never sends it; `tools/mic-record.py` does. Lines and their meaning are in [`firmware-bringup.md`](firmware-bringup.md#microphone).
+
 Character packs (format in `firmware-rs/core/src/character_pack.rs`), and the older voice packs (`firmware-rs/core/src/voice_pack.rs`), are written into the `voices` partition over the same serial link, without resetting and without esptool; both connection types behave the same. Stop-and-wait flow control: after each chunk the Mac waits for the device's acknowledgment, and sends nothing further without one.
 
 ```json
@@ -188,6 +190,41 @@ On the computer's side, `vibebuddyd` remembers the box's key when it sees `BOX K
 Once on Wi-Fi the box also answers mDNS (DNS-SD) for `_vibebuddy._tcp` on port 7340, as the instance `VibeBuddy <first 8 characters of the box key>` on host `vibebuddy-<the same, lowercased, with anything but letters and digits as ->.local`, with the box key in its TXT record: `key=<box key>`. When nothing answers at the remembered address, as after the router hands the box another one while it is off the cable, `vibebuddyd` connects to whichever advertised instance carries the remembered key, and remembers that address once the handshake succeeds. mDNS only finds the box; the handshake still checks its key, so an instance that claims the key without holding it gets nowhere. The daemon starts browsing the first time the remembered address doesn't answer and keeps listening from then on (Bonjour's port on macOS and Avahi's on Linux are shared, no system service needed). A fixed `VIBEBUDDY_LAN_ADDR` turns discovery off. While linked through the Relay, the 30 s check for the local network tries both the remembered address and any advertised one. It tries the network only while no box is on the cable, and checks the cable every 2 s while linked over the network. Moving between the two is not a drop: `/v1/status` goes from one connection to the other with no `connected: false` in between, and `device.network` says which it is. Flashing needs the cable.
 
 USB stays in the clear: the cable is physical presence, as pairing already assumes.
+
+## Voice commands (experimental)
+
+A voice command (ADR-0017) on a box linked over USB or the local network: the box records while K0 is held and streams the audio over the link; the computer turns it into text, hands it to the resident session and sends the spoken replies back. Over the Relay the box will talk to the voice service itself (ADR-0018); that path isn't described here yet.
+
+The computer offers voice, and the box only treats a long K0 as push-to-talk while it is offered:
+
+- `{"version":1,"event":"voice.available","on":true}`: sent after `device.hello` is answered (the daemon sends it on every `DISPLAY READY BUILD`, so a box that rebooted on the same link is told again), and again whenever it changes, when the resident session is switched on and ready (the user's Codex installed and signed in; see [`resident-session.md`](resident-session.md#readiness)) and speech recognition is configured; `"on":false` withdraws it. A box that hasn't been told, or was told `false`, keeps K0 long as it was. A new link starts with voice off until the computer says otherwise.
+
+One recording is a turn, numbered by the box from 1 after each boot. The box sends diagnostic lines, each under 1024 bytes:
+
+- `VOICE START <turn>`: K0 has been held for the long-press time and the box is recording. Recording starts here, a second after K0 went down, when the screen says LISTENING; nothing from before is kept.
+- `VOICE DATA <turn> <seq> <predictor> <index> <base64>`: the next stretch of audio, `seq` from 0 without gaps. Audio is 24 kHz mono IMA ADPCM, two samples per byte, low nibble first, the same coding the box plays Character packs with (`firmware-rs/core/src/adpcm.rs`). `predictor` (a signed 16-bit sample) and `index` (0–88) are the coder's state before the line's first nibble, so every line decodes on its own and a lost line costs only its own stretch. At most 768 base64 characters per line.
+- `VOICE END <turn> <samples>`: K0 was released, or 30 s passed; `samples` is how many were recorded, always an even number (a last sample without a partner for its byte isn't sent). It counts the samples of lines that were dropped too, so the computer can tell how much is missing.
+- `VOICE CANCEL <turn>`: the recording was too short (under half a second) or the box gave it up (K2, or an event that needs the user took the screen, or voice was withdrawn); the computer drops the turn.
+
+`VOICE DATA` comes to about 21 lines and 16 KB a second, and goes only over the native USB port and the local network. The UART bridge carries 11.5 KB/s at 115200 baud and its writes hold up the box's main loop, so data lines never go there; a computer on the bridge would see `START` and `END` with no data, so it shouldn't offer voice there. The Relay doesn't carry them either (see above). A data line that doesn't fit right now (the USB host isn't reading, the network connection's buffer is full) is dropped whole rather than waited for: a gap in `seq`, never a stalled recording. `START`, `END` and `CANCEL` go everywhere the box's other lines go.
+
+The computer answers with JSON events carrying the same `turn`:
+
+- `voice.heard` with `text`: what was recognised (cut to fit the line), so the box can show it.
+- `voice.reply` with `text`: one spoken reply, sent the moment the resident session says it; a turn may have several.
+- `voice.done`: the turn is over; it comes after the last reply's audio `end`. The box leaves what it heard and the replies up for 15 s to be read (K2 closes them sooner), then goes back to what it showed before; with nothing to show, it goes back at once.
+- `voice.error` with `reason` (`not_heard` when recognition returned nothing or no audio arrived, `unavailable` when recognition or the resident session failed, `busy` when another turn is still running) and an optional `message`; the turn is over. It may come while the box is still recording (`busy` right after `START`): the box stops recording and sends nothing more for that turn. The box shows `message` if there is one, otherwise a short text of its own, for 6 s.
+
+`voice.error` is also the name of the box's reply to a failed voice pack write ("Device maintenance" above). The two never meet: that one only goes from the box to the computer, this one only from the computer to the box, and it carries `turn`.
+
+The box ignores answers for any turn but the one on its screen: after K2 closed it, after a new turn started, or after a minute without a word from the computer, when it closes the overlay on its own.
+
+The computer also sends each spoken reply's audio, synthesized in the Character's voice, right after its `voice.reply`:
+
+- `voice.audio` with `reply` (0 for the turn's first `voice.reply`, counting up), `seq` (from 0, without gaps) and `data`: base64 of the next bytes of an MP3 stream (MPEG-2 Layer III, 24 kHz mono, 48 kbps, as the voice service returns it), at most 768 base64 characters. Chunks don't follow MP3 frame boundaries; the box buffers and decodes frame by frame.
+- `voice.audio` with `reply`, `seq` and `"end":true` (no `data`): that reply's audio is over. With `"error":"synthesis"` as well, synthesis failed or was cut short: the box plays what it has, keeps the text, and logs the failure instead of passing it off as a whole reply.
+
+The box plays replies in order, one after another, and starts a reply as soon as it has enough frames, without waiting for its end. If synthesis fails the reply stays text only. While muted the box shows replies without playing them. The box plays audio only for the turn it recorded last (`voice.audio` carries `turn` like the other answers), and stops a turn's replies for good, ignoring the rest of its audio, when the Pomodoro chime is about to play (it wins), when it is muted, when a new K0 push-to-talk starts, or when the overlay closes. The overlay stays up past its read time while a reply is still being spoken. An Agent's news during a voice command (needs input, failed, done) doesn't close the overlay or cut a reply short: the overlay marks needs input and failed in yellow, and the worst of what came is announced once, when the overlay closes (`AUDIO HELD <occasion>` when it is held). A missing chunk is skipped (the decoder finds the next frame, so the reply only loses a moment); a chunk arriving after a later one is ignored.
 
 ## Stage 1 error output
 

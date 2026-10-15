@@ -151,7 +151,8 @@ impl Transport {
         }
     }
 
-    fn write_usb(&mut self, data: &[u8]) {
+    /// USB alone, for a stream the UART can't keep up with.
+    pub fn write_usb(&mut self, data: &[u8]) {
         for &byte in data {
             if self.usb.write_byte_nb(byte).is_ok() {
                 self.usb_stalled = false;

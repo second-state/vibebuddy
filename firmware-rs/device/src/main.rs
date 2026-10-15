@@ -7,7 +7,9 @@
 //!   codec (0x18, absent on the NS4168 variant).
 //! - XL9555 P0: bit7 LCD backlight, bit5 amplifier enable, bit4 K1, bit3 K2 (keys active low).
 //! - K0: BOOT key, GPIO0, active low.
-//! - I2S0: BCLK GPIO21, WS GPIO13, DOUT GPIO14, no MCLK.
+//! - I2S0: BCLK GPIO21, WS GPIO13, DOUT GPIO14, no MCLK. DIN GPIO47 (the ES8311's ADC, left slot;
+//!   verified on one box, docs/hardware.md; read while a voice command records, and by the
+//!   `device.mic.record` diagnostic).
 //! - UART0: TX GPIO43, RX GPIO44, to the CH343 bridge; the chip's own USB Serial/JTAG as well.
 #![no_std]
 #![no_main]
@@ -17,6 +19,7 @@ extern crate alloc;
 
 mod audio;
 mod lcd;
+mod mic;
 mod net;
 mod relay;
 mod serial;
@@ -49,6 +52,7 @@ use vibebuddy_firmware_core::display::Screen;
 use vibebuddy_firmware_core::firmware::{AudioStatus, Board, Firmware, FrameAction, VolumeError};
 use vibebuddy_firmware_core::noise::{self, SealedLines, Sealer};
 use vibebuddy_firmware_core::relay_box::{self, RelayBox};
+use vibebuddy_firmware_core::spoken_reply::ReplyAudio;
 use vibebuddy_firmware_core::storage::Flash;
 
 use crate::audio::{PLAYING, PlayCommand, QUEUE, STOP, STREAM_BYTES, STREAM_CHUNK};
@@ -63,8 +67,17 @@ esp_bootloader_esp_idf::esp_app_desc!();
 /// the box freezes until power is cut.
 #[unsafe(no_mangle)]
 fn custom_halt() -> ! {
+    // SAFETY: one word written just before the reset; nothing else runs.
+    unsafe { PANICKED = PANIC_MARK };
     esp_hal::system::software_reset()
 }
+
+/// Set by a panic just before its reset, so the next boot can tell it from a restart asked for: both are
+/// software resets to the chip. RTC fast memory keeps it across the reset; after power-on it holds noise,
+/// hence a mark rather than a flag.
+#[esp_hal::ram(unstable(rtc_fast, persistent))]
+static mut PANICKED: u32 = 0;
+const PANIC_MARK: u32 = 0x5041_4e43;
 
 const XL9555_ADDRESS: u8 = 0x20;
 const XL9555_INPUT_PORT0: u8 = 0x00;
@@ -149,6 +162,22 @@ struct DeviceBoard {
 }
 
 impl DeviceBoard {
+    /// To the computer linked over the network: a line with no room is dropped whole, before it is sealed
+    /// (noise::SealedLines).
+    fn write_lan(&mut self, bytes: &[u8]) {
+        if let Some((conn, lines)) = &mut self.lan_peer {
+            let conn = *conn;
+            lines.lines(
+                bytes,
+                |length| net::room(conn) > length,
+                |line| {
+                    net::send(conn, line.as_bytes());
+                    net::send(conn, b"\n");
+                },
+            );
+        }
+    }
+
     fn expander(&mut self) -> Expander<'_> {
         Expander { i2c: &mut self.i2c }
     }
@@ -179,18 +208,7 @@ impl Board for DeviceBoard {
 
     fn write(&mut self, bytes: &[u8]) {
         self.transport.write(bytes);
-        // A line with no room is dropped whole, before it is sealed (noise::SealedLines).
-        if let Some((conn, lines)) = &mut self.lan_peer {
-            let conn = *conn;
-            lines.lines(
-                bytes,
-                |length| net::room(conn) > length,
-                |line| {
-                    net::send(conn, line.as_bytes());
-                    net::send(conn, b"\n");
-                },
-            );
-        }
+        self.write_lan(bytes);
         if let Some(lines) = &mut self.relay_peer {
             lines.lines(
                 bytes,
@@ -200,6 +218,14 @@ impl Board for DeviceBoard {
                 },
             );
         }
+    }
+
+    /// `VOICE DATA`, 16 KB/s of it: USB and the local network only. The UART carries 11.5 KB/s at 115200
+    /// baud and its writes block, so the stream would stall the main loop there; the Relay's 50 messages a
+    /// second are for the box's other output (a voice command over the Relay is ADR-0018's).
+    fn write_stream(&mut self, line: &[u8]) {
+        self.transport.write_usb(line);
+        self.write_lan(line);
     }
 
     fn lan_send(&mut self, conn: u32, bytes: &[u8]) {
@@ -314,6 +340,52 @@ impl Board for DeviceBoard {
         }
         codec::set_es8311_volume(&mut self.codec(), level).map_err(|_| VolumeError::Failed)
     }
+
+    fn i2c_read(&mut self, address: u8, register: u8) -> Option<u8> {
+        let mut value = [0u8];
+        self.i2c.write_read(address, &[register], &mut value).ok().map(|()| value[0])
+    }
+
+    fn i2c_write(&mut self, address: u8, register: u8, value: u8) -> Result<(), ()> {
+        self.i2c.write(address, &[register, value]).map_err(|_| ())
+    }
+
+    fn mic_start(&mut self, bytes: usize) -> Result<(), ()> {
+        mic::DONE.reset();
+        mic::COMMAND.signal(mic::Command::Record(bytes));
+        Ok(())
+    }
+
+    fn mic_take(&mut self) -> Option<Result<alloc::vec::Vec<u8>, &'static str>> {
+        while let Ok(note) = mic::NOTES.try_receive() {
+            self.write(note.as_bytes());
+            self.write(b"\n");
+        }
+        mic::DONE.try_take()
+    }
+
+    fn voice_start(&mut self) -> Result<(), ()> {
+        mic::start_stream();
+        Ok(())
+    }
+
+    fn voice_take(&mut self, samples: &mut alloc::vec::Vec<i16>) {
+        mic::take_samples(samples);
+    }
+
+    fn voice_stop(&mut self) {
+        mic::stop_stream();
+    }
+
+    fn reply_audio(&mut self, audio: ReplyAudio) {
+        if let Ok(mut replies) = audio::REPLIES.try_lock() {
+            replies.apply(audio);
+        }
+    }
+
+    fn reply_speaking(&self) -> bool {
+        audio::REPLIES.try_lock().is_ok_and(|replies| replies.speaking())
+    }
 }
 
 #[allow(clippy::large_stack_frames, reason = "main has to hold a lot of peripherals and buffers anyway")]
@@ -378,20 +450,25 @@ async fn main(spawner: Spawner) -> ! {
     let lcd = Lcd::new(bus, parameters, frame);
 
     // Start the I2S stream first (all zeros): as in the C firmware, the clock runs before the codec is
-    // configured.
+    // configured. The receiver shares the transmitter's BCLK and WS (signal loopback), as ESP-IDF sets up a
+    // full-duplex channel pair on the same pins; it only runs while a voice command records and during the
+    // microphone diagnostic.
     let i2s = I2s::new(
         peripherals.I2S0,
         peripherals.DMA_CH1,
         TdmConfig::new_tdm_philips()
             .with_sample_rate(Rate::from_hz(SAMPLE_RATE))
             .with_data_format(DataFormat::Data16Channel16)
-            .with_channels(Channels::STEREO),
+            .with_channels(Channels::STEREO)
+            .with_signal_loopback(true),
     )
     .expect("I2S0 config")
     .into_async();
     let i2s_tx = i2s.i2s_tx.with_bclk(peripherals.GPIO21).with_ws(peripherals.GPIO13).with_dout(peripherals.GPIO14).build();
     let stream: DmaTxStreamBuf = dma_tx_stream_buffer!(STREAM_BYTES, STREAM_CHUNK);
     spawner.spawn(audio::audio_task(i2s_tx, stream).expect("audio task"));
+    let i2s_rx = i2s.i2s_rx.with_din(peripherals.GPIO47).build();
+    spawner.spawn(mic::mic_task(i2s_rx).expect("mic task"));
 
     let k0 = Input::new(peripherals.GPIO0, InputConfig::default().with_pull(Pull::Up));
 
@@ -427,6 +504,7 @@ async fn main(spawner: Spawner) -> ! {
     // Booting got this far, so an image installed over the air keeps its slot.
     storage::confirm_running_image();
     net::CREDENTIALS.signal(wifi_credentials(&firmware));
+    report_reset(&mut board);
     report_memory(&mut board);
     if let Some(stack) = stack {
         if let Some(link) = firmware.link() {
@@ -437,13 +515,24 @@ async fn main(spawner: Spawner) -> ! {
     let mut relay_box = RelayBox::new();
 
     let mut input = [0u8; 256];
+    // UART and USB feed one line parser, so UART bytes are held here until their line is whole: a stray byte on
+    // the bridge must not land in the middle of a line arriving over USB.
+    let mut uart_line: alloc::vec::Vec<u8> = alloc::vec::Vec::new();
     loop {
         loop {
             let count = serial::take_uart(&mut input);
             if count == 0 {
                 break;
             }
-            firmware.receive(&mut board, &input[..count]);
+            for &byte in &input[..count] {
+                if uart_line.len() < 2048 {
+                    uart_line.push(byte);
+                }
+                if byte == b'\n' {
+                    firmware.receive(&mut board, &uart_line);
+                    uart_line.clear();
+                }
+            }
         }
         loop {
             let count = serial::take_usb(&mut input);
@@ -511,6 +600,11 @@ async fn main(spawner: Spawner) -> ! {
             net::CREDENTIALS.signal(wifi_credentials(&firmware));
         }
         firmware.poll(&mut board);
+        // The microphone's own report on a stream that just ended.
+        while let Ok(note) = mic::NOTES.try_receive() {
+            board.write(note.as_bytes());
+            board.write(b"\n");
+        }
         // Before restarting, close the Relay socket and the network connections so the computers and the
         // Relay see the box go at once, rather than after their silence timeouts; a new identity has a new
         // box-id, so nothing would replace the old one's socket (#122). The wait also lets the last line out.
@@ -530,6 +624,16 @@ fn wifi_credentials(firmware: &Firmware) -> Option<(alloc::string::String, alloc
 }
 
 /// `MEMORY INTERNAL <free>/<total> PSRAM <free>/<total>` in bytes: what the heaps have left (#108).
+/// Why the box last started, so a box that restarted by itself shows in the daemon's log: a watchdog, a brownout or
+/// a panic.
+fn report_reset(board: &mut DeviceBoard) {
+    // SAFETY: read and cleared once at boot, before anything can panic again.
+    let panicked = unsafe { core::mem::replace(&mut *core::ptr::addr_of_mut!(PANICKED), 0) } == PANIC_MARK;
+    let reason = esp_hal::system::reset_reason();
+    let line = alloc::format!("RESET {reason:?}{}\n", if panicked { " PANIC" } else { "" });
+    board.write(line.as_bytes());
+}
+
 fn report_memory(board: &mut DeviceBoard) {
     let stats = esp_alloc::HEAP.stats();
     let internal = esp_alloc::HEAP.free_caps(esp_alloc::MemoryCapability::Internal.into());

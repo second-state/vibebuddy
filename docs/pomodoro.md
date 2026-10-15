@@ -28,7 +28,7 @@ The case has three buttons, K0, K1, and K2 (plus RST). Each button does one thin
 
 | Button | Short press | Long press (1 second) |
 | --- | --- | --- |
-| K0 | Pomodoro: start / pause / resume | Abandon the current phase and return to idle; when the break is ready to start, this skips the break |
+| K0 | Pomodoro: start / pause / resume | Abandon the current phase and return to idle; when the break is ready to start, this skips the break. While the computer offers voice commands, push-to-talk instead, and abandoning is in the device menu ([`device-menu.md`](device-menu.md#voice-commands)) |
 | K1 | Toggle between On duty and Pomodoro | Send the buddy to Leisure right now |
 | K2 | Open the current source (reported to the Mac, behavior unchanged) | Mute toggle |
 

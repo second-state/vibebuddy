@@ -29,6 +29,9 @@ use iced::{Element, Font, Length, Subscription, Task, Theme, window};
 use i18n::{UiLanguage, tr};
 use status::{Config, MenuState, Status};
 
+/// How many exchanges the Conversation tab reads, as on the Mac.
+const CONVERSATION_LIMIT: usize = 20;
+
 /// Omarchy's monospace font, used when Omarchy's theme is: the window should look like the rest of the desktop.
 const OMARCHY_FONT: &str = "JetBrainsMono Nerd Font";
 
@@ -66,6 +69,8 @@ enum Tab {
     Sound,
     Agents,
     Device,
+    /// Only while the daemon runs the resident session (experimental).
+    Conversation,
     Advanced,
 }
 
@@ -139,6 +144,23 @@ enum Message {
     /// Play a Character's preview lines here, or stop the one playing.
     TogglePreview(&'static str),
     PreviewDone(String, Result<(), String>),
+    /// Whether the daemon runs the resident session, asked each time it comes up.
+    Resident(Result<bool, String>),
+    RefreshConversation,
+    Conversation(Result<Vec<client::Exchange>, client::HistoryError>),
+    /// Ask `GET /v1/resident` again while the Conversation tab shows.
+    PollConversation,
+    ConversationPolled(Result<client::ResidentInfo, client::HistoryError>),
+    OpenCodexInstallPage,
+    OpenClaudeInstallPage,
+    OpenAnthropicConsole,
+    /// Which Agent answers voice commands.
+    PickBrain(client::BrainChoice),
+    AnthropicKeyDraft(String),
+    SaveAnthropicKey,
+    RemoveAnthropicKey,
+    /// The daemon's answer to a brain or key change.
+    ResidentSettingSaved(Result<client::ResidentInfo, String>),
     /// Ask `vibebuddy-hook` for each agent's state again.
     RefreshAgents,
     Agents(Result<Vec<agents::Setup>, String>),
@@ -211,6 +233,25 @@ struct App {
     agents: Vec<agents::Setup>,
     /// A change to an agent's config, shown before it's written.
     hook_plan: Option<agents::Plan>,
+    /// The daemon runs the experimental resident session, so the Conversation tab shows. Kept while the daemon is
+    /// down, so the tab can say so.
+    resident: bool,
+    /// The last voice commands and spoken replies read, or why they couldn't be; None before the first read.
+    conversation: Option<Result<Vec<client::Exchange>, client::HistoryError>>,
+    conversation_loading: bool,
+    /// The history's change marker when it was last read; None before that, and after the daemon went away.
+    conversation_seen: Option<u64>,
+    /// The daemon has the change marker; an older one gets its history read every 5 seconds instead.
+    conversation_marked: bool,
+    conversation_polling: bool,
+    /// What voice commands are missing (the user's Codex or Claude Code), as the daemon last said.
+    resident_problem: Option<client::Problem>,
+    /// The daemon's last word on the resident session: which Agent the user picked, whether a key is stored.
+    resident_info: Option<client::ResidentInfo>,
+    /// The Anthropic API key being typed; cleared once the daemon has it, and never filled from the daemon.
+    anthropic_key_draft: String,
+    /// Why the last brain or key change failed.
+    resident_setting_error: Option<String>,
     /// The outcome of the last action, shown at the bottom of the window.
     notice: Option<Result<String, String>>,
     /// The language picked in Settings, and, while it differs from the UI's, the offer to restart.
@@ -262,6 +303,16 @@ impl App {
             previewing: None,
             agents: Vec::new(),
             hook_plan: None,
+            resident: false,
+            conversation: None,
+            conversation_loading: false,
+            conversation_seen: None,
+            conversation_marked: true,
+            conversation_polling: false,
+            resident_problem: None,
+            resident_info: None,
+            anthropic_key_draft: String::new(),
+            resident_setting_error: None,
             notice: None,
             language: UiLanguage::saved(),
             restart_offer: None,
@@ -317,12 +368,20 @@ impl App {
         );
         #[cfg(not(target_os = "linux"))]
         let (tray, instance) = (Subscription::none(), Subscription::none());
+        // Only while the Conversation tab is in an open window: the history is read again when it changed.
+        let conversation = if self.settings.is_some() && self.resident && self.tab == Tab::Conversation {
+            let every = if self.conversation_marked { 2 } else { 5 };
+            iced::time::every(Duration::from_secs(every)).map(|_| Message::PollConversation)
+        } else {
+            Subscription::none()
+        };
         Subscription::batch([
             Subscription::run(client::status_updates).map(Message::Daemon),
             iced::time::every(Duration::from_secs(2)).map(|_| Message::ThemeTick),
             window::close_events().map(Message::WindowClosed),
             tray,
             instance,
+            conversation,
         ])
     }
 
@@ -336,8 +395,18 @@ impl App {
                     .then(|| self.pending_voice.take())
                     .flatten();
                 notify_new_firmware(&status);
+                // Only the daemon's environment at start decides, so ask once each time it comes up.
+                let resident = if self.status.is_none() {
+                    Task::perform(client::resident_enabled(), Message::Resident)
+                } else {
+                    Task::none()
+                };
                 self.status = Some(*status);
-                return Task::batch([self.refresh_tray(), voice.map_or_else(Task::none, |id| Task::done(Message::UseVoice(id)))]);
+                return Task::batch([
+                    self.refresh_tray(),
+                    voice.map_or_else(Task::none, |id| Task::done(Message::UseVoice(id))),
+                    resident,
+                ]);
             }
             Message::Daemon(client::Update::Down) => {
                 self.status = None;
@@ -400,8 +469,15 @@ impl App {
                     ..Default::default()
                 });
                 self.settings = Some(id);
+                // Reopened on the Conversation tab: read it again, as when the tab opens.
+                let conversation = if self.tab == Tab::Conversation {
+                    self.conversation_seen = None;
+                    Task::done(Message::PollConversation)
+                } else {
+                    Task::none()
+                };
                 // The Agents tab reads each agent's config from disk; have it ready, whichever tab shows first.
-                return Task::batch([open.discard(), Task::done(Message::RefreshAgents)]);
+                return Task::batch([open.discard(), Task::done(Message::RefreshAgents), conversation]);
             }
             Message::WindowClosed(id) => {
                 if self.settings == Some(id) {
@@ -419,6 +495,96 @@ impl App {
                 if tab == Tab::Agents {
                     return Task::done(Message::RefreshAgents);
                 }
+                // The conversation goes on on the box while the window is elsewhere: read it each time the tab opens.
+                if tab == Tab::Conversation {
+                    self.conversation_seen = None;
+                    return Task::done(Message::PollConversation);
+                }
+            }
+            Message::Resident(Ok(enabled)) => {
+                self.resident = enabled;
+                if !enabled && self.tab == Tab::Conversation {
+                    self.tab = Tab::General;
+                }
+            }
+            Message::Resident(Err(_)) => {}
+            Message::RefreshConversation => {
+                if !self.conversation_loading {
+                    self.conversation_loading = true;
+                    return Task::perform(client::resident_history(CONVERSATION_LIMIT), Message::Conversation);
+                }
+            }
+            Message::Conversation(result) => {
+                self.conversation_loading = false;
+                self.conversation = Some(result);
+            }
+            Message::PollConversation => {
+                if !self.conversation_polling {
+                    self.conversation_polling = true;
+                    return Task::perform(client::resident_info(), Message::ConversationPolled);
+                }
+            }
+            Message::ConversationPolled(result) => {
+                self.conversation_polling = false;
+                match result {
+                    Ok(info) => {
+                        self.conversation_marked = info.revision.is_some();
+                        let became_ready = self.resident_problem.is_some() && info.problem.is_none();
+                        self.resident_problem = info.problem.clone();
+                        self.resident_info = Some(info.clone());
+                        let changed = info.revision.is_none() || info.revision != self.conversation_seen || became_ready;
+                        // A read already under way is left alone; the next poll sees the change again.
+                        if (changed || self.conversation.is_none()) && !self.conversation_loading {
+                            self.conversation_seen = info.revision;
+                            return Task::done(Message::RefreshConversation);
+                        }
+                    }
+                    Err(client::HistoryError::DaemonDown) => {
+                        // Read again once it answers: a restarted daemon counts from 0 again.
+                        self.conversation_seen = None;
+                        self.resident_problem = None;
+                        self.conversation = Some(Err(client::HistoryError::DaemonDown));
+                    }
+                    Err(client::HistoryError::Unavailable(_)) => {}
+                }
+            }
+            Message::OpenCodexInstallPage => {
+                if let Err(error) = launch("xdg-open", &[std::ffi::OsStr::new(CODEX_INSTALL_PAGE)]) {
+                    self.notice = Some(Err(error));
+                }
+            }
+            Message::OpenClaudeInstallPage => {
+                if let Err(error) = launch("xdg-open", &[std::ffi::OsStr::new(CLAUDE_INSTALL_PAGE)]) {
+                    self.notice = Some(Err(error));
+                }
+            }
+            Message::OpenAnthropicConsole => {
+                if let Err(error) = launch("xdg-open", &[std::ffi::OsStr::new(ANTHROPIC_CONSOLE)]) {
+                    self.notice = Some(Err(error));
+                }
+            }
+            Message::PickBrain(choice) => return Task::perform(client::set_resident_brain(choice), Message::ResidentSettingSaved),
+            Message::AnthropicKeyDraft(draft) => self.anthropic_key_draft = draft,
+            Message::SaveAnthropicKey => {
+                let key = self.anthropic_key_draft.trim().to_owned();
+                if !key.is_empty() {
+                    return Task::perform(client::set_anthropic_key(Some(key)), Message::ResidentSettingSaved);
+                }
+            }
+            Message::RemoveAnthropicKey => return Task::perform(client::set_anthropic_key(None), Message::ResidentSettingSaved),
+            Message::ResidentSettingSaved(result) => match result {
+                Ok(info) => {
+                    if info.anthropic_key_set == Some(true) {
+                        self.anthropic_key_draft.clear();
+                    }
+                    self.resident_problem = info.problem.clone();
+                    self.resident_info = Some(info);
+                    self.resident_setting_error = None;
+                    // Another Agent may answer now, with its own history.
+                    self.conversation_seen = None;
+                    return Task::done(Message::PollConversation);
+                }
+                Err(error) => self.resident_setting_error = Some(error),
             }
             Message::NotifyLink(enabled) => {
                 let mut config = self.status.as_ref().map(|status| status.config.clone()).unwrap_or_default();
@@ -522,7 +688,7 @@ impl App {
                 let form = assets::language_of(id).and_then(|language| self.characters.address(language)).map(str::to_owned);
                 let write = async move {
                     let pack = assets::read_character(id, form.as_deref()).await?;
-                    client::write_voice_pack(pack.build().ok_or("the Character pack doesn't fit")?).await
+                    client::write_voice_pack(pack.build().ok_or("the Character pack doesn't fit")?, None, form.as_deref()).await
                 };
                 return Task::perform(write, Message::Done);
             }
@@ -554,7 +720,7 @@ impl App {
             Message::UseRobot => {
                 self.characters.robot_lender = None;
                 self.characters.save();
-                let write = async move { client::write_voice_pack(assets::read_pack(ROBOT).await?).await };
+                let write = async move { client::write_voice_pack(assets::read_pack(ROBOT).await?, None, None).await };
                 return Task::perform(write, Message::Done);
             }
             Message::UseCustom => {
@@ -567,7 +733,7 @@ impl App {
                 let form = assets::language_of(lender.id).and_then(|language| self.characters.address(language)).map(str::to_owned);
                 let write = async move {
                     let pack = assets::read_character(lender.id, form.as_deref()).await?.with_look(look, CUSTOM);
-                    client::write_voice_pack(pack.build().ok_or("that character can't lend its voice")?).await
+                    client::write_voice_pack(pack.build().ok_or("that character can't lend its voice")?, Some(lender.id), form.as_deref()).await
                 };
                 return Task::perform(write, Message::Done);
             }
@@ -717,9 +883,12 @@ impl App {
             (Tab::Sound, tr("Character", &[])),
             (Tab::Agents, tr("Agents", &[])),
             (Tab::Device, tr("Device", &[])),
+            (Tab::Conversation, tr("Conversation", &[])),
             (Tab::Advanced, tr("Advanced", &[])),
         ];
-        let tab_bar = row(tabs.into_iter().map(|(tab, label)| {
+        // Voice commands are experimental (VIBEBUDDY_RESIDENT_SESSION=1): no tab while the daemon has them off.
+        let tabs = tabs.into_iter().filter(|(tab, _)| *tab != Tab::Conversation || self.resident);
+        let tab_bar = row(tabs.map(|(tab, label)| {
             let style = if tab == self.tab { button::primary } else { button::text };
             button(text(label)).style(style).on_press(Message::Tab(tab)).into()
         }))
@@ -729,6 +898,7 @@ impl App {
             Tab::Sound => self.sound(),
             Tab::Agents => self.agents(),
             Tab::Device => self.device(),
+            Tab::Conversation => self.conversation(),
             Tab::Advanced => self.advanced(),
         };
         let notice = self.notice.as_ref().map(|notice| match notice {
@@ -1542,6 +1712,138 @@ impl App {
         })
     }
 
+    /// The user's last voice commands and the buddy's spoken replies, newest at the bottom, as on the Mac.
+    fn conversation(&self) -> Element<'_, Message> {
+        let header = row![
+            text(tr("Your last voice commands and the buddy's spoken replies, newest at the bottom.", &[]))
+                .size(13)
+                .style(text::secondary)
+                .width(Length::Fill),
+            button(text(tr("Refresh", &[]))).on_press_maybe((!self.conversation_loading).then_some(Message::RefreshConversation)),
+        ]
+        .spacing(12)
+        .align_y(iced::Alignment::Center);
+        let placeholder = |title: String, detail: String| -> Element<'_, Message> {
+            container(column![text(title).size(16), text(detail).size(13).style(text::secondary)].spacing(6).align_x(iced::Alignment::Center))
+                .center(Length::Fill)
+                .into()
+        };
+        // A daemon older than the setting doesn't say it; then there is only Codex.
+        let choice = self.resident_info.as_ref().and_then(|info| info.brain_setting);
+        let header = column![header].push(choice.map(|choice| self.agent_setting(choice))).spacing(12);
+        // Voice needs the user's Codex, installed and logged in, or Claude Code with a key: say what's missing first.
+        if let Some(problem) = &self.resident_problem {
+            let (title, detail) = match problem {
+                client::Problem::CodexMissing => (tr("Voice needs Codex", &[]), tr("Voice commands are answered by Codex on this computer, and it isn't installed. Install the Codex CLI, then sign in with `codex login`. This tab notices within half a minute.", &[])),
+                client::Problem::CodexLoggedOut => (tr("Voice needs Codex", &[]), tr("Voice commands are answered by Codex on this computer, and it isn't signed in. Run `codex login` in a terminal and sign in. This tab notices within half a minute.", &[])),
+                client::Problem::ClaudeMissing => (tr("Voice needs Claude Code", &[]), tr("Voice commands are answered by Claude Code on this computer, and it isn't installed. Install Claude Code; you don't need to sign in to it. This tab notices within half a minute.", &[])),
+                client::Problem::AnthropicKeyMissing => (tr("Voice needs Claude Code", &[]), tr("Claude Code answers voice commands only with your own Anthropic API key. Add your key above.", &[])),
+                client::Problem::Other => (tr("Voice needs Codex", &[]), tr("The buddy's session isn't available: %@", &[&"?"])),
+            };
+            let codex_problem = matches!(problem, client::Problem::CodexMissing | client::Problem::CodexLoggedOut);
+            let or_claude = (codex_problem && choice == Some(client::BrainChoice::Auto))
+                .then(|| text(tr("Or let Claude Code answer, with your own Anthropic API key: add it above.", &[])).size(13).style(text::secondary));
+            let install = match problem {
+                client::Problem::CodexMissing => Some(button(text(tr("How to install the Codex CLI", &[]))).on_press(Message::OpenCodexInstallPage)),
+                client::Problem::ClaudeMissing => Some(button(text(tr("How to install Claude Code", &[]))).on_press(Message::OpenClaudeInstallPage)),
+                _ => None,
+            };
+            let body = container(
+                column![text(title).size(16), text(detail).size(13).style(text::secondary)]
+                    .push(or_claude)
+                    .push(install)
+                    .spacing(6)
+                    .align_x(iced::Alignment::Center),
+            )
+            .center(Length::Fill);
+            return column![header, body].spacing(12).into();
+        }
+        let body = match &self.conversation {
+            None => container(text(tr("Refreshing…", &[])).style(text::secondary)).center(Length::Fill).into(),
+            Some(Err(client::HistoryError::DaemonDown)) => placeholder(
+                tr("Couldn't read the conversation", &[]),
+                tr("The daemon isn't running. Restart it on the Advanced tab.", &[]),
+            ),
+            Some(Err(client::HistoryError::Unavailable(why))) => placeholder(
+                tr("Couldn't read the conversation", &[]),
+                tr("The buddy's session isn't available: %@", &[why]),
+            ),
+            Some(Ok(exchanges)) if exchanges.is_empty() => placeholder(
+                tr("Nothing said yet", &[]),
+                tr("Hold K0 on the box and talk to the buddy. What you say and what it says back show up here.", &[]),
+            ),
+            Some(Ok(exchanges)) => scrollable(
+                column(exchanges.iter().map(|exchange| {
+                    column![bubble(&exchange.said, true)]
+                        .extend(exchange.replies.iter().map(|reply| bubble(reply, false)))
+                        .spacing(6)
+                        .into()
+                }))
+                .spacing(10)
+                // Room for the scroll bar, which otherwise covers the ends of the lines.
+                .padding(iced::Padding::ZERO.right(16)),
+            )
+            // Opens on the newest, at the bottom.
+            .anchor_bottom()
+            .height(Length::Fill)
+            .into(),
+        };
+        column![header, body].spacing(12).into()
+    }
+
+    /// Which Agent answers, and the user's Anthropic API key for Claude Code, as on the Mac. The key is typed once
+    /// and never shown again: the daemon only says whether it has one.
+    fn agent_setting(&self, choice: client::BrainChoice) -> Element<'_, Message> {
+        let option = |label: String, option: client::BrainChoice| {
+            let style = if option == choice { button::primary } else { button::secondary };
+            button(text(label)).style(style).on_press(Message::PickBrain(option))
+        };
+        let mut setting = column![
+            row![
+                text(tr("Answered by", &[])),
+                option(tr("Automatic", &[]), client::BrainChoice::Auto),
+                option("Codex".to_owned(), client::BrainChoice::Codex),
+                option("Claude Code".to_owned(), client::BrainChoice::Claude),
+            ]
+            .spacing(8)
+            .align_y(iced::Alignment::Center)
+        ]
+        .spacing(6);
+        if choice == client::BrainChoice::Auto {
+            setting = setting.push(text(tr("Automatic: Codex when it's ready, else Claude Code with your API key.", &[])).size(12).style(text::secondary));
+        }
+        if choice != client::BrainChoice::Codex {
+            let saved = self.resident_info.as_ref().and_then(|info| info.anthropic_key_set) == Some(true);
+            let key = if saved {
+                row![
+                    text(tr("Anthropic API key saved", &[])),
+                    button(text(tr("Remove", &[]))).style(button::secondary).on_press(Message::RemoveAnthropicKey),
+                ]
+            } else {
+                let draft = self.anthropic_key_draft.trim();
+                row![
+                    text_input(&tr("Anthropic API key", &[]), &self.anthropic_key_draft)
+                        .secure(true)
+                        .on_input(Message::AnthropicKeyDraft)
+                        .on_submit(Message::SaveAnthropicKey)
+                        .width(320),
+                    button(text(tr("Save", &[]))).on_press_maybe((!draft.is_empty()).then_some(Message::SaveAnthropicKey)),
+                ]
+            };
+            setting = setting
+                .push(
+                    key.push(button(text(tr("Get an API key", &[]))).style(button::text).on_press(Message::OpenAnthropicConsole))
+                        .spacing(8)
+                        .align_y(iced::Alignment::Center),
+                )
+                .push(text(tr("Claude Code answers only with your own Anthropic API key, billed to your Anthropic account; a Claude subscription can't be used here. What you say and your Agents' task titles go to Anthropic.", &[])).size(12).style(text::secondary));
+        }
+        if let Some(error) = &self.resident_setting_error {
+            setting = setting.push(text(error.clone()).size(12).style(text::danger));
+        }
+        setting.into()
+    }
+
     fn advanced(&self) -> Element<'_, Message> {
         let daemon = match &self.status {
             Some(status) => tr("Running · %@", &[&status.daemon.short_build()]),
@@ -1640,6 +1942,12 @@ async fn export_diagnostics(summary: String, config: Option<Config>) -> Result<S
 
 /// Where every release lives: the new App, and the firmware zip for flashing by hand when the daemon can't get it.
 const RELEASES_PAGE: &str = "https://github.com/second-state/vibebuddy/releases";
+/// OpenAI's page on installing the Codex CLI, which voice commands need.
+const CODEX_INSTALL_PAGE: &str = "https://learn.chatgpt.com/docs/codex/cli";
+/// Anthropic's page on installing Claude Code, the other Agent that can answer voice commands.
+const CLAUDE_INSTALL_PAGE: &str = "https://code.claude.com/docs/en/setup";
+/// The Claude Console, where the user makes the Anthropic API key Claude Code answers voice commands with.
+const ANTHROPIC_CONSOLE: &str = "https://platform.claude.com/";
 const NEW_ISSUE: &str = "https://github.com/second-state/vibebuddy/issues/new";
 
 /// The id under which the box wears the user's own Character.
@@ -1652,6 +1960,21 @@ const BUILTIN: &str = "builtin";
 const CUSTOM_PROMPT: &str = "Pixel art game sprite of [describe your character], chibi proportions, standing, front view, full body, centered, arms down, flat colors, thick dark outline, limited 16-color palette, plain solid white background. Then the same character in exactly the same pose with the eyes closed; with a big happy smile; with a sad face.";
 
 /// A look frame as an image to draw, each pixel `scale` pixels wide.
+/// The user's words on the right in the accent color, the buddy's replies on the left, as in a chat.
+fn bubble(words: &str, mine: bool) -> Element<'_, Message> {
+    let bubble = container(text(words).size(14)).padding([7, 12]).max_width(440).style(move |theme: &Theme| {
+        let palette = theme.extended_palette();
+        let pair = if mine { palette.primary.base } else { palette.background.weak };
+        container::Style {
+            background: Some(pair.color.into()),
+            text_color: Some(pair.text),
+            border: iced::border::rounded(12),
+            ..container::Style::default()
+        }
+    });
+    if mine { row![space::horizontal(), bubble] } else { row![bubble, space::horizontal()] }.into()
+}
+
 fn handle(frame: &character::Image, scale: usize) -> image::Handle {
     let (w, h) = (frame.width * scale, frame.height * scale);
     let mut pixels = vec![0u8; w * h * 4];

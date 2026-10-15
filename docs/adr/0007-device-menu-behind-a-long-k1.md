@@ -13,3 +13,7 @@ Muse's two-key layout, with K1's short press opening the menu: K1's one-press sw
 ## Consequences
 
 Leisure can no longer be started on demand; demos use the time-compressed build. The C fallback firmware keeps the old long K1. A volume change from the box prints the same `VOLUME <n>` line as `device.volume`, which the daemon already applies, so the app's slider follows without a protocol change.
+
+## Amendment
+
+ADR-0017 (proposed) gives K0 long to push-to-talk while the computer offers voice commands (`voice.available`, docs/protocol.md). Giving up a Pomodoro phase then lives only in the menu's STOP FOCUS / END BREAK row; while voice isn't offered, K0 long still gives up the phase as before.

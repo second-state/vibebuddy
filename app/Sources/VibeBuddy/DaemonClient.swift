@@ -95,8 +95,17 @@ struct DaemonClient {
         guard code == 202 else { throw DaemonError(message: DaemonClient.message(in: data) ?? String(localized: "Forgetting Wi-Fi was rejected (\(code))")) }
     }
 
-    func writeVoicePack(_ pack: Data) async throws {
-        let (code, data) = try await post("/v1/device/voice-pack", body: pack, contentType: "application/octet-stream")
+    /// `lender` (the Character lending a custom one its voice, persona and lines) and `address` (the form of
+    /// address its lines carry) aren't in the pack; the daemon keeps them for the buddy's spoken replies.
+    func writeVoicePack(_ pack: Data, lender: String? = nil, address: String? = nil) async throws {
+        var request = self.request("/v1/device/voice-pack", method: "POST", body: pack, contentType: "application/octet-stream")
+        let query = [("lender", lender), ("address", address)].compactMap { name, value in value.map { URLQueryItem(name: name, value: $0) } }
+        if !query.isEmpty, let url = request.url, var components = URLComponents(url: url, resolvingAgainstBaseURL: false) {
+            components.queryItems = query
+            request.url = components.url
+        }
+        let (data, response) = try await URLSession.shared.data(for: request)
+        let code = (response as? HTTPURLResponse)?.statusCode ?? 0
         guard code == 202 else { throw DaemonError(message: DaemonClient.message(in: data) ?? String(localized: "Voice pack write was rejected (\(code))")) }
     }
 
@@ -120,6 +129,44 @@ struct DaemonClient {
     func checkForUpdates() async throws {
         let (code, data) = try await post("/v1/updates/check")
         guard code == 202 else { throw DaemonError(message: DaemonClient.message(in: data) ?? String(localized: "Update check was rejected (\(code))")) }
+    }
+
+    func resident() async throws -> ResidentInfo {
+        let (data, _) = try await URLSession.shared.data(for: request("/v1/resident"))
+        return try StatusCoding.decoder().decode(ResidentInfo.self, from: data)
+    }
+
+    /// The last `limit` voice commands and their spoken replies, oldest first. Slow the first time: the daemon may have to
+    /// start Codex's app-server to read the thread.
+    func residentHistory(limit: Int) async throws -> [ResidentExchange] {
+        var request = self.request("/v1/resident/history")
+        request.url = URL(string: "\(base.absoluteString)/v1/resident/history?limit=\(limit)")
+        request.timeoutInterval = 60
+        let (data, response) = try await URLSession.shared.data(for: request)
+        let code = (response as? HTTPURLResponse)?.statusCode ?? 0
+        guard code == 200 else { throw DaemonError(message: DaemonClient.message(in: data) ?? String(localized: "The daemon answered \(code)")) }
+        return try StatusCoding.decoder().decode(ResidentHistory.self, from: data).exchanges
+    }
+
+    /// Which Agent answers voice commands. Its own endpoint, not part of the config.
+    func setResidentBrain(_ choice: ResidentBrainChoice) async throws -> ResidentInfo {
+        let body = try JSONSerialization.data(withJSONObject: ["brain": choice.rawValue])
+        return try await residentSetting("/v1/resident/brain", method: "PUT", body: body)
+    }
+
+    /// Stores the user's Anthropic API key in the daemon (nil removes it). The daemon never sends it back.
+    func setAnthropicKey(_ key: String?) async throws -> ResidentInfo {
+        guard let key else { return try await residentSetting("/v1/resident/anthropic-key", method: "DELETE", body: nil) }
+        let body = try JSONSerialization.data(withJSONObject: ["api_key": key])
+        return try await residentSetting("/v1/resident/anthropic-key", method: "PUT", body: body)
+    }
+
+    private func residentSetting(_ path: String, method: String, body: Data?) async throws -> ResidentInfo {
+        let request = request(path, method: method, body: body, contentType: body == nil ? nil : "application/json")
+        let (data, response) = try await URLSession.shared.data(for: request)
+        let code = (response as? HTTPURLResponse)?.statusCode ?? 0
+        guard code == 200 else { throw DaemonError(message: DaemonClient.message(in: data) ?? String(localized: "The daemon answered \(code)")) }
+        return try StatusCoding.decoder().decode(ResidentInfo.self, from: data)
     }
 
     private static func message(in data: Data) -> String? {

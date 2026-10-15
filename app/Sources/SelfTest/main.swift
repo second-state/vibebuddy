@@ -310,6 +310,32 @@ check(BundleName.step(for: newBundle, exists: { _ in false }) == .none, "bundle:
 let devBuild = URL(fileURLWithPath: "/Users/me/vibe-buddy/app/build").appendingPathComponent(BundleName.old)
 check(BundleName.step(for: devBuild, exists: { _ in false }) == .none, "bundle: a build outside Applications is left alone")
 
+// 6. The resident session's info and history, as the daemon writes them (the Conversation tab).
+do {
+    let info = try StatusCoding.decoder().decode(ResidentInfo.self, from: Data(#"{"enabled":true,"thread_id":null}"#.utf8))
+    check(info.enabled && info.threadId == nil && info.revision == nil, "resident info decodes, without a revision from an older daemon")
+    let revised = try StatusCoding.decoder().decode(ResidentInfo.self, from: Data(#"{"enabled":true,"revision":7,"thread_id":"t1"}"#.utf8))
+    check(revised.revision == 7 && revised.threadId == "t1" && revised.problem == nil, "resident info carries its revision")
+    let missing = try StatusCoding.decoder().decode(ResidentInfo.self, from: Data(#"{"enabled":true,"problem":"codex_missing","ready":false,"revision":0,"thread_id":null}"#.utf8))
+    check(missing.problem == .codexMissing, "resident info says Codex is missing")
+    let loggedOut = try StatusCoding.decoder().decode(ResidentInfo.self, from: Data(#"{"enabled":true,"problem":"codex_logged_out","ready":false,"revision":0,"thread_id":null}"#.utf8))
+    check(loggedOut.problem == .codexLoggedOut, "resident info says Codex is logged out")
+    let later = try StatusCoding.decoder().decode(ResidentInfo.self, from: Data(#"{"enabled":true,"problem":"something_new","ready":false,"revision":0,"thread_id":null}"#.utf8))
+    check(later.problem == .other("something_new"), "an unknown problem still decodes")
+    check(later.brainSetting == nil && later.anthropicKeySet == nil, "an older daemon has no brain setting")
+    let claude = try StatusCoding.decoder().decode(ResidentInfo.self, from: Data(#"{"enabled":true,"problem":null,"ready":true,"revision":3,"thread_id":"s1","brain":"claude","brain_setting":"auto","anthropic_key_set":true}"#.utf8))
+    check(claude.brain == "claude" && claude.brainSetting == .auto && claude.anthropicKeySet == true, "resident info says Claude Code answers")
+    let noKey = try StatusCoding.decoder().decode(ResidentInfo.self, from: Data(#"{"enabled":true,"problem":"anthropic_key_missing","ready":false,"revision":0,"thread_id":null,"brain":null,"brain_setting":"claude","anthropic_key_set":false}"#.utf8))
+    check(noKey.problem == .anthropicKeyMissing && noKey.brainSetting == .claude, "resident info says the Anthropic API key is missing")
+    let noClaude = try StatusCoding.decoder().decode(ResidentInfo.self, from: Data(#"{"enabled":true,"problem":"claude_missing","brain_setting":"something_new"}"#.utf8))
+    check(noClaude.problem == .claudeMissing && noClaude.brainSetting == nil, "resident info says Claude Code is missing; an unknown setting is nil")
+    let history = try StatusCoding.decoder().decode(ResidentHistory.self, from: Data(#"{"exchanges":[{"replies":["现在没有 Agent 在工作。"],"said":"现在有几个agent在工作呀"},{"replies":["a","b"],"said":"two"}],"thread_id":"t1"}"#.utf8))
+    check(history.threadId == "t1" && history.exchanges.count == 2, "resident history decodes")
+    check(history.exchanges.last == ResidentExchange(said: "two", replies: ["a", "b"]), "exchanges keep their order and every reply")
+} catch {
+    check(false, "resident JSON fails to decode: \(error)")
+}
+
 if failures > 0 {
     print("\(failures) failure(s)")
     exit(1)

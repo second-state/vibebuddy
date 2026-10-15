@@ -12,12 +12,14 @@ use core::sync::atomic::{AtomicBool, Ordering};
 
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 use embassy_sync::channel::Channel;
+use embassy_sync::mutex::Mutex;
 use embassy_time::Timer;
 use esp_hal::Async;
 use esp_hal::dma::DmaTxStreamBuf;
 use esp_hal::i2s::master::I2sTx;
 use vibebuddy_firmware_core::adpcm::LineStream;
 use vibebuddy_firmware_core::audio::{Chime, Codec, Prompt, Sound};
+use vibebuddy_firmware_core::spoken_reply::ReplyPlayer;
 
 use crate::storage;
 
@@ -35,6 +37,11 @@ pub static QUEUE: Channel<CriticalSectionRawMutex, PlayCommand, 8> = Channel::ne
 pub static PLAYING: AtomicBool = AtomicBool::new(false);
 /// The main loop asks for an immediate stop: drop what is playing; the requester clears the queue.
 pub static STOP: AtomicBool = AtomicBool::new(false);
+/// Spoken replies (core's spoken_reply.rs): the main loop hands in their MP3, and this task decodes and plays
+/// them whenever no line is queued or playing, so an announcement always goes first. Both sides run on the
+/// same executor and neither holds the lock across an await, so `try_lock` always gets it. The player holds
+/// only empty containers here; its buffers and decoder live on the heap, and only while there is a reply.
+pub static REPLIES: Mutex<CriticalSectionRawMutex, ReplyPlayer> = Mutex::new(ReplyPlayer::new());
 
 static INPUT_REQUIRED: &[u8] = include_bytes!("../../../firmware/main/assets/input_required.pcm");
 static DONE: &[u8] = include_bytes!("../../../firmware/main/assets/done.pcm");
@@ -206,6 +213,9 @@ pub async fn audio_task(tx: I2sTx<'static, Async>, buffer: DmaTxStreamBuf) {
                     if cursor.remaining() == 0 {
                         current = None;
                     }
+                } else if let Ok(mut replies) = REPLIES.try_lock() {
+                    // A reply's frames are decoded here, on this task's poll, about 25 ms of audio at a time.
+                    filled = replies.fill(&mut chunk);
                 }
                 chunk[filled..].fill(0);
                 transfer.push(&chunk);

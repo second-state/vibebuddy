@@ -317,3 +317,30 @@
 "The network name is too long: 32 bytes at most." = "网络名太长了，最多 32 字节。";
 "Status" = "状态";
 "Change network" = "更换网络";
+
+/* Conversation (the resident session, experimental) */
+"Conversation" = "对话";
+"Your last voice commands and the buddy's spoken replies, newest at the bottom." = "你最近的语音指令和氛围小助手的口头回复，最新的在最下面。";
+"Couldn't read the conversation" = "读不到对话";
+"The daemon isn't running. Restart it on the Advanced tab." = "daemon 没在运行，到“高级”页重启它。";
+"The buddy's session isn't available: %@" = "氛围小助手的会话现在用不了：%@";
+"Nothing said yet" = "还没说过话";
+"Hold K0 on the box and talk to the buddy. What you say and what it says back show up here." = "按住盒子上的 K0，对氛围小助手说话。你说的和它回的都会显示在这里。";
+"The daemon answered %lld" = "daemon 返回了 %lld";
+"Voice needs Codex" = "语音需要 Codex";
+"Voice commands are answered by Codex on this computer, and it isn't installed. Install the Codex CLI, then sign in with `codex login`. This tab notices within half a minute." = "语音指令由这台电脑上的 Codex 来回答，但它还没安装。先装好 Codex CLI，再用 `codex login` 登录。半分钟内这一页会自己更新。";
+"Voice commands are answered by Codex on this computer, and it isn't signed in. Run `codex login` in a terminal and sign in. This tab notices within half a minute." = "语音指令由这台电脑上的 Codex 来回答，但它还没登录。在终端里运行 `codex login` 登录即可。半分钟内这一页会自己更新。";
+"How to install the Codex CLI" = "如何安装 Codex CLI";
+"Answered by" = "由谁回答";
+"Automatic" = "自动";
+"Automatic: Codex when it's ready, else Claude Code with your API key." = "自动：Codex 能用时用 Codex，否则用 Claude Code 和你的 API 密钥。";
+"Anthropic API key" = "Anthropic API 密钥";
+"Anthropic API key saved" = "已保存 Anthropic API 密钥";
+"Save" = "保存";
+"Get an API key" = "获取 API 密钥";
+"Claude Code answers only with your own Anthropic API key, billed to your Anthropic account; a Claude subscription can't be used here. What you say and your Agents' task titles go to Anthropic." = "Claude Code 只用你自己的 Anthropic API 密钥回答，费用记在你的 Anthropic 账户上；这里不能用 Claude 订阅。你说的话和各个 Agent 的任务标题会发给 Anthropic。";
+"Voice needs Claude Code" = "语音需要 Claude Code";
+"Voice commands are answered by Claude Code on this computer, and it isn't installed. Install Claude Code; you don't need to sign in to it. This tab notices within half a minute." = "语音指令由这台电脑上的 Claude Code 来回答，但它还没安装。装好 Claude Code 即可，不用登录。半分钟内这一页会自己更新。";
+"Claude Code answers voice commands only with your own Anthropic API key. Add your key above." = "Claude Code 只用你自己的 Anthropic API 密钥回答语音指令。请在上面填入你的密钥。";
+"Or let Claude Code answer, with your own Anthropic API key: add it above." = "也可以让 Claude Code 来回答，用你自己的 Anthropic API 密钥：在上面填入即可。";
+"How to install Claude Code" = "如何安装 Claude Code";

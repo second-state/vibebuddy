@@ -39,12 +39,29 @@ The review fixes applied before bring-up (see the PR) were in place, so it can't
 | UART receive | More `invalid_json` with only the UART bridge connected | The interrupt and ring buffer in `device/src/serial.rs` |
 | USB output blocking | Frozen screen after a night on the UART bridge alone (see LESSONS.md on output channels without a reader) | `write_usb` in `serial.rs` |
 | Settings storage | Wrong pomodoro tally or volume after a restart | `core/src/storage.rs` |
+| The box restarts by itself | The boot report again in the daemon's log, unasked | The `RESET` line just before `MEMORY`: esp-hal's reset reason, such as `Some(CoreMwdt0)` or `Some(RtcWdt…)` for a watchdog and `Some(SysBrownOut)` for a brownout, plus ` PANIC` when a panic caused it (its backtrace went out on the port before the reset). A panic and the restart after a new identity are both `Some(CoreSw)`; only the mark tells them apart. A reset from the flasher or the USB port shows as `Some(CoreUsbJtag)` or `Some(CoreUsbUart)`. `Some(ChipPowerOn)` can also be a brownout of the whole chip. |
 
 ## Intentional differences from the C firmware
 
 - Settings (today's pomodoro tally, the volume) use a new storage format, so they reset once when the Rust firmware is first flashed.
 - `voice.begin` interrupts the line currently playing before erasing the partition; the C firmware waited up to 10 seconds for it to finish.
 - JSON parsing is stricter than cJSON: invalid UTF-8, `"version":1.0` and a non-string `message` get `ERROR invalid_message` (or `invalid_json`). The Mac never sends these. When `device.echo` is used to hunt corrupted bytes, a corrupted line now gets `ERROR invalid_json` instead of a CRC reply, which says the same thing.
+- Task titles, project names and the voice overlay draw Chinese (see Fonts below); the C firmware draws a placeholder for every byte of it. ASCII is unchanged: `tools/compare-display.sh` still finds every English screen identical.
+
+## Fonts
+
+ASCII is the 5×7 bitmap font in `core/src/canvas.rs`, uppercase only, scaled 1×, 2× or 3×. Everything else comes from a 12 px Chinese font in `core/src/font.rs`:
+
+- **What's in it**: the 3,500 characters of level one of the Table of General Standard Chinese Characters (通用规范汉字表 一级, 2013), CJK punctuation (、。《》「」【】…), the full-width forms (，！？：；（）) and a few more marks (“”‘’…—·→): 3,678 glyphs. A character outside it, an emoji say, draws as a dotted box the size of a Chinese character, so a gap is visible rather than silent.
+- **Where it comes from**: [Fusion Pixel Font](https://github.com/TakWolf/fusion-pixel-font) 12 px monospaced, zh_Hans shapes, under the SIL Open Font License 1.1. Fusion is Ark Pixel Font with the characters Ark hasn't drawn at 12 px yet (over a hundred of level one, among them 热, 然 and 紧) filled in from Cubic 11. It was chosen because it is a pixel font drawn for 12 px, not an outline font rasterized down: strokes land on whole pixels and every glyph keeps a blank row and column for spacing, so a line of Chinese stays legible on the 320×240 panel (Muse's 16 px Unifont captions, which fill their whole cell, ran together). 12 px is also the smallest size that keeps level-one characters readable, and close to 2× ASCII's 14 px.
+- **How it's built**: `tools/make-cjk-font.py` downloads the font and Unicode's Unihan database (whose `kTGH` field numbers the 2013 table) pinned by SHA-256, and writes `core/fonts/cjk-12px.bin`: a sorted index of 16-bit codepoints, looked up by binary search, then one packed 1-bit 12×12 bitmap per glyph, 18 bytes. 73,562 bytes in all, committed, plus the font's license files beside it, which the firmware zip carries as `FONTS.txt`. The table is `include_bytes!`, read-only data that stays in flash: it adds about 75 KB to the app image and nothing to RAM or the main stack.
+- **Layout**: a Chinese character advances 12 px and is centred on the ASCII line, which at 1× puts the font's own baseline on the ASCII baseline. It stays 12 px next to 2× ASCII (titles, large type). Width is measured per glyph (`font::width`, `font::fit`); text is cut at whole characters. `font::wrap` breaks between any two Chinese characters but never inside an ASCII word unless the word is longer than a row, and lets closing punctuation (，。！？ and the like) hang past the row's end rather than start a row. Curly single quotes next to English letters draw as the ASCII apostrophe.
+- **Where it's used**: task card titles and project names, the title under the buddy, the agent line in Pomodoro mode, and the voice overlay. Menus and labels stay ASCII. The daemon still squashes session titles to uppercase ASCII before sending them ([`pet.md`](pet.md)), so Chinese titles reach the cards only once it stops doing that for firmware that can draw them; voice text already arrives as it was spoken.
+- **Voice overlay**: text with Chinese in it goes straight to small type (rows 13 px apart, 10 rows); large type, with doubled ASCII beside 12 px Chinese, looked shouty. English-only text keeps large then small type as before.
+
+![Chinese task titles](images/device-cards-zh.png) ![A Chinese reply](images/voice-reply-zh.png) ![A longer one, mixed with English](images/voice-reply-zh-small.png)
+
+The pictures come from `cargo run -p vibebuddy-firmware-core --example voice_preview -- <directory>`.
 
 ## Steps
 
@@ -90,6 +107,99 @@ The review fixes applied before bring-up (see the PR) were in place, so it can't
 6. **Open the app.** The Device tab should show the same firmware build. Run a task in Claude Code or Codex and watch the task card, the face and the announcement.
 7. **Change the voice once in the app.** When the write finishes, the box speaks in the new voice. Power-cycle it and check that the voice stays.
 8. **Leave it on the UART bridge alone overnight**, with nothing on the USB port, and check the next morning that the screen still animates. This verifies that an output channel without a reader never blocks.
+
+## Microphone
+
+The box has a microphone, and until 2026-10-13 no firmware of ours had used it. `device.mic.record` is a bring-up diagnostic, like the screenshot: it records a few seconds and sends them back over the cable. It isn't a user feature, and neither app uses it.
+
+### What we know, and from where
+
+No ALIENTEK schematic or BSP for this board (ATK-DNESP32S3-BOX V1.1) could be found; the BOX3's wiki (a different board, with different I2S pins) doesn't count. So each fact below was either seen on a box or is a candidate the diagnostic settles. The first recording, on box `30:ED:A0:A4:0D:08` on 2026-10-13, settled the microphone path ([`hardware.md`](hardware.md)).
+
+| Fact | Value | Source | Confidence |
+|---|---|---|---|
+| Microphone ADC | The ES8311's own mono ADC; no ES7210 | No chip at 0x40–0x43 in the I2C0 scans of two boxes ([`hardware.md`](hardware.md)); xiaozhi 1.9.4's `atk-dnesp32s3-box` uses `Es8311AudioCodec` for both input and output | Verified on `30:ED:A0:A4:0D:08`: no chip at 0x40–0x43, and the recording is the voice |
+| ES8311 address | 0x18 (7-bit) | Seen on boxes | Verified |
+| ES7210 addresses checked | 0x40–0x43 (AD1/AD0 straps; esp_codec_dev's `es7210_address_t`) | esp_codec_dev | The diagnostic reports each |
+| Microphone data into the ESP32 | GPIO47 (I2S DIN) | xiaozhi 1.9.4 `config.h`, `AUDIO_I2S_GPIO_DIN` | Verified on `30:ED:A0:A4:0D:08` |
+| Clocks | Shared with the speaker: BCLK GPIO21, WS GPIO13, no MCLK. The ESP32's receiver runs off its transmitter's clocks (signal loopback), as ESP-IDF's full duplex does | Speaker pins verified on boxes; xiaozhi creates TX and RX on one I2S port with the same pins and `GPIO_NUM_NC` for MCLK | High |
+| Format and rate | Standard I2S, 16-bit, two slots, 24 kHz. Not 16 kHz: the ES8311 has one LRCK for ADC and DAC, so input runs at the speaker's rate | xiaozhi asserts input rate == output rate (24000) for this codec | High |
+| Which slot is the microphone | Left = ADC, right = DAC reference (silent unless the box is speaking) | esp_codec_dev writes ES8311 register 0x44 = 0x58, "ADCL + DACR"; our sequence already does | Verified on `30:ED:A0:A4:0D:08`: the voice is on the left; the right stays silent while the box is quiet |
+| ADC already enabled at boot | Yes: our ES8311 sequence is esp_codec_dev's `ESP_CODEC_DEV_WORK_MODE_BOTH`, the mode the C firmware used, so the ADC is powered and its serial output unmuted (registers 0x0A, 0x0E, 0x14, 0x15, 0x17) | `firmware/main/agent_audio.c`; `core/src/audio.rs` test | Verified in code |
+| Microphone gain | Register 0x16, 0–42 dB in 6 dB steps; 30 dB by default (xiaozhi's `AUDIO_CODEC_DEFAULT_MIC_GAIN`). At 30 dB a voice close to the box is only about -31 dBFS, so real use needs more | esp_codec_dev `es8311_set_mic_gain`; the recording | High |
+| Boxes on the NS4168 variant | No codec; xiaozhi reads a digital microphone straight from the same DIN with the same clocks | xiaozhi `ATK_NoAudioCodecDuplex` | Untested; the diagnostic still records |
+
+### Running it
+
+1. Quit the VibeBuddy app, then flash with `just flash /dev/cu.usbmodemXXXX` (step 2 above). Check the boot report still says `AUDIO READY` and that announcements still play: the speaker's I2S setup changed (the receiver now shares its clocks).
+2. Record, making some noise near the box (talk, clap, tap the case) while it records:
+
+   ```bash
+   uv run --with pyserial python tools/mic-record.py --port /dev/cu.usbmodemXXXX --ms 3000 --out mic.wav
+   ```
+
+   `--gain-db` sets the microphone gain. The samples come back at about 11 s per recorded second, because the firmware writes the UART at 115200 baud whichever port you use.
+3. Listen to `mic.wav`. The left channel should be your voice.
+
+The tool judges each slot from the samples, with the DC offset removed and the first 100 ms dropped: `LIVE` (the level moves at least 6 dB and the loudest 100 ms is above -70 dBFS), `FLAT`, `NO SIGNAL`, `SILENT` (all zeros) or `SATURATED`. Its last line, `microphone on this box: WORKS` or `NOT SHOWN`, rests on the left slot, the microphone; it exits 0 only for `WORKS`.
+
+The box replies, in order:
+
+```
+MIC PROBE 0x18 ID 8311        ES8311 chip ID (0xFD, 0xFE); NONE if nothing answers
+MIC PROBE 0x40 NONE           0x40–0x43: an ES7210 would answer here, with the bytes of 0x3D, 0x3E
+...
+MIC GAIN 30 DB                only with an ES8311
+MIC RECORDING 3000 MS
+MIC CAPTURED 3010 MS 288000 BYTES
+MIC LEVEL 0 L <rms> <peak> R <rms> <peak>      one per 100 ms, raw units, full scale 32768
+MIC BEGIN 24000 2 16 288000
+MIC DATA <seq> <base64>        576 bytes of samples per line
+MIC END 288000 <crc32>
+```
+
+`MIC UNAVAILABLE` means the board has no input; `MIC BUSY`, that a recording is still going out; `MIC ERROR STALLED`, that the DMA hadn't handed back enough samples a second after the recording should have ended; `MIC ERROR SHORT`, that the buffer filled up with fewer samples than asked for; `MIC ERROR MEMORY`, that the capture (PSRAM) or its DMA descriptors (internal RAM, taken only while recording) didn't fit.
+
+The DMA writes the whole recording straight into one buffer in PSRAM, so nothing depends on the main loop keeping up. The buffer is 2.5 times the recording: the I2S receiver signals an EOF every 4,094 bytes, and each EOF closes the DMA descriptor it lands in, so the descriptors come back 4080, 14, 4080, 14, …. esp-hal's `read()` sets RXEOF_NUM to 0xFFE, and on the ESP32-S3 that register counts bytes (as ESP-IDF uses it), not samples as the TRM's formula reads. Each descriptor's length says how many bytes it holds, and the samples stay in order. Lining the EOFs up with the descriptors would mean a raw write to RXEOF_NUM after esp-hal's, racing the first EOF; it hasn't been tried. Each recording also prints two `MIC DEBUG` lines, 100 ms in (`T100`) and at the end (`END` or `TIMEOUT`), for when it fails:
+
+```
+MIC DEBUG T100 DESC 4/179 BYTES 8188 LENS 4080 14 4080 14 0 0 I2S RXCONF … TXCONF … INTRAW … RXCLKM … RXEOF … TXSTATE … DMA ININT … INFIFO … INLINK … INSTATE … INDSCR … INPERI … OUTSTATE … OUTPERI … DIN 200
+```
+
+- `DESC done/total` and `BYTES`: DMA descriptors (up to 4,080 bytes each) handed back so far, and the sample bytes in them; at `T100` up to 9,600 (96 KB/s), counted only for descriptors already handed back. `DESC 0` means no sample reached memory.
+- `LENS`: the first six descriptors' lengths, which show where the EOFs cut them.
+- `I2S …`: I2S0's RX_CONF (0x20), TX_CONF (0x24), INT_RAW (0x0C), RX_CLKM_CONF (0x30), RXEOF_NUM (0x64), TX status (0x6C). RX_CONF bit 2 is RX_START and bit 3 RX_SLAVE_MOD; TX_CONF bit 2 is TX_START and bit 27 SIG_LOOPBACK (field offsets from the esp32s3 0.37 PAC).
+- `DMA …`: GDMA channel 1's IN_INT_RAW, INFIFO_STATUS, IN_LINK, IN_STATE, IN_DSCR (the descriptor it is on), IN_PERI_SEL (I2S0 is 3), and OUT_STATE and OUT_PERI_SEL for the speaker's side of the same channel.
+- `DIN`: level changes over 2000 quick reads of GPIO47. 0 means the data line doesn't move (or the codec sends exact silence). BCLK and WS can't be checked this way: they are outputs with their input path off, so their input register reads 0 however fast they run.
+
+### Reading the result
+
+| What you see | What it means |
+|---|---|
+| Left `LIVE`, rising when you talk; right silent | The microphone works on this box, as on `30:ED:A0:A4:0D:08`. Record the box's serial number in [`hardware.md`](hardware.md) |
+| Both slots `SILENT` (all zeros) | Nothing drives GPIO47: wrong pin, or the ES8311's ADC output isn't on |
+| Both slots stuck at one value, or `SATURATED` with no sound | GPIO47 is floating or isn't the codec's data line |
+| Left `FLAT` with a level above zero | The ADC runs but the microphone isn't reaching it: try `--gain-db 42` and noise right at the mic hole; then suspect the analog path (MIC bias, which input the ES8311 selects in register 0x14) |
+| `LIVE` on the right, not the left | The slots are the other way round from esp_codec_dev's 0x44 setting |
+| Any `MIC PROBE 0x4x ID …` | This box has a chip where an ES7210 would be: it differs from the scanned boxes, so stop and look before trusting the ES8311 path |
+
+Boxes of this board differ (some have a touchscreen, some don't), so run it on each box you care about and say which box in the result.
+
+### Voice commands
+
+A voice command records the same input, but for as long as K0 is held (up to 30 s), so it can't use one linear buffer: that would be 7 MB. The DMA writes round a ring instead, 128 descriptors over 520 KB of PSRAM, linked in a circle with owner checks off, so it never reaches an end and never stops, however late the reader. The microphone task reads the descriptors the DMA has handed back every 10 ms, takes the left slot's samples out (the stream runs on across descriptors: frames don't line up with the 4,094-byte EOFs) and queues them for the main loop, which encodes and sends them. An EOF every 4,094 bytes takes two descriptors, so the ring holds 2.7 s of audio before the DMA comes round to what hasn't been read. The ring and the queue are taken from the heap when recording starts and given back when it stops: no statics (LESSONS.md).
+
+The microphone gain is 42 dB while recording a voice command (the PGA's maximum): at the diagnostic's 30 dB a voice close to the box was about -31 dBFS; 42 dB should bring it to about -19.
+
+When a recording stops, the box prints one line about it:
+
+```
+MIC STREAM <ms> MS <samples> SAMPLES <dropped> DROPPED BACKLOG <most descriptors waiting> OF 128
+```
+
+About 24 samples per millisecond means nothing was lost on the way in. `DROPPED` counts samples the main loop's 2 s queue had no room for. A `BACKLOG` near 128 means the DMA lapped the reader and some audio was overwritten. `MIC STREAM MEMORY` and `MIC STREAM I2S` mean the ring couldn't be allocated or the transfer didn't start.
+
+What to check on the first flash: with the computer offering voice, hold K0 and talk. `VOICE START 1`, then about 21 `VOICE DATA` lines a second with `seq` counting up without gaps (over USB), `VOICE END 1 <samples>` with `samples` about 24,000 per second held, and `MIC STREAM` with about 24 samples per millisecond and a small backlog. The meter should move with your voice and sit near the bottom when quiet. Decode the data lines (24 kHz IMA ADPCM, each line from its own `predictor` and `index`) and listen. Check that announcements still play afterwards, and that a long K0 still gives up a phase once voice is withdrawn.
 
 ## Going back to the C firmware
 

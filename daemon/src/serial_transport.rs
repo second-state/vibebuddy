@@ -863,9 +863,10 @@ fn process_device_line(line: &[u8], firmware: &mut Firmware, event_sender: &mpsc
     } else {
         let line = String::from_utf8_lossy(line).into_owned();
         // Screenshot rows (hundreds of them) stay out of the log; their BEGIN and END lines and every other
-        // diagnostic line are still logged, so a screenshot that never finishes shows where it stopped.
+        // diagnostic line are still logged, so a screenshot that never finishes shows where it stopped. So do the
+        // lines of recorded audio, which carry what the user said.
         let screenshot_row = line.starts_with("SHOT ") && !line.starts_with("SHOT BEGIN") && line != "SHOT END";
-        if !screenshot_row && !line.starts_with("ECHO ") {
+        if !screenshot_row && !line.starts_with("ECHO ") && !line.starts_with("VOICE DATA ") {
             info!(message = %line, "device message");
         }
         DeviceMessage::Line(line)

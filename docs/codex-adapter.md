@@ -78,6 +78,8 @@ Codex fires the same set of hooks for its own background sessions, typically the
 
 So `vibebuddyd` filters at the entry point: any Codex session that has no usable working directory and can't be found in the threads table is ignored (with one info log line): no card, no announcement, no K2 target. Both conditions are required: a freshly created real session may not have been written to the threads table yet, but it has a working directory. Before K2 opens a thread it checks once more that the thread exists, and skips to the next candidate if not. `tools/codex-hook.py` also writes one diagnostic line without the prompt to `~/Library/Logs/VibeBuddy/codex-hooks.log` (event name, session and thread ids, directory, whether there is a transcript), so the next time a session of unknown origin shows up you can see what the hook actually received.
 
+The daemon's own resident session (ADR-0017) is a Codex thread too, and the user's hooks fire for it. Its hooks are dropped at the same entry point, by its thread id or by a `cwd` inside its working directory, so it never becomes an Activity; see [`resident-session.md`](resident-session.md).
+
 The `vibebuddyd` release binary is started automatically after login by `~/Library/LaunchAgents/com.vibebuddy.vibebuddyd.plist` and restarted if it exits abnormally. Logs go to `~/Library/Logs/VibeBuddy/vibebuddyd.log`. When the USB device is temporarily absent, the process keeps running and periodically rediscovers it; hooks don't need to know about plugging and unplugging.
 
 After updating the daemon, run `cargo build --release -p vibebuddyd`, then restart the service with `launchctl kickstart -k gui/502/com.vibebuddy.vibebuddyd`. Stop the service before flashing firmware so it doesn't hold the serial port.

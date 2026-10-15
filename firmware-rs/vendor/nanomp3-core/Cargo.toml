@@ -1,0 +1,24 @@
+# nanomp3-core 0.2.0 from crates.io (https://github.com/robbie01/nanomp3), MIT OR Apache-2.0, with one change so
+# the Xtensa LLVM backend in the esp toolchain can compile it at opt-level "s": `l3_reorder` is `#[inline(never)]`
+# (src/minimp3.rs, marked "VibeBuddy"). Without it the firmware build stops at "Cannot select: i32 =
+# Constant<4608>" in mp3dec_decode_frame. Its tests and test MP3 are left out. Both workspaces use this copy
+# through [patch.crates-io]; drop it once the backend is fixed.
+[package]
+edition = "2021"
+rust-version = "1.89"
+name = "nanomp3-core"
+version = "0.2.0"
+authors = ["Robert B. Langer <robbie@sohio.net>"]
+description = "The no_std, allocation-free MPEG audio decoder behind nanomp3 (a bit-exact, safe Rust port of minimp3)"
+readme = "README.md"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/robbie01/nanomp3"
+publish = false
+
+[features]
+default = ["wide", "layer12"]
+layer12 = []
+wide = ["dep:wide"]
+
+[dependencies]
+wide = { version = "1", default-features = false, optional = true }
