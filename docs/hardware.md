@@ -65,7 +65,7 @@ A probe firmware, flashed to the app slot only, scanned I2C0 (SDA GPIO48, SCL GP
 
 - **Some boxes have a capacitive touchscreen, some don't.** On `30:ED:A0:A4:0D:08` the chip at `0x2E` answers the CHSC5432 protocol from ALIENTEK's BOX3 touch notes: write a 32-bit big-endian register address, then read. Touch events are at `0x2000002C`, read as 28 bytes; the chip ID is at `0x20000080`. While the user touched and swiped, byte 1 was the number of points (`01` down, `00` up), bytes 2–3 the low bytes of the coordinates, which moved with the finger, and byte 6 the event (`00` down, `80` moving, `40` up). It worked straight after power-on, with no reset pulse; where its RST and INT lines go on this board is still unknown. A plain read without a register address returns all `0xFF`.
 - On `FC:01:2C:CF:C8:DC` nothing answers at `0x2E`, nor at the other common touch addresses (`0x14`, `0x15`, `0x38`, `0x5D`), and the ID read fails. Either its screen has no touch layer or the touch flex isn't connected.
-- **So touch can't be assumed.** Firmware that uses it must probe `0x2E` at boot and fall back to the buttons when nothing answers.
+- **So touch can't be assumed.** The firmware probes `0x2E` at boot (a read of the ID register), reports `TOUCH CHSC5432` or `TOUCH NONE`, and reads the touch report every 20 ms on a box that has one (ADR-0017, [`device-menu.md`](device-menu.md#touch)). The report's point count is byte 1; each point's low coordinate bytes are bytes 2 and 3 and their high nibbles byte 5, as ALIENTEK's driver reads them.
 - `0x1E`, `0x50` and `0x6A` were only seen answering; their identities above are guesses from common parts at those addresses, not read from the chips.
 - Dragon's daily box (`98:88:E0:06:8B:CC`) hasn't been probed.
 
