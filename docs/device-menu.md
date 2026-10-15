@@ -92,9 +92,10 @@ Some boxes have a touchscreen (ADR-0017). The firmware looks for one at boot and
 
 - **A row** is selected and acted on at once, as K1 to the row and then K0 would. VOLUME steps, MUTE toggles, COMPUTERS opens; FORGET ALL and NEW ID still ask first.
 - **A key hint** along the bottom is that key: tap CLOSE to close, BACK to go back.
+- **A task card** on duty takes you to that card's agent: the box sends the card's id in a `focus` event and the daemon opens it, the way K2 opens the most pressing one ([`protocol.md`](protocol.md)).
 - **The buddy** on duty, outside the menu, is petted: it hops with a heart for a moment, and nothing else changes.
 
-The tapped row, hint or buddy is outlined for a moment, so a tap that landed is seen to. A tap in Leisure only calls the buddy back, like any key, and wakes a screen dimmed for the night. The menu still opens on K1 held, and the Pomodoro screen has nothing to tap: a box on a desk gets brushed, and the timer stays on K0. Every tap prints `TAP <x> <y>` as a diagnostic line.
+The tapped row, hint, card or buddy is outlined for a moment, so a tap that landed is seen to. A tap in Leisure only calls the buddy back, like any key, and wakes a screen dimmed for the night. The menu still opens on K1 held, and the Pomodoro screen has nothing to tap: a box on a desk gets brushed, and the timer stays on K0. Every tap prints `TAP <x> <y>` as a diagnostic line.
 
 ![A tapped row](images/touch-row.png) ![The buddy petted](images/touch-pet.png)
 

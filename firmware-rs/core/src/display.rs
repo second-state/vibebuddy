@@ -99,10 +99,13 @@ pub struct TaskInput<'a> {
     /// Owning project; drawn on the second line when the title is a session name, skipped when empty or
     /// the same as the title.
     pub project: Option<&'a [u8]>,
+    /// The daemon's id for the card's activity, which a tap on the card names (ADR-0017); None from an older daemon.
+    pub id: Option<&'a [u8]>,
 }
 
 struct Task {
     title: Vec<u8>,
+    id: Vec<u8>,
     project: Vec<u8>,
     state: State,
     elapsed_base: i32,
@@ -1278,6 +1281,7 @@ impl Display {
             .map(|task| Task {
                 title: truncated(task.title.unwrap_or(b"CODEX"), TITLE_BYTES),
                 project: truncated(task.project.unwrap_or(b""), TITLE_BYTES),
+                id: task.id.unwrap_or_default().to_vec(),
                 state: task.state,
                 elapsed_base: task.elapsed_s,
                 received_ms: scene.now_ms,
@@ -1503,6 +1507,11 @@ impl Display {
 
     fn petted(&self, now_ms: u32) -> bool {
         self.petted_until.is_some_and(|until| (now_ms.wrapping_sub(until) as i32) < 0)
+    }
+
+    /// The id of the activity behind the card at `index`; None when the daemon sent none.
+    pub fn card_id(&self, index: usize) -> Option<&[u8]> {
+        self.tasks.get(index).map(|task| task.id.as_slice()).filter(|id| !id.is_empty())
     }
 
     /// Where a target is drawn now, if it's on the screen at all.
