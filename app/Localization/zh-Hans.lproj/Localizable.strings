@@ -46,6 +46,7 @@
 
 /* Notifications and errors */
 "The daemon failed to start three times in a row. Click the menu bar icon to restart it." = "daemon 连续三次启动失败，点菜单栏图标重启。";
+"The daemon stopped and didn't come back. Restart it from the tray icon or on the Advanced tab." = "daemon 已停止且没有恢复，请在托盘图标或“高级”标签页中重启它。";
 "Codex hook config updated" = "Codex 的 Hook 配置更新了";
 "VibeBuddy rewrote ~/.codex/hooks.json. Codex silently disables hooks that change: type /hooks in Codex and re-trust them so the box keeps getting Codex events." = "VibeBuddy 改写了 ~/.codex/hooks.json。Codex 会静默停用改过的 hook，请在 Codex 里输入 /hooks 重新信任，盒子才收得到 Codex 的事。";
 "Box disconnected" = "盒子断开了";
@@ -157,6 +158,7 @@
 "Not running" = "未运行";
 "Restart daemon" = "重启 daemon";
 "Show daemon log" = "查看 daemon 日志";
+"No terminal found. Run %@ to see the daemon log." = "找不到终端。运行 %@ 查看 daemon 日志。";
 "Export diagnostics…" = "导出诊断…";
 "Config file: %@" = "配置文件：%@";
 

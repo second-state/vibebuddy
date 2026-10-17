@@ -15,13 +15,14 @@ mod firmware_file;
 mod i18n;
 #[cfg(target_os = "linux")]
 mod instance;
+mod outage;
 mod preview;
 mod status;
 mod theme;
 #[cfg(target_os = "linux")]
 mod tray;
 
-use std::time::{Duration, SystemTime};
+use std::time::{Duration, Instant, SystemTime};
 
 use iced::widget::{button, checkbox, column, container, image, pick_list, row, scrollable, slider, space, text, text_input, toggler};
 use iced::{Element, Font, Length, Subscription, Task, Theme, window};
@@ -80,6 +81,9 @@ enum Message {
     TrayHost(bool),
     TrayHostCheck,
     ThemeTick,
+    /// The grace period of a daemon outage has passed, or the unit's state was read after it.
+    OutageGrace,
+    OutageService(outage::Service),
     OpenSettings,
     /// A page of the first-run guide, or (None) leave it for the tabs.
     Guide(Option<usize>),
@@ -130,10 +134,9 @@ enum Message {
     TakeScreenshot,
     Screenshot(Result<Vec<u8>, String>),
     SaveScreenshot,
+    /// Through systemd on Linux, including when the daemon's HTTP endpoint is unavailable.
     RestartDaemon,
     LaunchAtLogin(bool),
-    /// Through systemd, which works when the daemon isn't answering, unlike its own restart endpoint.
-    StartDaemon,
     /// The tray's Check for Updates…: check, and show General, where the answer appears (the Mac shows Sparkle's).
     CheckFromMenu,
     /// Play a Character's preview lines here, or stop the one playing.
@@ -221,6 +224,8 @@ struct App {
     /// When the box's port was last seen open, to tell a box that never reports a build.
     /// Whether the shell has a tray host for the icon right now.
     tray_host: bool,
+    /// Tells the user if the daemon fails and stays down, once per outage.
+    outage: outage::Outage,
     #[cfg(target_os = "linux")]
     tray: Option<TrayHandle>,
     /// VibeBuddy's Omarchy plugin is in the bar, showing the face; the tray icon would be a second one.
@@ -267,6 +272,7 @@ impl App {
             restart_offer: None,
             pending_voice: launch_voice(),
             tray_host: true,
+            outage: outage::Outage::new(outage::GRACE),
             #[cfg(target_os = "linux")]
             tray: None,
             #[cfg(target_os = "linux")]
@@ -336,12 +342,22 @@ impl App {
                     .then(|| self.pending_voice.take())
                     .flatten();
                 notify_new_firmware(&status);
+                self.outage.handle(outage::Event::Status { notify_link: status.config.notify_link }, Instant::now());
                 self.status = Some(*status);
                 return Task::batch([self.refresh_tray(), voice.map_or_else(Task::none, |id| Task::done(Message::UseVoice(id)))]);
             }
             Message::Daemon(client::Update::Down) => {
                 self.status = None;
-                return self.refresh_tray();
+                let effect = self.outage.handle(outage::Event::Down, Instant::now());
+                return Task::batch([self.refresh_tray(), self.outage_task(effect)]);
+            }
+            Message::OutageGrace => {
+                let effect = self.outage.handle(outage::Event::GraceElapsed, Instant::now());
+                return self.outage_task(effect);
+            }
+            Message::OutageService(service) => {
+                let effect = self.outage.handle(outage::Event::Service(service), Instant::now());
+                return self.outage_task(effect);
             }
             #[cfg(target_os = "linux")]
             Message::TrayReady(handle) => {
@@ -608,12 +624,6 @@ impl App {
                 self.tab = Tab::General;
                 return Task::batch([Task::done(Message::OpenSettings), Task::done(Message::CheckForUpdatesNow)]);
             }
-            Message::StartDaemon => {
-                let args = ["--user", "restart", "vibebuddyd"].map(std::ffi::OsStr::new);
-                if let Err(error) = launch("systemctl", &args) {
-                    self.notice = Some(Err(error));
-                }
-            }
             Message::LaunchAtLogin(enabled) => {
                 match set_launch_at_login(enabled) {
                     Ok(()) => self.launch_at_login = enabled,
@@ -667,8 +677,7 @@ impl App {
                 }
             }
             Message::ShowDaemonLog => {
-                let args = ["journalctl", "--user", "-u", "vibebuddyd", "-f"].map(std::ffi::OsStr::new);
-                if let Err(error) = launch("xdg-terminal-exec", &args) {
+                if let Err(error) = show_daemon_log() {
                     self.notice = Some(Err(error));
                 }
             }
@@ -687,6 +696,21 @@ impl App {
             Message::Quit => return iced::exit(),
         }
         Task::none()
+    }
+
+    /// Carries out what the outage policy asked for: the timer, the unit's state, or the notification.
+    fn outage_task(&self, effect: Option<outage::Effect>) -> Task<Message> {
+        match effect {
+            Some(outage::Effect::Wait(after)) => Task::perform(tokio::time::sleep(after), |()| Message::OutageGrace),
+            Some(outage::Effect::CheckService) => Task::perform(outage::service(), Message::OutageService),
+            Some(outage::Effect::Notify) => {
+                if let Err(error) = outage::notify() {
+                    eprintln!("vibebuddy-desktop: {error}");
+                }
+                Task::none()
+            }
+            None => Task::none(),
+        }
     }
 
     /// Pushes the menu and the face's color to the tray; a no-op until the tray is up.
@@ -1556,7 +1580,7 @@ impl App {
             .unwrap_or_default();
         column![
             row![text("daemon").width(140), text(daemon)].spacing(12),
-            button(text(tr("Restart daemon", &[]))).on_press_maybe(self.status.is_some().then_some(Message::RestartDaemon)),
+            button(text(tr("Restart daemon", &[]))).on_press(Message::RestartDaemon),
             // The daemon logs to the journal here, not a file; the folder holds the hook's log.
             row![
                 button(text(tr("Show daemon log", &[]))).on_press(Message::ShowDaemonLog),
@@ -1612,6 +1636,32 @@ fn launch(program: &str, args: &[&std::ffi::OsStr]) -> Result<(), String> {
         .spawn()
         .map(drop)
         .map_err(|error| format!("cannot run {program}: {error}"))
+}
+
+/// What Show daemon log runs: the daemon logs to the journal here.
+const DAEMON_LOG: [&str; 5] = ["journalctl", "--user", "-u", "vibebuddyd", "-f"];
+
+/// Terminals that run a command given after their flag, in the order tried: the XDG default first (Omarchy has it),
+/// then the usual desktops' own. Ubuntu 22.04, for one, has no xdg-terminal-exec.
+const TERMINALS: [(&str, &[&str]); 5] = [
+    ("xdg-terminal-exec", &[]),
+    ("gnome-terminal", &["--"]),
+    ("konsole", &["-e"]),
+    ("xfce4-terminal", &["-x"]),
+    ("xterm", &["-e"]),
+];
+
+/// Follows the daemon's journal in the first terminal this desktop has. Only a terminal that isn't installed moves on
+/// to the next; one that fails to start is reported.
+fn show_daemon_log() -> Result<(), String> {
+    for (terminal, flag) in TERMINALS {
+        match std::process::Command::new(terminal).args(flag).args(DAEMON_LOG).spawn() {
+            Ok(_) => return Ok(()),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => continue,
+            Err(error) => return Err(format!("cannot run {terminal}: {error}")),
+        }
+    }
+    Err(tr("No terminal found. Run %@ to see the daemon log.", &[&DAEMON_LOG.join(" ")]))
 }
 
 /// Logs, config and both sides' build IDs in one folder under Downloads, with no hook payloads; the folder opens when
@@ -1915,7 +1965,7 @@ fn run_tray() -> impl futures::Stream<Item = Message> {
         while let Some(event) = clicks.next().await {
             let message = match event {
                 tray::TrayEvent::OpenSettings => Message::OpenSettings,
-                tray::TrayEvent::RestartDaemon => Message::StartDaemon,
+                tray::TrayEvent::RestartDaemon => Message::RestartDaemon,
                 tray::TrayEvent::CheckForUpdates => Message::CheckFromMenu,
                 tray::TrayEvent::ReportProblem => Message::ReportProblem,
                 tray::TrayEvent::Quit => Message::Quit,

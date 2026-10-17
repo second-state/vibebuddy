@@ -10,6 +10,10 @@ use crate::status::{Config, Status};
 
 const BASE: &str = "http://127.0.0.1:7331";
 const RETRY: Duration = Duration::from_secs(2);
+const STATUS_HEADERS_TIMEOUT: Duration = Duration::from_secs(10);
+// The daemon sends SSE keepalives every 15 s, even when no status changes. Allow missed intervals, but never keep
+// displaying a stale status forever when the daemon stalls with an open socket.
+const STATUS_IDLE_TIMEOUT: Duration = Duration::from_secs(45);
 
 #[derive(Clone, Debug)]
 pub enum Update {
@@ -20,15 +24,25 @@ pub enum Update {
 
 /// Snapshots for as long as the app runs, reconnecting whenever the daemon goes away.
 pub fn status_updates() -> impl Stream<Item = Update> {
-    iced::stream::channel(16, async |mut output| {
+    status_updates_at(BASE.to_owned())
+}
+
+/// The same stream from another base URL, for the headless probe that runs against a test daemon.
+pub fn status_updates_at(base: String) -> impl Stream<Item = Update> {
+    status_updates_with_timeouts(base, STATUS_HEADERS_TIMEOUT, STATUS_IDLE_TIMEOUT)
+}
+
+fn status_updates_with_timeouts(base: String, headers_timeout: Duration, idle_timeout: Duration) -> impl Stream<Item = Update> {
+    iced::stream::channel(16, async move |mut output| {
         let client = reqwest::Client::new();
         loop {
-            if let Ok(response) = client.get(format!("{BASE}/v1/status/stream")).send().await
+            let request = client.get(format!("{base}/v1/status/stream")).send();
+            if let Ok(Ok(response)) = tokio::time::timeout(headers_timeout, request).await
                 && response.status().is_success()
             {
                 let mut body = response.bytes_stream();
                 let mut buffer = Vec::new();
-                while let Some(Ok(chunk)) = body.next().await {
+                while let Ok(Some(Ok(chunk))) = tokio::time::timeout(idle_timeout, body.next()).await {
                     buffer.extend_from_slice(&chunk);
                     for status in drain_events(&mut buffer) {
                         let _ = output.send(Update::Status(Box::new(status))).await;
@@ -146,6 +160,28 @@ pub async fn screenshot() -> Result<Vec<u8>, String> {
 }
 
 pub async fn restart_daemon() -> Result<(), String> {
+    #[cfg(target_os = "linux")]
+    {
+        // The daemon cannot restart itself over HTTP while it is down. Both Advanced and the tray use its supervisor.
+        let command = tokio::process::Command::new("systemctl")
+            .args(["--user", "restart", "vibebuddyd"])
+            .kill_on_drop(true)
+            .output();
+        let output = tokio::time::timeout(Duration::from_secs(10), command)
+            .await
+            .map_err(|_| "systemctl restart timed out".to_owned())?
+            .map_err(|error| format!("cannot run systemctl: {error}"))?;
+        if output.status.success() {
+            Ok(())
+        } else {
+            Err(format!(
+                "systemctl restart failed ({}): {}",
+                output.status,
+                String::from_utf8_lossy(&output.stderr).trim()
+            ))
+        }
+    }
+    #[cfg(not(target_os = "linux"))]
     post("/v1/daemon/restart", None).await
 }
 
@@ -177,6 +213,83 @@ async fn accepted(request: reqwest::RequestBuilder) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+    // Hold the socket open after sending the requested traffic, so EOF cannot accidentally satisfy a timeout test.
+    async fn stream_server(headers: bool, keepalives: bool) -> (String, tokio::task::JoinHandle<()>) {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let base = format!("http://{}", listener.local_addr().unwrap());
+        let server = tokio::spawn(async move {
+            let (mut socket, _) = listener.accept().await.unwrap();
+            let mut request_start = [0; 1];
+            socket.read_exact(&mut request_start).await.unwrap();
+            if headers {
+                socket
+                    .write_all(b"HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\n\r\ndata: {}\n\n")
+                    .await
+                    .unwrap();
+            }
+            if keepalives {
+                for _ in 0..8 {
+                    tokio::time::sleep(Duration::from_millis(60)).await;
+                    socket.write_all(b": keep-alive\n\n").await.unwrap();
+                }
+                socket.write_all(b"data: {\"today\":{\"done\":2}}\n\n").await.unwrap();
+            }
+            std::future::pending::<()>().await;
+            drop(socket);
+        });
+        (base, server)
+    }
+
+    #[tokio::test]
+    async fn a_connection_that_never_sends_headers_reports_down() {
+        let (base, server) = stream_server(false, false).await;
+        let mut updates = std::pin::pin!(status_updates_with_timeouts(base, Duration::from_millis(250), STATUS_IDLE_TIMEOUT));
+        assert!(matches!(
+            tokio::time::timeout(Duration::from_secs(3), updates.next()).await.unwrap(),
+            Some(Update::Down)
+        ));
+        server.abort();
+    }
+
+    #[tokio::test]
+    async fn an_open_stream_that_stops_sending_bytes_reports_down() {
+        let (base, server) = stream_server(true, false).await;
+        let mut updates = std::pin::pin!(status_updates_with_timeouts(
+            base,
+            STATUS_HEADERS_TIMEOUT,
+            Duration::from_millis(250)
+        ));
+        assert!(matches!(
+            tokio::time::timeout(Duration::from_secs(3), updates.next()).await.unwrap(),
+            Some(Update::Status(_))
+        ));
+        assert!(matches!(
+            tokio::time::timeout(Duration::from_secs(3), updates.next()).await.unwrap(),
+            Some(Update::Down)
+        ));
+        server.abort();
+    }
+
+    #[tokio::test]
+    async fn keepalives_preserve_a_stream_longer_than_its_idle_timeout() {
+        let (base, server) = stream_server(true, true).await;
+        let mut updates = std::pin::pin!(status_updates_with_timeouts(
+            base,
+            STATUS_HEADERS_TIMEOUT,
+            Duration::from_millis(250)
+        ));
+        assert!(matches!(
+            tokio::time::timeout(Duration::from_secs(3), updates.next()).await.unwrap(),
+            Some(Update::Status(_))
+        ));
+        match tokio::time::timeout(Duration::from_secs(3), updates.next()).await.unwrap() {
+            Some(Update::Status(status)) => assert_eq!(status.today.done, 2),
+            update => panic!("keepalives should preserve the stream: {update:?}"),
+        }
+        server.abort();
+    }
 
     #[test]
     fn events_split_across_chunks_are_reassembled() {

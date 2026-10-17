@@ -5136,6 +5136,7 @@ dependencies = [
  "ed25519-dalek",
  "libm",
  "rand_core 0.6.4",
+ "serde",
  "serde_json",
  "tungstenite",
  "vibebuddy-protocol",

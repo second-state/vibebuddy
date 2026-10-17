@@ -1,0 +1,28 @@
+{
+  "id": 1,
+  "type": "root",
+  "name": "root",
+  "nodes": [
+    {
+      "id": 2,
+      "type": "output",
+      "name": "eDP-1",
+      "nodes": [
+        {
+          "id": 3,
+          "type": "workspace",
+          "name": "1",
+          "nodes": [
+            {"id": 9, "type": "con", "name": "fish", "app_id": "foot", "pid": 4000, "nodes": [], "floating_nodes": []},
+            {"id": 17, "type": "con", "name": "claude", "app_id": "foot", "pid": 4242, "nodes": [], "floating_nodes": []}
+          ],
+          "floating_nodes": [
+            {"id": 21, "type": "floating_con", "name": "Volume Control", "app_id": "pavucontrol", "pid": 5151, "nodes": [], "floating_nodes": []}
+          ]
+        }
+      ],
+      "floating_nodes": []
+    }
+  ],
+  "floating_nodes": []
+}

@@ -29,6 +29,8 @@ final class AppModel: ObservableObject {
     private var streamTask: Task<Void, Never>?
     private var linkLostSince: Date?
     private var linkNotified = false
+    /// Preserve the last reported preference when the supervisor clears status during a failure.
+    private var notifyLink = true
     /// A voice the user asked for while changing the UI language, to write once the restarted app sees the box.
     /// Taken out of the defaults at start, so it is tried in this run only and never surprises the user days later.
     private var pendingVoice: String?
@@ -46,8 +48,8 @@ final class AppModel: ObservableObject {
             guard let self else { return }
             self.daemonAlive = false
             self.refreshMenu()
-            // With "Notify me" off, not even this one shows; without a daemon there's no config, so default to on.
-            if self.status?.config.notifyLink ?? true {
+            // Default to on only until the daemon has reported a preference.
+            if self.notifyLink {
                 Notifier.notify(title: "VibeBuddy", body: String(localized: "The daemon failed to start three times in a row. Click the menu bar icon to restart it."))
             }
         }
@@ -97,6 +99,7 @@ final class AppModel: ObservableObject {
 
     private func apply(_ status: Status) {
         self.status = status
+        notifyLink = status.config.notifyLink
         daemonAlive = true
         refreshMenu()
         refreshForeignFirmware()

@@ -18,6 +18,7 @@ mod source_opener;
 mod status;
 mod updates;
 mod voice_writer;
+mod window_focus;
 
 use std::convert::Infallible;
 use std::env;
