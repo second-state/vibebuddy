@@ -280,6 +280,7 @@
 "Network" = "网络";
 "Not set" = "未设置";
 "Plug in the cable to change the box's network." = "要更换盒子的网络，请插上数据线。";
+"Plug in the cable to update the box's firmware." = "要更新盒子的固件，请插上数据线。";
 "Network name" = "网络名称";
 "Password" = "密码";
 "Join" = "加入";

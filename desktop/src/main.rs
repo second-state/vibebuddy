@@ -1380,6 +1380,8 @@ impl App {
         };
         let firmware = device.and_then(|device| device.firmware_label()).unwrap_or_else(|| "—".to_owned());
         let online = device.is_some_and(|device| device.connected);
+        // Flashing goes over the cable only: over Wi-Fi or the Relay the daemon refuses it.
+        let on_cable = online && !device.is_some_and(|device| device.network);
         let updates = self.updates();
         let offer = updates.and_then(|updates| updates.firmware.as_ref());
         // The offered version, or why there is none: a bare dash read as "no update checks at all".
@@ -1438,7 +1440,7 @@ impl App {
                 Message::FlashFile(false),
             )
         });
-        let update: Option<Element<'_, Message>> = match (foreign, outdated && online, self.confirm_firmware) {
+        let update: Option<Element<'_, Message>> = match (foreign, outdated && on_cable, self.confirm_firmware) {
             (true, _, true) => Some(confirm(
                 tr("Flash the box with VibeBuddy?", &[]),
                 tr(
@@ -1483,7 +1485,7 @@ impl App {
                     text(tr("Before retrying, hold K0 on the box and replug the cable to put it in download mode.", &[]))
                         .size(13),
                     button(text(tr("Retry", &[])))
-                        .on_press_maybe((online && downloaded).then_some(Message::FlashFirmware)),
+                        .on_press_maybe((on_cable && downloaded).then_some(Message::FlashFirmware)),
                 ]
                 .spacing(8)
             });
@@ -1562,6 +1564,7 @@ impl App {
                 text(tr("This is a %@ board, which released firmware doesn't run on, so no update is offered.", &[board])).size(13)
             }))
             .push(update)
+            .push((outdated && online && !on_cable).then(|| text(tr("Plug in the cable to update the box's firmware.", &[])).size(13)))
             .push(unavailable)
             .push(flashing)
             .push(from_file)
@@ -1571,6 +1574,7 @@ impl App {
     fn device(&self) -> Element<'_, Message> {
         let device = self.status.as_ref().map(|status| &status.device);
         let online = device.is_some_and(|device| device.connected);
+        let on_cable = online && !device.is_some_and(|device| device.network);
         let busy = self.status.as_ref().and_then(|status| status.operation.as_ref()).is_some_and(status::Operation::running);
         // The computers the box is paired with (ADR-0012). Every computer it's plugged into pairs on its own, so this
         // one has no Remove: it would only pair again.
@@ -1616,7 +1620,7 @@ impl App {
                     // Separately distributed firmware (VibeBuddy-firmware-*.zip on Releases) comes in here.
                     row![
                         button(text(tr("Flash from file…", &[])))
-                            .on_press_maybe((online && !busy).then_some(Message::FlashFromFile)),
+                            .on_press_maybe((on_cable && !busy).then_some(Message::FlashFromFile)),
                         button(text(tr("Make the box blink", &[])))
                             .on_press_maybe((online && !busy).then_some(Message::Identify)),
                     ]
