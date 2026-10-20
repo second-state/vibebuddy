@@ -236,6 +236,56 @@ fn send(transport: &dyn Transport, event: Event) {
     }
 }
 
+/// A turn's own events, sent in order by a task of their own, each waiting for room in the link's send queue: a
+/// reply's audio fills that queue, and `voice.done` right after its last piece (or a reply's text during an earlier
+/// reply's audio) was dropped when it was full, which left the box waiting for the turn to end.
+struct TurnEvents {
+    queue: tokio::sync::mpsc::UnboundedSender<Event>,
+    task: JoinHandle<()>,
+}
+
+impl TurnEvents {
+    fn start(transport: Arc<dyn Transport>) -> Self {
+        let (queue, mut events) = tokio::sync::mpsc::unbounded_channel::<Event>();
+        let task = tokio::spawn(async move {
+            while let Some(event) = events.recv().await {
+                send_waiting(&*transport, event).await;
+            }
+        });
+        Self { queue, task }
+    }
+
+    fn send(&self, event: Event) {
+        let _ = self.queue.send(event);
+    }
+
+    /// Waits until every event has been handed to the link.
+    async fn finish(self) {
+        drop(self.queue);
+        let _ = self.task.await;
+    }
+}
+
+async fn send_waiting(transport: &dyn Transport, event: Event) {
+    let Ok(frame) = event.to_ndjson() else {
+        warn!(event = %event.event, "a voice event could not be encoded");
+        return;
+    };
+    let started = Instant::now();
+    loop {
+        match transport.send(frame.clone()) {
+            Ok(()) => return,
+            Err(TransportError::QueueFull) if started.elapsed() < AUDIO_QUEUE_WAIT => {
+                tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+            }
+            Err(error) => {
+                warn!(?error, event = %event.event, "a voice event could not be queued for the box");
+                return;
+            }
+        }
+    }
+}
+
 /// Clears the running flag however the turn ends.
 struct Running(Arc<AtomicBool>);
 
@@ -503,6 +553,22 @@ async fn run_turn(
     speaker: Option<(Arc<dyn Synthesizer>, Option<String>)>,
     wearing: Wearing,
 ) {
+    let events = TurnEvents::start(transport.clone());
+    answer_turn(turn, audio, recognizer, resident, transport, speaker, wearing, &events).await;
+    events.finish().await;
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn answer_turn(
+    turn: u32,
+    audio: Vec<i16>,
+    recognizer: Arc<dyn Recognizer>,
+    resident: Arc<Resident>,
+    transport: Arc<dyn Transport>,
+    speaker: Option<(Arc<dyn Synthesizer>, Option<String>)>,
+    wearing: Wearing,
+    events: &TurnEvents,
+) {
     let started = Instant::now();
     let seconds = audio.len() as f32 / SAMPLE_RATE as f32;
     let wav = wav(&audio);
@@ -514,24 +580,24 @@ async fn run_turn(
         Ok(transcript) => transcript,
         Err(error) => {
             warn!(turn, %error, "speech recognition failed");
-            send(&*transport, error_event(turn, "unavailable", &error));
+            events.send(error_event(turn, "unavailable", &error));
             return;
         }
     };
     if transcript.text.is_empty() {
         info!(turn, seconds, recognised_ms, "nothing was heard in the voice turn");
-        send(&*transport, error_event(turn, "not_heard", "nothing was recognised"));
+        events.send(error_event(turn, "not_heard", "nothing was recognised"));
         return;
     }
     info!(turn, seconds, recognised_ms, language = transcript.language.as_deref().unwrap_or("unknown"), chars = transcript.text.chars().count(), "voice turn heard");
-    send(&*transport, text_event("voice.heard", turn, &transcript.text));
+    events.send(text_event("voice.heard", turn, &transcript.text));
     let speaker = speaker.map(|(synthesizer, character)| Speaker::start(turn, synthesizer, character, transport.clone()));
     let mut replies = 0;
     let answered = resident
         .say_streaming(&transcript.text, &wearing, &mut |reply| {
             replies += 1;
             info!(turn, elapsed_ms = started.elapsed().as_millis() as u64, "voice reply");
-            send(&*transport, text_event("voice.reply", turn, reply));
+            events.send(text_event("voice.reply", turn, reply));
             if let Some(speaker) = &speaker {
                 speaker.say(reply);
             }
@@ -544,14 +610,14 @@ async fn run_turn(
                 speaker.finish().await;
             }
             info!(turn, replies, elapsed_ms = started.elapsed().as_millis() as u64, "voice turn done");
-            send(&*transport, turn_event("voice.done", turn));
+            events.send(turn_event("voice.done", turn));
         }
         Err(error) => {
             if let Some(speaker) = speaker {
                 speaker.stop().await;
             }
             warn!(turn, %error, "the resident session failed the voice turn");
-            send(&*transport, error_event(turn, "unavailable", &error.to_string()));
+            events.send(error_event(turn, "unavailable", &error.to_string()));
         }
     }
 }
@@ -710,10 +776,17 @@ pub mod tests {
     #[derive(Default)]
     pub struct RecordingTransport {
         frames: std::sync::Mutex<Vec<Vec<u8>>>,
+        /// How many sends to refuse as a full queue first.
+        refusals: std::sync::Mutex<u32>,
     }
 
     impl Transport for RecordingTransport {
         fn send(&self, frame: Vec<u8>) -> Result<(), crate::serial_transport::TransportError> {
+            let mut refusals = self.refusals.lock().unwrap();
+            if *refusals > 0 {
+                *refusals -= 1;
+                return Err(crate::serial_transport::TransportError::QueueFull);
+            }
             self.frames.lock().unwrap().push(frame);
             Ok(())
         }
@@ -816,6 +889,17 @@ pub mod tests {
         fn drop(&mut self) {
             let _ = std::fs::remove_dir_all(&self.dir);
         }
+    }
+
+    #[tokio::test]
+    async fn a_turns_events_wait_for_room_in_a_full_queue_instead_of_dropping() {
+        let script = logged_in();
+        script.lock().unwrap().turn_requests = vec![tool_call("speak", json!({"text": "Two agents are working."}))];
+        let rig = Rig::new("full", Ok("what are my agents doing"), script);
+        // The queue is full when the turn's events go out, as it is behind a reply's audio.
+        *rig.transport.refusals.lock().unwrap() = 20;
+        rig.feed(&voice_lines(4, &sine(30_000))).expect("the turn runs").await.unwrap();
+        assert_eq!(rig.names(), ["voice.heard", "voice.reply", "voice.done"]);
     }
 
     #[tokio::test]
