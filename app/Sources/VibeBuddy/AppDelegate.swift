@@ -17,6 +17,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var terminationSignal: DispatchSourceSignal?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        #if DEBUG
+        // Debug builds only: draw every korekore page with sample data into a folder and quit, touching nothing else.
+        if let folder = ProcessInfo.processInfo.environment["VIBEBUDDY_KOREKORE_SNAPSHOTS"] {
+            KorekoreSnapshots.write(to: URL(fileURLWithPath: folder), model: model)
+            exit(0)
+        }
+        #endif
         // A second copy of the app (another path, a dev build) would start a second daemon that fights over
         // the port and the serial port. Hand off to the running one and quit before starting anything.
         if SingleInstance.handOffToRunningCopy() { exit(0) }

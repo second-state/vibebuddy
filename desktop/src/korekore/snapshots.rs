@@ -7,6 +7,7 @@ use iced_test::simulator::Simulator;
 use super::picture::BoxPicture;
 use super::{FONTS, Section, view};
 use crate::status::{Activity, Status};
+use crate::{Message, agents, client};
 
 fn picture(connected: bool, activities: &[(&str, &str, &str)]) -> BoxPicture {
     let mut status = Status::default();
@@ -28,7 +29,7 @@ fn picture(connected: bool, activities: &[(&str, &str, &str)]) -> BoxPicture {
     BoxPicture::derive(Some(&status))
 }
 
-fn save(name: &str, size: (f32, f32), element: Element<'_, view::Pick>) {
+fn save<M: Clone>(name: &str, size: (f32, f32), element: Element<'_, M>) {
     let settings = Settings { fonts: FONTS.iter().map(|font| (*font).into()).collect(), ..Settings::default() };
     let mut simulator = Simulator::with_size(settings, size, element);
     let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../target/korekore-preview").join(format!("{name}.png"));
@@ -52,9 +53,61 @@ fn draw_the_korekore_views() {
     );
     let asking = picture(true, &[("codex", "CX:Review changes", "needs_input"), ("claude-code", "CC:Add Chinese to the box", "working")]);
     // The window's inside, as on the canvas (960 × 772 less its 3 px outline).
-    save("window-character", (954.0, 766.0), view::settings(&working, &Section::ALL, Section::Character, "0.5.0", view::pending()));
-    save("window-device-asking", (954.0, 766.0), view::settings(&asking, &Section::ALL, Section::Device, "0.5.0", view::pending()));
+    save("window-character", (954.0, 766.0), view::settings(&working, &Section::ALL, Section::Character, "0.5.0", |section| section, view::pending()));
+    save("window-device-asking", (954.0, 766.0), view::settings(&asking, &Section::ALL, Section::Device, "0.5.0", |section| section, view::pending()));
     for (name, sample) in [("working", &working), ("asking", &asking), ("quiet", &picture(true, &[])), ("no-link", &picture(false, &[]))] {
-        save(&format!("minibox-{name}"), (214.0, 166.0), view::mini_box(sample));
+        save(&format!("minibox-{name}"), (214.0, 166.0), view::mini_box::<Section>(sample));
+    }
+}
+
+/// The canvas's sample status, as JSON from the daemon. Nothing here asks the daemon, and the conversation is canned:
+/// the real one is the user's own.
+const SAMPLE: &str = r#"{"daemon":{"build":"0.5.0 cc16829","revision":"firmware-v0.5.0-61-gcc16829"},
+ "device":{"connected":true,"port":"/dev/ttyACM0","mode":"duty","firmware_version":"0.5.0","firmware_build":"cc16829",
+   "voice":"robot","volume":50,"box_key":"k","computer_key":"me",
+   "paired_computers":[{"key":"me","name":"ThinkPad · Omarchy"},{"key":"m","name":"Michael's Mac Studio"}],
+   "wifi_network":"ByteTrade","wifi_address":"192.168.1.160","transfer":true},
+ "today":{"done":7,"asks":3,"busy_seconds":15120},
+ "hooks":{"codex":"2026-10-21T16:40:00+08:00","claude":"2026-10-21T17:03:00+08:00"},
+ "config":{"notify_link":true,"check_updates":true,"relay":false},
+ "updates":{"enabled":true,"last_check":"2026-10-21T13:51:00+08:00"},
+ "activities":[{"agent":"claude-code","title":"CC:Add Chinese to the box","state":"working"},
+               {"agent":"codex","title":"CX:Fix voice reply","state":"working"},
+               {"agent":"github-actions","title":"CI:App tests","state":"working"}]}"#;
+
+#[test]
+#[ignore = "writes PNGs for review; run with --ignored"]
+fn draw_the_korekore_pages() {
+    let (mut app, _) = crate::App::boot();
+    app.korekore = true;
+    app.status = Some(serde_json::from_str(SAMPLE).unwrap());
+    app.resident = true;
+    app.resident_info = serde_json::from_str(r#"{"enabled":true,"revision":1,"brain_setting":"codex","anthropic_key_set":false}"#).unwrap();
+    app.conversation = Some(Ok(vec![
+        client::Exchange {
+            said: "Quick check: what time is it, and how many agents are working?".to_owned(),
+            replies: vec!["It's 10:09 a.m. in Singapore. Three agents are working.".to_owned()],
+        },
+        client::Exchange { said: "新加坡明天天气怎么样".to_owned(), replies: vec!["明天上午多云转晴，最高约三十四度；午后可能有雷阵雨，出门记得带伞。".to_owned()] },
+    ]));
+    let setup = |agent: &str, name: &str, present: bool, installed: bool| agents::Setup {
+        agent: agent.to_owned(),
+        name: name.to_owned(),
+        present,
+        installed,
+        config: std::path::PathBuf::from("/tmp/config"),
+        modified: None,
+    };
+    app.agents = vec![
+        setup("claude", "Claude Code", true, true),
+        setup("codex", "Codex", true, true),
+        setup("opencode", "OpenCode", true, true),
+        setup("pi", "Pi", true, false),
+        setup("copilot", "GitHub Copilot CLI", false, false),
+    ];
+    for section in Section::ALL {
+        app.tab = section.tab();
+        let element: Element<'_, Message> = app.view(iced::window::Id::unique());
+        save(&format!("page-{}", format!("{section:?}").to_lowercase()), (954.0, 766.0), element);
     }
 }

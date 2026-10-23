@@ -11,10 +11,6 @@ use super::theme::{self, typography};
 use super::{Section, Sprite};
 use crate::i18n::tr;
 
-/// What the view sends back: the user picked a section.
-#[derive(Clone, Copy, Debug)]
-pub struct Pick(pub Section);
-
 const ROUNDED: &str = "Rounded Mplus 1c";
 const PIXEL: Font = typography::BOX_TEXT.font;
 
@@ -81,7 +77,16 @@ fn tile(name: &str) -> &'static Sprite {
 /// The box's screen redrawn (canvas: "App sidebar component"): laid out at the box's 320 × 240 and shown at 0.65,
 /// 208 × 156, as the design does, inside a 3 px outline.
 pub fn mini_box<'a, M: 'a>(picture: &BoxPicture) -> Element<'a, M> {
-    const S: f32 = 0.65;
+    container(container(screen(picture, 0.65)).width(208.0).height(156.0).clip(true))
+        .padding(theme::STROKE_BOLD)
+        .style(|_| sticker(theme::INK, theme::RADIUS_MD, theme::STROKE_BOLD, theme::STICKER_SM))
+        .into()
+}
+
+/// The box's screen redrawn from the status, at `scale` of its 320 × 240.
+pub fn screen<'a, M: 'a>(picture: &BoxPicture, scale: f32) -> Element<'a, M> {
+    #[allow(non_snake_case)]
+    let S = scale;
     // iced clips square, so the screen's own corners are rounded to sit inside the outline.
     const INNER: f32 = theme::RADIUS_MD - theme::STROKE_BOLD;
     let screen: Element<'a, M> = if picture.mood == Mood::NoLink {
@@ -139,7 +144,7 @@ pub fn mini_box<'a, M: 'a>(picture: &BoxPicture) -> Element<'a, M> {
             .center(Length::Fill)
             .into()
         } else {
-            column(picture.tickets.iter().map(|ticket| {
+            column(picture.tickets.iter().map(move |ticket| {
                 container(
                     row![
                         sized(tile(&format!("icon-{}", ticket.icon)), 2, false, 2.0 * S),
@@ -151,7 +156,7 @@ pub fn mini_box<'a, M: 'a>(picture: &BoxPicture) -> Element<'a, M> {
                 .padding(7.0 * S)
                 .width(Length::Fill)
                 .clip(true)
-                .style(|_| container::Style {
+                .style(move |_| container::Style {
                     background: Some(theme::BOX_CARD.into()),
                     border: Border { radius: (8.0 * S).into(), ..Border::default() },
                     ..container::Style::default()
@@ -170,13 +175,16 @@ pub fn mini_box<'a, M: 'a>(picture: &BoxPicture) -> Element<'a, M> {
             })
             .into()
     };
-    container(container(screen).width(208.0).height(156.0).clip(true))
-        .padding(theme::STROKE_BOLD)
-        .style(|_| sticker(theme::INK, theme::RADIUS_MD, theme::STROKE_BOLD, theme::STICKER_SM))
-        .into()
+    container(screen).width(320.0 * S).height(240.0 * S).clip(true).into()
 }
 
-fn sidebar<'a>(picture: &BoxPicture, sections: &[Section], current: Section, app_version: &str) -> Element<'a, Pick> {
+fn sidebar<'a, M: Clone + 'a>(
+    picture: &BoxPicture,
+    sections: &[Section],
+    current: Section,
+    app_version: &str,
+    pick: &impl Fn(Section) -> M,
+) -> Element<'a, M> {
     let link_line = if !picture.daemon_alive {
         tr("DAEMON NOT RUNNING", &[])
     } else if let Some(link) = picture.link {
@@ -208,7 +216,7 @@ fn sidebar<'a>(picture: &BoxPicture, sections: &[Section], current: Section, app
         )
         .padding(Padding::from([6, 8]))
         .width(Length::Fill)
-        .on_press(Pick(section))
+        .on_press(pick(section))
         .style(move |_, _| button::Style {
             background: on.then_some(Background::Color(theme::INK)),
             text_color: if on { theme::CREAM } else { theme::INK },
@@ -244,13 +252,14 @@ fn sidebar<'a>(picture: &BoxPicture, sections: &[Section], current: Section, app
 }
 
 /// The whole window: sidebar, its 3 px ink edge, and the page.
-pub fn settings<'a>(
+pub fn settings<'a, M: Clone + 'a>(
     picture: &BoxPicture,
     sections: &[Section],
     current: Section,
     app_version: &str,
-    page: Element<'a, Pick>,
-) -> Element<'a, Pick> {
+    pick: impl Fn(Section) -> M,
+    page: Element<'a, M>,
+) -> Element<'a, M> {
     let edge = container(Space::new()).width(theme::STROKE_BOLD).height(Length::Fill).style(|_| container::Style {
         background: Some(theme::INK.into()),
         ..container::Style::default()
@@ -265,7 +274,7 @@ pub fn settings<'a>(
         .padding(Padding { top: 22.0, right: 22.0, bottom: 20.0, left: 22.0 })
         .width(Length::Fill)
         .height(Length::Fill);
-    container(row![sidebar(picture, sections, current, app_version), edge, main])
+    container(row![sidebar(picture, sections, current, app_version, &pick), edge, main])
         .width(Length::Fill)
         .height(Length::Fill)
         .style(|_| container::Style { background: Some(theme::CREAM.into()), ..container::Style::default() })
@@ -273,7 +282,7 @@ pub fn settings<'a>(
 }
 
 /// Stands in for a page that comes with a later step of the korekore UI.
-pub fn pending<'a>() -> Element<'a, Pick> {
+pub fn pending<'a, M: 'a>() -> Element<'a, M> {
     container(text(tr("This page comes with the next step of korekore.", &[])).font(rounded(iced::font::Weight::Normal)).size(14).color(theme::MUTED))
         .center_x(Length::Fill)
         .center_y(Length::Fixed(120.0))

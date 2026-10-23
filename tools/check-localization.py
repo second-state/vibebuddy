@@ -116,7 +116,7 @@ def source_keys() -> dict[str, str]:
     """Normalised key -> where it was first seen."""
     keys: dict[str, str] = {}
     for directory in SOURCES:
-        for path in sorted(directory.glob("*.swift")):
+        for path in sorted(directory.rglob("*.swift")):
             code = strip_comments(path.read_text(encoding="utf-8"))
             found: list[tuple[int, str]] = []
             for match in re.finditer(r'String\(localized:\s*"', code):

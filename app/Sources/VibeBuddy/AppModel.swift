@@ -119,6 +119,15 @@ final class AppModel: ObservableObject {
         }
     }
 
+    #if DEBUG
+    /// Debug builds only: shows a sample status without a daemon, for the korekore page snapshots.
+    func showSample(_ status: Status) {
+        self.status = status
+        daemonAlive = true
+        refreshMenu()
+    }
+    #endif
+
     private func refreshForeignFirmware() {
         let foreign = status.map { Firmware.foreign($0.device) } ?? false
         if foreign != foreignFirmware { foreignFirmware = foreign }

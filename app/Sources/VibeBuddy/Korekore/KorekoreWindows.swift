@@ -7,15 +7,46 @@ import VibeBuddyCore
 /// The settings window with the AppModel behind it.
 struct KorekoreSettingsRoot: View {
     @ObservedObject var model: AppModel
-    @State private var selection = KorekoreSection.character
+    @State private var selection: KorekoreSection
+    /// Snapshots only: a canned conversation in place of the daemon's, which is the user's own.
+    let sampleConversation: [ResidentExchange]?
+
+    init(model: AppModel, initial: KorekoreSection = .character, sampleConversation: [ResidentExchange]? = nil) {
+        self.model = model
+        _selection = State(initialValue: initial)
+        self.sampleConversation = sampleConversation
+    }
 
     var body: some View {
         // Voice commands are experimental: no Conversation section while the daemon has them off.
         let sections = KorekoreSection.allCases.filter { $0 != .conversation || model.residentEnabled }
         KorekoreSettings(picture: BoxPicture.derive(status: model.status, daemonAlive: model.daemonAlive),
                          versions: KorekoreVersions(app: Resources.bundleVersion, firmware: model.status?.device.firmwareVersion),
-                         sections: sections, selection: $selection) { _ in
-            KorekorePagePending()
+                         sections: sections, selection: $selection) { section in
+            switch section {
+            case .character: KorekoreCharacterPage(model: model)
+            case .conversation:
+                if let sampleConversation {
+                    let info = ResidentInfo.sample
+                    KorekoreConversationPage(load: { sampleConversation }, info: { info }, setBrain: { _ in info }, setKey: { _ in info },
+                                             links: .init(anthropicConsole: Resources.anthropicConsole, codexInstall: Resources.codexInstallPage,
+                                                          claudeInstall: Resources.claudeInstallPage),
+                                             avatar: nil)
+                } else {
+                KorekoreConversationPage(
+                    load: { [client = model.client] in try await client.residentHistory(limit: KorekoreConversationPage.limit) },
+                    info: { [client = model.client] in try await client.resident() },
+                    setBrain: { [client = model.client] choice in try await client.setResidentBrain(choice) },
+                    setKey: { [client = model.client] key in try await client.setAnthropicKey(key) },
+                    links: .init(anthropicConsole: Resources.anthropicConsole, codexInstall: Resources.codexInstallPage,
+                                 claudeInstall: Resources.claudeInstallPage),
+                    avatar: nil)
+                }
+            case .agents: KorekoreAgentsPage(model: model)
+            case .device: KorekoreDevicePage(model: model)
+            case .general: KorekoreGeneralPage(model: model)
+            case .advanced: KorekoreAdvancedPage(model: model)
+            }
         }
     }
 }

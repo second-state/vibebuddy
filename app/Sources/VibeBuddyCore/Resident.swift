@@ -38,6 +38,9 @@ public struct ResidentInfo: Decodable, Equatable {
         brainSetting = (try? container.decodeIfPresent(String.self, forKey: .brainSetting)).flatMap { $0 }.flatMap(ResidentBrainChoice.init(rawValue:))
         anthropicKeySet = try container.decodeIfPresent(Bool.self, forKey: .anthropicKeySet)
     }
+
+    /// Ready, answered by Codex; for previews and snapshots.
+    public static let sample = try! JSONDecoder().decode(ResidentInfo.self, from: Data(#"{"enabled":true,"thread_id":"sample","revision":1,"brain_setting":"codex","brain":"codex","anthropic_key_set":false}"#.utf8))
 }
 
 /// Which Agent answers voice commands: Codex when it is ready, else Claude Code when an Anthropic API key is set

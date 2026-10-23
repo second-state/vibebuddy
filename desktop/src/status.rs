@@ -171,6 +171,8 @@ pub struct Device {
     pub box_key: Option<String>,
     /// The firmware takes updates over any link (ADR-0016): no cable, no download mode.
     pub transfer: bool,
+    /// The last image sent over the link didn't confirm itself, and the box went back (`FIRMWARE ROLLED BACK`).
+    pub rolled_back: bool,
     /// This computer's key, to tell it apart in `paired_computers`.
     pub computer_key: Option<String>,
     pub paired_computers: Vec<PairedComputer>,

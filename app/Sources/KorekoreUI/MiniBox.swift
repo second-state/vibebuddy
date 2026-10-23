@@ -5,21 +5,29 @@ import VibeBuddyCore
 /// 320 × 240 and shown at 0.65, 208 × 156, as the design does.
 public struct MiniBox: View {
     let picture: BoxPicture
+    let scale: CGFloat
+    let framed: Bool
 
-    public init(picture: BoxPicture) {
+    /// At `scale` of the box's size; `framed` adds the sidebar's outline and shadow.
+    public init(picture: BoxPicture, scale: CGFloat = 0.65, framed: Bool = true) {
         self.picture = picture
+        self.scale = scale
+        self.framed = framed
     }
 
-    static let scale: CGFloat = 0.65
-
     public var body: some View {
-        screen
-            .scaleEffect(Self.scale, anchor: .topLeading)
-            .frame(width: 320 * Self.scale, height: 240 * Self.scale, alignment: .topLeading)
-            // The outline sits outside the screen, as the canvas's content-box does.
-            .clipShape(RoundedRectangle(cornerRadius: Theme.Radius.md - Theme.Stroke.bold, style: .continuous))
-            .padding(Theme.Stroke.bold)
-            .sticker(radius: Theme.Radius.md, fill: Theme.Colors.ink, stroke: Theme.Stroke.bold)
+        let screen = screen
+            .scaleEffect(scale, anchor: .topLeading)
+            .frame(width: 320 * scale, height: 240 * scale, alignment: .topLeading)
+        if framed {
+            screen
+                // The outline sits outside the screen, as the canvas's content-box does.
+                .clipShape(RoundedRectangle(cornerRadius: Theme.Radius.md - Theme.Stroke.bold, style: .continuous))
+                .padding(Theme.Stroke.bold)
+                .sticker(radius: Theme.Radius.md, fill: Theme.Colors.ink, stroke: Theme.Stroke.bold)
+        } else {
+            screen
+        }
     }
 
     @ViewBuilder private var screen: some View {

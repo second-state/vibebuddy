@@ -5,6 +5,8 @@
 // The views that use all this come in the next steps.
 #![allow(dead_code)]
 
+mod controls;
+mod pages;
 pub mod picture;
 #[cfg(test)]
 mod snapshots;
@@ -179,6 +181,22 @@ impl Section {
             Section::General => tr("How korekore behaves on this computer", &[]),
             Section::Advanced => tr("For when something's off", &[]),
         }
+    }
+
+    /// The current UI's tab this section stands for: same state, same messages.
+    pub fn tab(self) -> crate::Tab {
+        match self {
+            Section::Character => crate::Tab::Sound,
+            Section::Agents => crate::Tab::Agents,
+            Section::Conversation => crate::Tab::Conversation,
+            Section::Device => crate::Tab::Device,
+            Section::General => crate::Tab::General,
+            Section::Advanced => crate::Tab::Advanced,
+        }
+    }
+
+    pub fn of(tab: crate::Tab) -> Self {
+        Section::ALL.into_iter().find(|section| section.tab() == tab).unwrap_or(Section::Character)
     }
 
     pub fn tile(self) -> &'static str {
