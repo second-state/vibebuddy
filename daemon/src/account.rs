@@ -216,6 +216,30 @@ impl Account {
         self.keep(None)
     }
 
+    /// A voice token for the box with this key, for it to call the voice service itself over the Relay (ADR-0018,
+    /// docs/api.md): the token and when it expires, as the service wrote it. Blocking.
+    pub fn voice_token(&self, box_key: &str) -> Result<(String, String), AccountError> {
+        let token = self.token().ok_or(AccountError::NotSignedIn)?;
+        let base = self.base.clone().ok_or(AccountError::Unavailable)?;
+        let body = serde_json::json!({"box": box_key}).to_string();
+        let (status, text) = read(
+            crate::speech::agent(TIMEOUT)
+                .post(&format!("{base}/v1/voice/token"))
+                .header("Authorization", &format!("Bearer {token}"))
+                .header("Content-Type", "application/json")
+                .send(body.as_bytes()),
+        )?;
+        if status == 401 {
+            self.forget();
+            return Err(AccountError::NotSignedIn);
+        }
+        let answer: serde_json::Value = serde_json::from_str(&text).unwrap_or_default();
+        match (status, answer["token"].as_str(), answer["expires_at"].as_str()) {
+            (200, Some(token), Some(expires)) => Ok((token.to_owned(), expires.to_owned())),
+            _ => Err(AccountError::Service(format!("no voice token: HTTP {status} {}", text.chars().take(200).collect::<String>()))),
+        }
+    }
+
     /// The service no longer takes the session (a 401): signed out.
     pub fn forget(&self) {
         warn!("the service no longer takes the session; signed out");
@@ -253,9 +277,15 @@ impl Account {
 /// An account signed in with `token`, its file in `dir`, for other modules' tests.
 #[cfg(test)]
 pub fn signed_in_for_tests(dir: &Path, token: &str) -> Account {
+    signed_in_at("http://127.0.0.1:9", dir, token)
+}
+
+/// The same, with the service at `base`.
+#[cfg(test)]
+pub fn signed_in_at(base: &str, dir: &Path, token: &str) -> Account {
     std::fs::create_dir_all(dir).unwrap();
     crate::resident_claude::write_private(&dir.join(ACCOUNT_FILE), &serde_json::json!({"token": token, "github_id": 1}).to_string()).unwrap();
-    Account::new(Some("http://127.0.0.1:9".to_owned()), Some(dir), 7331)
+    Account::new(Some(base.to_owned()), Some(dir), 7331)
 }
 
 fn load(path: &Path) -> Option<Saved> {
@@ -455,6 +485,20 @@ mod tests {
         account.delete().unwrap();
         assert!(!account.status().signed_in);
         assert!(seen.lock().unwrap()[1].starts_with("DELETE /v1/account"));
+    }
+
+    #[test]
+    fn fetches_a_voice_token_for_a_box_and_signs_out_on_a_401() {
+        let dir = scratch();
+        let (service, seen) = serve(vec![(200, r#"{"token":"vbt1.p.m","expires_at":"2026-10-23T15:00:00.000Z"}"#), (401, r#"{"error":"unauthorized"}"#)]);
+        let account = signed_in(&service, dir.as_path());
+        assert_eq!(account.voice_token("BOXKEY").unwrap(), ("vbt1.p.m".to_owned(), "2026-10-23T15:00:00.000Z".to_owned()));
+        let request = seen.lock().unwrap()[0].clone();
+        assert!(request.starts_with("POST /v1/voice/token"));
+        assert!(request.to_ascii_lowercase().contains("authorization: bearer tok"));
+        assert!(request.ends_with(r#"{"box":"BOXKEY"}"#));
+        assert_eq!(account.voice_token("BOXKEY"), Err(AccountError::NotSignedIn));
+        assert!(!account.status().signed_in);
     }
 
     #[test]

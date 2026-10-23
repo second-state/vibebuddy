@@ -170,6 +170,14 @@ pub fn wav(samples: &[i16]) -> Vec<u8> {
     out
 }
 
+/// `voice.token`: what a box on the Relay presents to the voice service itself (ADR-0018, docs/api.md).
+pub fn token_event(token: &str, expires_at: &str) -> Event {
+    let mut event = Event::named("voice.token");
+    event.extra.insert("token".to_owned(), token.into());
+    event.extra.insert("expires_at".to_owned(), expires_at.into());
+    event
+}
+
 /// `voice.available`: whether the box may treat a long K0 as push-to-talk.
 pub fn available_event(on: bool) -> Event {
     let mut event = Event::named("voice.available");
@@ -317,6 +325,11 @@ impl Voice {
     /// account, ADR-0018) and the resident session is on and ready: the user's Codex is installed and logged in.
     pub fn available(&self) -> bool {
         self.recognizer.as_ref().is_some_and(|recognizer| recognizer.ready()) && self.resident.as_ref().is_some_and(|resident| resident.ready())
+    }
+
+    /// Recognition is the voice service's, so a box on the Relay can be given a voice token to call it itself.
+    pub fn uses_voice_service(&self) -> bool {
+        self.recognizer.as_ref().is_some_and(|recognizer| recognizer.is_voice_service())
     }
 
     /// Takes one `VOICE` line from the box. A turn that ends starts a task, returned so tests can wait for it;

@@ -102,7 +102,7 @@ The `READY`, `EVENT`, `TITLE` and `ERROR` lines the firmware prints are diagnost
 
 These messages are the app operating on the device itself. They don't count as agent activity, don't wake Leisure mode, and don't produce `EVENT` diagnostic lines.
 
-`device.hello` is the Mac's greeting right after connecting, sent once the box has been listened to and hasn't given itself away as other firmware (see decision 17 in [`architecture.md`](architecture.md)); a box that runs other firmware is written nothing, hello included, and `/v1/status` reports `device.foreign_firmware: true`. It is needed because mode, firmware build number, voice and volume are otherwise reported only at boot or on change, and the daemon restarts more often than the device, so without asking it would never know. The device replies with these diagnostic lines: `DISPLAY READY BUILD …`, `FIRMWARE VERSION …`, `MODE …`, `VOICES …`, `VOLUME …`, and `TOUCH …` from firmware that knows the touchscreen; firmware that can pair adds `BOX KEY …` after the version (see Pairing below), and firmware that links off the cable only through a Noise session puts `LINK NOISE` just before it (see Local network link). `FIRMWARE VERSION` carries the firmware version (`0.2.2`), which orders releases (ADR-0010); it is also printed at boot, and firmware older than it doesn't print it.
+`device.hello` is the Mac's greeting right after connecting, sent once the box has been listened to and hasn't given itself away as other firmware (see decision 17 in [`architecture.md`](architecture.md)); a box that runs other firmware is written nothing, hello included, and `/v1/status` reports `device.foreign_firmware: true`. It is needed because mode, firmware build number, voice and volume are otherwise reported only at boot or on change, and the daemon restarts more often than the device, so without asking it would never know. The device replies with these diagnostic lines: `DISPLAY READY BUILD …`, `FIRMWARE VERSION …`, `MODE …`, `VOICES …`, `VOLUME …`, and `TOUCH …` from firmware that knows the touchscreen; firmware that can pair adds `BOX KEY …` after the version (see Pairing below), and firmware that links off the cable only through a Noise session puts `LINK NOISE` just before it (see Local network link); firmware that calls the voice service itself over the Relay adds `VOICE DIRECT` (see Voice commands, "Over the Relay"). `FIRMWARE VERSION` carries the firmware version (`0.2.2`), which orders releases (ADR-0010); it is also printed at boot, and firmware older than it doesn't print it.
 
 `device.echo` is a link self-test: the device returns the length and CRC32 of the `data` string as `{"event":"echo","length":…,"crc":…}`, then echoes a line `ECHO …` verbatim. It's used to check whether the serial port is receiving corrupted bytes; that's how the UART bridge problem was tracked down.
 
@@ -233,7 +233,7 @@ USB stays in the clear: the cable is physical presence, as pairing already assum
 
 ## Voice commands (experimental)
 
-A voice command (ADR-0017) on a box linked over USB or the local network: the box records while K0 is held and streams the audio over the link; the computer turns it into text, hands it to the resident session and sends the spoken replies back. Over the Relay the box will talk to the voice service itself (ADR-0018); that path isn't described here yet.
+A voice command (ADR-0017) on a box linked over USB or the local network: the box records while K0 is held and streams the audio over the link; the computer turns it into text, hands it to the resident session and sends the spoken replies back. Over the Relay the box talks to the voice service itself (ADR-0018), with a voice token the computer gives it ("Over the Relay" below).
 
 The computer offers voice, and the box only treats a long K0 as push-to-talk while it is offered:
 
@@ -265,6 +265,16 @@ The computer also sends each spoken reply's audio, synthesized in the Character'
 - `voice.audio` with `reply`, `seq` and `"end":true` (no `data`): that reply's audio is over. With `"error":"synthesis"` as well, synthesis failed or was cut short: the box plays what it has, keeps the text, and logs the failure instead of passing it off as a whole reply.
 
 The box plays replies in order, one after another, and starts a reply as soon as it has enough frames, without waiting for its end. If synthesis fails the reply stays text only. While muted the box shows replies without playing them. The box plays audio only for the turn it recorded last (`voice.audio` carries `turn` like the other answers), and stops a turn's replies for good, ignoring the rest of its audio, when the Pomodoro chime is about to play (it wins), when it is muted, when a new K0 push-to-talk starts, or when the overlay closes. The overlay stays up past its read time while a reply is still being spoken. An Agent's news during a voice command (needs input, failed, done) doesn't close the overlay or cut a reply short: the overlay marks needs input and failed in yellow, and the worst of what came is announced once, when the overlay closes (`AUDIO HELD <occasion>` when it is held). A missing chunk is skipped (the decoder finds the next frame, so the reply only loses a moment); a chunk arriving after a later one is ignored.
+
+
+### Over the Relay
+
+Linked through the Relay, the box doesn't send its audio over the link: it calls the voice service itself over Wi-Fi (docs/api.md, "Voice"), and the computer's resident session still answers. With the user's own speech recognizer, whose key the box can't hold, nothing here applies and voice isn't offered over the Relay.
+
+- `VOICE DIRECT`: a diagnostic line firmware that can do this prints in reply to `device.hello` (and so on every new link and reboot), next to `BOX KEY`. Firmware that doesn't print it is never sent a token.
+- `{"version":1,"event":"voice.token","token":"vbt1.…","expires_at":"2026-10-23T15:14:46.000Z"}`: the computer sends it while linked through the Relay, signed in to the account and recognizing through the voice service. It sends one as soon as the box says `VOICE DIRECT`, and a fresh one every 45 minutes; a token lasts an hour. The box keeps only the latest, in RAM, and sends it as `Authorization: Bearer` on its own calls. When the computer is signed out, unlinks or switches to its own recognizer, it stops sending them, and the last one runs out within the hour.
+
+How the box hands the transcript to the computer and plays the replies over the Relay comes with the firmware side (#163).
 
 ## Stage 1 error output
 

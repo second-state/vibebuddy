@@ -50,6 +50,8 @@ pub struct DeviceState {
     pub box_key: Option<String>,
     /// The box has confirmed it is paired with this computer.
     pub paired: bool,
+    /// The box said `VOICE DIRECT`: over the Relay it calls the voice service itself, with a voice token (ADR-0018).
+    pub voice_direct: bool,
     /// This computer's own key, so the app can tell it apart in `paired_computers`. Set once at start.
     pub computer_key: Option<String>,
     /// Every computer the box is paired with, as it last listed them.
@@ -130,6 +132,7 @@ impl DeviceState {
                 self.voice = None;
                 self.volume = None;
                 self.box_key = None;
+                self.voice_direct = false;
                 self.paired = false;
                 self.paired_computers.clear();
                 self.wifi_network = None;
@@ -164,6 +167,7 @@ impl DeviceState {
                 self.voice = None;
                 self.volume = None;
                 self.box_key = None;
+                self.voice_direct = false;
                 self.paired = false;
                 self.paired_computers.clear();
                 self.wifi_network = None;
@@ -210,6 +214,8 @@ impl DeviceState {
                         self.wifi_address = None;
                     }
                     self.box_key = Some(key.to_owned());
+                } else if line.trim() == "VOICE DIRECT" {
+                    self.voice_direct = true;
                 } else if line.starts_with("PAIRED ") {
                     self.paired = true;
                 } else if let Some(url) = line.strip_prefix("RELAY URL ") {
@@ -431,6 +437,7 @@ mod tests {
                 volume: Some(65),
                 usb_serial: None,
                 box_key: None,
+                voice_direct: false,
                 paired: false,
                 computer_key: None,
                 paired_computers: Vec::new(),

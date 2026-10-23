@@ -315,6 +315,7 @@ async fn main() {
         follow_resident_readiness(&state, resident);
     }
     follow_account(&state);
+    tokio::spawn(hand_out_voice_tokens(state.clone()));
     // On macOS the app reports a lost link; elsewhere there is no app, so the daemon does it.
     if !cfg!(target_os = "macos") {
         tokio::spawn(link_alert::watch(state.clone()));
@@ -496,6 +497,77 @@ fn follow_account(state: &AppState) {
             offer_voice_again(&follower).await;
         }
     });
+}
+
+/// How long a voice token is used before the next is fetched; it lasts an hour.
+const VOICE_TOKEN_RENEW: Duration = Duration::from_secs(45 * 60);
+/// How soon to try again when the service gave none.
+const VOICE_TOKEN_RETRY: Duration = Duration::from_secs(60);
+
+/// The box a voice token is due for, if any: linked through the Relay and saying `VOICE DIRECT`, while this computer is
+/// signed in and recognition is the voice service's. With the user's own recognizer the audio comes over the link
+/// instead, since the box can't hold their key (ADR-0018).
+fn voice_token_box(device: &DeviceState, signed_in: bool, uses_voice_service: bool) -> Option<String> {
+    (device.connected && device.relay && device.voice_direct && signed_in && uses_voice_service).then(|| device.box_key.clone()).flatten()
+}
+
+/// Keeps a box on the Relay supplied with voice tokens (docs/protocol.md, "Voice commands"): one as soon as it says
+/// `VOICE DIRECT`, which it does on every new link and reboot (its token lives only in RAM), then a fresh one every
+/// [`VOICE_TOKEN_RENEW`]. Nothing while the conditions of [`voice_token_box`] don't hold.
+async fn hand_out_voice_tokens(state: AppState) {
+    let mut status = state.status_changed.subscribe();
+    let mut lines = state.device_bus.subscribe();
+    // The box last given a token, and when the next is due.
+    let mut handed: Option<(String, tokio::time::Instant)> = None;
+    loop {
+        let wanted = {
+            let device = state.device.lock().await;
+            voice_token_box(&device, state.account.status().signed_in, state.voice.uses_voice_service())
+        };
+        let due = match wanted {
+            None => {
+                handed = None;
+                None
+            }
+            Some(box_key) => {
+                let now = tokio::time::Instant::now();
+                if handed.as_ref().is_none_or(|(given, at)| *given != box_key || *at <= now) {
+                    let (account, key) = (state.account.clone(), box_key.clone());
+                    let fetched = tokio::task::spawn_blocking(move || account.voice_token(&key))
+                        .await
+                        .unwrap_or_else(|error| Err(account::AccountError::Service(error.to_string())));
+                    let next = match fetched {
+                        Ok((token, expires_at)) => {
+                            send_event(&state, voice::token_event(&token, &expires_at));
+                            info!(%expires_at, "gave the box on the Relay a voice token");
+                            now + VOICE_TOKEN_RENEW
+                        }
+                        Err(error) => {
+                            warn!(%error, "no voice token for the box on the Relay; trying again soon");
+                            now + VOICE_TOKEN_RETRY
+                        }
+                    };
+                    handed = Some((box_key, next));
+                }
+                handed.as_ref().map(|(_, at)| *at)
+            }
+        };
+        tokio::select! {
+            _ = status.recv() => {}
+            message = lines.recv() => {
+                // A box that says it again has just linked or restarted, and lost its token.
+                if matches!(&message, Ok(DeviceMessage::Line(line)) if line.trim() == "VOICE DIRECT") {
+                    handed = None;
+                }
+            }
+            _ = async {
+                match due {
+                    Some(at) => tokio::time::sleep_until(at).await,
+                    None => std::future::pending().await,
+                }
+            } => {}
+        }
+    }
 }
 
 /// Checks the resident session's readiness every [`resident::READINESS_TTL`] and tells the box each time it flips.
@@ -2097,6 +2169,82 @@ mod tests {
     }
 
     /// A recognizer that is never called: these tests only look at whether voice is offered.
+    #[test]
+    fn a_voice_token_is_due_only_for_a_box_on_the_relay_that_can_use_it() {
+        let device = DeviceState { connected: true, relay: true, voice_direct: true, box_key: Some("BOX".to_owned()), ..Default::default() };
+        assert_eq!(voice_token_box(&device, true, true).as_deref(), Some("BOX"));
+        assert_eq!(voice_token_box(&device, false, true), None, "signed out");
+        assert_eq!(voice_token_box(&device, true, false), None, "the user's own recognizer: audio comes over the link");
+        assert_eq!(voice_token_box(&DeviceState { relay: false, ..device.clone() }, true, true), None, "on the cable or the LAN");
+        assert_eq!(voice_token_box(&DeviceState { voice_direct: false, ..device.clone() }, true, true), None, "firmware that can't use one");
+        assert_eq!(voice_token_box(&DeviceState { connected: false, ..device }, true, true), None);
+    }
+
+    /// Recognition by the voice service, as far as the token handout is concerned.
+    struct ServiceRecognizer;
+
+    impl speech::Recognizer for ServiceRecognizer {
+        fn recognize(&self, _wav: &[u8]) -> Result<speech::Transcript, speech::RecognitionError> {
+            Ok(speech::Transcript::default())
+        }
+
+        fn is_voice_service(&self) -> bool {
+            true
+        }
+    }
+
+    #[tokio::test]
+    async fn a_box_on_the_relay_gets_a_voice_token_and_another_after_it_restarts() {
+        use std::io::{BufRead, BufReader, Read, Write};
+        // A fake service handing out numbered tokens.
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let service = format!("http://{}", listener.local_addr().unwrap());
+        std::thread::spawn(move || {
+            for (n, stream) in listener.incoming().enumerate() {
+                let Ok(stream) = stream else { return };
+                let mut reader = BufReader::new(stream.try_clone().unwrap());
+                let mut length = 0;
+                loop {
+                    let mut line = String::new();
+                    if reader.read_line(&mut line).unwrap_or(0) == 0 || line == "\r\n" {
+                        break;
+                    }
+                    if let Some(value) = line.to_ascii_lowercase().strip_prefix("content-length:") {
+                        length = value.trim().parse().unwrap_or(0);
+                    }
+                }
+                reader.read_exact(&mut vec![0; length]).unwrap();
+                let body = format!(r#"{{"token":"vbt1.t{n}","expires_at":"later"}}"#);
+                let mut stream = stream;
+                let _ = write!(stream, "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}", body.len());
+            }
+        });
+        let transport = Arc::new(RecordingTransport::default());
+        let mut state = test_state(transport.clone());
+        let dir = std::env::temp_dir().join(format!("vibebuddy-token-handout-{}", std::process::id()));
+        state.account = Arc::new(account::signed_in_at(&service, &dir, "tok"));
+        state.voice = Arc::new(voice::Voice::new(Some(Arc::new(ServiceRecognizer)), None));
+        *state.device.lock().await = DeviceState { connected: true, relay: true, voice_direct: true, box_key: Some("BOX".to_owned()), ..Default::default() };
+        tokio::spawn(hand_out_voice_tokens(state.clone()));
+        let tokens = || transport.events().into_iter().filter(|event| event.event == "voice.token").map(|event| event.extra["token"].as_str().unwrap().to_owned()).collect::<Vec<_>>();
+        for _ in 0..200 {
+            if !tokens().is_empty() {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+        assert_eq!(tokens(), ["vbt1.t0"]);
+        // The box restarted on the Relay: it says VOICE DIRECT again and needs a new token at once.
+        let _ = state.device_bus.send(DeviceMessage::Line("VOICE DIRECT".to_owned()));
+        for _ in 0..200 {
+            if tokens().len() == 2 {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+        assert_eq!(tokens(), ["vbt1.t0", "vbt1.t1"]);
+    }
+
     struct SilentRecognizer;
 
     impl speech::Recognizer for SilentRecognizer {

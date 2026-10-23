@@ -82,6 +82,12 @@ pub trait Recognizer: Send + Sync {
     fn ready(&self) -> bool {
         true
     }
+
+    /// The voice service, which a box on the Relay can call itself with a voice token; the user's own recognizer
+    /// can't be, so its audio comes over the link (ADR-0018).
+    fn is_voice_service(&self) -> bool {
+        false
+    }
 }
 
 /// An HTTP request, built apart from sending it so the tests can check it.
@@ -184,6 +190,10 @@ impl Recognizer for VoiceService {
 
     fn ready(&self) -> bool {
         self.session.is_none() || self.token().is_some()
+    }
+
+    fn is_voice_service(&self) -> bool {
+        true
     }
 }
 
