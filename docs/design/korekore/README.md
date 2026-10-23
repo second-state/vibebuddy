@@ -2,6 +2,8 @@
 
 korekore (これこれ, "here, here!") is VibeBuddy's new face: a kawaii, Japanese-cartoon desk cheerleader, with **your vibebuddy** kept beside the name for people who already own a box. It is built as a **new UI beside the current one**, behind a switch; the current UI is not touched (see the ground rule in the implementation plan). Why: [ADR-0020](../../adr/0020-the-box-and-the-apps-share-the-korekore-look.md).
 
+> **Since [ADR-0021](../../adr/0021-the-apps-become-korekore-and-the-user-picks-the-box-screens.md):** the apps will have only the korekore look (until Phase 2 is accepted it opens with `VIBEBUDDY_UI=korekore`), and the box's screens are the user's choice, robot by default, from one firmware image that carries both: there is no `korekore` cargo feature. Where this plan says otherwise, the ADR wins.
+
 This folder is everything an implementer needs; the two links below are the same design as live pages (private: ask Frank for access).
 
 - Design canvas, every screen: <https://claude.ai/artifact/9NXAKq7WS5XySKZ466YNfS>
@@ -135,6 +137,7 @@ The current UI (settings window, onboarding, menu bar item, box screens) is fini
 - Generate per-platform tokens from `tokens.json`: a Swift `KorekoreTheme` in `app/Sources/VibeBuddy/Korekore/`, a Rust module `desktop/src/korekore/theme.rs`, and RGB565 constants in a new `firmware-rs/core/src/korekore/` module (RGB565: `((r >> 3) << 11) | ((g >> 2) << 5) | (b >> 3)`).
 - Turn `pixel/*.json` into code with a small generator in `tools/`: a Swift sprite renderer (CGImage, `.interpolation(.none)`), a Rust one for iced (RGBA `image::Handle`, `FilterMethod::Nearest`), and `static` RGB565 tables for the firmware (flash, not heap).
 - Add the UI switch in both apps (read at launch), defaulting to the current UI.
+- Done: `tools/korekore-codegen.py` writes the theme and sprites for all three (`--check` runs in CI through `tools/test_korekore_codegen.py`); `tools/korekore-fonts.py` writes the subset fonts to `fonts/korekore/`. Both font families are Japanese, so the 1,605 Chinese characters M PLUS Rounded 1c lacks are filled in from Resource Han Rounded CN (OFL) at the same weight; DotGothic16 is not filled in, and a Chinese character it lacks falls back to the system font.
 
 ### Phase 2: the korekore apps (Mac and Linux in the same PR)
 

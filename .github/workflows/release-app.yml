@@ -17,6 +17,7 @@ on:
       - "firmware-rs/core/**"
       - "manifest/**"
       - "characters/**"
+      - "fonts/**"
       - "tools/check-localization.py"
       - "tools/package-licenses.py"
       - "packaging/**"

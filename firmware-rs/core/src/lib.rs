@@ -21,6 +21,7 @@ pub mod character_pack;
 pub mod display;
 pub mod firmware;
 pub mod font;
+pub mod korekore;
 pub mod lan;
 pub mod lcd;
 pub mod leisure;

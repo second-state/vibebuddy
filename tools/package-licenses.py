@@ -66,6 +66,10 @@ def main():
             for path in sorted(fonts.rglob("*.txt"))))
     else:
         (licenses / "THIRD-PARTY-APP.txt").write_text(dependency_notices("Cargo.toml", app_target))
+        # Both apps carry the korekore fonts (OFL, tools/korekore-fonts.py); their licenses travel with them.
+        fonts = ROOT / "fonts/korekore"
+        (licenses / "FONTS.txt").write_text("\n\n".join(
+            f"{path.name}\n{'=' * len(path.name)}\n\n{path.read_text()}" for path in sorted(fonts.glob("*.txt"))))
     revision = run("git", "rev-parse", "HEAD")
     lockfile = "firmware-rs/device/Cargo.lock" if firmware else "Cargo.lock"
     serialport = "" if firmware else ", including the unmodified\nMPL-2.0-covered serialport dependency"

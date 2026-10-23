@@ -15,6 +15,7 @@ mod firmware_file;
 mod i18n;
 #[cfg(target_os = "linux")]
 mod instance;
+mod korekore;
 mod preview;
 mod status;
 mod theme;
@@ -349,6 +350,8 @@ impl App {
         app.guide = (first && cfg!(target_os = "linux")).then_some(0);
         let open = first || restarted || !cfg!(target_os = "linux");
         let task = if open { Task::done(Message::OpenSettings) } else { Task::none() };
+        // The korekore UI's fonts, only when it was asked for (ADR-0021): the current UI keeps the system's.
+        let task = if korekore::requested() { Task::batch([task, korekore::load_fonts()]) } else { task };
         (app, task)
     }
 
