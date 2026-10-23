@@ -28,3 +28,7 @@ zip = { version = "2", default-features = false, features = ["deflate"] }
 ksni = "0.3"
 # The file chooser goes through the desktop portal, as other apps' do.
 rfd = { version = "0.15", default-features = false, features = ["xdg-portal", "tokio"] }
+
+[dev-dependencies]
+# Draws the korekore views headless into PNGs, to set beside the design canvas (src/korekore/preview.rs).
+iced_test = "0.14"

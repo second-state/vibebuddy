@@ -10,8 +10,10 @@ public struct Status: Codable, Equatable {
     public var config: DaemonConfig
     /// What the update manifest offers (ADR-0010); absent from older daemons.
     public var updates: UpdateStatus?
+    /// Every Activity, newest first, as the box's task cards show them; absent from older daemons.
+    public var activities: [ActivitySummary]?
 
-    public init(daemon: DaemonInfo, device: DeviceState, today: TodaySummary, hooks: HooksSeen, operation: DeviceOperation?, config: DaemonConfig, updates: UpdateStatus? = nil) {
+    public init(daemon: DaemonInfo, device: DeviceState, today: TodaySummary, hooks: HooksSeen, operation: DeviceOperation?, config: DaemonConfig, updates: UpdateStatus? = nil, activities: [ActivitySummary]? = nil) {
         self.daemon = daemon
         self.device = device
         self.today = today
@@ -19,6 +21,25 @@ public struct Status: Codable, Equatable {
         self.operation = operation
         self.config = config
         self.updates = updates
+        self.activities = activities
+    }
+}
+
+/// One Activity as the daemon summarises it (daemon/src/activity.rs `ActivitySummary`).
+public struct ActivitySummary: Codable, Equatable, Sendable {
+    /// `codex`, `claude-code`, `github-actions`, or the agent a CLI hook names (`opencode`, `copilot`, `pi`).
+    public var agent: String
+    /// The task card's title, with the prefix that tells agents apart (`CC:`, `CX:`…).
+    public var title: String
+    public var project: String?
+    /// `working` or `needs_input`.
+    public var state: String
+
+    public init(agent: String, title: String, project: String? = nil, state: String) {
+        self.agent = agent
+        self.title = title
+        self.project = project
+        self.state = state
     }
 }
 

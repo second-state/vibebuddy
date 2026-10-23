@@ -353,6 +353,30 @@ do {
     check(KorekoreSprites.all.values.allSatisfy { s in s.pixels.count == s.width * s.height && s.pixels.allSatisfy { Int($0) <= s.palette.count } }, "every sprite is whole")
 }
 
+// 8. korekore's picture of the box (ADR-0021), drawn from the status's Activities.
+do {
+    let json = #"""
+    {"daemon":{"build":"x"},"device":{"connected":true,"bridge":false,"mode":"duty","network":true},
+     "today":{"done":7,"asks":3,"busy_seconds":15120},"hooks":{},"config":{"notify_link":true},
+     "activities":[{"agent":"codex","title":"CX:Review changes","project":"vibebuddy","state":"needs_input","host":"app","state_for_s":3,"last_event_s":3},
+                   {"agent":"claude-code","title":"CC:Add Chinese","state":"working","host":"none","state_for_s":9,"last_event_s":9},
+                   {"agent":"github-actions","title":"CI:App tests","state":"working","host":"github","state_for_s":1,"last_event_s":1},
+                   {"agent":"pi","title":"PI:Older","state":"working","host":"none","state_for_s":1,"last_event_s":1}]}
+    """#
+    let status = try StatusCoding.decoder().decode(Status.self, from: Data(json.utf8))
+    check(status.activities?.count == 4, "activities decode")
+    let picture = BoxPicture.derive(status: status, daemonAlive: true)
+    check(picture.mood == .input && picture.link == .lan, "an Activity waiting on you makes the box ask; linked over the network")
+    check(picture.tickets.map(\.icon) == ["cx", "cc", "ci"] && picture.tickets.first?.title == "Review changes", "the newest three, by tile, without prefix")
+    check(BoxPicture.derive(status: status, daemonAlive: false).mood == .noLink, "no daemon, no link")
+    check(BoxPicture.cardTitle("Fix: the build") == "Fix: the build", "only a short capital prefix is dropped")
+    check(BoxPicture.busy(15120) == "4h12m" && BoxPicture.busy(2100) == "35m", "busy time reads 4h12m")
+    let old = try StatusCoding.decoder().decode(Status.self, from: Data(sample.utf8))
+    check(old.activities == nil && BoxPicture.derive(status: old, daemonAlive: true).mood == .pomodoro, "an older daemon without activities still decodes; its box is in a Pomodoro")
+} catch {
+    check(false, "korekore status fails to decode: \(error)")
+}
+
 if failures > 0 {
     print("\(failures) failure(s)")
     exit(1)

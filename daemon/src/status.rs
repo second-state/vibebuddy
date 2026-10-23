@@ -342,6 +342,8 @@ pub struct Status {
     pub daemon: DaemonInfo,
     pub device: DeviceState,
     pub today: TodaySummary,
+    /// Every Activity, newest first: what the box's task cards show, for the apps' picture of the box (ADR-0021).
+    pub activities: Vec<crate::activity::ActivitySummary>,
     pub hooks: HooksSeen,
     pub operation: Option<Operation>,
     pub config: Config,

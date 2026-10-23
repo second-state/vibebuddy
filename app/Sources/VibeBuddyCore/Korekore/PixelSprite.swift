@@ -34,6 +34,21 @@ public struct PixelSprite: Sendable {
         }
         return bytes
     }
+
+    /// The sprite in gray, as CSS `grayscale(1) brightness(b)` draws it: each colour's luminance (Rec. 709
+    /// weights), scaled by `brightness`. The canvas grays Kore this way when the box has no link.
+    public func grayed(brightness: Double) -> PixelSprite {
+        // Typed step by step: as one expression it is too slow for the type checker on CI's Xcode.
+        let palette = palette.map { (rgb: UInt32) -> UInt32 in
+            let r: Double = Double((rgb >> 16) & 0xFF)
+            let g: Double = Double((rgb >> 8) & 0xFF)
+            let b: Double = Double(rgb & 0xFF)
+            let luminance: Double = 0.2126 * r + 0.7152 * g + 0.0722 * b
+            let level: UInt32 = UInt32(Swift.min(255.0, Swift.max(0.0, (luminance * brightness).rounded())))
+            return (level << 16) | (level << 8) | level
+        }
+        return PixelSprite(width: width, height: height, palette: palette, pixels: pixels)
+    }
 }
 
 /// Which settings window, onboarding and menu bar the app shows (ADR-0021). The korekore UI opens only with

@@ -346,3 +346,30 @@
 "Claude Code answers voice commands only with your own Anthropic API key. Add your key above." = "Claude Code 只用你自己的 Anthropic API 密钥回答语音指令。请在上面填入你的密钥。";
 "Or let Claude Code answer, with your own Anthropic API key: add it above." = "也可以让 Claude Code 来回答，用你自己的 Anthropic API 密钥：在上面填入即可。";
 "How to install Claude Code" = "如何安装 Claude Code";
+
+/* korekore UI (ADR-0021) */
+"%lld done · %lld asks today" = "今天完成 %lld 个 · 提问 %lld 次";
+"DAEMON NOT RUNNING" = "daemon 没在运行";
+"BOX ONLINE · %@" = "盒子在线 · %@";
+"NO BOX LINKED" = "没有连上盒子";
+"app %@ · box fw %@" = "App %@ · 盒子固件 %@";
+"app %@" = "App %@";
+"This page comes with the next step of korekore." = "这一页会在 korekore 的下一步做好。";
+"%@ done" = "完成 %@";
+"%@ asks" = "提问 %@";
+"%@ busy" = "忙碌 %@";
+"1 AGENT" = "1 个 Agent";
+"%lld AGENTS" = "%lld 个 Agent";
+"box online · %@ · fw %@" = "盒子在线 · %@ · 固件 %@";
+"box online · %@" = "盒子在线 · %@";
+"no box linked" = "没有连上盒子";
+"Who lives in the box" = "谁住在盒子里";
+"Who the box watches" = "盒子替你看着谁";
+"Hold K0 on the box and ask" = "按住盒子上的 K0 提问";
+"The box, its firmware and its network" = "盒子、固件和网络";
+"How korekore behaves on this Mac" = "korekore 在这台 Mac 上怎么工作";
+"How korekore behaves on this computer" = "korekore 在这台电脑上怎么工作";
+"For when something's off" = "出问题时来这里";
+"Check for updates…" = "检查更新…";
+"Report a problem…" = "报告问题…";
+"Quit korekore (the box goes offline)" = "退出 korekore（盒子将离线）";

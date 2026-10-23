@@ -145,6 +145,8 @@ The current UI (settings window, onboarding, menu bar item, box screens) is fini
 - **Mac menu bar**: today `NSStatusItem` + `NSMenu` (`AppDelegate.swift` l.35, rebuilt l.124-152 from `VibeBuddyCore/MenuState.swift`). With the switch on, use Kore as the icon and a `MenuBarExtra(.window)` panel fed by the same `MenuState`.
 - **Linux**, new module `desktop/src/korekore/`: a sidebar view and one function per section, mirroring the current `enum Tab` (`main.rs` l.67) and section methods, but in new code; the first-run guide likewise (current `guide()` ~l.905). With the switch on, `view()` (l.877) delegates to it. The korekore UI ignores `theme.rs`/Omarchy and uses its own palette; the current UI keeps following Omarchy.
 - **Kore in the tray and menu bar**: new sprite code; leave `PixelFace.swift` and `desktop/src/face.rs` as they are for the current UI.
+- Done in 2a (behind `VIBEBUDDY_UI=korekore`): the window, the sidebar with the mini box, the menu bar item and its panel, and Kore in the Linux tray. The mini box reads the Activities `/v1/status` now carries. The Mac views live in `app/Sources/KorekoreUI` and are drawn with sample data by `swift run --package-path app KorekorePreview <dir>`; the Linux ones by `cargo test -p vibebuddy-desktop korekore::snapshots -- --ignored` (into `target/korekore-preview`). Screenshots: `screenshots/phase-2a/`.
+- **Linux differs** in two places: the tray keeps its StatusNotifierItem menu, since a tray host draws that menu itself and has no room for the Mac's panel (the icon is Kore, with the same `sun` dot and gray); and Omarchy draws the window's frame, so the view is the inside of the design's window, without its outline, shadow or window buttons.
 
 ### Phase 3: the korekore box
 

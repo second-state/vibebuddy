@@ -162,6 +162,10 @@ impl AppState {
     async fn snapshot(&self) -> Status {
         let device = self.device.lock().await.clone();
         let updates = self.updates.lock().await.status(&device, self.update_checks_enabled().await);
+        let (today, activities) = {
+            let tracker = self.activities.lock().await;
+            (tracker.today(), tracker.summaries())
+        };
         Status {
             daemon: DaemonInfo {
                 build: build_identity(self.app_version.as_deref()),
@@ -169,7 +173,8 @@ impl AppState {
                 app_version: self.app_version.clone(),
             },
             device,
-            today: self.activities.lock().await.today(),
+            today,
+            activities,
             hooks: self.hooks_seen.lock().await.clone(),
             operation: self.operation.lock().await.clone(),
             config: self.config.lock().await.clone(),
@@ -1384,6 +1389,8 @@ async fn sweep_expired_activities(state: AppState) {
 
 /// Shared path for background tasks sending events. A full queue or encoding failure is only logged and doesn't affect the next round.
 fn send_event(state: &AppState, event: Event) {
+    // What the box shows changed, so the apps' picture of it (the Activities in the status) did too.
+    state.notify_status();
     match event.to_ndjson() {
         Ok(frame) => {
             if let Err(error) = state.transport.send(frame) {
@@ -1912,6 +1919,7 @@ mod tests {
         .unwrap();
         let _ = post_codex_hook(State(state.clone()), Json(hook)).await;
         assert_eq!(state.activities.lock().await.summaries().len(), 1);
+        assert_eq!(state.snapshot().await.activities.len(), 1, "the status carries the Activities");
         let _ = std::fs::remove_dir_all(dir);
     }
 

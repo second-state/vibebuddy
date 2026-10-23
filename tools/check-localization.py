@@ -28,7 +28,7 @@ import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-SOURCES = [ROOT / "app/Sources/VibeBuddy", ROOT / "app/Sources/VibeBuddyCore"]
+SOURCES = [ROOT / "app/Sources/VibeBuddy", ROOT / "app/Sources/VibeBuddyCore", ROOT / "app/Sources/KorekoreUI"]
 RUST_SOURCES = ROOT / "desktop/src"
 TABLE = ROOT / "app/Localization/zh-Hans.lproj/Localizable.strings"
 
@@ -134,7 +134,7 @@ def source_keys() -> dict[str, str]:
                     continue
                 line = code.count("\n", 0, offset) + 1
                 keys.setdefault(text, f"{path.relative_to(ROOT)}:{line}")
-    for path in sorted(RUST_SOURCES.glob("*.rs")):
+    for path in sorted(RUST_SOURCES.rglob("*.rs")):
         code = path.read_text(encoding="utf-8")
         for match in re.finditer(r'(?<![\w.])tr\(\s*"((?:[^"\\]|\\.)*)"', code):
             text = SPECIFIER.sub(PLACEHOLDER, unescape(match.group(1)))

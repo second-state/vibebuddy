@@ -178,6 +178,8 @@ enum Message {
     ExportDiagnostics,
     Done(Result<(), String>),
     Quit,
+    /// A section picked in the korekore UI's sidebar (ADR-0021).
+    Korekore(korekore::view::Pick),
 }
 
 #[cfg(target_os = "linux")]
@@ -268,6 +270,9 @@ struct App {
     /// VibeBuddy's Omarchy plugin is in the bar, showing the face; the tray icon would be a second one.
     #[cfg(target_os = "linux")]
     plugin: bool,
+    /// The korekore UI's section, when it was asked for at launch (`VIBEBUDDY_UI=korekore`, ADR-0021); None keeps
+    /// the current UI.
+    korekore: Option<korekore::Section>,
 }
 
 struct RestartOffer {
@@ -323,6 +328,7 @@ impl App {
             tray: None,
             #[cfg(target_os = "linux")]
             plugin: plugin_in_omarchy_bar(),
+            korekore: korekore::requested().then_some(korekore::Section::Character),
         };
         // The first launch shows the window, so it's clear where the app went; later ones stay in the tray, unless a
         // language change restarted the app from its window. Without a tray (macOS builds, for development) the
@@ -460,10 +466,16 @@ impl App {
                 if let Some(id) = self.settings {
                     return window::gain_focus(id);
                 }
-                // The same as the Mac's: room for the whole Character tab, resizable down to the old size.
+                // The same as the Mac's: room for the whole Character tab, resizable down to the old size. The
+                // korekore window is the design's 960 × 772, down to 900 × 760.
+                let (size, min_size) = if self.korekore.is_some() {
+                    (iced::Size::new(960.0, 772.0), iced::Size::new(900.0, 760.0))
+                } else {
+                    (iced::Size::new(760.0, 640.0), iced::Size::new(640.0, 480.0))
+                };
                 let (id, open) = window::open(window::Settings {
-                    size: iced::Size::new(760.0, 640.0),
-                    min_size: Some(iced::Size::new(640.0, 480.0)),
+                    size,
+                    min_size: Some(min_size),
                     #[cfg(target_os = "linux")]
                     platform_specific: window::settings::PlatformSpecific {
                         application_id: "vibebuddy".to_owned(),
@@ -854,6 +866,7 @@ impl App {
                 }
             }
             Message::Quit => return iced::exit(),
+            Message::Korekore(korekore::view::Pick(section)) => self.korekore = Some(section),
         }
         Task::none()
     }
@@ -863,12 +876,14 @@ impl App {
         #[cfg(target_os = "linux")]
         if let Some(TrayHandle(handle)) = self.tray.clone() {
             let menu = MenuState::derive(self.status.as_ref());
+            let kore = self.korekore.map(|_| korekore::picture::BoxPicture::derive(self.status.as_ref()));
             let [r, g, b, _] = self.theme.palette().text.into_rgba8();
             return Task::future(async move {
                 handle
                     .update(move |tray| {
                         tray.menu = menu;
                         tray.color = [r, g, b];
+                        tray.kore = kore;
                     })
                     .await;
             })
@@ -878,6 +893,9 @@ impl App {
     }
 
     fn view(&self, _window: window::Id) -> Element<'_, Message> {
+        if let Some(section) = self.korekore {
+            return self.korekore(section);
+        }
         if let Some(page) = self.guide {
             return self.guide(page);
         }
@@ -913,6 +931,18 @@ impl App {
             .spacing(16)
             .padding(20);
         container(content).width(Length::Fill).height(Length::Fill).into()
+    }
+
+    /// The korekore settings window (ADR-0021); its pages come in the next steps.
+    fn korekore(&self, section: korekore::Section) -> Element<'_, Message> {
+        // Voice commands are experimental: no Conversation section while the daemon has them off.
+        let sections: Vec<korekore::Section> = korekore::Section::ALL
+            .into_iter()
+            .filter(|&section| section != korekore::Section::Conversation || self.resident)
+            .collect();
+        let picture = korekore::picture::BoxPicture::derive(self.status.as_ref());
+        korekore::view::settings(&picture, &sections, section, env!("CARGO_PKG_VERSION"), korekore::view::pending())
+            .map(Message::Korekore)
     }
 
     /// First run on Linux: what the install script couldn't do. It already connected the agents and set up the start
@@ -2230,7 +2260,8 @@ fn run_tray() -> impl futures::Stream<Item = Message> {
 
     iced::stream::channel(16, async |mut output| {
         let (events, mut clicks) = futures::channel::mpsc::unbounded();
-        let tray = tray::Tray { menu: MenuState::derive(None), color: [255, 255, 255], events };
+        let kore = korekore::requested().then(|| korekore::picture::BoxPicture::derive(None));
+        let tray = tray::Tray { menu: MenuState::derive(None), kore, color: [255, 255, 255], events };
         // At login the app can start before the shell's tray host is up; ksni then registers once it appears, and
         // again after the shell restarts. The app opens the window if it doesn't (`Message::TrayHost`).
         match tray.assume_sni_available(true).spawn().await {

@@ -2,7 +2,7 @@
 """Generate the korekore theme and pixel art as code for the Mac app, the Linux app and the firmware.
 
 The design lives in docs/design/korekore/ (tokens.json and pixel/*.json, see its README); this turns it into:
-  - app/Sources/VibeBuddy/Korekore/KorekoreTheme.swift       colours, type styles and metrics for SwiftUI
+  - app/Sources/KorekoreUI/KorekoreTheme.swift               colours, type styles and metrics for SwiftUI
   - app/Sources/VibeBuddyCore/Korekore/KorekoreSprites.swift  the sprites as palette-indexed pixels
   - desktop/src/korekore/theme.rs                             the same theme for iced
   - desktop/src/korekore/sprites.rs                           the same sprites
@@ -162,40 +162,40 @@ def chunks(values, width, fmt):
 
 def swift_theme(tokens):
     lines = [f"// {HEADER}", "import SwiftUI", "", "/// The korekore design tokens (docs/design/korekore/tokens.json).",
-             "enum KorekoreTheme {", "    enum Colors {"]
+             "public enum KorekoreTheme {", "    public enum Colors {"]
     for name, rgb, usage in colors(tokens):
-        lines += [f"        /// {usage}", f"        static let {camel(name)} = Color(korekoreRGB: 0x{rgb:06X})"]
-    lines += ["    }", "", "    /// The bundled fonts (Resources/fonts) by PostScript name.", "    enum FontName {"]
+        lines += [f"        /// {usage}", f"        public static let {camel(name)} = Color(korekoreRGB: 0x{rgb:06X})"]
+    lines += ["    }", "", "    /// The bundled fonts (Resources/fonts) by PostScript name.", "    public enum FontName {"]
     for name in [*ROUNDED.values(), *PIXEL.values()]:
         family, weight = name.split("-")
         short = ("rounded" if family == "RoundedMplus1c" else "pixel") + weight
-        lines.append(f"        static let {short} = \"{name}\"")
-    lines += ["    }", "", "    enum Typography {"]
+        lines.append(f"        public static let {short} = \"{name}\"")
+    lines += ["    }", "", "    public enum Typography {"]
     for name, family, font, size, line_height, weight, spacing, usage in text_styles(tokens):
         lines += [f"        /// {FAMILY_NAMES[family]} {weight}. {usage}",
-                  f"        static let {camel(name)} = KorekoreTextStyle(font: \"{font}\", size: {number(size)}, "
+                  f"        public static let {camel(name)} = KorekoreTextStyle(font: \"{font}\", size: {number(size)}, "
                   f"lineHeight: {number(line_height)}, letterSpacing: {number(spacing)})"]
     lines.append("    }")
     for enum, group in [("Space", "spacing"), ("Radius", "radius"), ("Stroke", "stroke")]:
-        lines += ["", f"    enum {enum} {{"]
+        lines += ["", f"    public enum {enum} {{"]
         for name, value, usage in metrics(tokens, group):
             short = name.split("-", 1)[1] if "-" in name else name
             short = "s" + short if short[0].isdigit() else short
-            lines += [f"        /// {usage}", f"        static let {camel(short)}: CGFloat = {number(px(value))}"]
+            lines += [f"        /// {usage}", f"        public static let {camel(short)}: CGFloat = {number(px(value))}"]
         lines.append("    }")
-    lines += ["", "    /// Solid ink drop shadows: how far down they fall.", "    enum Sticker {"]
+    lines += ["", "    /// Solid ink drop shadows: how far down they fall.", "    public enum Sticker {"]
     for name, value, usage in metrics(tokens, "shadow"):
-        lines += [f"        /// {usage}", f"        static let {camel(name.split('-', 1)[1])}: CGFloat = {number(shadow_offset(value))}"]
-    lines += ["    }", "", "    enum Pixel {"]
+        lines += [f"        /// {usage}", f"        public static let {camel(name.split('-', 1)[1])}: CGFloat = {number(shadow_offset(value))}"]
+    lines += ["    }", "", "    public enum Pixel {"]
     for name, value, usage in metrics(tokens, "pixel"):
         swift_value = number(px(value)) if value.endswith("px") else value
         kind = "CGFloat" if value.endswith("px") else "Int"
-        lines += [f"        /// {usage}", f"        static let {camel(name)}: {kind} = {swift_value}"]
+        lines += [f"        /// {usage}", f"        public static let {camel(name)}: {kind} = {swift_value}"]
     lines += ["    }", "}", "",
               "/// A type style: the font file, its size, line height and letter spacing, all in points.",
-              "struct KorekoreTextStyle {", "    let font: String", "    let size: CGFloat",
-              "    let lineHeight: CGFloat", "    let letterSpacing: CGFloat", "}", "",
-              "extension Color {", "    init(korekoreRGB rgb: UInt32) {",
+              "public struct KorekoreTextStyle: Sendable {", "    public let font: String", "    public let size: CGFloat",
+              "    public let lineHeight: CGFloat", "    public let letterSpacing: CGFloat", "}", "",
+              "extension Color {", "    public init(korekoreRGB rgb: UInt32) {",
               "        self.init(.sRGB, red: Double(rgb >> 16 & 0xFF) / 255, green: Double(rgb >> 8 & 0xFF) / 255, "
               "blue: Double(rgb & 0xFF) / 255)",
               "    }", "}", ""]
@@ -289,7 +289,7 @@ def outputs():
     tokens = load("tokens.json")
     all_sprites = sprites(tokens)
     return {
-        "app/Sources/VibeBuddy/Korekore/KorekoreTheme.swift": swift_theme(tokens),
+        "app/Sources/KorekoreUI/KorekoreTheme.swift": swift_theme(tokens),
         "app/Sources/VibeBuddyCore/Korekore/KorekoreSprites.swift": swift_sprites(all_sprites),
         "desktop/src/korekore/theme.rs": rust_theme(tokens),
         "desktop/src/korekore/sprites.rs": rust_sprites(all_sprites, firmware=False),

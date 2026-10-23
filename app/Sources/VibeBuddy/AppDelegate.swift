@@ -1,5 +1,6 @@
 import AppKit
 import Combine
+import KorekoreUI
 import SwiftUI
 import VibeBuddyCore
 
@@ -7,6 +8,8 @@ import VibeBuddyCore
 final class AppDelegate: NSObject, NSApplicationDelegate {
     private let model = AppModel()
     private var statusItem: NSStatusItem!
+    /// The korekore UI's menu bar item and panel, in place of `statusItem` (ADR-0021).
+    private var korekoreItem: KorekoreStatusItem?
     private var settingsWindow: NSWindow?
     private var onboardingWindow: NSWindow?
     private var subscriptions: Set<AnyCancellable> = []
@@ -20,7 +23,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // An installed copy with the old file name renames itself (or gives way to a new copy) and starts again.
         if BundleRename.migrateIfNeeded() { exit(0) }
         // The korekore UI's fonts, only when it was asked for (ADR-0021): the current UI keeps the system's.
-        if AppUI.atLaunch() == .korekore { KorekoreAssets.registerFonts() }
+        if AppUI.atLaunch() == .korekore { KorekoreAssets.registerFonts(in: Resources.resourcesDirectory.appendingPathComponent("fonts")) }
         DistributedNotificationCenter.default().addObserver(forName: SingleInstance.showSettings, object: nil, queue: .main) { [weak self] _ in
             MainActor.assumeIsolated { self?.showMainWindow() }
         }
@@ -34,10 +37,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         source.resume()
         terminationSignal = source
 
-        statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
-        statusItem.button?.image = PixelFace.image(eyesClosed: true)
-        statusItem.menu = NSMenu()
-        model.$menu.receive(on: RunLoop.main).sink { [weak self] menu in self?.render(menu) }.store(in: &subscriptions)
+        if AppUI.atLaunch() == .korekore {
+            korekoreItem = KorekoreStatusItem(model: model, actions: KorekoreMenuActions(
+                settings: { [weak self] in self?.showSettings() }, checkForUpdates: { [weak self] in self?.checkForUpdates() },
+                reportProblem: { [weak self] in self?.reportProblem() }, quit: { [weak self] in self?.quit() },
+                restartDaemon: { [weak self] in self?.restartDaemon() }))
+        } else {
+            statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
+            statusItem.button?.image = PixelFace.image(eyesClosed: true)
+            statusItem.menu = NSMenu()
+            model.$menu.receive(on: RunLoop.main).sink { [weak self] menu in self?.render(menu) }.store(in: &subscriptions)
+        }
         model.$lastError.receive(on: RunLoop.main).compactMap { $0 }.sink { message in
             let alert = NSAlert()
             alert.messageText = "VibeBuddy"
@@ -159,6 +169,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     @objc private func reportProblem() { model.reportProblem() }
 
     @objc func showSettings() {
+        if settingsWindow == nil, AppUI.atLaunch() == .korekore {
+            let window = KorekoreSettingsWindow(rootView: KorekoreSettingsRoot(model: model))
+            window.center()
+            window.isReleasedWhenClosed = false
+            watchClose(window)
+            settingsWindow = window
+        }
         if settingsWindow == nil {
             // Roomy enough for the whole Character tab at first sight, and resizable down to the old size.
             let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 760, height: 640), styleMask: [.titled, .closable, .miniaturizable, .resizable], backing: .buffered, defer: false)
