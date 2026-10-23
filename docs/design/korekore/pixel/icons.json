@@ -1,0 +1,404 @@
+{
+ "tile": [
+  12,
+  12
+ ],
+ "glyph": [
+  10,
+  10
+ ],
+ "ink": "#1C1730",
+ "tileBorder": "1 cell ink, corners cut",
+ "icons": {
+  "cc": {
+   "label": "Claude Code",
+   "tile": "#F2A27E",
+   "glyph10": [
+    "..........",
+    ".xxxxxxxx.",
+    ".x......x.",
+    ".x.x....x.",
+    ".x..x...x.",
+    ".x.x.xx.x.",
+    ".x......x.",
+    ".xxxxxxxx.",
+    "..xx......",
+    "..x......."
+   ],
+   "tile12": [
+    ".oooooooooo.",
+    "ooggggggggoo",
+    "ogxxxxxxxxgo",
+    "ogxggggggxgo",
+    "ogxgxggggxgo",
+    "ogxggxgggxgo",
+    "ogxgxgxxgxgo",
+    "ogxggggggxgo",
+    "ogxxxxxxxxgo",
+    "oggxxggggggo",
+    "oogxggggggoo",
+    ".oooooooooo."
+   ]
+  },
+  "cx": {
+   "label": "Codex",
+   "tile": "#9DB4FF",
+   "glyph10": [
+    "..........",
+    ".xxxxxxxx.",
+    ".xwwwwwwx.",
+    ".xxxxxxxx.",
+    ".x......x.",
+    ".x.x..x.x.",
+    ".xx....xx.",
+    ".x.x..x.x.",
+    ".x......x.",
+    ".xxxxxxxx."
+   ],
+   "tile12": [
+    ".oooooooooo.",
+    "ooggggggggoo",
+    "ogxxxxxxxxgo",
+    "ogxwwwwwwxgo",
+    "ogxxxxxxxxgo",
+    "ogxggggggxgo",
+    "ogxgxggxgxgo",
+    "ogxxggggxxgo",
+    "ogxgxggxgxgo",
+    "ogxggggggxgo",
+    "ooxxxxxxxxoo",
+    ".oooooooooo."
+   ]
+  },
+  "ci": {
+   "label": "GitHub Actions",
+   "tile": "#D9D3EA",
+   "glyph10": [
+    "....xx....",
+    ".x.xxxx.x.",
+    "..xxxxxx..",
+    ".xxx..xxx.",
+    "xxx....xxx",
+    "xxx....xxx",
+    ".xxx..xxx.",
+    "..xxxxxx..",
+    ".x.xxxx.x.",
+    "....xx...."
+   ],
+   "tile12": [
+    ".oooooooooo.",
+    "oogggxxgggoo",
+    "ogxgxxxxgxgo",
+    "oggxxxxxxggo",
+    "ogxxxggxxxgo",
+    "oxxxggggxxxo",
+    "oxxxggggxxxo",
+    "ogxxxggxxxgo",
+    "oggxxxxxxggo",
+    "ogxgxxxxgxgo",
+    "oogggxxgggoo",
+    ".oooooooooo."
+   ]
+  },
+  "oc": {
+   "label": "OpenCode",
+   "tile": "#8FE3C4",
+   "glyph10": [
+    "..........",
+    "..xx..xx..",
+    ".x......x.",
+    ".x......x.",
+    "x...xx...x",
+    ".x..xx..x.",
+    ".x......x.",
+    ".x......x.",
+    "..xx..xx..",
+    ".........."
+   ],
+   "tile12": [
+    ".oooooooooo.",
+    "ooggggggggoo",
+    "oggxxggxxggo",
+    "ogxggggggxgo",
+    "ogxggggggxgo",
+    "oxgggxxgggxo",
+    "ogxggxxggxgo",
+    "ogxggggggxgo",
+    "ogxggggggxgo",
+    "oggxxggxxggo",
+    "ooggggggggoo",
+    ".oooooooooo."
+   ]
+  },
+  "gh": {
+   "label": "GitHub Copilot CLI",
+   "tile": "#A8D8FF",
+   "glyph10": [
+    "..........",
+    "....xx....",
+    "....xx....",
+    "xxxxxxxxxx",
+    ".xxxxxxxx.",
+    "....xx....",
+    "....xx....",
+    "...xxxx...",
+    "..........",
+    ".........."
+   ],
+   "tile12": [
+    ".oooooooooo.",
+    "ooggggggggoo",
+    "oggggxxggggo",
+    "oggggxxggggo",
+    "oxxxxxxxxxxo",
+    "ogxxxxxxxxgo",
+    "oggggxxggggo",
+    "oggggxxggggo",
+    "ogggxxxxgggo",
+    "oggggggggggo",
+    "ooggggggggoo",
+    ".oooooooooo."
+   ]
+  },
+  "pi": {
+   "label": "Pi",
+   "tile": "#FFC59E",
+   "glyph10": [
+    "..........",
+    ".xxxxxxxx.",
+    ".xxxxxxxx.",
+    "..x...x...",
+    "..x...x...",
+    "..x...x...",
+    "..x...xx..",
+    ".xx....xx.",
+    "..........",
+    ".........."
+   ],
+   "tile12": [
+    ".oooooooooo.",
+    "ooggggggggoo",
+    "ogxxxxxxxxgo",
+    "ogxxxxxxxxgo",
+    "oggxgggxgggo",
+    "oggxgggxgggo",
+    "oggxgggxgggo",
+    "oggxgggxxggo",
+    "ogxxggggxxgo",
+    "oggggggggggo",
+    "ooggggggggoo",
+    ".oooooooooo."
+   ]
+  },
+  "api": {
+   "label": "Your own events",
+   "tile": "#FFE58A",
+   "glyph10": [
+    ".....xx...",
+    "....xx....",
+    "...xx.....",
+    "..xxxxxx..",
+    ".....xx...",
+    "....xx....",
+    "...xx.....",
+    "..xx......",
+    ".x........",
+    ".........."
+   ],
+   "tile12": [
+    ".oooooooooo.",
+    "ooggggxxggoo",
+    "oggggxxggggo",
+    "ogggxxgggggo",
+    "oggxxxxxxggo",
+    "ogggggxxgggo",
+    "oggggxxggggo",
+    "ogggxxgggggo",
+    "oggxxggggggo",
+    "ogxggggggggo",
+    "ooggggggggoo",
+    ".oooooooooo."
+   ]
+  },
+  "nav_char": {
+   "label": "Character",
+   "tile": "#FFB3C8",
+   "glyph10": [
+    "..xxxxxx..",
+    ".x......x.",
+    "x..x..x..x",
+    "x..x..x..x",
+    "x........x",
+    "x.x....x.x",
+    "x..xxxx..x",
+    ".x......x.",
+    "..xxxxxx..",
+    ".........."
+   ],
+   "tile12": [
+    ".oooooooooo.",
+    "oogxxxxxxgoo",
+    "ogxggggggxgo",
+    "oxggxggxggxo",
+    "oxggxggxggxo",
+    "oxggggggggxo",
+    "oxgxggggxgxo",
+    "oxggxxxxggxo",
+    "ogxggggggxgo",
+    "oggxxxxxxggo",
+    "ooggggggggoo",
+    ".oooooooooo."
+   ]
+  },
+  "nav_agents": {
+   "label": "Agents",
+   "tile": "#9DB4FF",
+   "glyph10": [
+    "xxxx..xxxx",
+    "x..x..x..x",
+    "x..x..x..x",
+    "xxxx..xxxx",
+    "..........",
+    "..........",
+    "xxxx..xxxx",
+    "x..x..x..x",
+    "x..x..x..x",
+    "xxxx..xxxx"
+   ],
+   "tile12": [
+    ".oooooooooo.",
+    "ooxxxggxxxoo",
+    "oxggxggxggxo",
+    "oxggxggxggxo",
+    "oxxxxggxxxxo",
+    "oggggggggggo",
+    "oggggggggggo",
+    "oxxxxggxxxxo",
+    "oxggxggxggxo",
+    "oxggxggxggxo",
+    "ooxxxggxxxoo",
+    ".oooooooooo."
+   ]
+  },
+  "nav_box": {
+   "label": "Device",
+   "tile": "#FFF3DD",
+   "glyph10": [
+    "..x.x.x...",
+    ".xxxxxxxx.",
+    ".x......x.",
+    ".x.xxxx.x.",
+    ".x.x..x.x.",
+    ".x.xxxx.x.",
+    ".x......x.",
+    ".xxxxxxxx.",
+    "..x....x..",
+    ".........."
+   ],
+   "tile12": [
+    ".oooooooooo.",
+    "oogxgxgxggoo",
+    "ogxxxxxxxxgo",
+    "ogxggggggxgo",
+    "ogxgxxxxgxgo",
+    "ogxgxggxgxgo",
+    "ogxgxxxxgxgo",
+    "ogxggggggxgo",
+    "ogxxxxxxxxgo",
+    "oggxggggxggo",
+    "ooggggggggoo",
+    ".oooooooooo."
+   ]
+  },
+  "nav_chat": {
+   "label": "Conversation",
+   "tile": "#FFE58A",
+   "glyph10": [
+    "..........",
+    ".xxxxxxxx.",
+    "x........x",
+    "x.x.x.x..x",
+    "x........x",
+    ".xxxxxxxx.",
+    "..xx......",
+    "..x.......",
+    "..........",
+    ".........."
+   ],
+   "tile12": [
+    ".oooooooooo.",
+    "ooggggggggoo",
+    "ogxxxxxxxxgo",
+    "oxggggggggxo",
+    "oxgxgxgxggxo",
+    "oxggggggggxo",
+    "ogxxxxxxxxgo",
+    "oggxxggggggo",
+    "oggxgggggggo",
+    "oggggggggggo",
+    "ooggggggggoo",
+    ".oooooooooo."
+   ]
+  },
+  "nav_gen": {
+   "label": "General",
+   "tile": "#D9D3EA",
+   "glyph10": [
+    ".xx.......",
+    "xxxxxxxxxx",
+    ".xx.......",
+    "..........",
+    "......xx..",
+    "xxxxxxxxxx",
+    "......xx..",
+    "..........",
+    "...xx.....",
+    "xxxxxxxxxx"
+   ],
+   "tile12": [
+    ".oooooooooo.",
+    "ooxxggggggoo",
+    "oxxxxxxxxxxo",
+    "ogxxgggggggo",
+    "oggggggggggo",
+    "oggggggxxggo",
+    "oxxxxxxxxxxo",
+    "oggggggxxggo",
+    "oggggggggggo",
+    "ogggxxgggggo",
+    "ooxxxxxxxxoo",
+    ".oooooooooo."
+   ]
+  },
+  "nav_adv": {
+   "label": "Advanced",
+   "tile": "#D9D3EA",
+   "glyph10": [
+    "..........",
+    "xxxxxxxxxx",
+    "x........x",
+    "x.x......x",
+    "x..x.....x",
+    "x.x..xxx.x",
+    "x........x",
+    "xxxxxxxxxx",
+    "..........",
+    ".........."
+   ],
+   "tile12": [
+    ".oooooooooo.",
+    "ooggggggggoo",
+    "oxxxxxxxxxxo",
+    "oxggggggggxo",
+    "oxgxggggggxo",
+    "oxggxgggggxo",
+    "oxgxggxxxgxo",
+    "oxggggggggxo",
+    "oxxxxxxxxxxo",
+    "oggggggggggo",
+    "ooggggggggoo",
+    ".oooooooooo."
+   ]
+  }
+ }
+}
