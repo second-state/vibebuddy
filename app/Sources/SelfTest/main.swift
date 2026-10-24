@@ -83,6 +83,10 @@ do {
     {"connected":false,"bridge":false,"relay":false,"busy":{"owner":"omarchy","reason":"linked"}}
     """.utf8))
     check(busy.busy == BoxBusy(owner: "omarchy", reason: "linked"), "busy decodes")
+    let refused = try StatusCoding.decoder().decode(DeviceState.self, from: Data("""
+    {"connected":false,"bridge":false,"relay_refused":"plan"}
+    """.utf8))
+    check(refused.relayRefused == "plan" && busy.relayRefused == nil, "the Relay's refusal decodes")
     let seen = try StatusCoding.decoder().decode(DeviceState.self, from: Data("""
     {"connected":true,"bridge":false,"wifi_seen":[{"ssid":"ByteTrade","rssi":-49}]}
     """.utf8))

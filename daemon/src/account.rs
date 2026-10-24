@@ -124,6 +124,9 @@ pub struct Account {
     usage_changed: watch::Sender<u64>,
     /// Whether signed in, for whoever must follow it: the status stream and the box's offer of voice.
     signed_in: watch::Sender<bool>,
+    /// Bumped on signing in or out and on each read that finds the Paid plan: what a computer the Relay turned
+    /// away for its account waits for before trying again.
+    relay_chance: watch::Sender<u64>,
 }
 
 impl Account {
@@ -133,6 +136,7 @@ impl Account {
         let saved = file.as_deref().and_then(load);
         let (signed_in, _) = watch::channel(saved.is_some());
         let (usage_changed, _) = watch::channel(0);
+        let (relay_chance, _) = watch::channel(0);
         Self {
             base,
             file,
@@ -144,7 +148,13 @@ impl Account {
             plan: Mutex::default(),
             usage_changed,
             signed_in,
+            relay_chance,
         }
+    }
+
+    /// Changes when signing in or out, or a read of the plan finds the Paid plan.
+    pub fn relay_chance(&self) -> u64 {
+        *self.relay_chance.borrow()
     }
 
     /// Changes whenever today's usage, a refusal or the plan changes.
@@ -245,6 +255,9 @@ impl Account {
             characters: plan["characters"].as_u64(),
             characters_limit: plan["characters_limit"].as_u64(),
         });
+        if plan.as_ref().is_some_and(|plan| plan.name == "paid") {
+            self.relay_chance.send_modify(|n| *n += 1);
+        }
         self.today.lock().unwrap().usage = usage;
         *self.plan.lock().unwrap() = plan;
         self.usage_changed.send_modify(|n| *n += 1);
@@ -367,6 +380,7 @@ impl Account {
         let signed_in = saved.is_some();
         *self.saved.lock().unwrap() = saved;
         self.signed_in.send_if_modified(|was| std::mem::replace(was, signed_in) != signed_in);
+        self.relay_chance.send_modify(|n| *n += 1);
         Ok(())
     }
 
@@ -377,6 +391,14 @@ impl Account {
             return None;
         }
         serde_json::from_str::<serde_json::Value>(&text).ok()?["login"].as_str().map(str::to_owned)
+    }
+}
+
+#[cfg(test)]
+impl Account {
+    /// As if the service had just said the account is on `plan` (`free` or `paid`).
+    pub fn read_plan_for_tests(&self, plan: &str) {
+        self.take_usage(&serde_json::json!({"plan": {"name": plan}}));
     }
 }
 

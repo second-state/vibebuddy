@@ -17,11 +17,13 @@ use futures_util::{SinkExt, StreamExt};
 use serde_json::{Value, json};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, DuplexStream};
 use tokio::net::TcpStream;
+use tokio::sync::watch;
 use tokio_tungstenite::tungstenite::Message;
 use tokio_tungstenite::tungstenite::protocol::CloseFrame;
 use tokio_tungstenite::{Connector, MaybeTlsStream, WebSocketStream};
 use tracing::{debug, info, warn};
 
+use crate::account::Account;
 use crate::identity::Identity;
 use crate::noise_link::{self, Memory, Session};
 
@@ -54,6 +56,17 @@ pub struct RelayConfig {
     url: Arc<std::sync::RwLock<String>>,
     /// The update manifest may move the Relay: a release build on its compiled default.
     movable: bool,
+    /// Whose session `hello` carries, for the Relay's check of the Paid plan (ADR-0020); None only in tests.
+    account: Option<Arc<Account>>,
+    refusal: Arc<watch::Sender<Option<Refusal>>>,
+}
+
+/// Why the Relay last turned this computer away (`signed_out`, `plan` or `unavailable`), and the account's
+/// [`Account::relay_chance`] then.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Refusal {
+    code: String,
+    chance: u64,
 }
 
 impl RelayConfig {
@@ -63,7 +76,39 @@ impl RelayConfig {
         let default = if release { PRODUCTION_URL } else { STAGING_URL };
         let movable = release && fixed.is_none();
         let url = fixed.unwrap_or_else(|| default.to_owned());
-        Self { identity, url: Arc::new(std::sync::RwLock::new(url)), movable }
+        Self { identity, url: Arc::new(std::sync::RwLock::new(url)), movable, account: None, refusal: Arc::new(watch::channel(None).0) }
+    }
+
+    pub fn with_account(mut self, account: Arc<Account>) -> Self {
+        self.account = Some(account);
+        self
+    }
+
+    /// Why the Relay turned this computer away, while that still holds: `signed_out` or `plan` until the account
+    /// signs in or out or a read finds the Paid plan, `unavailable` until a try gets through.
+    pub fn refused(&self) -> Option<String> {
+        let refusal = self.refusal.borrow();
+        let refusal = refusal.as_ref()?;
+        (refusal.code == "unavailable" || refusal.chance == self.chance()).then(|| refusal.code.clone())
+    }
+
+    /// Turned away for the account, which hasn't changed since: trying again would only be refused the same way.
+    pub fn waits_for_account(&self) -> bool {
+        self.refused().is_some_and(|code| code != "unavailable")
+    }
+
+    /// Changes with each refusal, and when one is cleared.
+    pub fn watch_refusal(&self) -> watch::Receiver<Option<Refusal>> {
+        self.refusal.subscribe()
+    }
+
+    fn note_refusal(&self, code: Option<&str>) {
+        let refusal = code.map(|code| Refusal { code: code.to_owned(), chance: self.chance() });
+        self.refusal.send_if_modified(|was| std::mem::replace(was, refusal.clone()) != refusal);
+    }
+
+    fn chance(&self) -> u64 {
+        self.account.as_ref().map_or(0, |account| account.relay_chance())
     }
 
     pub fn url(&self) -> String {
@@ -104,6 +149,9 @@ pub enum RelayError {
     Refused(String),
     /// Close 4005: the Relay no longer speaks this daemon's protocol version. Only an update helps.
     Upgrade,
+    /// Close 4006 or 4007 (`signed_out`, `plan`): not for this account. Tried again once the account changes
+    /// ([`RelayConfig::waits_for_account`]), not after a time.
+    Account(String),
 }
 
 impl RelayError {
@@ -112,6 +160,7 @@ impl RelayError {
         let base = match self {
             Self::RateLimited => Duration::from_secs(30),
             Self::Refused(_) => Duration::from_secs(60),
+            Self::Account(_) => return Duration::ZERO,
             Self::Unreachable(_) => Duration::from_secs(2),
             // Not again in this run: the next try would be refused the same way.
             Self::Upgrade => return Duration::from_secs(365 * 24 * 3600),
@@ -183,13 +232,20 @@ pub async fn link(config: &RelayConfig, box_key: &[u8; 32], wait: Wait<'_>) -> R
     };
     let presence = wait.presence.clone();
     let memory = wait.memory.clone();
-    let result = match tokio::time::timeout(HANDSHAKE_TIMEOUT, handshake(&mut socket, &config.identity, box_key)).await {
+    let session = config.account.as_ref().and_then(|account| account.token());
+    let result = match tokio::time::timeout(HANDSHAKE_TIMEOUT, handshake(&mut socket, &config.identity, box_key, session)).await {
         Err(_) => Err(RelayError::Unreachable("handshake timed out".to_owned())),
         Ok(Err(error)) => Err(error),
         Ok(Ok(())) => wait_for_box(&mut socket, wait).await,
     };
+    match &result {
+        Ok(()) => config.note_refusal(None),
+        Err(RelayError::Account(code)) => config.note_refusal(Some(code)),
+        Err(RelayError::Refused(code)) if code == "unavailable" => config.note_refusal(Some(code)),
+        Err(_) => {}
+    }
     match result {
-        Ok(()) => Ok(bridge(socket, presence, Noise { identity: config.identity.clone(), box_key: *box_key, memory })),
+        Ok(()) => Ok(bridge(socket, presence, Noise { identity: config.identity.clone(), box_key: *box_key, memory }, config.clone())),
         Err(error) => {
             close_normally(&mut socket).await;
             Err(error)
@@ -224,8 +280,7 @@ where
                         Some("status") if value["owner"].is_null() || value["owner"]["linked"] == false => {
                             send(socket, json!({"t": "link"})).await?;
                         }
-                        Some("error") if value["code"] == "upgrade" => return Err(RelayError::Upgrade),
-                        Some("error") => return Err(RelayError::Refused(value["code"].as_str().unwrap_or("error").to_owned())),
+                        Some("error") => return Err(refusal(value["code"].as_str().unwrap_or("error"))),
                         _ => {}
                     }
                 }
@@ -261,7 +316,9 @@ where
     let _ = socket.close().await;
 }
 
-async fn handshake<S>(socket: &mut S, identity: &Identity, box_key: &[u8; 32]) -> Result<(), RelayError>
+/// `session` is the account's, outside the signature: the Relay asks the service whether its account is on the Paid
+/// plan.
+async fn handshake<S>(socket: &mut S, identity: &Identity, box_key: &[u8; 32], session: Option<String>) -> Result<(), RelayError>
 where
     S: futures_util::Stream<Item = Result<Message, tokio_tungstenite::tungstenite::Error>>
         + futures_util::Sink<Message, Error = tokio_tungstenite::tungstenite::Error>
@@ -271,7 +328,11 @@ where
     let challenge = expect(socket, &["challenge"]).await?;
     let nonce = challenge["nonce"].as_str().unwrap_or_default().to_owned();
     let sig = URL_SAFE_NO_PAD.encode(identity.sign(&signed_message("computer", &box_id, &nonce)));
-    send(socket, json!({"t": "hello", "role": "computer", "key": identity.public_key(), "sig": sig, "v": PROTOCOL_VERSION})).await?;
+    let mut hello = json!({"t": "hello", "role": "computer", "key": identity.public_key(), "sig": sig, "v": PROTOCOL_VERSION});
+    if let Some(session) = session {
+        hello["session"] = json!(session);
+    }
+    send(socket, hello).await?;
     expect(socket, &["welcome"]).await?;
     Ok(())
 }
@@ -289,11 +350,8 @@ where
                 if wanted.contains(&kind) {
                     return Ok(value);
                 }
-                if kind == "error" && value["code"] == "upgrade" {
-                    return Err(RelayError::Upgrade);
-                }
                 if kind == "error" {
-                    return Err(RelayError::Refused(value["code"].as_str().unwrap_or("error").to_owned()));
+                    return Err(refusal(value["code"].as_str().unwrap_or("error")));
                 }
             }
             Some(Ok(Message::Close(frame))) => return Err(closed(frame.as_ref())),
@@ -301,6 +359,14 @@ where
             Some(Err(error)) => return Err(RelayError::Unreachable(error.to_string())),
             None => return Err(RelayError::Unreachable("closed".to_owned())),
         }
+    }
+}
+
+fn refusal(code: &str) -> RelayError {
+    match code {
+        "upgrade" => RelayError::Upgrade,
+        "signed_out" | "plan" => RelayError::Account(code.to_owned()),
+        _ => RelayError::Refused(code.to_owned()),
     }
 }
 
@@ -312,6 +378,9 @@ fn closed(frame: Option<&CloseFrame>) -> RelayError {
         // Silent too long, as a sleeping laptop is: a drop like any other, and the box may still be ours.
         Some(4004) => RelayError::Unreachable("silent".to_owned()),
         Some(4005) => RelayError::Upgrade,
+        Some(4006) => RelayError::Account("signed_out".to_owned()),
+        Some(4007) => RelayError::Account("plan".to_owned()),
+        Some(1013) => RelayError::Refused("unavailable".to_owned()),
         Some(code) => RelayError::Unreachable(format!("closed with {code}")),
         None => RelayError::Unreachable("closed".to_owned()),
     }
@@ -353,13 +422,13 @@ const HANDSHAKE_AGAIN_AFTER: Duration = Duration::from_secs(10);
 /// Runs the linked socket behind a byte stream: lines written to the stream go out as `data`, `data`
 /// from the box comes back as lines, sealed once the box opens a session. The stream ends when the box
 /// is taken away, the Relay closes, a sealed line doesn't open, or the Relay goes quiet for [`DEAD_AFTER`].
-fn bridge(socket: Socket, presence: Arc<dyn Fn(bool) + Send + Sync>, noise: Noise) -> DuplexStream {
+fn bridge(socket: Socket, presence: Arc<dyn Fn(bool) + Send + Sync>, noise: Noise, config: RelayConfig) -> DuplexStream {
     let (ours, theirs) = tokio::io::duplex(64 * 1024);
-    tokio::spawn(run_bridge(socket, theirs, presence, noise));
+    tokio::spawn(run_bridge(socket, theirs, presence, noise, config));
     ours
 }
 
-async fn run_bridge<S>(socket: S, stream: DuplexStream, presence: Arc<dyn Fn(bool) + Send + Sync>, noise: Noise)
+async fn run_bridge<S>(socket: S, stream: DuplexStream, presence: Arc<dyn Fn(bool) + Send + Sync>, noise: Noise, config: RelayConfig)
 where
     S: futures_util::Stream<Item = Result<Message, tokio_tungstenite::tungstenite::Error>>
         + futures_util::Sink<Message, Error = tokio_tungstenite::tungstenite::Error>
@@ -483,7 +552,15 @@ where
                                 info!(reason = value["reason"].as_str().unwrap_or("?"), "the Relay link ended");
                                 break;
                             }
-                            Some("error") => warn!(code = value["code"].as_str().unwrap_or("?"), "the Relay reported an error"),
+                            Some("error") => {
+                                let code = value["code"].as_str().unwrap_or("?");
+                                // The Relay's hourly check found the plan ended: the close that follows ends the
+                                // link, and the next try waits for the account to change.
+                                if matches!(code, "signed_out" | "plan" | "unavailable") {
+                                    config.note_refusal(Some(code));
+                                }
+                                warn!(code, "the Relay reported an error");
+                            }
                             // The box went away (its power, its Wi-Fi) while this computer stays linked: the link
                             // is down until the Relay says linked again.
                             Some("status") => {
@@ -723,6 +800,133 @@ mod tests {
         let mut busy = |_: String, _: String| {};
         let result = link(&config, &[5; 32], Wait { takeover: &takeover, busy: &mut busy, give_up: &|| true, presence: Arc::new(|_| {}), memory: None }).await;
         assert!(matches!(result, Err(RelayError::Unreachable(_))));
+    }
+
+    /// A Relay that checks the Paid plan as `vibebuddy-relay` does: each connection in turn is refused with the next of
+    /// `answers` (`signed_out`, `plan`, `unavailable`) at hello, or linked and then refused with `ended-plan` as the
+    /// hourly check would; with none left, it links and keeps the link. It records every hello.
+    async fn plan_relay(answers: Vec<&'static str>) -> (String, Arc<std::sync::Mutex<Vec<Value>>>) {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let hellos = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let record = hellos.clone();
+        tokio::spawn(async move {
+            let mut answers = std::collections::VecDeque::from(answers);
+            loop {
+                let (stream, _) = listener.accept().await.unwrap();
+                let mut socket = accept_async(stream).await.unwrap();
+                let say = |value: Value| Message::text(value.to_string());
+                socket.send(say(json!({"t": "challenge", "nonce": "abc"}))).await.unwrap();
+                let Some(Ok(Message::Text(hello))) = socket.next().await else { continue };
+                record.lock().unwrap().push(serde_json::from_str::<Value>(&hello).unwrap());
+                let refuse = |code: &'static str| {
+                    let close = match code {
+                        "signed_out" => 4006,
+                        "plan" => 4007,
+                        _ => 1013,
+                    };
+                    (say(json!({"t": "error", "code": code})), Message::Close(Some(CloseFrame { code: close.into(), reason: code.into() })))
+                };
+                let answer = answers.pop_front();
+                if let Some(code @ ("signed_out" | "plan" | "unavailable")) = answer {
+                    let (error, close) = refuse(code);
+                    socket.send(error).await.unwrap();
+                    let _ = socket.send(close).await;
+                    continue;
+                }
+                socket.send(say(json!({"t": "welcome"}))).await.unwrap();
+                let _link = socket.next().await;
+                socket.send(say(json!({"t": "linked"}))).await.unwrap();
+                if answer == Some("ended-plan") {
+                    let (error, close) = refuse("plan");
+                    socket.send(error).await.unwrap();
+                    let _ = socket.send(close).await;
+                    continue;
+                }
+                while socket.next().await.is_some() {}
+            }
+        });
+        (format!("ws://{address}"), hellos)
+    }
+
+    fn scratch(name: &str) -> std::path::PathBuf {
+        let mut suffix = [0u8; 4];
+        getrandom::fill(&mut suffix).unwrap();
+        std::env::temp_dir().join(format!("vibebuddy-relay-{name}-{}-{}", std::process::id(), u32::from_le_bytes(suffix)))
+    }
+
+    #[tokio::test]
+    async fn hello_carries_the_session_outside_the_signature() {
+        let (url, hellos) = plan_relay(Vec::new()).await;
+        let account = Arc::new(crate::account::signed_in_for_tests(&scratch("session"), "tok_relay"));
+        let config = RelayConfig::new(Arc::new(identity()), Some(url.clone()), false).with_account(account);
+        let _stream = link_now(&config).await.unwrap();
+        let hello = hellos.lock().unwrap()[0].clone();
+        assert_eq!(hello["session"], "tok_relay");
+        assert!(hello["sig"].is_string() && hello["key"].is_string());
+        // The signature is over the same message as before: fake_relay checks it and doesn't know the session.
+        let config = RelayConfig::new(Arc::new(identity()), Some(fake_relay("linked").await), false).with_account(Arc::new(crate::account::signed_in_for_tests(&scratch("sig"), "t")));
+        assert!(link_now(&config).await.is_ok());
+        // Signed out, there is none.
+        let (url, hellos) = plan_relay(vec!["signed_out"]).await;
+        let config = RelayConfig::new(Arc::new(identity()), Some(url), false);
+        assert_eq!(link_now(&config).await.err(), Some(RelayError::Account("signed_out".to_owned())));
+        assert!(hellos.lock().unwrap()[0].get("session").is_none());
+    }
+
+    #[tokio::test]
+    async fn turned_away_for_the_plan_it_waits_until_a_read_finds_the_paid_plan() {
+        let (url, hellos) = plan_relay(vec!["plan"]).await;
+        let account = Arc::new(crate::account::signed_in_for_tests(&scratch("plan"), "tok"));
+        let config = RelayConfig::new(Arc::new(identity()), Some(url), false).with_account(account.clone());
+        let mut refusals = config.watch_refusal();
+        assert_eq!(link_now(&config).await.err(), Some(RelayError::Account("plan".to_owned())));
+        assert_eq!(config.refused().as_deref(), Some("plan"));
+        assert!(config.waits_for_account() && refusals.has_changed().unwrap());
+        refusals.mark_unchanged();
+        // Reading the plan again and finding Free changes nothing.
+        account.read_plan_for_tests("free");
+        assert!(config.waits_for_account());
+        account.read_plan_for_tests("paid");
+        assert!(!config.waits_for_account() && config.refused().is_none());
+        assert!(link_now(&config).await.is_ok());
+        assert_eq!(hellos.lock().unwrap().len(), 2, "one try for the refusal, one after the plan changed");
+        assert!(refusals.has_changed().unwrap() && config.refused().is_none());
+    }
+
+    #[tokio::test]
+    async fn turned_away_signed_out_it_waits_for_the_account_and_unavailable_only_backs_off() {
+        let (url, _) = plan_relay(vec!["signed_out", "unavailable"]).await;
+        let account = Arc::new(crate::account::signed_in_for_tests(&scratch("signed-out"), "unknown"));
+        let config = RelayConfig::new(Arc::new(identity()), Some(url), false).with_account(account.clone());
+        assert_eq!(link_now(&config).await.err(), Some(RelayError::Account("signed_out".to_owned())));
+        assert!(config.waits_for_account());
+        account.forget();
+        assert!(!config.waits_for_account());
+        let error = link_now(&config).await.err().unwrap();
+        assert_eq!(error, RelayError::Refused("unavailable".to_owned()));
+        assert!(error.backoff(0) >= Duration::from_secs(60));
+        assert_eq!(config.refused().as_deref(), Some("unavailable"));
+        assert!(!config.waits_for_account(), "it backs off and tries again");
+    }
+
+    #[tokio::test]
+    async fn a_plan_that_ends_while_linked_ends_the_link_and_the_next_try_waits() {
+        let (url, _) = plan_relay(vec!["ended-plan"]).await;
+        let account = Arc::new(crate::account::signed_in_for_tests(&scratch("ended"), "tok"));
+        let config = RelayConfig::new(Arc::new(identity()), Some(url), false).with_account(account);
+        let mut stream = link_now(&config).await.unwrap();
+        let mut rest = String::new();
+        stream.read_to_string(&mut rest).await.unwrap();
+        assert!(config.waits_for_account());
+    }
+
+    #[test]
+    fn the_refusal_close_codes_are_known() {
+        let frame = |code: u16| CloseFrame { code: code.into(), reason: "".into() };
+        assert_eq!(closed(Some(&frame(4006))), RelayError::Account("signed_out".to_owned()));
+        assert_eq!(closed(Some(&frame(4007))), RelayError::Account("plan".to_owned()));
+        assert_eq!(closed(Some(&frame(1013))), RelayError::Refused("unavailable".to_owned()));
     }
 
     #[test]

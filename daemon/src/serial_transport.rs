@@ -311,6 +311,7 @@ async fn serial_worker(
             if busy.is_none()
                 && config.relay_enabled.load(Ordering::Relaxed)
                 && let (Some(relay_config), Some(box_key)) = (&config.relay, box_key)
+                && !relay_config.waits_for_account()
                 && (takeover || relay_retry.is_none_or(|at| Instant::now() >= at))
             {
                 let reported_busy = std::sync::Mutex::new(busy_logged.clone());
@@ -371,6 +372,11 @@ async fn serial_worker(
                             }
                         }
                         continue;
+                    }
+                    Err(RelayError::Account(code)) => {
+                        info!(%code, "the Relay turned this computer away; not trying again until the account or its plan changes");
+                        relay_retry = None;
+                        relay_attempts = 0;
                     }
                     Err(RelayError::Upgrade) => {
                         warn!("the Relay no longer speaks this version of VibeBuddy; update to reach the box through it");

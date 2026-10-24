@@ -559,6 +559,9 @@ struct DeviceView: View {
                         }
                     }
                 }
+                if !connected, let refusal = relayRefusal {
+                    Text(refusal).font(.caption).foregroundStyle(.secondary)
+                }
                 // Not while a flash waits for a replug: that row says not to hold K0 this time.
                 if let pin = model.status?.device.pin {
                     PinNotice(pin: pin)
@@ -637,6 +640,17 @@ struct DeviceView: View {
     }
 
     private var connected: Bool { model.status?.device.connected ?? false }
+
+    /// Why the Relay won't carry the link, shown while the box is away (ADR-0020).
+    private var relayRefusal: String? {
+        switch model.status?.device.relayRefused {
+        case nil: nil
+        case "signed_out": String(localized: "Sign in to use the Relay.")
+        case "plan": String(localized: "The Relay needs the Paid plan.")
+        default: String(localized: "The Relay can't check the account right now. VibeBuddy tries again later.")
+        }
+    }
+
     /// Firmware that reports `TRANSFER 1` is updated over whatever carries the link (ADR-0016); older firmware is
     /// flashed over the cable only, and over Wi-Fi or the Relay the daemon refuses it.
     private var canFlash: Bool { connected && (model.status?.device.network != true || model.status?.device.transfer == true) }

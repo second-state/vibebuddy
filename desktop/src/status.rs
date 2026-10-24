@@ -234,6 +234,8 @@ pub struct Device {
     pub wifi_error: Option<String>,
     /// What the box heard on its last scan, strongest first.
     pub wifi_seen: Vec<SeenNetwork>,
+    /// Why the Relay won't carry the link (ADR-0020): `signed_out`, `plan` or `unavailable`.
+    pub relay_refused: Option<String>,
 }
 
 #[derive(Clone, Debug, Default, Deserialize, PartialEq)]
@@ -281,6 +283,15 @@ impl Device {
             (Some(version), Some(build)) => Some(format!("{version} · {build}")),
             (version, build) => version.clone().or_else(|| build.clone()),
         }
+    }
+
+    /// What the link section says about the Relay turning this computer away.
+    pub fn relay_refusal(&self) -> Option<String> {
+        Some(match self.relay_refused.as_deref()? {
+            "signed_out" => tr("Sign in to use the Relay.", &[]),
+            "plan" => tr("The Relay needs the Paid plan.", &[]),
+            _ => tr("The Relay can't check the account right now. VibeBuddy tries again later.", &[]),
+        })
     }
 }
 
@@ -491,6 +502,13 @@ mod tests {
         same.firmware.as_mut().unwrap().newer_than_box = false;
         assert!(!same.firmware_update_available());
         assert!(!Updates::default().firmware_update_available());
+    }
+
+    #[test]
+    fn the_relays_refusal_is_explained() {
+        let device: Device = serde_json::from_str(r#"{"connected":false,"relay_refused":"plan"}"#).expect("device");
+        assert_eq!(device.relay_refusal().as_deref(), Some("The Relay needs the Paid plan."));
+        assert_eq!(Device::default().relay_refusal(), None);
     }
 
     #[test]

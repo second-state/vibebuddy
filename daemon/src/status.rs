@@ -63,6 +63,9 @@ pub struct DeviceState {
     pub wifi_error: Option<String>,
     /// The Relay this computer uses, `wss://host`; None without a key. Set by the daemon, not the box.
     pub relay_server: Option<String>,
+    /// Why the Relay won't carry this computer's link (ADR-0020): `signed_out`, `plan`, or `unavailable` (it
+    /// couldn't check the plan; tried again later). Set by the daemon from [`crate::relay::RelayConfig::refused`].
+    pub relay_refused: Option<String>,
     /// The Relay the box uses, as it last said (`RELAY URL`); it follows the computer on the cable.
     pub box_relay: Option<String>,
     /// The networks the box heard on its last scan, strongest first, one entry per name.
@@ -438,6 +441,7 @@ mod tests {
                 wifi_address: None,
                 wifi_error: None,
                 relay_server: None,
+                relay_refused: None,
                 box_relay: None,
                 wifi_seen: Vec::new(),
                 foreign_firmware: false,

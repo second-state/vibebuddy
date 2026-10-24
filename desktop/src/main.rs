@@ -1608,8 +1608,10 @@ impl App {
                 .spacing(12)
             }
         });
+        let refusal = device.filter(|_| !online).and_then(status::Device::relay_refusal).map(|refusal| text(refusal).size(13));
         column![row![text(tr("Link", &[])).width(140), text(link)].spacing(12)]
             .push(busy_row)
+            .push(refusal)
             .push(pin)
             .push(choice)
             .push(not_found)
