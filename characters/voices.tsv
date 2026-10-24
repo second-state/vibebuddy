@@ -1,0 +1,10 @@
+# The voices a made Character can speak with (docs/characters.md): id, provider, the provider's voice id, language,
+# gender, the name the App shows. The presets' voices, and Jessica, the built-in default's.
+ada	elevenlabs	tcSsCJFYrsHpK5rCQZMf	en	female	Ada
+dave	elevenlabs	Mb37aOTLC27T6HIFEA5r	en	male	Dave
+hank	elevenlabs	U6jH23hcPh0zH17nf3DT	en	male	Hank
+kai	elevenlabs	E02BDDILcu36QAixQqyA	en	male	Kai
+luna	elevenlabs	ggx46gxUmdtruayPIL8q	en	female	Luna
+mei	elevenlabs	DkZuBPOXCw6ntlXANTdj	en	female	Mei
+wanwanxiaohe	volc	zh_female_wanwanxiaohe_moon_bigtts	zh	female	Xiaohe
+jessica	elevenlabs	cgSgspJ2msm6clMCkdW9	en	female	Jessica

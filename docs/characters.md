@@ -99,6 +99,10 @@ characters/<id>/
 
 A language model drafts `lines.tsv` from `persona.md` and the rules above (`tools/draft-lines.py` asks a local one); a person listens to the synthesized result and deletes what doesn't work. Nothing in the App or the daemon calls a language model. `tools/make-character.sh` synthesizes each line with the Character's TTS voice, normalizes it and builds the Character pack, which the App bundles.
 
+### Making a Character
+
+Users can make a Character of their own in the App (ADR-0020): start from a preset, edit the lines, pick a voice from `characters/voices.tsv` (the presets' voices and Jessica), and bring a look. The daemon makes the line audio (`POST /v1/characters`, [app.md](app.md#how-the-app-talks-to-the-daemon)) as `tools/make-character.sh` does, without Python or ffmpeg: each line is synthesized as 16 kHz PCM, with the user's own key for the voice's provider if there is one, otherwise by the voice service with `"for":"character"`, which only the Paid plan gets. A line with `{address}` is made once without a form and once with each form of the voice's language. Each line is trimmed of silence at -50 dBFS and normalized to a -1 dBFS peak. The daemon keeps everything in `config_dir()/characters/<id>/`, laid out as `characters/<id>/` is: `audio/` and `audio-address/` with each line's PCM, named as `make-character.sh` names it, and `pack.bin` and `address/<form>.bin`, encoded with the box's own ADPCM encoder (`firmware-rs/core/src/adpcm.rs`) byte for byte as `tools/character_pack.py` packs them, plus `manifest.json` with what was asked. A refusal stops the job and keeps the lines made; making it again makes only the rest. The App packs `pack.bin` with the look as it does a preset's.
+
 ### Character pack format
 
 One Character pack fills the `voices` partition (2 MB, unchanged), written whole over the serial protocol exactly as voice packs were (`voice.begin` / `voice.chunk` / `voice.end`). Old firmware sees an unknown magic and falls back to the built-in voice.

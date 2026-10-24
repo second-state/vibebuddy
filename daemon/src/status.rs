@@ -350,6 +350,8 @@ pub struct Status {
     pub account: crate::account::AccountStatus,
     /// Which of the user's own keys for spoken replies are set, and refused (ADR-0020); never a key.
     pub voice_keys: crate::voice_keys::VoiceKeysStatus,
+    /// The Character being made, or the last one made, since the daemon started (ADR-0020).
+    pub making: Option<crate::making::MakingStatus>,
 }
 
 /// What the apps explain for `WIFI FAILED <why>`: `wrong_password` (the network turned the box away, which a

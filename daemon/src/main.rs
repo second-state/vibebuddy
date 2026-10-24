@@ -13,6 +13,7 @@ mod relay;
 mod resident;
 mod resident_claude;
 mod link_alert;
+mod making;
 mod occasions;
 mod persona;
 mod rom_flasher;
@@ -117,6 +118,8 @@ struct AppState {
     account: Arc<account::Account>,
     /// The user's own keys for spoken replies (ADR-0020); none can be set in tests unless one sets it.
     voice_keys: Arc<voice_keys::VoiceKeys>,
+    /// Making a Character's line audio (ADR-0020); nothing can be made in tests unless one sets it.
+    making: Arc<making::Maker>,
 }
 
 impl AppState {
@@ -132,6 +135,8 @@ impl AppState {
             .unwrap_or_default();
         let (device_bus, _) = broadcast::channel(1024);
         let (status_changed, _) = broadcast::channel(64);
+        let account = Arc::new(account::Account::new(None, None, 7331));
+        let voice_keys = Arc::new(voice_keys::VoiceKeys::new(None));
         Self {
             transport,
             activities: Arc::new(Mutex::new(activities)),
@@ -154,8 +159,9 @@ impl AppState {
             voice: Arc::new(voice::Voice::new(None, None)),
             noise_seen: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             written: Arc::default(),
-            account: Arc::new(account::Account::new(None, None, 7331)),
-            voice_keys: Arc::new(voice_keys::VoiceKeys::new(None)),
+            making: Arc::new(making::Maker::new(None, None, account.clone(), voice_keys.clone())),
+            account,
+            voice_keys,
         }
     }
 
@@ -184,6 +190,7 @@ impl AppState {
             updates,
             account: self.account.status(),
             voice_keys: self.voice_keys.status(),
+            making: self.making.status(),
         }
     }
 
@@ -296,6 +303,16 @@ async fn main() {
     let session = Some(state.account.clone());
     state.voice_keys = Arc::new(voice_keys::VoiceKeys::new(config::config_dir().as_deref()));
     let synthesizer = synthesis::from_env(session.clone(), state.voice_keys.clone());
+    let made = config::config_dir().map(|dir| dir.join("characters"));
+    if let Some(made) = &made {
+        let _ = making::DIR.set(made.clone());
+    }
+    state.making = Arc::new(making::Maker::new(
+        made,
+        synthesis::service_base(env::var(synthesis::BASE_URL_VARIABLE).ok(), relay::release()),
+        state.account.clone(),
+        state.voice_keys.clone(),
+    ));
     state.voice = Arc::new(voice::Voice::new(speech::from_env(session), state.resident.clone()).with_synthesizer(Some(synthesizer)));
     if let Some(resident) = state.resident.clone() {
         let wearing = wearing(&state).await;
@@ -323,6 +340,7 @@ async fn main() {
     }
     follow_account(&state);
     follow_voice_keys(&state);
+    follow_making(&state);
     // On macOS the app reports a lost link; elsewhere there is no app, so the daemon does it.
     if !cfg!(target_os = "macos") {
         tokio::spawn(link_alert::watch(state.clone()));
@@ -517,6 +535,17 @@ fn follow_voice_keys(state: &AppState) {
     });
 }
 
+/// A Character being made reports each line on its own thread; the status stream hears of it here.
+fn follow_making(state: &AppState) {
+    let mut changes = state.making.watch();
+    let follower = state.clone();
+    tokio::spawn(async move {
+        while changes.changed().await.is_ok() {
+            follower.notify_status();
+        }
+    });
+}
+
 /// Checks the resident session's readiness every [`resident::READINESS_TTL`] and tells the box each time it flips.
 fn follow_resident_readiness(state: &AppState, resident: Arc<resident::Resident>) {
     let mut flips = resident.watch_ready();
@@ -679,6 +708,8 @@ fn app(state: AppState) -> Router {
         .route("/v1/resident/brain", axum::routing::put(put_resident_brain))
         .route("/v1/resident/anthropic-key", axum::routing::put(put_anthropic_key).delete(delete_anthropic_key))
         .route("/v1/voice-keys", axum::routing::put(put_voice_keys))
+        .route("/v1/voices", get(get_voices))
+        .route("/v1/characters", get(get_characters).post(post_character))
         .route("/v1/account", axum::routing::delete(delete_account))
         .route("/v1/account/sign-in", post(post_sign_in))
         .route("/v1/account/callback", get(get_account_callback))
@@ -1703,6 +1734,28 @@ async fn put_voice_keys(State(state): State<AppState>, Json(request): Json<serde
     Json(state.voice_keys.status()).into_response()
 }
 
+/// The voices a made Character can speak with: `characters/voices.tsv`.
+async fn get_voices() -> Json<Vec<making::Voice>> {
+    Json(making::voices())
+}
+
+/// The Characters made here, for the App to list beside the presets.
+async fn get_characters(State(state): State<AppState>) -> Json<Vec<making::MadeCharacter>> {
+    Json(state.making.list())
+}
+
+/// Starts making a Character's line audio (`making` in the status follows it); 409 while another is being made.
+async fn post_character(State(state): State<AppState>, Json(request): Json<making::Request>) -> axum::response::Response {
+    use axum::response::IntoResponse;
+    let (status, message) = match state.making.start(request) {
+        Ok(making) => return (StatusCode::ACCEPTED, Json(making)).into_response(),
+        Err(making::StartError::Busy) => (StatusCode::CONFLICT, "another Character is being made".to_owned()),
+        Err(making::StartError::Invalid(message)) => (StatusCode::BAD_REQUEST, message),
+        Err(making::StartError::Unavailable(message)) => (StatusCode::INTERNAL_SERVER_ERROR, message),
+    };
+    (status, Json(ApiResponse { accepted: false, message })).into_response()
+}
+
 #[derive(Serialize)]
 struct SignInResponse {
     url: String,
@@ -2150,6 +2203,23 @@ mod tests {
         assert_eq!((answer["elevenlabs"]["set"].as_bool(), answer["volc"]["set"].as_bool()), (Some(true), Some(false)));
         assert_eq!(put(serde_json::json!({"openai": "k"})).await.status(), StatusCode::BAD_REQUEST);
         assert_eq!(put(serde_json::json!({"volc": 1})).await.status(), StatusCode::BAD_REQUEST);
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[tokio::test]
+    async fn voices_are_listed_and_only_a_character_in_one_of_them_starts() {
+        assert!(get_voices().await.0.iter().any(|voice| voice.id == "wanwanxiaohe" && voice.provider == "volc"));
+        let dir = voice_keys::tests::scratch("making-main");
+        let mut state = test_state(Arc::new(RecordingTransport::default()));
+        state.making = Arc::new(making::Maker::new(Some(dir.clone()), None, state.account.clone(), state.voice_keys.clone()));
+        let post = |voice: &str| {
+            let body = serde_json::json!({"name": "Owl", "base": "ada", "voice": voice, "lines": [{"occasion": "done", "text": "Done."}]});
+            post_character(State(state.clone()), Json(serde_json::from_value(body).unwrap()))
+        };
+        assert_eq!(post("elevenlabs:somebody").await.status(), StatusCode::BAD_REQUEST);
+        assert_eq!(post("ada").await.status(), StatusCode::ACCEPTED);
+        let status = serde_json::to_string(&state.snapshot().await).unwrap();
+        assert!(status.contains(r#""making":{"id":"owl-"#), "{status}");
         let _ = std::fs::remove_dir_all(dir);
     }
 

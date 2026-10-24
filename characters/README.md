@@ -12,6 +12,8 @@ Each directory is one Character (see [`docs/characters.md`](../docs/characters.m
 
 `audio/` is the synthesis cache and is not committed.
 
+`voices.tsv` lists the voices a Character the user makes in the App can speak with: id, provider, the provider's voice id, language, gender and the name the App shows (docs/characters.md, "Making a Character").
+
 ## Writing lines
 
 Lines are drafted by a language model from the persona and the brief below, then a person listens to the synthesized result and deletes or rewrites what doesn't work. Nothing in the App or the daemon writes lines.
