@@ -41,10 +41,10 @@ The daemon sends the token as `Authorization: Bearer <token>` and keeps it in `c
 - `GET /v1/account` answers
 
   ```json
-  {"id":"…","email":null,"github_id":60097,"created_at":"2026-10-23T08:44:49.885Z","today":{"day":"2026-10-23","commands":1,"replies":1},"limits":{"commands":100,"replies":300}}
+  {"id":"…","email":null,"github_id":60097,"created_at":"2026-10-23T08:44:49.885Z","plan":{"name":"free"},"today":{"day":"2026-10-23","commands":1,"replies":1},"limits":{"commands":20,"replies":20}}
   ```
 
-  An account has an `email` or a `github_id`, never both. `today` counts voice in the current UTC day, and `limits` is the daily allowance.
+  An account has an `email` or a `github_id`, never both. `plan` is `{"name":"free"}` or `{"name":"paid","period_end":"…","characters":12300,"characters_limit":100000}` (ADR-0020), where `characters` counts the billing period's spoken replies against the monthly allowance. `today` counts voice in the current UTC day, and `limits` is the daily allowance of the account's plan.
 - `POST /v1/sign-out` revokes this session only: 204.
 - `DELETE /v1/account` deletes the account with all its sessions and usage: 204.
 
@@ -72,9 +72,18 @@ POST /v1/voice/speak
 
 It streams back `audio/mpeg`: MPEG-2 Layer III, 24 kHz mono, 48 kbps, the only rate the box's speaker runs at; it may begin with an ID3 tag. `text` is 1 to 1000 characters. `voice` names the vendor and its voice: `elevenlabs:<voice_id>` or `volc:<speaker>` (a Doubao 1.0 voice); the daemon maps each Character to one. A bad request gets 400; a synthesis that fails before any audio 502; one that fails midway cuts the stream short.
 
+### Speaking a Character's line
+
+```text
+POST /v1/voice/speak
+{"text":"…","voice":"elevenlabs:<voice_id>","for":"character"}
+```
+
+A line for a Character the user is making (ADR-0020). It streams back `audio/pcm;rate=16000`: 16 kHz mono 16-bit little-endian PCM, which the daemon trims, normalizes and packs as ADPCM. Only the Paid plan gets it; on Free the call gets `403 {"reason":"plan"}`. It counts its characters only against the monthly allowance, never the daily replies; past it the call gets `429 {"reason":"monthly"}` until the next period. A synthesis failure is 502: lines never come in another voice.
+
 ### The daily allowance
 
-Each recognition counts one command and each spoken reply one reply, against the account's UTC day: 100 commands and 300 replies (ADR-0018). A use is counted once the request is found valid. Past either limit the call gets
+Each recognition counts one command and each spoken reply one reply, against the account's UTC day. On Free that is 20 commands and 20 replies; on the Paid plan, 100 commands, and spoken replies count their characters against the monthly allowance first (ADR-0020). The reply that crosses the monthly allowance still passes; after it, replies count against Free's daily replies until the period ends. The service sets the numbers. A use is counted once the request is found valid. Past either limit the call gets
 
 ```text
 429 {"reason":"allowance"}
