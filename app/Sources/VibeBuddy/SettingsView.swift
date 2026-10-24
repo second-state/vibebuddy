@@ -836,9 +836,35 @@ struct AccountView: View {
             } else {
                 Text("Signing in isn't available in this version of VibeBuddy.").foregroundStyle(.secondary)
             }
+            // A daemon older than own keys doesn't report them.
+            if let keys = model.status?.voiceKeys {
+                Section("Your own keys") {
+                    Text("With your own key, spoken replies in that provider's voices go straight to it, billed to your account there, and never through VibeBuddy.")
+                        .font(.caption).foregroundStyle(.secondary)
+                    OwnKeyRow(title: Text(verbatim: "ElevenLabs"), key: keys.elevenlabs, keyPage: Resources.elevenLabsKeys,
+                              refused: Text("ElevenLabs refused your own key. Replies in its voices stay silent until you set another one.")) { key in
+                        await saveKey("elevenlabs", key)
+                    }
+                    OwnKeyRow(title: Text("Volcano Engine"), key: keys.volc, keyPage: Resources.volcConsole,
+                              refused: Text("Volcano Engine refused your own key. Replies in its voices stay silent until you set another one.")) { key in
+                        await saveKey("volc", key)
+                    }
+                }
+            }
         }
         .formStyle(.grouped)
         .onChange(of: account?.signedIn) { waiting = false }
+    }
+
+    /// The status stream then shows the key as set or not; true when the daemon took it.
+    private func saveKey(_ provider: String, _ key: String?) async -> Bool {
+        do {
+            try await model.client.setVoiceKey(provider, key)
+            return true
+        } catch {
+            model.lastError = String(localized: "Couldn't save your own key: \(error.localizedDescription)")
+            return false
+        }
     }
 
     private var signedInText: String {
@@ -878,6 +904,49 @@ struct AccountView: View {
         Task {
             do { try await model.client.deleteAccount() } catch { model.lastError = String(localized: "Couldn't delete the account: \(error.localizedDescription)") }
         }
+    }
+}
+
+/// One provider's own key for spoken replies (ADR-0020). It is typed once and never shown again: the daemon only says
+/// whether it has one.
+private struct OwnKeyRow: View {
+    let title: Text
+    let key: VoiceKeysStatus.Key
+    let keyPage: URL
+    let refused: Text
+    /// Sends the key, or nil to clear it; true when the daemon took it.
+    let save: (String?) async -> Bool
+    @State private var draft = ""
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack {
+                title
+                Spacer()
+                if key.set {
+                    Text("Set").foregroundStyle(.secondary)
+                    Button("Clear") { Task { _ = await save(nil) } }
+                } else {
+                    SecureField(text: $draft, prompt: Text("Your own key")) { title }
+                        .labelsHidden()
+                        .textFieldStyle(.roundedBorder)
+                        .frame(maxWidth: 260)
+                        .onSubmit { submit() }
+                    Button("Save") { submit() }
+                        .disabled(draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                }
+                Link("Get a key", destination: keyPage)
+            }
+            if key.refused {
+                refused.font(.caption).foregroundStyle(.red)
+            }
+        }
+    }
+
+    private func submit() {
+        let typed = draft.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !typed.isEmpty else { return }
+        Task { if await save(typed) { draft = "" } }
     }
 }
 

@@ -348,6 +348,8 @@ pub struct Status {
     pub updates: crate::updates::UpdateStatus,
     /// The person's VibeBuddy account (ADR-0018).
     pub account: crate::account::AccountStatus,
+    /// Which of the user's own keys for spoken replies are set, and refused (ADR-0020); never a key.
+    pub voice_keys: crate::voice_keys::VoiceKeysStatus,
 }
 
 /// What the apps explain for `WIFI FAILED <why>`: `wrong_password` (the network turned the box away, which a

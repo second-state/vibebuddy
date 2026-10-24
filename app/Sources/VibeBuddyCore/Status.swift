@@ -12,8 +12,12 @@ public struct Status: Codable, Equatable {
     public var updates: UpdateStatus?
     /// The person's VibeBuddy account (ADR-0018); absent from older daemons, which can't sign in.
     public var account: AccountStatus?
+    /// Which of the user's own keys for spoken replies are set (ADR-0020); absent from older daemons.
+    public var voiceKeys: VoiceKeysStatus?
 
-    public init(daemon: DaemonInfo, device: DeviceState, today: TodaySummary, hooks: HooksSeen, operation: DeviceOperation?, config: DaemonConfig, updates: UpdateStatus? = nil, account: AccountStatus? = nil) {
+    enum CodingKeys: String, CodingKey { case daemon, device, today, hooks, operation, config, updates, account, voiceKeys = "voice_keys" }
+
+    public init(daemon: DaemonInfo, device: DeviceState, today: TodaySummary, hooks: HooksSeen, operation: DeviceOperation?, config: DaemonConfig, updates: UpdateStatus? = nil, account: AccountStatus? = nil, voiceKeys: VoiceKeysStatus? = nil) {
         self.daemon = daemon
         self.device = device
         self.today = today
@@ -22,7 +26,20 @@ public struct Status: Codable, Equatable {
         self.config = config
         self.updates = updates
         self.account = account
+        self.voiceKeys = voiceKeys
     }
+}
+
+/// The daemon says only whether each key is set, and whether its provider refused it; a key never comes back.
+public struct VoiceKeysStatus: Codable, Equatable {
+    public struct Key: Codable, Equatable {
+        public var set: Bool
+        public var refused: Bool
+        public init(set: Bool, refused: Bool = false) { self.set = set; self.refused = refused }
+    }
+    public var elevenlabs: Key
+    public var volc: Key
+    public init(elevenlabs: Key, volc: Key) { self.elevenlabs = elevenlabs; self.volc = volc }
 }
 
 /// An account has an email or a GitHub user, never both.

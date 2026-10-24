@@ -364,3 +364,15 @@
 "Couldn't sign in: %@" = "登录失败：%@";
 "Couldn't sign out: %@" = "退出登录失败：%@";
 "Couldn't delete the account: %@" = "删除账户失败：%@";
+
+/* Own keys for spoken replies (ADR-0020) */
+"Your own keys" = "自己的密钥";
+"With your own key, spoken replies in that provider's voices go straight to it, billed to your account there, and never through VibeBuddy." = "填了自己的密钥后，用这家服务商声音的语音回复会直接由它合成，费用记在你在那里的账户上，不经过 VibeBuddy。";
+"Volcano Engine" = "火山引擎";
+"Your own key" = "自己的密钥";
+"Set" = "已设置";
+"Clear" = "清除";
+"Get a key" = "获取密钥";
+"ElevenLabs refused your own key. Replies in its voices stay silent until you set another one." = "ElevenLabs 拒绝了你自己的密钥。换一个密钥之前，用它的声音的回复不会出声。";
+"Volcano Engine refused your own key. Replies in its voices stay silent until you set another one." = "火山引擎拒绝了你自己的密钥。换一个密钥之前，用它的声音的回复不会出声。";
+"Couldn't save your own key: %@" = "保存自己的密钥失败：%@";

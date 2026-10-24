@@ -19,6 +19,23 @@ pub struct Status {
     /// The VibeBuddy account this computer is signed in to (ADR-0018); older daemons don't say, which reads as not
     /// available.
     pub account: Account,
+    /// Which of the user's own keys for spoken replies are set (ADR-0020); absent from older daemons.
+    pub voice_keys: Option<VoiceKeys>,
+}
+
+/// The daemon says only whether each key is set, and whether its provider refused it; a key never comes back.
+#[derive(Clone, Debug, Default, Deserialize, PartialEq)]
+#[serde(default)]
+pub struct VoiceKeys {
+    pub elevenlabs: VoiceKey,
+    pub volc: VoiceKey,
+}
+
+#[derive(Clone, Debug, Default, Deserialize, PartialEq)]
+#[serde(default)]
+pub struct VoiceKey {
+    pub set: bool,
+    pub refused: bool,
 }
 
 #[derive(Clone, Debug, Default, Deserialize, PartialEq)]
@@ -452,6 +469,14 @@ mod tests {
         .expect("account");
         assert!(account.available && account.signed_in);
         assert_eq!((account.github_id, account.github_login.as_deref(), account.email), (Some(60097), Some("octocat"), None));
+    }
+
+    #[test]
+    fn own_keys_read_as_absent_from_an_older_daemon() {
+        let status: Status = serde_json::from_str(LIVE).expect("status");
+        assert_eq!(status.voice_keys, None);
+        let keys: VoiceKeys = serde_json::from_str(r#"{"elevenlabs": {"set": true, "refused": true}, "volc": {"set": false, "refused": false}}"#).expect("keys");
+        assert_eq!(keys, VoiceKeys { elevenlabs: VoiceKey { set: true, refused: true }, volc: VoiceKey::default() });
     }
 
     #[test]

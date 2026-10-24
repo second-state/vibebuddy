@@ -239,6 +239,38 @@ pub async fn set_anthropic_key(key: Option<String>) -> Result<ResidentInfo, Stri
     resident_setting(request).await
 }
 
+/// A provider of spoken replies the user can give their own key for (ADR-0020).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum KeyProvider {
+    ElevenLabs,
+    Volc,
+}
+
+impl KeyProvider {
+    pub const ALL: [Self; 2] = [Self::ElevenLabs, Self::Volc];
+
+    /// Its name in the daemon's API.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::ElevenLabs => "elevenlabs",
+            Self::Volc => "volc",
+        }
+    }
+}
+
+/// Sets the user's own key for a provider of spoken replies (None clears it). The daemon never sends it back; the
+/// status says it is set.
+pub async fn set_voice_key(provider: KeyProvider, key: Option<String>) -> Result<(), String> {
+    let request = reqwest::Client::new().put(format!("{BASE}/v1/voice-keys")).json(&serde_json::json!({provider.as_str(): key}));
+    let response = request.timeout(Duration::from_secs(10)).send().await.map_err(|error| error.to_string())?;
+    let status = response.status();
+    if status.is_success() {
+        return Ok(());
+    }
+    let body: serde_json::Value = response.json().await.unwrap_or_default();
+    Err(body["message"].as_str().map(str::to_owned).unwrap_or_else(|| format!("the daemon answered {status}")))
+}
+
 async fn resident_setting(request: reqwest::RequestBuilder) -> Result<ResidentInfo, String> {
     let response = request.timeout(Duration::from_secs(10)).send().await.map_err(|error| error.to_string())?;
     let status = response.status();

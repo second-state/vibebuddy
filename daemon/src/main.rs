@@ -26,6 +26,7 @@ mod transfer;
 mod synthesis;
 mod updates;
 mod voice;
+mod voice_keys;
 mod voice_writer;
 
 use std::convert::Infallible;
@@ -114,6 +115,8 @@ struct AppState {
     written: Arc<Mutex<persona::Written>>,
     /// The person's VibeBuddy account (ADR-0018); unavailable in tests unless one sets it.
     account: Arc<account::Account>,
+    /// The user's own keys for spoken replies (ADR-0020); none can be set in tests unless one sets it.
+    voice_keys: Arc<voice_keys::VoiceKeys>,
 }
 
 impl AppState {
@@ -152,6 +155,7 @@ impl AppState {
             noise_seen: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             written: Arc::default(),
             account: Arc::new(account::Account::new(None, None, 7331)),
+            voice_keys: Arc::new(voice_keys::VoiceKeys::new(None)),
         }
     }
 
@@ -179,6 +183,7 @@ impl AppState {
             config: self.config.lock().await.clone(),
             updates,
             account: self.account.status(),
+            voice_keys: self.voice_keys.status(),
         }
     }
 
@@ -289,7 +294,9 @@ async fn main() {
         })
     });
     let session = Some(state.account.clone());
-    state.voice = Arc::new(voice::Voice::new(speech::from_env(session.clone()), state.resident.clone()).with_synthesizer(synthesis::from_env(session)));
+    state.voice_keys = Arc::new(voice_keys::VoiceKeys::new(config::config_dir().as_deref()));
+    let synthesizer = synthesis::from_env(session.clone(), state.voice_keys.clone());
+    state.voice = Arc::new(voice::Voice::new(speech::from_env(session), state.resident.clone()).with_synthesizer(Some(synthesizer)));
     if let Some(resident) = state.resident.clone() {
         let wearing = wearing(&state).await;
         tokio::spawn(async move { resident.warm(&wearing).await });
@@ -315,6 +322,7 @@ async fn main() {
         follow_resident_readiness(&state, resident);
     }
     follow_account(&state);
+    follow_voice_keys(&state);
     // On macOS the app reports a lost link; elsewhere there is no app, so the daemon does it.
     if !cfg!(target_os = "macos") {
         tokio::spawn(link_alert::watch(state.clone()));
@@ -498,6 +506,17 @@ fn follow_account(state: &AppState) {
     });
 }
 
+/// A provider refusing or taking an own key happens on a reply's thread; the status stream hears of it here.
+fn follow_voice_keys(state: &AppState) {
+    let mut changes = state.voice_keys.watch();
+    let follower = state.clone();
+    tokio::spawn(async move {
+        while changes.changed().await.is_ok() {
+            follower.notify_status();
+        }
+    });
+}
+
 /// Checks the resident session's readiness every [`resident::READINESS_TTL`] and tells the box each time it flips.
 fn follow_resident_readiness(state: &AppState, resident: Arc<resident::Resident>) {
     let mut flips = resident.watch_ready();
@@ -659,6 +678,7 @@ fn app(state: AppState) -> Router {
         .route("/v1/resident/history", get(get_resident_history))
         .route("/v1/resident/brain", axum::routing::put(put_resident_brain))
         .route("/v1/resident/anthropic-key", axum::routing::put(put_anthropic_key).delete(delete_anthropic_key))
+        .route("/v1/voice-keys", axum::routing::put(put_voice_keys))
         .route("/v1/account", axum::routing::delete(delete_account))
         .route("/v1/account/sign-in", post(post_sign_in))
         .route("/v1/account/callback", get(get_account_callback))
@@ -1662,6 +1682,27 @@ async fn set_anthropic_key(state: AppState, key: Option<String>) -> axum::respon
     get_resident(State(state)).await.into_response()
 }
 
+/// Sets or clears the user's own keys for spoken replies (ADR-0020): `{"elevenlabs"?, "volc"?}`, each a key, or null
+/// or "" to clear it; one left out stays. Answers which are set, as in the status; a key is never sent back or logged.
+async fn put_voice_keys(State(state): State<AppState>, Json(request): Json<serde_json::Map<String, serde_json::Value>>) -> axum::response::Response {
+    use axum::response::IntoResponse;
+    let refuse = |message: String| (StatusCode::BAD_REQUEST, Json(ApiResponse { accepted: false, message })).into_response();
+    let mut changes = Vec::new();
+    for (name, value) in request {
+        let Some(provider) = voice_keys::Provider::named(&name) else { return refuse(format!("{name} is not a provider: elevenlabs or volc")) };
+        match value {
+            serde_json::Value::Null => changes.push((provider, None)),
+            serde_json::Value::String(key) => changes.push((provider, Some(key))),
+            _ => return refuse(format!("{name} must be a key, or null to clear it")),
+        }
+    }
+    if let Err(error) = state.voice_keys.set(&changes) {
+        warn!(%error, "failed to save the own keys");
+        return (StatusCode::INTERNAL_SERVER_ERROR, Json(ApiResponse { accepted: false, message: error.to_string() })).into_response();
+    }
+    Json(state.voice_keys.status()).into_response()
+}
+
 #[derive(Serialize)]
 struct SignInResponse {
     url: String,
@@ -2084,6 +2125,31 @@ mod tests {
         let body = http_body_util::BodyExt::collect(response.into_body()).await.unwrap().to_bytes();
         let info: serde_json::Value = serde_json::from_slice(&body).unwrap();
         assert_eq!((info["anthropic_key_set"].as_bool(), info["problem"].as_str()), (Some(false), Some("anthropic_key_missing")));
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[tokio::test]
+    async fn own_keys_are_set_and_cleared_and_never_sent_back() {
+        let dir = voice_keys::tests::scratch("main");
+        let mut state = test_state(Arc::new(RecordingTransport::default()));
+        state.voice_keys = Arc::new(voice_keys::VoiceKeys::new(Some(&dir)));
+        let put = |body: serde_json::Value| put_voice_keys(State(state.clone()), Json(serde_json::from_value(body).unwrap()));
+
+        let response = put(serde_json::json!({"elevenlabs": "sk_eleven_secret", "volc": "volc_secret"})).await;
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = http_body_util::BodyExt::collect(response.into_body()).await.unwrap().to_bytes();
+        let answer: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(answer, serde_json::json!({"elevenlabs": {"set": true, "refused": false}, "volc": {"set": true, "refused": false}}));
+        let status = serde_json::to_string(&state.snapshot().await).unwrap();
+        assert!(status.contains(r#""voice_keys":{"elevenlabs":{"set":true"#), "{status}");
+        assert!(!status.contains("secret") && !String::from_utf8_lossy(&body).contains("secret"));
+
+        let response = put(serde_json::json!({"volc": null})).await;
+        let body = http_body_util::BodyExt::collect(response.into_body()).await.unwrap().to_bytes();
+        let answer: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!((answer["elevenlabs"]["set"].as_bool(), answer["volc"]["set"].as_bool()), (Some(true), Some(false)));
+        assert_eq!(put(serde_json::json!({"openai": "k"})).await.status(), StatusCode::BAD_REQUEST);
+        assert_eq!(put(serde_json::json!({"volc": 1})).await.status(), StatusCode::BAD_REQUEST);
         let _ = std::fs::remove_dir_all(dir);
     }
 

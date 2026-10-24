@@ -484,6 +484,9 @@ fn speak(
     }
     let voice = synthesis::voice_for(character);
     let voice = voice.as_str();
+    if !synthesizer.speaks(voice) {
+        return;
+    }
     let started = Instant::now();
     let (mut seq, mut bytes, mut first_byte_ms) = (0, 0, None);
     let result = synthesizer.synthesize(text, voice, &mut |piece| {
@@ -1226,7 +1229,7 @@ pub mod tests {
     #[ignore = "uses the network and the voice service"]
     fn e2e_spoken_replies_through_the_real_voice_service() {
         let out = std::path::PathBuf::from(std::env::var("VIBEBUDDY_E2E_OUT").expect("VIBEBUDDY_E2E_OUT names a directory"));
-        let synthesizer = synthesis::from_env(None).expect("a voice service");
+        let synthesizer = synthesis::from_env(None, Arc::new(crate::voice_keys::VoiceKeys::new(None)));
         for (name, character, text) in [
             ("zh", Some("wanwanxiaohe"), "两个智能体正在工作，有一个在等你回复。"),
             ("en", Some("ada"), "Two agents are working, and one of them is waiting for you."),

@@ -156,6 +156,17 @@ struct DaemonClient {
         guard code == 200 else { throw DaemonError(message: DaemonClient.message(in: data) ?? String(localized: "The daemon answered \(code)")) }
     }
 
+    /// Sets the user's own key for a provider of spoken replies, `elevenlabs` or `volc` (nil clears it). The daemon
+    /// never sends it back; the status says it is set.
+    func setVoiceKey(_ provider: String, _ key: String?) async throws {
+        let body = try JSONSerialization.data(withJSONObject: [provider: key.map { $0 as Any } ?? NSNull()])
+        var request = request("/v1/voice-keys", method: "PUT", body: body, contentType: "application/json")
+        request.timeoutInterval = 10
+        let (data, response) = try await URLSession.shared.data(for: request)
+        let code = (response as? HTTPURLResponse)?.statusCode ?? 0
+        guard code == 200 else { throw DaemonError(message: DaemonClient.message(in: data) ?? String(localized: "The daemon answered \(code)")) }
+    }
+
     func resident() async throws -> ResidentInfo {
         let (data, _) = try await URLSession.shared.data(for: request("/v1/resident"))
         return try StatusCoding.decoder().decode(ResidentInfo.self, from: data)

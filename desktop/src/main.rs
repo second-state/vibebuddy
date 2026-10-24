@@ -184,6 +184,12 @@ enum Message {
     DeleteAccount,
     /// Signing out or deleting the account finished; the account itself comes with the next status.
     AccountDone(Result<(), String>),
+    OwnKeyDraft(client::KeyProvider, String),
+    SaveOwnKey(client::KeyProvider),
+    ClearOwnKey(client::KeyProvider),
+    OpenOwnKeyPage(client::KeyProvider),
+    /// The daemon took the key, or didn't; whether it is set comes with the next status.
+    OwnKeySaved(client::KeyProvider, Result<(), String>),
     Done(Result<(), String>),
     Quit,
 }
@@ -265,6 +271,8 @@ struct App {
     signing_in: bool,
     /// Deleting the account waits for a second click, since it can't be undone.
     confirm_delete_account: bool,
+    /// The own keys being typed, by provider; cleared once the daemon has one, and never filled from the daemon.
+    own_key_drafts: [String; 2],
     /// The outcome of the last action, shown at the bottom of the window.
     notice: Option<Result<String, String>>,
     /// The language picked in Settings, and, while it differs from the UI's, the offer to restart.
@@ -328,6 +336,7 @@ impl App {
             resident_setting_error: None,
             signing_in: false,
             confirm_delete_account: false,
+            own_key_drafts: Default::default(),
             notice: None,
             language: UiLanguage::saved(),
             restart_offer: None,
@@ -890,6 +899,29 @@ impl App {
                     self.notice = Some(Err(error));
                 }
             }
+            Message::OwnKeyDraft(provider, draft) => self.own_key_drafts[provider as usize] = draft,
+            Message::SaveOwnKey(provider) => {
+                let key = self.own_key_drafts[provider as usize].trim().to_owned();
+                if !key.is_empty() {
+                    return Task::perform(client::set_voice_key(provider, Some(key)), move |result| Message::OwnKeySaved(provider, result));
+                }
+            }
+            Message::ClearOwnKey(provider) => {
+                return Task::perform(client::set_voice_key(provider, None), move |result| Message::OwnKeySaved(provider, result));
+            }
+            Message::OpenOwnKeyPage(provider) => {
+                let page = match provider {
+                    client::KeyProvider::ElevenLabs => ELEVENLABS_KEYS,
+                    client::KeyProvider::Volc => VOLC_CONSOLE,
+                };
+                if let Err(error) = launch("xdg-open", &[std::ffi::OsStr::new(page)]) {
+                    self.notice = Some(Err(error));
+                }
+            }
+            Message::OwnKeySaved(provider, result) => match result {
+                Ok(()) => self.own_key_drafts[provider as usize].clear(),
+                Err(error) => self.notice = Some(Err(tr("Couldn't save your own key: %@", &[&error]))),
+            },
             Message::Done(result) => {
                 // The box answers a volume change through the status stream; drop the dragged value then.
                 self.volume = None;
@@ -1902,8 +1934,57 @@ impl App {
         setting.into()
     }
 
-    /// The VibeBuddy account (ADR-0018): the daemon keeps the session; this only opens the browser to sign in.
+    /// The Account tab: the VibeBuddy account, then the user's own keys, as on the Mac.
     fn account(&self) -> Element<'_, Message> {
+        let keys = self.status.as_ref().and_then(|status| status.voice_keys.as_ref()).map(|keys| self.own_keys(keys));
+        column![self.vibebuddy_account()].push(keys).spacing(24).into()
+    }
+
+    /// The user's own keys for spoken replies (ADR-0020). Each is typed once and never shown again: the daemon only
+    /// says whether it has one.
+    fn own_keys(&self, keys: &status::VoiceKeys) -> Element<'_, Message> {
+        let mut section = column![
+            text(tr("Your own keys", &[])).size(16),
+            text(tr("With your own key, spoken replies in that provider's voices go straight to it, billed to your account there, and never through VibeBuddy.", &[])).size(12).style(text::secondary),
+        ]
+        .spacing(8);
+        for provider in client::KeyProvider::ALL {
+            let (name, key, refused) = match provider {
+                client::KeyProvider::ElevenLabs => ("ElevenLabs".to_owned(), &keys.elevenlabs, tr("ElevenLabs refused your own key. Replies in its voices stay silent until you set another one.", &[])),
+                client::KeyProvider::Volc => (tr("Volcano Engine", &[]), &keys.volc, tr("Volcano Engine refused your own key. Replies in its voices stay silent until you set another one.", &[])),
+            };
+            let entry = if key.set {
+                row![
+                    text(tr("Set", &[])).style(text::secondary),
+                    button(text(tr("Clear", &[]))).style(button::secondary).on_press(Message::ClearOwnKey(provider)),
+                ]
+            } else {
+                let draft = &self.own_key_drafts[provider as usize];
+                row![
+                    text_input(&tr("Your own key", &[]), draft)
+                        .secure(true)
+                        .on_input(move |draft| Message::OwnKeyDraft(provider, draft))
+                        .on_submit(Message::SaveOwnKey(provider))
+                        .width(260),
+                    button(text(tr("Save", &[]))).on_press_maybe((!draft.trim().is_empty()).then_some(Message::SaveOwnKey(provider))),
+                ]
+            };
+            section = section.push(
+                row![text(name).width(140)]
+                    .push(entry.spacing(8).align_y(iced::Alignment::Center))
+                    .push(button(text(tr("Get a key", &[]))).style(button::text).on_press(Message::OpenOwnKeyPage(provider)))
+                    .spacing(8)
+                    .align_y(iced::Alignment::Center),
+            );
+            if key.refused {
+                section = section.push(text(refused).size(12).style(text::danger));
+            }
+        }
+        section.into()
+    }
+
+    /// The VibeBuddy account (ADR-0018): the daemon keeps the session; this only opens the browser to sign in.
+    fn vibebuddy_account(&self) -> Element<'_, Message> {
         let Some(status) = &self.status else {
             return text(tr("The daemon isn't running. Restart it on the Advanced tab.", &[])).size(13).into();
         };
@@ -2049,6 +2130,10 @@ const CODEX_INSTALL_PAGE: &str = "https://learn.chatgpt.com/docs/codex/cli";
 const CLAUDE_INSTALL_PAGE: &str = "https://code.claude.com/docs/en/setup";
 /// The Claude Console, where the user makes the Anthropic API key Claude Code answers voice commands with.
 const ANTHROPIC_CONSOLE: &str = "https://platform.claude.com/";
+/// Where the user makes their own key for spoken replies in ElevenLabs' voices.
+const ELEVENLABS_KEYS: &str = "https://elevenlabs.io/app/settings/api-keys";
+/// Volcano Engine's speech console, where the user makes their own key for the Doubao voices.
+const VOLC_CONSOLE: &str = "https://console.volcengine.com/speech/";
 const NEW_ISSUE: &str = "https://github.com/second-state/vibebuddy/issues/new";
 
 /// The id under which the box wears the user's own Character.
