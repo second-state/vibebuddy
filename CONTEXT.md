@@ -43,7 +43,7 @@ The connection between one computer and the box. A box has at most one link at a
 _Avoid_: connection, USB, serial port, Wi-Fi (those are ways of carrying the link)
 
 **Relay (中转)**:
-VibeBuddy's online service that carries a link when the computer and the box can't reach each other directly, such as when they are on different networks. It passes the link along and decides nothing about Agents. It is never required: a box works over USB or the local network without it.
+VibeBuddy's online service that carries a link when the computer and the box can't reach each other directly, such as when they are on different networks. It passes the link along and decides nothing about Agents. It carries a link only for an account on the Paid plan. It is never required: a box works over USB or the local network without it.
 _Avoid_: cloud, server, backend (too broad: later online features are not the Relay)
 
 **Pairing (配对)**:
@@ -51,12 +51,24 @@ The lasting permission for a computer to link to a box. Pairing is done once per
 _Avoid_: binding, registration, login (an account is a separate thing, see below)
 
 **Account (账户)**:
-A person's identity with VibeBuddy's online services, needed only for features that cost us money to run, voice commands first. It belongs to a person, never to a box: the user signs in on a computer, in the App, and a box is never signed in. It is layered on pairing and changes nothing about it: linking, takeover and the Relay need no account.
+A person's identity with VibeBuddy's online services, needed only for features that cost us money to run: our voices and the Relay. It belongs to a person, never to a box: the user signs in on a computer, in the App, and a box is never signed in. It is layered on pairing and changes nothing about it: linking and takeover need no account; only the Relay needs one, on the Paid plan.
 _Avoid_: user (the person, not their account), box account, device registration, login (the act of signing in)
 
 **Daily allowance (每日额度)**:
-How many voice commands one account may make in a day. Past it, voice stops for that account until the next day; nothing else about the box changes.
+How many voice commands and spoken replies one account may have in a day. Every account has one; the Paid plan's commands allowance is larger. Past it, voice stops for that account until the next day; nothing else about the box changes.
 _Avoid_: quota, credits, plan, limit (on its own)
+
+**Paid plan (付费版)**:
+The one thing VibeBuddy sells: a monthly subscription on an account, paid through Stripe on the website. It opens the Relay and gives the monthly allowance. An account without it is on Free (免费版), which keeps everything over USB and the local network. When the plan ends, the account goes back to Free, and nothing the user has made is taken away.
+_Avoid_: subscription (Stripe's word), Pro, premium, membership, VIP, credits
+
+**Monthly allowance (每月额度)**:
+How many characters of our voices an account on the Paid plan may have spoken in one billing period, by spoken replies and by making Characters. Past it, the daily allowance applies until the next period. Speech made with the user's own key never counts.
+_Avoid_: credits, quota, tokens, balance
+
+**Own key (自己的密钥)**:
+A key the user has with a speech provider, entered in the App and kept only on the computer. The daemon calls the provider with it directly; it never reaches us.
+_Avoid_: token, BYOK (fine in code, not in the UI), API key on its own (the Anthropic API key is another one)
 
 **Takeover (接管)**:
 A paired computer becoming the one the box links to, ending the previous computer's link. Plugging in USB always takes over; otherwise the user takes over from the App, or another paired computer links on its own once the previous one has been gone long enough. Agent activity never moves the box between computers by itself.
@@ -91,6 +103,10 @@ _Avoid_: skin, avatar, sprite (that is the image format)
 **Character pack (角色包)**:
 One Character bundled into a single pack: its look (unless it uses the built-in one), the audio of its lines and its name, written to a location on the device separate from the program. Changing Character means changing the Character pack, never the firmware, and the whole pack is written at once so look and voice never disagree. When the device has no Character pack, it uses the built-in default Character.
 _Avoid_: voice pack (the older pack that held only five lines), 语音包, 音色包, asset pack, skin pack
+
+**Making a Character (创建角色)**:
+The user making a Character of their own in the App: a look they import, a voice picked from a list we choose, and lines that start as a preset Character's and may be edited. The computer synthesizes every line, with the user's own key or with our voices, and builds the Character pack. No language model writes the lines.
+_Avoid_: generate, clone (voices are picked, never cloned), custom skin
 
 **Mute (静音)**:
 The master switch for the device speaker, toggled only on the device: by long-pressing K2, or from the device menu. When it is on, neither announcements nor the Pomodoro chime make a sound; the screen behaves as usual. It belongs to the device alone: the Mac side doesn't record it, show it or toggle it on the device's behalf.
@@ -192,6 +208,10 @@ Fixed wording for the App's English UI and English logs. Use these words when wr
 | 固件 / 刷入 | firmware / flash | |
 | 配对 / 已配对的电脑 | pair / paired computers | On the box's menu the row is COMPUTERS; "this computer" marks the one the App runs on |
 | 账户 / 登录 / 退出登录 | account / sign in / sign out | Never "log in" or "login"; the account belongs to the person, never the box |
+| 付费版 / 免费版 / 升级 | Paid plan / Free / upgrade | Never "Pro" or "premium" |
+| 每月额度 / 每日额度 | monthly allowance / daily allowance | |
+| 自己的密钥 | your own key | A speech provider's key; never "token" |
+| 创建角色 | make a Character | |
 | UART 桥 / 原生 USB | UART bridge / native USB | |
 | 语音指令 | voice command | |
 | 常驻会话 | resident session | Not shown to users so far; in the UI the buddy is the one you talk to |
