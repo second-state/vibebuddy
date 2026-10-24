@@ -37,11 +37,11 @@ impl crate::App {
         }
     }
 
-    fn online(&self) -> bool {
+    pub(super) fn online(&self) -> bool {
         self.status.as_ref().is_some_and(|status| status.device.connected)
     }
 
-    fn busy(&self) -> bool {
+    pub(super) fn busy(&self) -> bool {
         self.status.as_ref().and_then(|status| status.operation.as_ref()).is_some_and(status::Operation::running)
     }
 
@@ -163,7 +163,7 @@ impl crate::App {
         )
     }
 
-    fn kore_card(&self) -> Element<'_, Message> {
+    pub(super) fn kore_card(&self) -> Element<'_, Message> {
         card(
             column![
                 container(sprite(&sprites::KORE_NORMAL, 4)).center_x(Length::Fill).center_y(Length::Fixed(104.0)).style(|_| stage(theme::INK)),
@@ -177,7 +177,7 @@ impl crate::App {
         .into()
     }
 
-    fn character_card(
+    pub(super) fn character_card(
         &self,
         name: String,
         summary: String,
@@ -566,80 +566,7 @@ impl crate::App {
         let offer = updates.and_then(|updates| updates.firmware.as_ref());
         let downloaded = updates.and_then(status::Updates::firmware_directory).is_some();
         let outdated = updates.is_some_and(status::Updates::firmware_update_available);
-        let other_firmware = online && device.is_some_and(|device| device.foreign_firmware && device.firmware_build.is_none());
-        let operation = self.status.as_ref().and_then(|status| status.operation.as_ref());
-        let replug = operation.is_some_and(|operation| operation.state == OperationState::Replug);
-
-        let mut finding = column![].spacing(14);
-        if let Some(owner_busy) = device.filter(|_| !online).and_then(|device| device.busy.as_ref()) {
-            let owner = if owner_busy.owner.is_empty() { tr("another computer", &[]) } else { owner_busy.owner.clone() };
-            let body: Element<'_, Message> = if owner_busy.reason == "usb" {
-                note(tr("The box is plugged into %@.", &[&owner]))
-            } else {
-                column![note(tr("Take it over to drive it from here.", &[])), pill(tr("Take over", &[]), Fill::Sun, Some(Message::TakeOver))].spacing(8).into()
-            };
-            finding = finding.push(card(column![heading(tr("The box is with %@.", &[&owner])), body].spacing(8)));
-        }
-        if let Some(pin) = device.and_then(|device| device.pin.as_ref()) {
-            finding = finding.push(card_with(
-                column![
-                    text(tr("Only looking at %@, set by %@.", &[&pin.value, &pin.variable])).font(bold()).size(13).color(theme::INK),
-                    note(tr("To find the box on its own again, unset %@ and restart the daemon.", &[&pin.variable])),
-                ]
-                .spacing(4),
-                theme::CREAM,
-                theme::INK,
-                theme::STROKE_BASE,
-            ));
-        }
-        let candidates = device.map(|device| device.candidates.as_slice()).unwrap_or_default();
-        if !online && !candidates.is_empty() {
-            let rows = candidates.iter().map(|candidate| {
-                let label = match &candidate.usb_serial {
-                    Some(serial) => format!("{} · {serial}", candidate.port),
-                    None => candidate.port.clone(),
-                };
-                let pick = candidate.usb_serial.clone().map(|serial| pill(tr("This is the box", &[]), Fill::Sun, (!busy).then_some(Message::ChooseBox(serial))));
-                column![divider(), row![text(label).font(PIXEL).size(12).color(theme::INK).width(Length::Fill)].push(pick).align_y(Alignment::Center)]
-                    .spacing(8)
-                    .into()
-            });
-            finding = finding.push(card(
-                column![heading(tr("Which one is your box?", &[])), note(tr("Several devices are plugged in. Pick yours once; korekore remembers it.", &[]))]
-                    .extend(rows)
-                    .spacing(8),
-            ));
-        } else if self.status.is_some() && !online && !busy && !replug && device.is_some_and(|device| device.pin.is_none()) {
-            finding = finding.push(card(
-                column![
-                    row![badge(&sprites::KORE_SLEEP, true, theme::INK), heading(tr("Box not found", &[]))].spacing(10).align_y(Alignment::Center),
-                    note(tr("Not showing up? Use a cable that carries data, not just power.", &[])),
-                    note(tr("If the daemon log on the Advanced tab says “Permission denied”, your account can't open the box's port yet: restart the computer once, then replug the box.", &[])),
-                    note(tr("Still nothing? Hold K0 on the box while you plug in the cable. The box starts in download mode with a dark screen, ready to be flashed with VibeBuddy firmware.", &[])),
-                ]
-                .spacing(8),
-            ));
-        }
-        if other_firmware {
-            let action: Element<'_, Message> = if downloaded {
-                column![
-                    note(tr("Flash korekore to use it; its current firmware will be replaced.", &[])),
-                    pill(tr("Flash korekore", &[]), Fill::Pink, (!busy).then_some(Message::AskFirmwareUpdate(true))),
-                ]
-                .spacing(8)
-                .into()
-            } else {
-                self.firmware_unavailable()
-            };
-            finding = finding.push(card(
-                column![heading(tr("The box isn't running korekore firmware", &[])), action, small(tr("If flashing can't start: hold K0 while plugging in, to enter download mode.", &[]))].spacing(8),
-            ));
-        }
-        if let Some(board) = device.filter(|_| online).and_then(|device| device.unsupported_board.as_ref()) {
-            finding = finding.push(card(
-                column![heading(tr("This is a %@ board.", &[board])), note(tr("Released firmware doesn't run on it, so no update is offered.", &[]))].spacing(8),
-            ));
-        }
+        let finding = self.kk_finding();
 
         // The box's screen as last captured, at one point per pixel in the design's 352 × 264 frame: any other scale
         // makes the pixel art uneven. Before the first capture, the box redrawn from the status.
@@ -721,6 +648,91 @@ impl crate::App {
         )
     }
 
+    /// Where the box is and what it runs, when that needs saying: taken by another computer, a pin, several devices
+    /// or none, other firmware, an unsupported board. The Device page and the first-run guide both show it.
+    pub(super) fn kk_finding(&self) -> iced::widget::Column<'_, Message> {
+        let device = self.status.as_ref().map(|status| &status.device);
+        let online = self.online();
+        let busy = self.busy();
+        let updates = self.updates();
+        let downloaded = updates.and_then(status::Updates::firmware_directory).is_some();
+        let other_firmware = online && device.is_some_and(|device| device.foreign_firmware && device.firmware_build.is_none());
+        let operation = self.status.as_ref().and_then(|status| status.operation.as_ref());
+        let replug = operation.is_some_and(|operation| operation.state == OperationState::Replug);
+        let mut finding = column![].spacing(14);
+        if let Some(owner_busy) = device.filter(|_| !online).and_then(|device| device.busy.as_ref()) {
+            let owner = if owner_busy.owner.is_empty() { tr("another computer", &[]) } else { owner_busy.owner.clone() };
+            let body: Element<'_, Message> = if owner_busy.reason == "usb" {
+                note(tr("The box is plugged into %@.", &[&owner]))
+            } else {
+                column![note(tr("Take it over to drive it from here.", &[])), pill(tr("Take over", &[]), Fill::Sun, Some(Message::TakeOver))].spacing(8).into()
+            };
+            finding = finding.push(card(column![heading(tr("The box is with %@.", &[&owner])), body].spacing(8)));
+        }
+        if let Some(pin) = device.and_then(|device| device.pin.as_ref()) {
+            finding = finding.push(card_with(
+                column![
+                    text(tr("Only looking at %@, set by %@.", &[&pin.value, &pin.variable])).font(bold()).size(13).color(theme::INK),
+                    note(tr("To find the box on its own again, unset %@ and restart the daemon.", &[&pin.variable])),
+                ]
+                .spacing(4),
+                theme::CREAM,
+                theme::INK,
+                theme::STROKE_BASE,
+            ));
+        }
+        let candidates = device.map(|device| device.candidates.as_slice()).unwrap_or_default();
+        if !online && !candidates.is_empty() {
+            let rows = candidates.iter().map(|candidate| {
+                let label = match &candidate.usb_serial {
+                    Some(serial) => format!("{} · {serial}", candidate.port),
+                    None => candidate.port.clone(),
+                };
+                let pick = candidate.usb_serial.clone().map(|serial| pill(tr("This is the box", &[]), Fill::Sun, (!busy).then_some(Message::ChooseBox(serial))));
+                column![divider(), row![text(label).font(PIXEL).size(12).color(theme::INK).width(Length::Fill)].push(pick).align_y(Alignment::Center)]
+                    .spacing(8)
+                    .into()
+            });
+            finding = finding.push(card(
+                column![heading(tr("Which one is your box?", &[])), note(tr("Several devices are plugged in. Pick yours once; korekore remembers it.", &[]))]
+                    .extend(rows)
+                    .spacing(8),
+            ));
+        } else if self.status.is_some() && !online && !busy && !replug && device.is_some_and(|device| device.pin.is_none()) {
+            finding = finding.push(card(
+                column![
+                    row![badge(&sprites::KORE_SLEEP, true, theme::INK), heading(tr("Box not found", &[]))].spacing(10).align_y(Alignment::Center),
+                    note(tr("Not showing up? Use a cable that carries data, not just power.", &[])),
+                    note(tr("If the daemon log on the Advanced tab says “Permission denied”, your account can't open the box's port yet: restart the computer once, then replug the box.", &[])),
+                    note(tr("Still nothing? Hold K0 on the box while you plug in the cable. The box starts in download mode with a dark screen, ready to be flashed with VibeBuddy firmware.", &[])),
+                ]
+                .spacing(8),
+            ));
+        }
+        if other_firmware {
+            let action: Element<'_, Message> = if downloaded {
+                column![
+                    note(tr("Flash korekore to use it; its current firmware will be replaced.", &[])),
+                    pill(tr("Flash korekore", &[]), Fill::Pink, (!busy).then_some(Message::AskFirmwareUpdate(true))),
+                ]
+                .spacing(8)
+                .into()
+            } else {
+                self.firmware_unavailable()
+            };
+            finding = finding.push(card(
+                column![heading(tr("The box isn't running korekore firmware", &[])), action, small(tr("If flashing can't start: hold K0 while plugging in, to enter download mode.", &[]))].spacing(8),
+            ));
+        }
+        if let Some(board) = device.filter(|_| online).and_then(|device| device.unsupported_board.as_ref()) {
+            finding = finding.push(card(
+                column![heading(tr("This is a %@ board.", &[board])), note(tr("Released firmware doesn't run on it, so no update is offered.", &[]))].spacing(8),
+            ));
+        }
+
+        finding
+    }
+
     fn firmware_unavailable(&self) -> Element<'_, Message> {
         let updates = self.updates();
         let offer = updates.and_then(|updates| updates.firmware.as_ref());
@@ -740,7 +752,7 @@ impl crate::App {
     }
 
     /// Flashing asks once more, inline (canvas: the confirmations, "inline panels on Linux").
-    fn confirm_panel(&self) -> Option<Element<'_, Message>> {
+    pub(super) fn confirm_panel(&self) -> Option<Element<'_, Message>> {
         let device = self.status.as_ref().map(|status| &status.device);
         let busy = self.busy();
         let online = self.online();
@@ -866,7 +878,7 @@ impl crate::App {
         }
     }
 
-    fn wifi_card<'a>(&'a self, device: &'a status::Device) -> Element<'a, Message> {
+    pub(super) fn wifi_card<'a>(&'a self, device: &'a status::Device) -> Element<'a, Message> {
         let busy = self.busy();
         let line = |label: String, value: Element<'a, Message>| -> Element<'a, Message> {
             row![text(label).font(regular()).size(13).color(theme::MUTED), Space::new().width(Length::Fill), value].align_y(Alignment::Center).into()

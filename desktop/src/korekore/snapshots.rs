@@ -105,6 +105,12 @@ fn draw_the_korekore_pages() {
         setup("pi", "Pi", true, false),
         setup("copilot", "GitHub Copilot CLI", false, false),
     ];
+    for page in 0..5 {
+        app.guide = Some(page);
+        let element: Element<'_, Message> = app.view(iced::window::Id::unique());
+        save(&format!("guide-{page}"), (954.0, 766.0), element);
+    }
+    app.guide = None;
     for section in Section::ALL {
         app.tab = section.tab();
         let element: Element<'_, Message> = app.view(iced::window::Id::unique());

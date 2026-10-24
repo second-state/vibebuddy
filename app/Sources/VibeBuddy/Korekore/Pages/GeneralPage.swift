@@ -103,27 +103,25 @@ struct KorekoreGeneralPage: View {
         language = choice
         let target = choice.resolved
         guard target != Resources.uiLanguage else { return }
-        let alert = NSAlert()
-        alert.messageText = String(localized: "Restart VibeBuddy to change the language?")
-        alert.informativeText = String(localized: "The box goes offline for a few seconds while the app restarts.")
-        var voiceSwitch: (entry: VoiceCatalogEntry, checkbox: NSButton)?
+        var voiceSwitch: VoiceCatalogEntry?
+        var checkbox: KorekoreAlert.Checkbox?
+        var note = String(localized: "The box goes offline for a few seconds while the app restarts.")
         let device = model.status?.device
+        // Only a box that has answered (build and voice reported) can take a voice; an unknown voice isn't guessed at.
         if let device, device.connected, device.firmwareBuild != nil, let voice = device.voice,
            let entry = VoiceCatalogEntry.switchSuggestion(boxVoice: voice, to: target, bundled: Resources.bundledVoices) {
-            let title = device.bridge
+            let label = device.bridge
                 ? String(localized: "Also switch the box's voice to \(entry.name) (a few minutes over the UART bridge; keep it plugged in)")
                 : String(localized: "Also switch the box's voice to \(entry.name)")
-            let checkbox = NSButton(checkboxWithTitle: title, target: nil, action: nil)
-            checkbox.state = .on
-            alert.accessoryView = checkbox
-            voiceSwitch = (entry, checkbox)
+            checkbox = KorekoreAlert.Checkbox(label: label, isOn: true)
+            voiceSwitch = entry
         } else if !(device?.connected ?? false) {
-            alert.informativeText += "\n" + String(localized: "The box isn't connected, so its character stays as it is. You can change it later on the Character tab.")
+            note += "\n" + String(localized: "The box isn't connected, so its character stays as it is. You can change it later on the Character tab.")
         }
-        alert.addButton(withTitle: String(localized: "Restart now"))
-        alert.addButton(withTitle: String(localized: "Later"))
-        let restart = alert.runModal() == .alertFirstButtonReturn
-        let voice = voiceSwitch.flatMap { $0.checkbox.state == .on ? $0.entry.id : nil }
+        let answer = KorekoreAlert.run(title: String(localized: "Restart korekore to change the language?"), message: note,
+                                       buttons: [String(localized: "Restart"), String(localized: "Not now")], checkbox: checkbox)
+        let restart = answer.button == 0
+        let voice = answer.checked ? voiceSwitch?.id : nil
         if restart {
             model.restart(writingVoice: voice)
         } else if let voice {

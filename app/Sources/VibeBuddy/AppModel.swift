@@ -38,6 +38,8 @@ final class AppModel: ObservableObject {
     private static let pendingVoiceKey = "pendingVoice"
     /// The last firmware version a notification was posted for, so each new one is announced once.
     private static let notifiedFirmwareKey = "notifiedFirmware"
+    /// The korekore UI words its notifications its own way (ADR-0021, canvas: "SYSTEM NOTIFICATIONS").
+    private static let korekore = AppUI.atLaunch() == .korekore
 
     init() {
         preview.onFinish = { [weak self] in self?.previewingVoice = nil }
@@ -51,7 +53,12 @@ final class AppModel: ObservableObject {
             self.refreshMenu()
             // With "Notify me" off, not even this one shows; without a daemon there's no config, so default to on.
             if self.status?.config.notifyLink ?? true {
-                Notifier.notify(title: "VibeBuddy", body: String(localized: "The daemon failed to start three times in a row. Click the menu bar icon to restart it."))
+                if Self.korekore {
+                    Notifier.notify(title: String(localized: "The daemon failed to start three times"),
+                                    body: String(localized: "Open korekore to restart it or export diagnostics."))
+                } else {
+                    Notifier.notify(title: "VibeBuddy", body: String(localized: "The daemon failed to start three times in a row. Click the menu bar icon to restart it."))
+                }
             }
         }
         refreshHookStates()
@@ -67,7 +74,9 @@ final class AppModel: ObservableObject {
             // as changed and silently disabled them, and the box announced nothing from Codex for four hours. This one ignores the
             // link-notification switch: the app itself made the change, so a person has to finish the job.
             Notifier.notify(title: String(localized: "Codex hook config updated"),
-                            body: String(localized: "VibeBuddy rewrote ~/.codex/hooks.json. Codex silently disables hooks that change: type /hooks in Codex and re-trust them so the box keeps getting Codex events."))
+                            body: Self.korekore
+                                ? String(localized: "Trust korekore's hooks again with /hooks in Codex.")
+                                : String(localized: "VibeBuddy rewrote ~/.codex/hooks.json. Codex silently disables hooks that change: type /hooks in Codex and re-trust them so the box keeps getting Codex events."))
         }
         refreshHookStates()
         if managesDaemon { supervisor.start() }
@@ -143,7 +152,7 @@ final class AppModel: ObservableObject {
               UserDefaults.standard.string(forKey: Self.notifiedFirmwareKey) != offer.version else { return }
         UserDefaults.standard.set(offer.version, forKey: Self.notifiedFirmwareKey)
         Notifier.notify(title: String(localized: "Box firmware \(offer.version) is available"),
-                        body: String(localized: "Open Settings → Device to update the box."))
+                        body: Self.korekore ? String(localized: "Update it from Settings › Device.") : String(localized: "Open Settings → Device to update the box."))
     }
 
     /// Notify once after the link has been down for 30 seconds (debounced); reset when it's plugged back in.
@@ -157,7 +166,9 @@ final class AppModel: ObservableObject {
         if linkLostSince == nil { linkLostSince = Date() }
         if !linkNotified, let since = linkLostSince, Date().timeIntervalSince(since) >= 30 {
             linkNotified = true
-            Notifier.notify(title: String(localized: "Box disconnected"), body: String(localized: "VibeBuddy hasn't seen the box for 30 seconds. Check the USB cable."))
+            Notifier.notify(title: String(localized: "Box disconnected"),
+                            body: Self.korekore ? String(localized: "The box has been gone for 30 seconds.")
+                                : String(localized: "VibeBuddy hasn't seen the box for 30 seconds. Check the USB cable."))
         }
     }
 

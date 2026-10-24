@@ -23,6 +23,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             KorekoreSnapshots.write(to: URL(fileURLWithPath: folder), model: model)
             exit(0)
         }
+        // Debug builds only: run against the daemon already running, as a guest, and draw the korekore windows with
+        // what it reports, then quit.
+        if let folder = ProcessInfo.processInfo.environment["VIBEBUDDY_KOREKORE_LIVE_SHOTS"] {
+            model.managesDaemon = false
+            KorekoreAssets.registerFonts(in: Resources.resourcesDirectory.appendingPathComponent("fonts"))
+            model.start()
+            KorekoreSnapshots.live(to: URL(fileURLWithPath: folder), model: model)
+            return
+        }
         #endif
         // A second copy of the app (another path, a dev build) would start a second daemon that fights over
         // the port and the serial port. Hand off to the running one and quit before starting anything.
@@ -201,6 +210,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func showOnboarding() {
+        if onboardingWindow == nil, AppUI.atLaunch() == .korekore {
+            let window = KorekoreSettingsWindow.onboarding(rootView: KorekoreOnboarding(model: model, finish: { [weak self] in
+                UserDefaults.standard.set(true, forKey: "onboardingDone")
+                self?.onboardingWindow?.close()
+            }))
+            window.center()
+            window.isReleasedWhenClosed = false
+            watchClose(window)
+            onboardingWindow = window
+        }
         if onboardingWindow == nil {
             let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 560, height: 540), styleMask: [.titled, .closable], backing: .buffered, defer: false)
             window.title = String(localized: "Welcome to VibeBuddy")
@@ -322,13 +341,21 @@ enum LegacyLaunchAgent {
         let hasPlist = FileManager.default.fileExists(atPath: plist.path)
         let occupied = await portOccupied()
         guard hasPlist || occupied else { return }
-        let alert = NSAlert()
-        alert.messageText = hasPlist ? String(localized: "Found an old vibebuddyd background service") : String(localized: "A daemon is already running on port 7331")
-        alert.informativeText = String(localized: "VibeBuddy now manages its own daemon, and two daemons would fight over the serial port. Remove the old one and take over?")
-        alert.addButton(withTitle: String(localized: "Remove and take over"))
-        alert.addButton(withTitle: String(localized: "Later"))
-        NSApp.activate(ignoringOtherApps: true)
-        if alert.runModal() == .alertFirstButtonReturn {
+        let title = hasPlist ? String(localized: "Found an old vibebuddyd background service") : String(localized: "A daemon is already running on port 7331")
+        let takeOver: Bool
+        if AppUI.atLaunch() == .korekore {
+            takeOver = KorekoreAlert.run(title: title, message: String(localized: "korekore can remove it and take over, so the two don't fight over the box."),
+                                         buttons: [String(localized: "Remove and take over"), String(localized: "Later")]).button == 0
+        } else {
+            let alert = NSAlert()
+            alert.messageText = title
+            alert.informativeText = String(localized: "VibeBuddy now manages its own daemon, and two daemons would fight over the serial port. Remove the old one and take over?")
+            alert.addButton(withTitle: String(localized: "Remove and take over"))
+            alert.addButton(withTitle: String(localized: "Later"))
+            NSApp.activate(ignoringOtherApps: true)
+            takeOver = alert.runModal() == .alertFirstButtonReturn
+        }
+        if takeOver {
             let bootout = Process()
             bootout.executableURL = URL(fileURLWithPath: "/bin/launchctl")
             bootout.arguments = ["bootout", "gui/\(getuid())/\(label)"]

@@ -112,7 +112,7 @@ final class KorekoreStatusItem {
     }
 }
 
-private struct KorekorePanelRoot: View {
+struct KorekorePanelRoot: View {
     @ObservedObject var model: AppModel
     let actions: KorekoreMenuActions
 

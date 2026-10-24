@@ -104,7 +104,7 @@ struct KorekoreDevicePage: View {
                     KHeading(String(localized: "The box isn't running korekore firmware"))
                     if model.firmwareDownloaded {
                         KNote(String(localized: "Flash korekore to use it; its current firmware will be replaced."))
-                        Button(String(localized: "Flash korekore")) { FlashConfirm.foreign(then: model.updateFirmware) }.kButton(.pink)
+                        Button(String(localized: "Flash korekore")) { KorekoreFlash.foreign(then: model.updateFirmware) }.kButton(.pink)
                             .disabled(model.operationRunning)
                     } else {
                         KorekoreFirmwareUnavailable(model: model)
@@ -168,7 +168,7 @@ struct KorekoreDevicePage: View {
                 if model.firmwareUpdateAvailable, connected, !canFlash {
                     KNote(String(localized: "Plug in the cable to update the box's firmware."))
                 } else if model.firmwareUpdateAvailable, let offer = model.offeredFirmware {
-                    Button(String(localized: "Update to \(offer.version)")) { FlashConfirm.update(offer, then: model.updateFirmware) }
+                    Button(String(localized: "Update to \(offer.version)")) { KorekoreFlash.update(offer, then: model.updateFirmware) }
                         .kButton(.pink, size: 13).frame(maxWidth: .infinity)
                         .disabled(model.operationRunning || !connected)
                 }
@@ -312,14 +312,14 @@ struct KorekoreDevicePage: View {
             model.lastError = error.localizedDescription
             return
         }
-        let alert = NSAlert()
-        alert.messageText = String(localized: "Flash this firmware?")
         let current = model.boxFirmware ?? String(localized: "unknown")
         let offered = Firmware.label(version: package.version, build: package.build) ?? package.build
-        alert.informativeText = String(localized: "Firmware package: \(offered)\nBox now: \(current)\nThe box restarts once; its voice pack and today's stats are kept. Over the UART bridge this takes a few minutes.")
-        alert.addButton(withTitle: String(localized: "Flash"))
-        alert.addButton(withTitle: String(localized: "Cancel"))
-        if alert.runModal() == .alertFirstButtonReturn { model.flashFirmware(package) }
+        let answer = KorekoreAlert.run(
+            title: String(localized: "Flash this firmware?"),
+            message: String(localized: "The box restarts once; its voice pack and today's stats are kept. Over the UART bridge this takes a few minutes."),
+            buttons: [String(localized: "Flash"), String(localized: "Cancel")],
+            facts: [(String(localized: "Firmware package"), offered), (String(localized: "Box now"), current)])
+        if answer.button == 0 { model.flashFirmware(package) }
     }
 }
 
@@ -357,7 +357,7 @@ struct KorekoreWifiCard: View {
     @State private var password = ""
     @State private var editing = false
 
-    private func wifiFailure(_ why: String) -> String {
+    static func wifiFailure(_ why: String) -> String {
         switch why {
         case "wrong_password": return String(localized: "The network turned the box away; the password is probably wrong. Check it, then join again.")
         case "not_found": return String(localized: "The box can't find this network. It only joins 2.4 GHz Wi-Fi: check the name, and that the box is in range.")
@@ -378,7 +378,7 @@ struct KorekoreWifiCard: View {
                 if let network = device.wifiNetwork {
                     if let why = device.wifiError {
                         KTag(String(localized: "Couldn't join"), color: Theme.Colors.korePinkText)
-                        KNote(wifiFailure(why))
+                        KNote(Self.wifiFailure(why))
                     } else if let address = device.wifiAddress {
                         row(String(localized: "Status")) { KTag(String(localized: "Joined · \(address)"), color: Theme.Colors.doneText) }
                     } else {
