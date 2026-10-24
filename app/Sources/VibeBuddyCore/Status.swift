@@ -38,11 +38,26 @@ public struct AccountStatus: Codable, Equatable {
     public var today: AccountUsage?
     /// Why the service refused voice today: `allowance` or `global_cap`.
     public var refused: String?
-    enum CodingKeys: String, CodingKey { case available, signedIn = "signed_in", email, githubID = "github_id", githubLogin = "github_login", today, refused }
-    public init(available: Bool, signedIn: Bool, email: String? = nil, githubID: Int? = nil, githubLogin: String? = nil, today: AccountUsage? = nil, refused: String? = nil) {
+    /// The account's plan (ADR-0020), when the daemon knows.
+    public var plan: AccountPlan?
+    enum CodingKeys: String, CodingKey { case available, signedIn = "signed_in", email, githubID = "github_id", githubLogin = "github_login", today, refused, plan }
+    public init(available: Bool, signedIn: Bool, email: String? = nil, githubID: Int? = nil, githubLogin: String? = nil, today: AccountUsage? = nil, refused: String? = nil, plan: AccountPlan? = nil) {
         self.available = available; self.signedIn = signedIn; self.email = email; self.githubID = githubID; self.githubLogin = githubLogin
-        self.today = today; self.refused = refused
+        self.today = today; self.refused = refused; self.plan = plan
     }
+}
+
+/// `free`, or `paid` with the billing period's end and its monthly allowance, in characters of our voices.
+public struct AccountPlan: Codable, Equatable {
+    public var name: String
+    public var periodEnd: Date?
+    public var characters: Int?
+    public var charactersLimit: Int?
+    enum CodingKeys: String, CodingKey { case name, periodEnd = "period_end", characters, charactersLimit = "characters_limit" }
+    public init(name: String, periodEnd: Date? = nil, characters: Int? = nil, charactersLimit: Int? = nil) {
+        self.name = name; self.periodEnd = periodEnd; self.characters = characters; self.charactersLimit = charactersLimit
+    }
+    public var paid: Bool { name == "paid" }
 }
 
 public struct AccountUsage: Codable, Equatable {

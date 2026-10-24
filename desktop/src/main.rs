@@ -1952,7 +1952,9 @@ impl App {
             (None, Some(usage)) => Some(text(tr("Voice today: %lld of %lld", &[&usage.commands, &usage.commands_limit])).size(13).style(text::secondary)),
             (None, None) => None,
         };
-        column![text(who)].push(today).push(actions).spacing(12).into()
+        let plan = account.plan.as_ref().map(|plan| text(if plan.paid() { tr("Paid plan", &[]) } else { tr("Free", &[]) }).size(13));
+        let month = account.plan.as_ref().and_then(|plan| plan.month_line()).map(|line| text(line).size(13).style(text::secondary));
+        column![text(who)].push(plan).push(month).push(today).push(actions).spacing(12).into()
     }
 
     fn advanced(&self) -> Element<'_, Message> {

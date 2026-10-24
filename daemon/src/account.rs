@@ -34,6 +34,25 @@ pub struct AccountStatus {
     pub today: Option<Usage>,
     /// Why the service last refused voice today (`allowance` or `global_cap`), until the UTC day ends.
     pub refused: Option<String>,
+    /// The account's plan (ADR-0020), read with today's usage; on the Paid plan its characters are counted here
+    /// too as replies are spoken.
+    pub plan: Option<Plan>,
+}
+
+/// As the service's `GET /v1/account` says it (docs/api.md): `{"name":"free"}`, or `paid` with the billing
+/// period's end and its monthly allowance.
+#[derive(Clone, Debug, PartialEq, Serialize)]
+pub struct Plan {
+    /// `free` or `paid`.
+    pub name: String,
+    /// When the period ends and the plan renews, RFC 3339.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub period_end: Option<String>,
+    /// Characters of our voices spoken this period.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub characters: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub characters_limit: Option<u64>,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize)]
@@ -99,7 +118,9 @@ pub struct Account {
     saved: Mutex<Option<Saved>>,
     pending: Mutex<Option<Pending>>,
     today: Mutex<Today>,
-    /// Bumped whenever [`AccountStatus::today`] or [`AccountStatus::refused`] changes, for the status stream.
+    plan: Mutex<Option<Plan>>,
+    /// Bumped whenever [`AccountStatus::today`], [`AccountStatus::refused`] or [`AccountStatus::plan`] changes, for
+    /// the status stream.
     usage_changed: watch::Sender<u64>,
     /// Whether signed in, for whoever must follow it: the status stream and the box's offer of voice.
     signed_in: watch::Sender<bool>,
@@ -120,12 +141,13 @@ impl Account {
             saved: Mutex::new(saved),
             pending: Mutex::new(None),
             today: Mutex::default(),
+            plan: Mutex::default(),
             usage_changed,
             signed_in,
         }
     }
 
-    /// Changes whenever today's usage or a refusal changes.
+    /// Changes whenever today's usage, a refusal or the plan changes.
     pub fn watch_usage(&self) -> watch::Receiver<u64> {
         self.usage_changed.subscribe()
     }
@@ -155,6 +177,7 @@ impl Account {
             // A new UTC day starts over: nothing used, nothing refused.
             today: today.usage.clone().filter(|_| signed_in).map(|usage| if usage.day == day { usage } else { Usage { day: day.clone(), commands: 0, ..usage } }),
             refused: today.refused.as_ref().filter(|(on, _)| signed_in && *on == day).map(|(_, reason)| reason.clone()),
+            plan: self.plan.lock().unwrap().clone().filter(|_| signed_in),
         }
     }
 
@@ -170,6 +193,20 @@ impl Account {
         }
         drop(today);
         self.usage_changed.send_modify(|n| *n += 1);
+    }
+
+    /// A spoken reply of `text` went through the service. On the Paid plan the service counted its characters
+    /// (JavaScript's `length`) against the month while it lasts, the one that crosses the limit included; after
+    /// that, against the daily replies, which aren't shown.
+    pub fn note_reply(&self, text: &str) {
+        let mut plan = self.plan.lock().unwrap();
+        if let Some(Plan { characters: Some(used), characters_limit: Some(limit), .. }) = plan.as_mut()
+            && *used < *limit
+        {
+            *used += text.encode_utf16().count() as u64;
+            drop(plan);
+            self.usage_changed.send_modify(|n| *n += 1);
+        }
     }
 
     /// The service refused voice for `reason` (`allowance` or `global_cap`).
@@ -195,13 +232,21 @@ impl Account {
         Ok(())
     }
 
-    /// Today's usage from a `GET /v1/account` answer (docs/api.md).
+    /// Today's usage and the plan from a `GET /v1/account` answer (docs/api.md).
     fn take_usage(&self, account: &serde_json::Value) {
         let usage = match (account["today"]["day"].as_str(), account["today"]["commands"].as_u64(), account["limits"]["commands"].as_u64()) {
             (Some(day), Some(commands), Some(limit)) => Some(Usage { day: day.to_owned(), commands, commands_limit: limit }),
             _ => None,
         };
+        let plan = &account["plan"];
+        let plan = plan["name"].as_str().map(|name| Plan {
+            name: name.to_owned(),
+            period_end: plan["period_end"].as_str().map(str::to_owned),
+            characters: plan["characters"].as_u64(),
+            characters_limit: plan["characters_limit"].as_u64(),
+        });
         self.today.lock().unwrap().usage = usage;
+        *self.plan.lock().unwrap() = plan;
         self.usage_changed.send_modify(|n| *n += 1);
     }
 
@@ -567,6 +612,33 @@ mod tests {
         assert_eq!(account.status().refused, None);
         account.forget();
         assert_eq!((account.status().today, account.status().refused), (None, None));
+    }
+
+    #[test]
+    fn reads_the_plan_and_counts_spoken_characters_on_the_paid_plan_only() {
+        let dir = scratch();
+        let (service, _) = serve(vec![
+            (200, r#"{"plan":{"name":"free"},"today":{"day":"2026-10-24","commands":0,"replies":0},"limits":{"commands":20,"replies":20}}"#),
+            (200, r#"{"plan":{"name":"paid","period_end":"2026-11-24T00:00:00.000Z","characters":99990,"characters_limit":100000}}"#),
+        ]);
+        let account = signed_in(&service, dir.as_path());
+        account.refresh_usage().unwrap();
+        let free = account.status().plan.unwrap();
+        assert_eq!(serde_json::to_value(&free).unwrap(), serde_json::json!({"name": "free"}));
+        account.note_reply("Hello");
+        assert_eq!(account.status().plan, Some(free));
+
+        account.refresh_usage().unwrap();
+        // Counted as JavaScript does: "é" is one unit, "😀" two.
+        account.note_reply("café 😀");
+        assert_eq!(account.status().plan.unwrap().characters, Some(99997));
+        // The reply that crosses the limit counts; after it, replies count against the day.
+        account.note_reply("four");
+        account.note_reply("more");
+        let paid = account.status().plan.unwrap();
+        assert_eq!((paid.characters, paid.characters_limit, paid.period_end.as_deref()), (Some(100001), Some(100000), Some("2026-11-24T00:00:00.000Z")));
+        account.forget();
+        assert_eq!(account.status().plan, None);
     }
 
     #[test]

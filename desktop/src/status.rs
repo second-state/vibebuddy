@@ -36,6 +36,46 @@ pub struct Account {
     pub today: Option<Usage>,
     /// Why the service refused voice today: `allowance` or `global_cap`.
     pub refused: Option<String>,
+    /// The account's plan (ADR-0020), when the daemon knows.
+    pub plan: Option<Plan>,
+}
+
+#[derive(Clone, Debug, Default, Deserialize, PartialEq)]
+#[serde(default)]
+pub struct Plan {
+    /// `free` or `paid`.
+    pub name: String,
+    /// When the billing period ends and the plan renews, RFC 3339; the counts and this come only on the Paid plan.
+    pub period_end: Option<String>,
+    pub characters: Option<u64>,
+    pub characters_limit: Option<u64>,
+}
+
+impl Plan {
+    pub fn paid(&self) -> bool {
+        self.name == "paid"
+    }
+
+    /// "This month: 12,300 of 100,000 characters · renews 24 Nov", on the Paid plan only.
+    pub fn month_line(&self) -> Option<String> {
+        let (Some(used), Some(limit), Some(end)) = (self.characters, self.characters_limit, self.period_end.as_deref()) else { return None };
+        let end = chrono::DateTime::parse_from_rfc3339(end).ok()?.with_timezone(&chrono::Local);
+        let renews = if crate::i18n::is_chinese() { end.format("%-m月%-d日") } else { end.format("%-d %b") }.to_string();
+        self.paid().then(|| tr("This month: %@ of %@ characters · renews %@", &[&grouped(used), &grouped(limit), &renews]))
+    }
+}
+
+/// `12300` as "12,300".
+fn grouped(number: u64) -> String {
+    let digits = number.to_string();
+    let mut out = String::new();
+    for (index, digit) in digits.chars().enumerate() {
+        if index > 0 && (digits.len() - index).is_multiple_of(3) {
+            out.push(',');
+        }
+        out.push(digit);
+    }
+    out
 }
 
 #[derive(Clone, Debug, Default, Deserialize, PartialEq)]
@@ -467,6 +507,20 @@ mod tests {
         let used: Account = serde_json::from_str(r#"{"signed_in":true,"today":{"day":"2026-10-24","commands":7,"commands_limit":100},"refused":"global_cap"}"#).expect("account");
         assert_eq!(used.today, Some(Usage { day: "2026-10-24".to_owned(), commands: 7, commands_limit: 100 }));
         assert_eq!(used.refused.as_deref(), Some("global_cap"));
+        assert_eq!(used.plan, None);
+    }
+
+    #[test]
+    fn the_plan_decodes_and_only_the_paid_plan_has_a_month() {
+        let free: Account = serde_json::from_str(r#"{"signed_in":true,"plan":{"name":"free"}}"#).expect("account");
+        let free = free.plan.expect("plan");
+        assert!(!free.paid());
+        assert_eq!(free.month_line(), None);
+        let paid: Plan = serde_json::from_str(r#"{"name":"paid","period_end":"2026-11-24T12:00:00.000Z","characters":12300,"characters_limit":100000}"#).expect("plan");
+        assert!(paid.paid());
+        let line = paid.month_line().expect("a month");
+        assert!(line.starts_with("This month: 12,300 of 100,000 characters · renews ") && line.ends_with(" Nov"), "{line}");
+        assert_eq!((grouped(0), grouped(999), grouped(1000), grouped(1234567)), ("0".to_owned(), "999".to_owned(), "1,000".to_owned(), "1,234,567".to_owned()));
     }
 
     #[test]

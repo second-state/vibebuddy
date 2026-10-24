@@ -69,6 +69,9 @@ impl VoiceService {
             }
             return Err(format!("the voice service answered {status}: {}", answer.trim()));
         }
+        if let Some(session) = &self.session {
+            session.note_reply(text);
+        }
         let mut reader = response.into_body().into_reader();
         let mut buffer = [0u8; 4096];
         let mut total = 0;

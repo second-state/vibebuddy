@@ -1721,7 +1721,7 @@ async fn post_sign_out(State(state): State<AppState>) -> (StatusCode, Json<ApiRe
     }
 }
 
-/// Reads today's voice use from the service, for the App's Account tab; the status stream carries it.
+/// Reads today's voice use and the plan from the service, for the App's Account tab; the status stream carries them.
 async fn post_account_refresh(State(state): State<AppState>) -> (StatusCode, Json<ApiResponse>) {
     let account = state.account.clone();
     match tokio::task::spawn_blocking(move || account.refresh_usage()).await.unwrap_or_else(|error| Err(account::AccountError::Service(error.to_string()))) {

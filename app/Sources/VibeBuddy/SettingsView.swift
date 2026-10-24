@@ -820,6 +820,13 @@ struct AccountView: View {
             } else if let account, account.available {
                 if account.signedIn {
                     Text(signedInText)
+                    if let plan = account.plan {
+                        Text(plan.paid ? "Paid plan" : "Free")
+                        if plan.paid, let used = plan.characters, let limit = plan.charactersLimit, let end = plan.periodEnd {
+                            Text("This month: \(used.formatted()) of \(limit.formatted()) characters · renews \(end.formatted(.dateTime.day().month(.abbreviated)))")
+                                .foregroundStyle(.secondary)
+                        }
+                    }
                     if let refusal {
                         Text(refusal).foregroundStyle(.orange)
                     } else if let today = account.today {
@@ -844,7 +851,7 @@ struct AccountView: View {
         }
         .formStyle(.grouped)
         .onChange(of: account?.signedIn) { waiting = false }
-        // Reading the day's use costs a request to the service, so only when the tab is shown.
+        // Reading the day's use and the plan costs a request to the service, so only when the tab is shown.
         .task { if account?.signedIn == true { try? await model.client.refreshAccount() } }
     }
 
