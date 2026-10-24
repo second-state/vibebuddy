@@ -364,3 +364,6 @@
 "Couldn't sign in: %@" = "登录失败：%@";
 "Couldn't sign out: %@" = "退出登录失败：%@";
 "Couldn't delete the account: %@" = "删除账户失败：%@";
+"Voice today: %lld of %lld" = "今天的语音：已用 %lld / %lld 条";
+"Today's voice is used up. It comes back at midnight UTC." = "今天的语音已用完，UTC 零点后恢复。";
+"Voice is paused for everyone today. It comes back at midnight UTC." = "今天的语音已全局暂停，UTC 零点后恢复。";

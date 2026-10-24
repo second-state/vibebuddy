@@ -820,6 +820,11 @@ struct AccountView: View {
             } else if let account, account.available {
                 if account.signedIn {
                     Text(signedInText)
+                    if let refusal {
+                        Text(refusal).foregroundStyle(.orange)
+                    } else if let today = account.today {
+                        Text("Voice today: \(today.commands) of \(today.commandsLimit)").foregroundStyle(.secondary)
+                    }
                     HStack {
                         Button("Sign out") { signOut() }
                         Button("Delete account…") { confirmDelete() }
@@ -839,6 +844,17 @@ struct AccountView: View {
         }
         .formStyle(.grouped)
         .onChange(of: account?.signedIn) { waiting = false }
+        // Reading the day's use costs a request to the service, so only when the tab is shown.
+        .task { if account?.signedIn == true { try? await model.client.refreshAccount() } }
+    }
+
+    /// Why voice is refused today, if it is.
+    private var refusal: String? {
+        switch account?.refused {
+        case nil: nil
+        case "global_cap": String(localized: "Voice is paused for everyone today. It comes back at midnight UTC.")
+        default: String(localized: "Today's voice is used up. It comes back at midnight UTC.")
+        }
     }
 
     private var signedInText: String {

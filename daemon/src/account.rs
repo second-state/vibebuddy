@@ -29,6 +29,26 @@ pub struct AccountStatus {
     pub github_id: Option<u64>,
     /// Looked up on GitHub when signing in, for the App to show; the service keeps only the id.
     pub github_login: Option<String>,
+    /// Voice used in the current UTC day, when known: read from the service at sign-in and when the App asks, and
+    /// counted here as commands are recognized.
+    pub today: Option<Usage>,
+    /// Why the service last refused voice today (`allowance` or `global_cap`), until the UTC day ends.
+    pub refused: Option<String>,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize)]
+pub struct Usage {
+    /// The UTC day, `2026-10-24`.
+    pub day: String,
+    pub commands: u64,
+    pub commands_limit: u64,
+}
+
+/// What the daemon knows of today's voice; cleared at the UTC day's end by [`Account::status`].
+#[derive(Default)]
+struct Today {
+    usage: Option<Usage>,
+    refused: Option<(String, String)>,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -78,6 +98,9 @@ pub struct Account {
     github_api: String,
     saved: Mutex<Option<Saved>>,
     pending: Mutex<Option<Pending>>,
+    today: Mutex<Today>,
+    /// Bumped whenever [`AccountStatus::today`] or [`AccountStatus::refused`] changes, for the status stream.
+    usage_changed: watch::Sender<u64>,
     /// Whether signed in, for whoever must follow it: the status stream and the box's offer of voice.
     signed_in: watch::Sender<bool>,
 }
@@ -88,6 +111,7 @@ impl Account {
         let file = config_dir.map(|dir| dir.join(ACCOUNT_FILE));
         let saved = file.as_deref().and_then(load);
         let (signed_in, _) = watch::channel(saved.is_some());
+        let (usage_changed, _) = watch::channel(0);
         Self {
             base,
             file,
@@ -95,8 +119,15 @@ impl Account {
             github_api: "https://api.github.com".to_owned(),
             saved: Mutex::new(saved),
             pending: Mutex::new(None),
+            today: Mutex::default(),
+            usage_changed,
             signed_in,
         }
+    }
+
+    /// Changes whenever today's usage or a refusal changes.
+    pub fn watch_usage(&self) -> watch::Receiver<u64> {
+        self.usage_changed.subscribe()
     }
 
     /// Changes each time the account is signed in or out, from here or by the service refusing the session.
@@ -112,13 +143,66 @@ impl Account {
 
     pub fn status(&self) -> AccountStatus {
         let saved = self.saved.lock().unwrap().clone();
+        let day = utc_day();
+        let today = self.today.lock().unwrap();
+        let signed_in = saved.is_some();
         AccountStatus {
             available: self.base.is_some() && self.file.is_some(),
-            signed_in: saved.is_some(),
+            signed_in,
             email: saved.as_ref().and_then(|s| s.email.clone()),
             github_id: saved.as_ref().and_then(|s| s.github_id),
             github_login: saved.and_then(|s| s.github_login),
+            // A new UTC day starts over: nothing used, nothing refused.
+            today: today.usage.clone().filter(|_| signed_in).map(|usage| if usage.day == day { usage } else { Usage { day: day.clone(), commands: 0, ..usage } }),
+            refused: today.refused.as_ref().filter(|(on, _)| signed_in && *on == day).map(|(_, reason)| reason.clone()),
         }
+    }
+
+    /// A command was recognized by the voice service, which counted it.
+    pub fn note_command(&self) {
+        let day = utc_day();
+        let mut today = self.today.lock().unwrap();
+        if let Some(usage) = &mut today.usage {
+            if usage.day != day {
+                *usage = Usage { day, commands: 0, ..usage.clone() };
+            }
+            usage.commands += 1;
+        }
+        drop(today);
+        self.usage_changed.send_modify(|n| *n += 1);
+    }
+
+    /// The service refused voice for `reason` (`allowance` or `global_cap`).
+    pub fn note_refusal(&self, reason: &str) {
+        self.today.lock().unwrap().refused = Some((utc_day(), reason.to_owned()));
+        self.usage_changed.send_modify(|n| *n += 1);
+    }
+
+    /// Reads today's usage from the service. Blocking.
+    pub fn refresh_usage(&self) -> Result<(), AccountError> {
+        let token = self.token().ok_or(AccountError::NotSignedIn)?;
+        let base = self.base.clone().ok_or(AccountError::Unavailable)?;
+        let (status, text) = read(crate::speech::agent(TIMEOUT).get(&format!("{base}/v1/account")).header("Authorization", &format!("Bearer {token}")).call())?;
+        if status == 401 {
+            self.forget();
+            return Err(AccountError::NotSignedIn);
+        }
+        if status != 200 {
+            return Err(AccountError::Service(format!("the account couldn't be read: HTTP {status}")));
+        }
+        let account: serde_json::Value = serde_json::from_str(&text).map_err(|error| AccountError::Service(error.to_string()))?;
+        self.take_usage(&account);
+        Ok(())
+    }
+
+    /// Today's usage from a `GET /v1/account` answer (docs/api.md).
+    fn take_usage(&self, account: &serde_json::Value) {
+        let usage = match (account["today"]["day"].as_str(), account["today"]["commands"].as_u64(), account["limits"]["commands"].as_u64()) {
+            (Some(day), Some(commands), Some(limit)) => Some(Usage { day: day.to_owned(), commands, commands_limit: limit }),
+            _ => None,
+        };
+        self.today.lock().unwrap().usage = usage;
+        self.usage_changed.send_modify(|n| *n += 1);
     }
 
     /// The session for calls to the service, when signed in.
@@ -176,6 +260,7 @@ impl Account {
             return Err(AccountError::Service(format!("the new session didn't work: HTTP {status}")));
         }
         let account: serde_json::Value = serde_json::from_str(&text).map_err(|error| AccountError::Service(error.to_string()))?;
+        self.take_usage(&account);
         let github_id = account["github_id"].as_u64();
         let saved = Saved {
             token,
@@ -256,6 +341,10 @@ pub fn signed_in_for_tests(dir: &Path, token: &str) -> Account {
     std::fs::create_dir_all(dir).unwrap();
     crate::resident_claude::write_private(&dir.join(ACCOUNT_FILE), &serde_json::json!({"token": token, "github_id": 1}).to_string()).unwrap();
     Account::new(Some("http://127.0.0.1:9".to_owned()), Some(dir), 7331)
+}
+
+fn utc_day() -> String {
+    chrono::Utc::now().format("%Y-%m-%d").to_string()
 }
 
 fn load(path: &Path) -> Option<Saved> {
@@ -455,6 +544,29 @@ mod tests {
         account.delete().unwrap();
         assert!(!account.status().signed_in);
         assert!(seen.lock().unwrap()[1].starts_with("DELETE /v1/account"));
+    }
+
+    #[test]
+    fn keeps_todays_usage_counts_commands_and_remembers_a_refusal() {
+        let dir = scratch();
+        let day = utc_day();
+        let account_answer = format!(r#"{{"id":"a","github_id":1,"today":{{"day":"{day}","commands":7,"replies":9}},"limits":{{"commands":100,"replies":300}}}}"#);
+        let (service, _) = serve(vec![(200, Box::leak(account_answer.into_boxed_str()))]);
+        let account = signed_in(&service, dir.as_path());
+        let changes = account.watch_usage();
+        assert_eq!(account.status().today, None);
+        account.refresh_usage().unwrap();
+        assert_eq!(account.status().today, Some(Usage { day: day.clone(), commands: 7, commands_limit: 100 }));
+        account.note_command();
+        assert_eq!(account.status().today.unwrap().commands, 8);
+        account.note_refusal("allowance");
+        assert_eq!(account.status().refused.as_deref(), Some("allowance"));
+        assert!(changes.has_changed().unwrap());
+        // A refusal from another day is forgotten; signed out, nothing is shown.
+        account.today.lock().unwrap().refused = Some(("2001-01-01".to_owned(), "global_cap".to_owned()));
+        assert_eq!(account.status().refused, None);
+        account.forget();
+        assert_eq!((account.status().today, account.status().refused), (None, None));
     }
 
     #[test]

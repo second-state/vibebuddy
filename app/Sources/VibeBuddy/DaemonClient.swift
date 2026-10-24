@@ -144,6 +144,9 @@ struct DaemonClient {
 
     func signOut() async throws { try await accountCall("/v1/account/sign-out", method: "POST") }
 
+    /// Has the daemon read today's voice use from the service; it comes back in the status.
+    func refreshAccount() async throws { try await accountCall("/v1/account/refresh", method: "POST") }
+
     /// Deletes the account on the service; when the service doesn't, the daemon stays signed in.
     func deleteAccount() async throws { try await accountCall("/v1/account", method: "DELETE") }
 

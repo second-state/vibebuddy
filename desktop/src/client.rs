@@ -324,6 +324,11 @@ pub async fn sign_in() -> Result<String, String> {
 }
 
 /// Ends this computer's session only.
+/// Has the daemon read today's voice use from the service; it comes back in the status.
+pub async fn refresh_account() -> Result<(), String> {
+    post("/v1/account/refresh", None).await
+}
+
 pub async fn sign_out() -> Result<(), String> {
     post("/v1/account/sign-out", None).await
 }

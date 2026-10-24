@@ -32,6 +32,18 @@ pub struct Account {
     pub github_id: Option<u64>,
     /// Looked up on GitHub when signing in; the service keeps only the id.
     pub github_login: Option<String>,
+    /// Voice used in the current UTC day, when the daemon knows.
+    pub today: Option<Usage>,
+    /// Why the service refused voice today: `allowance` or `global_cap`.
+    pub refused: Option<String>,
+}
+
+#[derive(Clone, Debug, Default, Deserialize, PartialEq)]
+#[serde(default)]
+pub struct Usage {
+    pub day: String,
+    pub commands: u64,
+    pub commands_limit: u64,
 }
 
 /// The daemon's view of updates; which firmware to offer is its call, as on the Mac.
@@ -452,6 +464,9 @@ mod tests {
         .expect("account");
         assert!(account.available && account.signed_in);
         assert_eq!((account.github_id, account.github_login.as_deref(), account.email), (Some(60097), Some("octocat"), None));
+        let used: Account = serde_json::from_str(r#"{"signed_in":true,"today":{"day":"2026-10-24","commands":7,"commands_limit":100},"refused":"global_cap"}"#).expect("account");
+        assert_eq!(used.today, Some(Usage { day: "2026-10-24".to_owned(), commands: 7, commands_limit: 100 }));
+        assert_eq!(used.refused.as_deref(), Some("global_cap"));
     }
 
     #[test]

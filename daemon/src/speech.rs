@@ -179,7 +179,11 @@ impl Recognizer for VoiceService {
         if let Some(refusal) = refusal(status, &body, self.session.as_deref()) {
             return Err(refusal);
         }
-        Ok(Self::parse(status, &body)?)
+        let transcript = Self::parse(status, &body)?;
+        if let Some(session) = &self.session {
+            session.note_command();
+        }
+        Ok(transcript)
     }
 
     fn ready(&self) -> bool {
@@ -197,10 +201,16 @@ pub fn refusal(status: u16, body: &str, session: Option<&Account>) -> Option<Rec
             }
             Some(signed_out())
         }
-        429 => Some(match serde_json::from_str::<Value>(body).ok().and_then(|value| value.get("reason")?.as_str().map(str::to_owned)).as_deref() {
-            Some("global_cap") => RecognitionError { reason: "global_cap", message: "Voice is paused for today".to_owned() },
-            _ => RecognitionError { reason: "allowance", message: "Today's voice is used up".to_owned() },
-        }),
+        429 => {
+            let refusal = match serde_json::from_str::<Value>(body).ok().and_then(|value| value.get("reason")?.as_str().map(str::to_owned)).as_deref() {
+                Some("global_cap") => RecognitionError { reason: "global_cap", message: "Voice is paused for today".to_owned() },
+                _ => RecognitionError { reason: "allowance", message: "Today's voice is used up".to_owned() },
+            };
+            if let Some(session) = session {
+                session.note_refusal(refusal.reason);
+            }
+            Some(refusal)
+        }
         _ => None,
     }
 }

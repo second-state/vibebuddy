@@ -520,6 +520,10 @@ impl App {
                     self.conversation_seen = None;
                     return Task::done(Message::PollConversation);
                 }
+                // Reading the day's use costs a request to the service, so only when the tab opens; the status brings it.
+                if tab == Tab::Account && self.status.as_ref().is_some_and(|status| status.account.signed_in) {
+                    return Task::perform(client::refresh_account(), |_| Message::AccountDone(Ok(())));
+                }
             }
             Message::Resident(Ok(enabled)) => {
                 self.resident = enabled;
@@ -1942,7 +1946,13 @@ impl App {
             .spacing(8)
             .into()
         };
-        column![text(who), actions].spacing(12).into()
+        let today = match (account.refused.as_deref(), &account.today) {
+            (Some("global_cap"), _) => Some(text(tr("Voice is paused for everyone today. It comes back at midnight UTC.", &[])).size(13).style(text::warning)),
+            (Some(_), _) => Some(text(tr("Today's voice is used up. It comes back at midnight UTC.", &[])).size(13).style(text::warning)),
+            (None, Some(usage)) => Some(text(tr("Voice today: %lld of %lld", &[&usage.commands, &usage.commands_limit])).size(13).style(text::secondary)),
+            (None, None) => None,
+        };
+        column![text(who)].push(today).push(actions).spacing(12).into()
     }
 
     fn advanced(&self) -> Element<'_, Message> {

@@ -34,9 +34,24 @@ public struct AccountStatus: Codable, Equatable {
     public var githubID: Int?
     /// Looked up on GitHub when signing in; nil if that lookup failed.
     public var githubLogin: String?
-    enum CodingKeys: String, CodingKey { case available, signedIn = "signed_in", email, githubID = "github_id", githubLogin = "github_login" }
-    public init(available: Bool, signedIn: Bool, email: String? = nil, githubID: Int? = nil, githubLogin: String? = nil) {
+    /// Voice used in the current UTC day, when the daemon knows; absent from daemons before it.
+    public var today: AccountUsage?
+    /// Why the service refused voice today: `allowance` or `global_cap`.
+    public var refused: String?
+    enum CodingKeys: String, CodingKey { case available, signedIn = "signed_in", email, githubID = "github_id", githubLogin = "github_login", today, refused }
+    public init(available: Bool, signedIn: Bool, email: String? = nil, githubID: Int? = nil, githubLogin: String? = nil, today: AccountUsage? = nil, refused: String? = nil) {
         self.available = available; self.signedIn = signedIn; self.email = email; self.githubID = githubID; self.githubLogin = githubLogin
+        self.today = today; self.refused = refused
+    }
+}
+
+public struct AccountUsage: Codable, Equatable {
+    public var day: String
+    public var commands: Int
+    public var commandsLimit: Int
+    enum CodingKeys: String, CodingKey { case day, commands, commandsLimit = "commands_limit" }
+    public init(day: String, commands: Int, commandsLimit: Int) {
+        self.day = day; self.commands = commands; self.commandsLimit = commandsLimit
     }
 }
 

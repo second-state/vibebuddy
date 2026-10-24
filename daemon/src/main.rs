@@ -496,6 +496,14 @@ fn follow_account(state: &AppState) {
             offer_voice_again(&follower).await;
         }
     });
+    // Today's usage and refusals are only shown.
+    let mut usage = state.account.watch_usage();
+    let follower = state.clone();
+    tokio::spawn(async move {
+        while usage.changed().await.is_ok() {
+            follower.notify_status();
+        }
+    });
 }
 
 /// Checks the resident session's readiness every [`resident::READINESS_TTL`] and tells the box each time it flips.
@@ -663,6 +671,7 @@ fn app(state: AppState) -> Router {
         .route("/v1/account/sign-in", post(post_sign_in))
         .route("/v1/account/callback", get(get_account_callback))
         .route("/v1/account/sign-out", post(post_sign_out))
+        .route("/v1/account/refresh", post(post_account_refresh))
         .with_state(state)
 }
 
@@ -1708,6 +1717,15 @@ async fn post_sign_out(State(state): State<AppState>) -> (StatusCode, Json<ApiRe
     state.notify_status();
     match result {
         Ok(()) => (StatusCode::OK, Json(ApiResponse { accepted: true, message: "signed out".to_owned() })),
+        Err(error) => account_refusal(&error),
+    }
+}
+
+/// Reads today's voice use from the service, for the App's Account tab; the status stream carries it.
+async fn post_account_refresh(State(state): State<AppState>) -> (StatusCode, Json<ApiResponse>) {
+    let account = state.account.clone();
+    match tokio::task::spawn_blocking(move || account.refresh_usage()).await.unwrap_or_else(|error| Err(account::AccountError::Service(error.to_string()))) {
+        Ok(()) => (StatusCode::OK, Json(ApiResponse { accepted: true, message: "refreshed".to_owned() })),
         Err(error) => account_refusal(&error),
     }
 }

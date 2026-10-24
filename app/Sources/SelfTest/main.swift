@@ -92,6 +92,10 @@ do {
     {"available":true,"signed_in":true,"email":null,"github_id":583231,"github_login":"octocat"}
     """.utf8))
     check(account == AccountStatus(available: true, signedIn: true, githubID: 583231, githubLogin: "octocat"), "account decodes")
+    let used = try StatusCoding.decoder().decode(AccountStatus.self, from: Data("""
+    {"available":true,"signed_in":true,"github_id":1,"today":{"day":"2026-10-24","commands":7,"commands_limit":100},"refused":"allowance"}
+    """.utf8))
+    check(used.today == AccountUsage(day: "2026-10-24", commands: 7, commandsLimit: 100) && used.refused == "allowance", "today's voice use decodes")
 } catch {
     check(false, "status decoding threw: \(error)")
 }
