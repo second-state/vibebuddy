@@ -710,6 +710,7 @@ fn app(state: AppState) -> Router {
         .route("/v1/voice-keys", axum::routing::put(put_voice_keys))
         .route("/v1/voices", get(get_voices))
         .route("/v1/characters", get(get_characters).post(post_character))
+        .route("/v1/characters/presets/{id}/lines", get(get_preset_lines))
         .route("/v1/account", axum::routing::delete(delete_account))
         .route("/v1/account/sign-in", post(post_sign_in))
         .route("/v1/account/callback", get(get_account_callback))
@@ -1744,6 +1745,15 @@ async fn get_characters(State(state): State<AppState>) -> Json<Vec<making::MadeC
     Json(state.making.list())
 }
 
+/// A preset's lines, which a made Character starts from: `[{"occasion", "text"}]`; 404 for anything not a preset.
+async fn get_preset_lines(axum::extract::Path(id): axum::extract::Path<String>) -> axum::response::Response {
+    use axum::response::IntoResponse;
+    match making::preset_lines(&id) {
+        Some(lines) => Json(lines).into_response(),
+        None => (StatusCode::NOT_FOUND, Json(ApiResponse { accepted: false, message: format!("{id} is not a preset Character") })).into_response(),
+    }
+}
+
 /// Starts making a Character's line audio (`making` in the status follows it); 409 while another is being made.
 async fn post_character(State(state): State<AppState>, Json(request): Json<making::Request>) -> axum::response::Response {
     use axum::response::IntoResponse;
@@ -2221,6 +2231,18 @@ mod tests {
         let status = serde_json::to_string(&state.snapshot().await).unwrap();
         assert!(status.contains(r#""making":{"id":"owl-"#), "{status}");
         let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[tokio::test]
+    async fn a_presets_lines_are_served_for_the_app_to_start_from() {
+        let get = |id: &str| get_preset_lines(axum::extract::Path(id.to_owned()));
+        let response = get("wanwanxiaohe").await;
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = http_body_util::BodyExt::collect(response.into_body()).await.unwrap().to_bytes();
+        let lines: Vec<serde_json::Value> = serde_json::from_slice(&body).unwrap();
+        assert_eq!(lines.len(), 55);
+        assert!(lines[0]["occasion"].is_string() && lines[0]["text"].is_string(), "{:?}", lines[0]);
+        assert_eq!(get("robot").await.status(), StatusCode::NOT_FOUND);
     }
 
     #[test]

@@ -13,6 +13,7 @@ mod custom;
 mod face;
 mod firmware_file;
 mod i18n;
+mod making;
 #[cfg(target_os = "linux")]
 mod instance;
 mod preview;
@@ -23,7 +24,7 @@ mod tray;
 
 use std::time::{Duration, SystemTime};
 
-use iced::widget::{button, checkbox, column, container, image, pick_list, row, scrollable, slider, space, text, text_input, toggler};
+use iced::widget::{button, checkbox, column, container, image, pick_list, progress_bar, row, scrollable, slider, space, text, text_input, toggler};
 use iced::{Element, Font, Length, Subscription, Task, Theme, window};
 
 use i18n::{UiLanguage, tr};
@@ -127,6 +128,29 @@ enum Message {
     UseRobot,
     UseCustom,
     CopyPrompt,
+    /// Making a Character (ADR-0020): open the form in place of the Character tab, or (false) leave it.
+    MakeCharacter(bool),
+    MakeBase(Lender),
+    /// A preset's lines, for the form if it still starts from that preset.
+    MakeLines(&'static str, Result<Vec<making::Line>, String>),
+    MakeName(String),
+    MakeVoice(making::Voice),
+    MakeLine(usize, String),
+    MakeRemoveLine(usize),
+    MakeChooseDrawings,
+    MakeDrawings(Result<Option<Vec<character::Image>>, String>),
+    /// Wear the base's look again rather than the user's.
+    MakeBaseLook,
+    MakeStart,
+    /// The daemon took the job, from the form or a Resume, or didn't.
+    MakeStarted(Result<making::Making, String>),
+    MadeCharacters(Result<Vec<making::MadeCharacter>, String>),
+    MadeFaces(Vec<(String, image::Handle)>),
+    CharacterVoices(Result<Vec<making::Voice>, String>),
+    /// Write a made Character to the box, by id.
+    UseMade(String),
+    /// Make the rest of a made Character whose job stopped, by id.
+    ResumeMade(String),
     AskFirmwareUpdate(bool),
     FlashFirmware,
     FlashFromFile,
@@ -231,6 +255,13 @@ struct App {
     custom_problem: Option<String>,
     /// The robot's face for its card.
     robot_face: Option<image::Handle>,
+    /// The Characters made on this computer, each one's face, and the voices one can be made with (ADR-0020); asked
+    /// when the daemon comes up and whenever a job changes state.
+    made: Vec<making::MadeCharacter>,
+    made_faces: Vec<(String, image::Handle)>,
+    character_voices: Vec<making::Voice>,
+    /// The Make a Character form, while it shows in place of the Character tab.
+    make: Option<MakeForm>,
     /// The firmware update waits for a second click, since the box restarts.
     confirm_firmware: bool,
     /// A firmware zip picked with Flash from file…, waiting for the user to confirm.
@@ -290,6 +321,21 @@ struct App {
     plugin: bool,
 }
 
+/// Making a Character: the preset it starts from, its lines as edited (occasions stay, each keeps a line), the voice,
+/// and the user's own look, if any.
+struct MakeForm {
+    base: Lender,
+    name: String,
+    voice: Option<making::Voice>,
+    lines: Vec<making::Line>,
+    /// The preset's occasions, in its order.
+    occasions: Vec<String>,
+    /// The user's own look and its face; None wears the base's.
+    look: Option<(Vec<u8>, image::Handle)>,
+    problem: Option<String>,
+    starting: bool,
+}
+
 struct RestartOffer {
     /// A voice in the new language for the box, when it speaks the other one; ticked by default.
     voice: Option<assets::Voice>,
@@ -315,6 +361,10 @@ impl App {
             lender: None,
             custom_problem: None,
             robot_face: None,
+            made: Vec::new(),
+            made_faces: Vec::new(),
+            character_voices: Vec::new(),
+            make: None,
             confirm_firmware: false,
             file_firmware: None,
             wifi_ssid: String::new(),
@@ -430,11 +480,18 @@ impl App {
                 } else {
                     Task::none()
                 };
+                let job = |status: &Status| status.making.as_ref().map(|making| (making.id.clone(), making.state.clone()));
+                let made = if self.status.as_ref().is_none_or(|before| job(before) != job(&status)) {
+                    self.refresh_made()
+                } else {
+                    Task::none()
+                };
                 self.status = Some(*status);
                 return Task::batch([
                     self.refresh_tray(),
                     voice.map_or_else(Task::none, |id| Task::done(Message::UseVoice(id))),
                     resident,
+                    made,
                 ]);
             }
             Message::Daemon(client::Update::Down) => {
@@ -729,6 +786,11 @@ impl App {
                 if let Some(id) = current.as_deref().and_then(assets::voice_id).filter(|&id| assets::language_of(id) == Some(language)) {
                     return Task::done(Message::UseVoice(id));
                 }
+                if let Some(made) = self.made.iter().find(|made| made.complete && current.as_deref() == Some(made.id.as_str()))
+                    && self.made_language(made) == Some(language)
+                {
+                    return Task::done(Message::UseMade(made.id.clone()));
+                }
                 let lends = self.lender.is_some_and(|lender| assets::language_of(lender.id) == Some(language));
                 if current.as_deref() == Some(CUSTOM) && lends && self.custom_look.is_some() {
                     return Task::done(Message::UseCustom);
@@ -767,6 +829,150 @@ impl App {
                 return Task::perform(write, Message::Done);
             }
             Message::CopyPrompt => return iced::clipboard::write(CUSTOM_PROMPT.to_owned()),
+            Message::MakeCharacter(open) => {
+                self.make = None;
+                let Some(base) = self.voices.first().map(Lender::of).filter(|_| open) else { return Task::none() };
+                self.make = Some(MakeForm {
+                    base,
+                    name: String::new(),
+                    voice: None,
+                    lines: Vec::new(),
+                    occasions: Vec::new(),
+                    look: None,
+                    problem: None,
+                    starting: false,
+                });
+                return Task::batch([Task::done(Message::MakeBase(base)), self.refresh_made()]);
+            }
+            Message::MakeBase(base) => {
+                let Some(form) = &mut self.make else { return Task::none() };
+                (form.base, form.lines, form.occasions, form.voice) = (base, Vec::new(), Vec::new(), None);
+                return Task::perform(client::preset_lines(base.id), move |lines| Message::MakeLines(base.id, lines));
+            }
+            Message::MakeLines(base, lines) => {
+                let Some(form) = self.make.as_mut().filter(|form| form.base.id == base) else { return Task::none() };
+                match lines {
+                    Ok(lines) => {
+                        form.occasions = lines.iter().fold(Vec::new(), |mut seen, line| {
+                            if !seen.contains(&line.occasion) {
+                                seen.push(line.occasion.clone());
+                            }
+                            seen
+                        });
+                        form.lines = lines;
+                        form.problem = None;
+                    }
+                    Err(error) => form.problem = Some(tr("Couldn't read the lines of %@: %@", &[&assets::voice_name(base), &error])),
+                }
+                // The preset's own voice to begin with: voices.tsv has each preset's under its id.
+                form.voice = self.character_voices.iter().find(|voice| voice.id == base).cloned();
+            }
+            Message::MakeName(name) => {
+                if let Some(form) = &mut self.make {
+                    form.name = name;
+                }
+            }
+            Message::MakeVoice(voice) => {
+                if let Some(form) = &mut self.make {
+                    form.voice = Some(voice);
+                }
+            }
+            Message::MakeLine(index, text) => {
+                if let Some(line) = self.make.as_mut().and_then(|form| form.lines.get_mut(index)) {
+                    line.text = text;
+                }
+            }
+            Message::MakeRemoveLine(index) => {
+                if let Some(form) = self.make.as_mut().filter(|form| making::can_remove(index, &form.lines)) {
+                    form.lines.remove(index);
+                }
+            }
+            Message::MakeChooseDrawings => return Task::perform(custom::choose_drawings(), Message::MakeDrawings),
+            Message::MakeDrawings(drawings) => {
+                let Some(form) = &mut self.make else { return Task::none() };
+                match drawings {
+                    Ok(None) => {}
+                    Ok(Some(drawings)) => match character::build_look(&drawings) {
+                        Some(look) => {
+                            let face = character::look_frames(&look).and_then(|frames| frames.first().map(|frame| handle(frame, 1)));
+                            form.look = face.map(|face| (look, face));
+                            form.problem = None;
+                        }
+                        None => form.problem = Some(tr("No figure found: use a plain white or transparent background.", &[])),
+                    },
+                    Err(error) => form.problem = Some(error),
+                }
+            }
+            Message::MakeBaseLook => {
+                if let Some(form) = &mut self.make {
+                    form.look = None;
+                }
+            }
+            Message::MakeStart => {
+                let Some(form) = &mut self.make else { return Task::none() };
+                let Some(voice) = &form.voice else { return Task::none() };
+                form.starting = true;
+                let request = making::Request {
+                    id: None,
+                    name: form.name.trim().to_owned(),
+                    base: form.base.id.to_owned(),
+                    voice: voice.id.clone(),
+                    lines: form.lines.clone(),
+                };
+                return Task::perform(client::make_character(request), Message::MakeStarted);
+            }
+            Message::MakeStarted(Ok(started)) => {
+                // The user's look stays with the Character's packs, so it can be written again later.
+                if let Some((look, _)) = self.make.take().and_then(|form| form.look)
+                    && let Some(dir) = making::directory(&started.id)
+                {
+                    custom::write(&dir.join("look.bin"), &look);
+                }
+                return self.refresh_made();
+            }
+            Message::MakeStarted(Err(error)) => match &mut self.make {
+                Some(form) => (form.starting, form.problem) = (false, Some(error)),
+                None => self.notice = Some(Err(error)),
+            },
+            Message::MadeCharacters(Ok(made)) => {
+                let faces = made.clone();
+                self.made = made;
+                return Task::perform(
+                    async move {
+                        let mut found = Vec::new();
+                        for made in faces {
+                            let frame = making::look_of(&made).await.as_deref().and_then(character::look_frames).and_then(|frames| frames.into_iter().next());
+                            if let Some(frame) = frame {
+                                found.push((made.id, handle(&frame, 1)));
+                            }
+                        }
+                        found
+                    },
+                    Message::MadeFaces,
+                );
+            }
+            Message::MadeCharacters(Err(_)) => {}
+            Message::MadeFaces(faces) => self.made_faces = faces,
+            Message::CharacterVoices(Ok(voices)) => {
+                if let Some(form) = self.make.as_mut().filter(|form| form.voice.is_none()) {
+                    form.voice = voices.iter().find(|voice| voice.id == form.base.id).cloned();
+                }
+                self.character_voices = voices;
+            }
+            Message::CharacterVoices(Err(_)) => {}
+            Message::UseMade(id) => {
+                let Some(made) = self.made.iter().find(|made| made.id == id).cloned() else { return Task::none() };
+                let form = self.made_language(&made).and_then(|language| self.characters.address(language)).map(str::to_owned);
+                let write = async move {
+                    let pack = making::pack_of(&made, form.as_deref()).await?;
+                    client::write_voice_pack(pack, None, form.as_deref()).await
+                };
+                return Task::perform(write, Message::Done);
+            }
+            Message::ResumeMade(id) => match making::manifest(&id) {
+                Ok(request) => return Task::perform(client::make_character(request), Message::MakeStarted),
+                Err(error) => self.notice = Some(Err(error)),
+            },
             Message::AskFirmwareUpdate(asking) => self.confirm_firmware = asking,
             Message::FlashFirmware => {
                 self.confirm_firmware = false;
@@ -935,6 +1141,26 @@ impl App {
     }
 
     /// Pushes the menu and the face's color to the tray; a no-op until the tray is up.
+    /// Asks for the Characters made here, and the voices once.
+    fn refresh_made(&self) -> Task<Message> {
+        let voices = if self.character_voices.is_empty() {
+            Task::perform(client::character_voices(), Message::CharacterVoices)
+        } else {
+            Task::none()
+        };
+        Task::batch([Task::perform(client::made_characters(), Message::MadeCharacters), voices])
+    }
+
+    /// The language a made Character speaks: its voice's, else its base preset's.
+    fn made_language(&self, made: &making::MadeCharacter) -> Option<assets::Language> {
+        let voice = self.character_voices.iter().find(|voice| voice.id == made.voice);
+        match voice.map(|voice| voice.language.as_str()) {
+            Some("zh") => Some(assets::Language::Chinese),
+            Some("en") => Some(assets::Language::English),
+            _ => assets::language_of(&made.base),
+        }
+    }
+
     fn refresh_tray(&self) -> Task<Message> {
         #[cfg(target_os = "linux")]
         if let Some(TrayHandle(handle)) = self.tray.clone() {
@@ -1190,6 +1416,9 @@ impl App {
     }
 
     fn sound(&self) -> Element<'_, Message> {
+        if let Some(form) = &self.make {
+            return self.make_form(form);
+        }
         let box_volume = self.status.as_ref().and_then(|status| status.device.volume);
         let level = self.volume.or(box_volume).unwrap_or(60);
         let online = self.status.as_ref().is_some_and(|status| status.device.connected);
@@ -1296,6 +1525,40 @@ impl App {
             .spacing(8)
         }))
         .spacing(8);
+        let job = self.status.as_ref().and_then(|status| status.making.as_ref());
+        let job_running = job.is_some_and(making::Making::running);
+        let made_cards = self.made.iter().map(|made| {
+            let in_use = current.as_deref() == Some(made.id.as_str());
+            let action: Element<'_, Message> = if in_use {
+                text(tr("In use", &[])).style(text::success).into()
+            } else if made.complete {
+                button(text(tr("Use", &[]))).on_press_maybe((online && !busy).then_some(Message::UseMade(made.id.clone()))).into()
+            } else if job.is_some_and(|job| job.running() && job.id == made.id) {
+                text(tr("Making…", &[])).size(13).into()
+            } else {
+                button(text(tr("Resume", &[]))).on_press_maybe((!job_running).then_some(Message::ResumeMade(made.id.clone()))).into()
+            };
+            let base = assets::voice_name(&made.base);
+            let voice = self.character_voices.iter().find(|voice| voice.id == made.voice).map_or_else(|| made.voice.clone(), |voice| voice.name.clone());
+            let detail = if made.complete {
+                tr("Made from %@ · voice: %@", &[&base, &voice])
+            } else {
+                tr("Not finished · made from %@ · voice: %@", &[&base, &voice])
+            };
+            let face = self.made_faces.iter().find(|(id, _)| *id == made.id).map(|(_, face)| image(face.clone()));
+            let card = row![]
+                .push(face)
+                .push(column![text(made.name.clone()), text(detail).size(13)])
+                .push(space::horizontal())
+                .push(action)
+                .spacing(12)
+                .align_y(iced::Alignment::Center);
+            character_card(card.into(), in_use)
+        });
+        let make_button = button(text(tr("Make a Character…", &[])))
+            .style(button::secondary)
+            .on_press_maybe((self.status.is_some() && !job_running).then_some(Message::MakeCharacter(true)));
+        let job_row = job.and_then(|job| self.making_row(job, online && !busy));
         let progress = operation.filter(|operation| operation.kind == status::OperationKind::VoicePack).map(|operation| {
             let failed = operation.state == status::OperationState::Failed;
             column![text(operation.summary()).size(13)].push(failed.then(|| {
@@ -1320,8 +1583,104 @@ impl App {
             character_card(robot_card.into(), robot_in_use),
             column(cards).spacing(10),
             character_card(custom_card.into(), custom_in_use),
+            column(made_cards).spacing(10),
+            make_button,
         ]
+        .push(job_row)
         .push(progress)
+        .spacing(12);
+        scrollable(page).into()
+    }
+
+    /// The Character being made, or the last one: its progress, why it stopped, or that it is ready for the box.
+    fn making_row(&self, job: &making::Making, can_write: bool) -> Option<Element<'_, Message>> {
+        let made = self.made.iter().find(|made| made.id == job.id);
+        if job.running() {
+            let label = tr("Making “%@”… %lld of %lld", &[&job.name, &job.done, &job.total]);
+            return Some(row![progress_bar(0.0..=1.0, job.progress()).length(200), text(label).size(13)].spacing(12).align_y(iced::Alignment::Center).into());
+        }
+        let provider = made
+            .and_then(|made| self.character_voices.iter().find(|voice| voice.id == made.voice))
+            .map_or_else(|| tr("the voice's provider", &[]), making::Voice::provider_name);
+        if let Some(why) = job.explanation(&provider) {
+            let resume = made.map(|made| button(text(tr("Resume", &[]))).on_press(Message::ResumeMade(made.id.clone())));
+            return Some(row![text(why).size(13).style(text::danger).width(Length::Fill)].push(resume).spacing(12).align_y(iced::Alignment::Center).into());
+        }
+        let current = self.status.as_ref().and_then(|status| status.device.voice.as_deref());
+        let made = made.filter(|made| made.complete && current != Some(made.id.as_str()))?;
+        Some(
+            row![
+                text(tr("“%@” is made.", &[&made.name])).size(13).style(text::success),
+                space::horizontal(),
+                button(text(tr("Write to box", &[]))).on_press_maybe(can_write.then_some(Message::UseMade(made.id.clone()))),
+            ]
+            .spacing(12)
+            .align_y(iced::Alignment::Center)
+            .into(),
+        )
+    }
+
+    /// Making a Character, in place of the Character tab: start from a preset, change its lines (occasions stay, each
+    /// keeps a line), pick a voice and, optionally, bring a look; the daemon then makes the line audio.
+    fn make_form<'a>(&'a self, form: &'a MakeForm) -> Element<'a, Message> {
+        let bases: Vec<Lender> = self.voices.iter().map(Lender::of).collect();
+        let voices = making::sorted(&self.character_voices, assets::language_of(form.base.id).map(assets::Language::code));
+        let keys = self.status.as_ref().and_then(|status| status.voice_keys.as_ref());
+        let account = self.status.as_ref().map(|status| status.account.clone()).unwrap_or_default();
+        let readiness = form.voice.as_ref().map(|voice| (making::Readiness::of(voice, keys, &account), voice.provider_name()));
+        let job_running = self.status.as_ref().and_then(|status| status.making.as_ref()).is_some_and(making::Making::running);
+        let problem = form.problem.clone().or_else(|| if form.lines.is_empty() { None } else { making::problem(&form.name, &form.lines, &form.occasions) });
+        let can_make = !form.starting && !form.lines.is_empty() && problem.is_none() && readiness.as_ref().is_some_and(|(ready, _)| ready.can_start()) && !job_running;
+        let base_face = self.voices.iter().position(|voice| voice.id == form.base.id).and_then(|index| self.faces.get(index).cloned().flatten());
+        let face = form.look.as_ref().map(|(_, face)| face.clone()).or(base_face);
+        let readiness = readiness.map(|(ready, provider)| {
+            let note = text(ready.explanation(&provider)).size(13);
+            if ready.can_start() { note.style(text::secondary) } else { note.style(text::danger) }
+        });
+        let mut lines = column![].spacing(6);
+        for occasion in &form.occasions {
+            lines = lines.push(text(making::occasion_name(occasion)).size(14));
+            for (index, line) in form.lines.iter().enumerate().filter(|(_, line)| &line.occasion == occasion) {
+                lines = lines.push(
+                    row![
+                        text_input("", &line.text).on_input(move |text| Message::MakeLine(index, text)),
+                        button(text("−")).style(button::secondary).on_press_maybe(making::can_remove(index, &form.lines).then_some(Message::MakeRemoveLine(index))),
+                    ]
+                    .spacing(8)
+                    .align_y(iced::Alignment::Center),
+                );
+            }
+        }
+        let look = row![text(tr("Look", &[]))]
+            .push(face.map(image))
+            .push(button(text(tr("Choose images…", &[]))).style(button::secondary).on_press(Message::MakeChooseDrawings))
+            .push(form.look.is_some().then(|| {
+                button(text(tr("Use %@'s look", &[&assets::voice_name(form.base.id)]))).style(button::secondary).on_press(Message::MakeBaseLook)
+            }))
+            .spacing(8)
+            .align_y(iced::Alignment::Center);
+        let page = column![
+            text(tr("Make a Character", &[])).size(18),
+            text(tr("Start from a character, change what it says, and pick a voice. VibeBuddy makes each line in that voice, then you can write it to the box.", &[])).size(13),
+            row![text(tr("Start from", &[])), pick_list(bases, Some(form.base), Message::MakeBase)].spacing(8).align_y(iced::Alignment::Center),
+            row![text(tr("Name", &[])), text_input(&tr("Name", &[]), &form.name).on_input(Message::MakeName).width(320)]
+                .spacing(8)
+                .align_y(iced::Alignment::Center),
+            row![text(tr("Voice", &[])), pick_list(voices, form.voice.clone(), Message::MakeVoice)].spacing(8).align_y(iced::Alignment::Center),
+        ]
+        .push(readiness)
+        .push(look)
+        .push(lines)
+        .push(text(tr("{address} is where the buddy says what it calls you; each line with it is made once with each form of address.", &[])).size(13))
+        .push(problem.map(|problem| text(problem).size(13).style(text::danger)))
+        .push(
+            row![
+                space::horizontal(),
+                button(text(tr("Cancel", &[]))).style(button::secondary).on_press(Message::MakeCharacter(false)),
+                button(text(tr("Make", &[]))).on_press_maybe(can_make.then_some(Message::MakeStart)),
+            ]
+            .spacing(8),
+        )
         .spacing(12);
         scrollable(page).into()
     }

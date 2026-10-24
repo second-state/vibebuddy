@@ -271,6 +271,41 @@ pub async fn set_voice_key(provider: KeyProvider, key: Option<String>) -> Result
     Err(body["message"].as_str().map(str::to_owned).unwrap_or_else(|| format!("the daemon answered {status}")))
 }
 
+/// The voices a made Character can speak with.
+pub async fn character_voices() -> Result<Vec<crate::making::Voice>, String> {
+    get_json("/v1/voices").await
+}
+
+/// The Characters made on this computer.
+pub async fn made_characters() -> Result<Vec<crate::making::MadeCharacter>, String> {
+    get_json("/v1/characters").await
+}
+
+/// A preset's lines, which a made Character starts from.
+pub async fn preset_lines(id: &str) -> Result<Vec<crate::making::Line>, String> {
+    get_json(&format!("/v1/characters/presets/{id}/lines")).await
+}
+
+/// Starts making a Character's line audio, or resumes one stopped (`request.id`); `making` in the status follows it.
+pub async fn make_character(request: crate::making::Request) -> Result<crate::making::Making, String> {
+    let response = reqwest::Client::new().post(format!("{BASE}/v1/characters")).json(&request).send().await.map_err(|error| error.to_string())?;
+    let status = response.status();
+    if status.is_success() {
+        return response.json().await.map_err(|error| error.to_string());
+    }
+    let body: serde_json::Value = response.json().await.unwrap_or_default();
+    Err(body["message"].as_str().map(str::to_owned).unwrap_or_else(|| format!("the daemon answered {status}")))
+}
+
+async fn get_json<T: serde::de::DeserializeOwned>(path: &str) -> Result<T, String> {
+    let response = reqwest::Client::new().get(format!("{BASE}{path}")).timeout(Duration::from_secs(10)).send().await.map_err(|error| error.to_string())?;
+    let status = response.status();
+    if !status.is_success() {
+        return Err(format!("the daemon answered {status}"));
+    }
+    response.json().await.map_err(|error| error.to_string())
+}
+
 async fn resident_setting(request: reqwest::RequestBuilder) -> Result<ResidentInfo, String> {
     let response = request.timeout(Duration::from_secs(10)).send().await.map_err(|error| error.to_string())?;
     let status = response.status();

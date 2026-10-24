@@ -167,6 +167,36 @@ struct DaemonClient {
         guard code == 200 else { throw DaemonError(message: DaemonClient.message(in: data) ?? String(localized: "The daemon answered \(code)")) }
     }
 
+    /// The voices a made Character can speak with.
+    func characterVoices() async throws -> [CharacterVoice] {
+        try await get("/v1/voices")
+    }
+
+    /// The Characters made on this computer.
+    func madeCharacters() async throws -> [MadeCharacter] {
+        try await get("/v1/characters")
+    }
+
+    /// A preset's lines, which a made Character starts from.
+    func presetLines(_ id: String) async throws -> [CharacterLine] {
+        try await get("/v1/characters/presets/\(id)/lines")
+    }
+
+    /// Starts making a Character's line audio, or resumes one stopped (`request.id`); `making` in the status follows it.
+    func makeCharacter(_ request: CharacterRequest) async throws -> MakingStatus {
+        let body = try JSONEncoder().encode(request)
+        let (code, data) = try await post("/v1/characters", body: body, contentType: "application/json")
+        guard code == 202 else { throw DaemonError(message: DaemonClient.message(in: data) ?? String(localized: "The daemon answered \(code)")) }
+        return try StatusCoding.decoder().decode(MakingStatus.self, from: data)
+    }
+
+    private func get<T: Decodable>(_ path: String) async throws -> T {
+        let (data, response) = try await URLSession.shared.data(for: request(path))
+        let code = (response as? HTTPURLResponse)?.statusCode ?? 0
+        guard code == 200 else { throw DaemonError(message: DaemonClient.message(in: data) ?? String(localized: "The daemon answered \(code)")) }
+        return try StatusCoding.decoder().decode(T.self, from: data)
+    }
+
     func resident() async throws -> ResidentInfo {
         let (data, _) = try await URLSession.shared.data(for: request("/v1/resident"))
         return try StatusCoding.decoder().decode(ResidentInfo.self, from: data)

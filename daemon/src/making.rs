@@ -70,6 +70,30 @@ pub fn voices() -> Vec<Voice> {
         .collect()
 }
 
+/// Each preset's lines (`characters/<id>/lines.tsv`), which a made Character starts from in the App.
+const PRESET_LINES: &[(&str, &str)] = &[
+    ("ada", include_str!("../../characters/ada/lines.tsv")),
+    ("dave", include_str!("../../characters/dave/lines.tsv")),
+    ("hank", include_str!("../../characters/hank/lines.tsv")),
+    ("kai", include_str!("../../characters/kai/lines.tsv")),
+    ("luna", include_str!("../../characters/luna/lines.tsv")),
+    ("mei", include_str!("../../characters/mei/lines.tsv")),
+    ("wanwanxiaohe", include_str!("../../characters/wanwanxiaohe/lines.tsv")),
+];
+
+/// The lines of preset `id`, in `lines.tsv` order; None for anything not a preset.
+pub fn preset_lines(id: &str) -> Option<Vec<Line>> {
+    let (_, tsv) = PRESET_LINES.iter().find(|(preset, _)| *preset == id)?;
+    Some(
+        rows(tsv)
+            .filter_map(|row| match row[..] {
+                [occasion, text] => Some(Line { occasion: occasion.to_owned(), text: text.to_owned() }),
+                _ => None,
+            })
+            .collect(),
+    )
+}
+
 /// A TSV's rows, without blank ones and `#` comments.
 fn rows(tsv: &str) -> impl Iterator<Item = Vec<&str>> {
     tsv.lines().filter(|line| !line.trim().is_empty() && !line.starts_with('#')).map(|line| line.split('\t').collect())
@@ -786,6 +810,19 @@ mod tests {
         ] {
             assert!(check(&bad).unwrap_err().contains(why), "{why}");
         }
+    }
+
+    #[test]
+    fn every_preset_a_character_can_start_from_has_its_lines_and_they_can_be_made() {
+        for (id, _) in crate::synthesis::VOICE_FILES {
+            let lines = preset_lines(id).unwrap_or_else(|| panic!("{id} has no lines"));
+            assert_eq!(lines.len(), 55, "{id}");
+            assert!(lines.iter().any(|line| line.text.contains("{address}")), "{id}");
+            let voice = voices().into_iter().find(|voice| voice.id == *id).unwrap();
+            assert_eq!(check(&Request { id: None, name: "Copy".to_owned(), base: (*id).to_owned(), voice: voice.id, lines }).err(), None, "{id}");
+        }
+        assert_eq!(preset_lines("ada").unwrap()[0], line("input_required", "Hey {address}, it's waiting on you."));
+        assert_eq!(preset_lines("robot"), None);
     }
 
     #[test]

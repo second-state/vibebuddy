@@ -161,6 +161,7 @@ struct VolumeRow: View {
 
 struct VoicesView: View {
     @ObservedObject var model: AppModel
+    @State private var makingCharacter = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -177,7 +178,18 @@ struct VoicesView: View {
                         VoiceCard(model: model, entry: entry)
                     }
                     CustomCharacterCard(model: model)
+                    ForEach(model.madeCharacters) { made in
+                        MadeCharacterCard(model: model, made: made)
+                    }
+                    HStack {
+                        Button("Make a Character…") { makingCharacter = true }
+                            .disabled(model.status == nil || model.status?.making?.running == true)
+                        Spacer()
+                    }
                 }
+            }
+            if let making = model.status?.making {
+                MakingRow(model: model, making: making)
             }
             if let operation = model.operation, operation.kind == .voicePack {
                 OperationRow(operation: operation)
@@ -186,12 +198,14 @@ struct VoicesView: View {
                 }
             }
         }
+        .sheet(isPresented: $makingCharacter) { MakeCharacterSheet(model: model) }
     }
 
     private var currentVoiceName: String {
         let id = model.status?.device.voice ?? "builtin"
         if id == "builtin" || id == AppModel.robotID { return "VibeBuddy" }
         if id == CustomCharacterCard.id { return String(localized: "Your own character") }
+        if let made = model.madeCharacters.first(where: { $0.id == id }) { return made.name }
         return VoiceCatalogEntry.all.first { $0.id == id }?.name ?? id
     }
 }
@@ -1069,24 +1083,15 @@ struct CustomCharacterCard: View {
     }
 
     private func choose() {
-        let panel = NSOpenPanel()
-        panel.allowsMultipleSelection = true
-        panel.allowedContentTypes = [.png, .jpeg]
-        guard panel.runModal() == .OK else { return }
-        // In name order, so normal.png, closed.png, ... or 1.png, 2.png, ... come in as meant.
-        let urls = panel.urls.sorted { $0.lastPathComponent.localizedStandardCompare($1.lastPathComponent) == .orderedAscending }
-        let images = urls.compactMap(LookImages.load)
-        guard images.count == urls.count, (1...4).contains(images.count) else {
-            problem = String(localized: "Pick one to four PNG or JPEG images.")
-            return
-        }
-        do {
-            let built = try LookBuilder.build(images)
+        switch LookImages.chooseLook() {
+        case .success(let built):
             look = built
             frames = LookBuilder.frames(of: built) ?? []
             problem = nil
-        } catch {
-            problem = String(localized: "No figure found: use a plain white or transparent background.")
+        case .failure(let failure):
+            problem = failure.message
+        case nil:
+            break
         }
     }
 
@@ -1094,6 +1099,227 @@ struct CustomCharacterCard: View {
         guard let look, model.writeCustomCharacter(look: look, lender: lender) else {
             problem = String(localized: "That character can't lend its voice; pick another.")
             return
+        }
+    }
+}
+
+/// A Character made on this computer (ADR-0020): written to the box like a preset once its lines are made, on any
+/// plan; one whose job stopped can be resumed.
+struct MadeCharacterCard: View {
+    @ObservedObject var model: AppModel
+    let made: MadeCharacter
+
+    private var inUse: Bool { model.status?.device.voice == made.id }
+    private var making: Bool { model.status?.making?.running == true }
+
+    var body: some View {
+        HStack(spacing: 12) {
+            if let frame = model.look(of: made).flatMap(LookBuilder.frames(of:))?.first {
+                Image(nsImage: LookImages.image(frame, scale: 1)).frame(width: CharacterFace.width)
+            }
+            VStack(alignment: .leading) {
+                Text(verbatim: made.name).font(.body.weight(.semibold))
+                Text(detail).font(.caption).foregroundStyle(.secondary)
+            }
+            Spacer()
+            if inUse {
+                Label("In use", systemImage: "checkmark.circle.fill").foregroundStyle(.green)
+            } else if made.complete {
+                Button("Use") { model.writeMadeCharacter(made) }
+                    .disabled(model.operationRunning || !(model.status?.device.connected ?? false))
+            } else if model.status?.making?.id == made.id && making {
+                ProgressView().controlSize(.small)
+            } else {
+                Button("Resume") { model.resumeCharacter(made.id) }
+                    .disabled(making)
+            }
+        }
+        .padding(10)
+        .background(RoundedRectangle(cornerRadius: 8).fill(Color(nsColor: .controlBackgroundColor)))
+        .overlay(RoundedRectangle(cornerRadius: 8).stroke(inUse ? Color.accentColor : .clear, lineWidth: 2))
+    }
+
+    private var detail: String {
+        let base = VoiceCatalogEntry.all.first { $0.id == made.base }?.name ?? made.base
+        let voice = model.characterVoice(made.voice)?.name ?? made.voice
+        return made.complete
+            ? String(localized: "Made from \(base) · voice: \(voice)")
+            : String(localized: "Not finished · made from \(base) · voice: \(voice)")
+    }
+}
+
+/// The Character being made, or the last one: its progress, why it stopped, or that it is ready for the box.
+struct MakingRow: View {
+    @ObservedObject var model: AppModel
+    let making: MakingStatus
+
+    private var made: MadeCharacter? { model.madeCharacters.first { $0.id == making.id } }
+
+    var body: some View {
+        if making.running {
+            HStack {
+                ProgressView(value: making.progress)
+                Text("Making “\(making.name)”… \(making.done) of \(making.total)").font(.callout).lineLimit(1)
+            }
+        } else if let why = making.explanation(provider: provider) {
+            HStack(alignment: .top) {
+                Image(systemName: "xmark.octagon.fill").foregroundStyle(.red)
+                Text(why).font(.callout).fixedSize(horizontal: false, vertical: true)
+                Spacer()
+                if made != nil {
+                    Button("Resume") { model.resumeCharacter(making.id) }
+                }
+            }
+        } else if let made, made.complete, model.status?.device.voice != made.id {
+            HStack {
+                Image(systemName: "checkmark.circle.fill").foregroundStyle(.green)
+                Text("“\(made.name)” is made.").font(.callout)
+                Spacer()
+                Button("Write to box") { model.writeMadeCharacter(made) }
+                    .disabled(model.operationRunning || !(model.status?.device.connected ?? false))
+            }
+        }
+    }
+
+    private var provider: String {
+        made.flatMap { model.characterVoice($0.voice) }?.providerName ?? String(localized: "the voice's provider")
+    }
+}
+
+/// Making a Character: start from a preset, change its lines (occasions stay, each keeps a line), pick a voice and,
+/// optionally, bring a look; the daemon then makes the line audio.
+struct MakeCharacterSheet: View {
+    @ObservedObject var model: AppModel
+    @Environment(\.dismiss) private var dismiss
+
+    private struct Draft: Identifiable {
+        let id = UUID()
+        var occasion: String
+        var text: String
+    }
+
+    @State private var base = Resources.bundledVoices.first?.id ?? ""
+    @State private var name = ""
+    @State private var voice = ""
+    @State private var lines: [Draft] = []
+    /// The preset's occasions, in its order.
+    @State private var occasions: [String] = []
+    /// The user's own look; nil wears the base's.
+    @State private var look: Data?
+    @State private var problem: String?
+    @State private var starting = false
+
+    private var baseName: String { VoiceCatalogEntry.all.first { $0.id == base }?.name ?? base }
+    private var chosenVoice: CharacterVoice? { model.characterVoice(voice) }
+    private var edited: [CharacterLine] { lines.map { CharacterLine(occasion: $0.occasion, text: $0.text) } }
+    private var draftProblem: String? { lines.isEmpty ? nil : CharacterDraft.problem(name: name, lines: edited, occasions: occasions) }
+    private var readiness: MakingReadiness? {
+        chosenVoice.map { MakingReadiness.of($0, keys: model.status?.voiceKeys, account: model.status?.account) }
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("Make a Character").font(.headline)
+            Text("Start from a character, change what it says, and pick a voice. VibeBuddy makes each line in that voice, then you can write it to the box.")
+                .font(.callout).foregroundStyle(.secondary)
+            Form {
+                Picker(selection: $base) {
+                    ForEach(Resources.bundledVoices) { entry in Text(entry.name).tag(entry.id) }
+                } label: { Text("Start from") }
+                TextField(text: $name, prompt: Text("Name")) { Text("Name") }
+                Picker(selection: $voice) {
+                    ForEach(CharacterVoice.sorted(model.characterVoices, preferring: VoiceCatalogEntry.language(ofVoice: base))) { voice in
+                        Text(verbatim: "\(voice.name) · \(voice.providerName)").tag(voice.id)
+                    }
+                } label: { Text("Voice") }
+                if let readiness, let chosenVoice {
+                    Text(readiness.explanation(provider: chosenVoice.providerName))
+                        .font(.caption).foregroundStyle(readiness.canStart ? Color.secondary : Color.red)
+                }
+                LabeledContent {
+                    HStack {
+                        if let frame = (look ?? Resources.voicePack(base)?.look).flatMap(LookBuilder.frames(of:))?.first {
+                            Image(nsImage: LookImages.image(frame, scale: 1))
+                        }
+                        Button("Choose images…") { chooseLook() }
+                        if look != nil {
+                            Button("Use \(baseName)'s look") { look = nil }
+                        }
+                    }
+                } label: { Text("Look") }
+                ForEach(occasions, id: \.self) { occasion in
+                    Section(CharacterOccasion.name(occasion)) {
+                        ForEach(lines.filter { $0.occasion == occasion }) { line in
+                            HStack {
+                                TextField(CharacterOccasion.name(occasion), text: text(of: line.id)).labelsHidden()
+                                Button { lines.removeAll { $0.id == line.id } } label: { Image(systemName: "minus.circle") }
+                                    .buttonStyle(.borderless)
+                                    .disabled(!CharacterDraft.canRemove(lines.firstIndex { $0.id == line.id } ?? -1, from: edited))
+                                    .help(Text("Remove this line"))
+                            }
+                        }
+                    }
+                }
+            }
+            .formStyle(.grouped)
+            Text("{address} is where the buddy says what it calls you; each line with it is made once with each form of address.")
+                .font(.caption).foregroundStyle(.secondary)
+            if let shown = problem ?? draftProblem {
+                Text(shown).font(.caption).foregroundStyle(.red)
+            }
+            HStack {
+                Spacer()
+                Button("Cancel") { dismiss() }.keyboardShortcut(.cancelAction)
+                Button("Make") { make() }
+                    .keyboardShortcut(.defaultAction)
+                    .disabled(starting || lines.isEmpty || draftProblem != nil || !(readiness?.canStart ?? false) || model.status?.making?.running == true)
+            }
+        }
+        .padding(20)
+        .frame(width: 640, height: 680)
+        .onAppear { if model.characterVoices.isEmpty { model.refreshMadeCharacters() } }
+        .task(id: base) { await load() }
+    }
+
+    private func text(of id: UUID) -> Binding<String> {
+        Binding(get: { lines.first { $0.id == id }?.text ?? "" },
+                set: { new in if let index = lines.firstIndex(where: { $0.id == id }) { lines[index].text = new } })
+    }
+
+    /// The base's lines, in its voice; picking another base starts over.
+    private func load() async {
+        voice = base
+        do {
+            let fetched = try await model.client.presetLines(base)
+            lines = fetched.map { Draft(occasion: $0.occasion, text: $0.text) }
+            occasions = fetched.reduce(into: []) { seen, line in if !seen.contains(line.occasion) { seen.append(line.occasion) } }
+            problem = nil
+        } catch {
+            lines = []
+            occasions = []
+            problem = String(localized: "Couldn't read the lines of \(baseName): \(error.localizedDescription)")
+        }
+    }
+
+    private func chooseLook() {
+        switch LookImages.chooseLook() {
+        case .success(let built):
+            look = built
+            problem = nil
+        case .failure(let failure):
+            problem = failure.message
+        case nil:
+            break
+        }
+    }
+
+    private func make() {
+        starting = true
+        let request = CharacterRequest(name: name.trimmingCharacters(in: .whitespacesAndNewlines), base: base, voice: voice, lines: edited)
+        Task {
+            problem = await model.makeCharacter(request, look: look)
+            starting = false
+            if problem == nil { dismiss() }
         }
     }
 }

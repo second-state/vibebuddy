@@ -14,10 +14,13 @@ public struct Status: Codable, Equatable {
     public var account: AccountStatus?
     /// Which of the user's own keys for spoken replies are set (ADR-0020); absent from older daemons.
     public var voiceKeys: VoiceKeysStatus?
+    /// The Character being made, or the last one made since the daemon started (ADR-0020); absent when there is none,
+    /// and from older daemons.
+    public var making: MakingStatus?
 
-    enum CodingKeys: String, CodingKey { case daemon, device, today, hooks, operation, config, updates, account, voiceKeys = "voice_keys" }
+    enum CodingKeys: String, CodingKey { case daemon, device, today, hooks, operation, config, updates, account, voiceKeys = "voice_keys", making }
 
-    public init(daemon: DaemonInfo, device: DeviceState, today: TodaySummary, hooks: HooksSeen, operation: DeviceOperation?, config: DaemonConfig, updates: UpdateStatus? = nil, account: AccountStatus? = nil, voiceKeys: VoiceKeysStatus? = nil) {
+    public init(daemon: DaemonInfo, device: DeviceState, today: TodaySummary, hooks: HooksSeen, operation: DeviceOperation?, config: DaemonConfig, updates: UpdateStatus? = nil, account: AccountStatus? = nil, voiceKeys: VoiceKeysStatus? = nil, making: MakingStatus? = nil) {
         self.daemon = daemon
         self.device = device
         self.today = today
@@ -27,6 +30,7 @@ public struct Status: Codable, Equatable {
         self.updates = updates
         self.account = account
         self.voiceKeys = voiceKeys
+        self.making = making
     }
 }
 

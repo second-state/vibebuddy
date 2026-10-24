@@ -20,6 +20,25 @@ enum LookImages {
         return drawn ? RGBAImage(width: width, height: height, pixels: pixels) : nil
     }
 
+    /// Asks for one to four drawings (normal, eyes closed, happy, sad, in file name order) and makes a look of them:
+    /// nil when the user cancels, else the look or what is wrong with the images.
+    static func chooseLook() -> Result<Data, LookProblem>? {
+        let panel = NSOpenPanel()
+        panel.allowsMultipleSelection = true
+        panel.allowedContentTypes = [.png, .jpeg]
+        guard panel.runModal() == .OK else { return nil }
+        // In name order, so normal.png, closed.png, ... or 1.png, 2.png, ... come in as meant.
+        let urls = panel.urls.sorted { $0.lastPathComponent.localizedStandardCompare($1.lastPathComponent) == .orderedAscending }
+        let images = urls.compactMap(load)
+        guard images.count == urls.count, (1...4).contains(images.count) else {
+            return .failure(LookProblem(message: String(localized: "Pick one to four PNG or JPEG images.")))
+        }
+        guard let look = try? LookBuilder.build(images) else {
+            return .failure(LookProblem(message: String(localized: "No figure found: use a plain white or transparent background.")))
+        }
+        return .success(look)
+    }
+
     /// A look frame as an image, each look pixel drawn `scale` screen pixels wide, unsmoothed.
     static func image(_ frame: RGBAImage, scale: Int) -> NSImage {
         let rep = NSBitmapImageRep(
@@ -37,4 +56,8 @@ enum LookImages {
         image.addRepresentation(rep)
         return image
     }
+}
+
+struct LookProblem: Error {
+    let message: String
 }

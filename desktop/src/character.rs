@@ -132,6 +132,17 @@ impl Pack {
     }
 }
 
+/// A made Character as the box gets it: the daemon's pack of its lines (`pack.bin`, no look), with the lines of a form
+/// of address (`address/<form>.bin`) in place of the plain ones, wearing `look`. The pack always carries the made
+/// Character's `id`, which the daemon gives a spoken reply its voice by. None if `pack` isn't a Character pack.
+pub fn made(pack: &[u8], variant: Option<&[u8]>, look: Option<Vec<u8>>, id: &str) -> Option<Vec<u8>> {
+    let mut made = Pack::parse(pack)?;
+    if let Some(variant) = variant.and_then(Pack::parse) {
+        made = made.with_address(&variant);
+    }
+    Pack { id: id.to_owned(), look, ..made }.build()
+}
+
 /// An image as plain pixels: RGBA, 8 bits each, row by row.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Image {
@@ -401,6 +412,22 @@ mod tests {
         assert_eq!(parsed.id, "custom");
         assert_eq!(parsed.look.as_deref(), Some(&look[..]));
         assert_eq!(parsed.pools, base.pools);
+    }
+
+    #[test]
+    fn a_made_character_keeps_its_id_and_wears_the_look() {
+        let id = "night-owl-1a2b3c4d";
+        let lines = Pack { id: id.to_owned(), pools: vec![vec![(vec![1, 2], 4), (vec![3], 2)], vec![(vec![4], 2)], vec![]], look: None };
+        let variant = Pack { id: id.to_owned(), pools: vec![vec![(vec![9, 9], 3)], vec![], vec![]], look: None };
+        let (pack, variant) = (lines.build().unwrap(), variant.build().unwrap());
+        let look = build_look(&[drawing()]).unwrap();
+        let written = Pack::parse(&made(&pack, Some(&variant), Some(look.clone()), id).unwrap()).unwrap();
+        assert_eq!((written.id.as_str(), written.look.as_deref()), (id, Some(&look[..])));
+        assert_eq!(written.pools[0], [(vec![9, 9], 3), (vec![3], 2)], "the form of address takes the plain line's place");
+        assert_eq!(written.pools[1], lines.pools[1]);
+        assert_eq!(made(&pack, None, None, id).as_deref(), Some(&pack[..]), "no look, no form: the daemon's pack as it is");
+        assert_eq!(Pack::parse(&made(&pack, None, None, "other-00000000").unwrap()).unwrap().id, "other-00000000");
+        assert_eq!(made(b"not a pack", None, None, id), None);
     }
 
     #[test]

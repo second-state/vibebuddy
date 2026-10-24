@@ -21,6 +21,9 @@ pub struct Status {
     pub account: Account,
     /// Which of the user's own keys for spoken replies are set (ADR-0020); absent from older daemons.
     pub voice_keys: Option<VoiceKeys>,
+    /// The Character being made, or the last one made since the daemon started (ADR-0020); absent when there is none,
+    /// and from older daemons.
+    pub making: Option<crate::making::Making>,
 }
 
 /// The daemon says only whether each key is set, and whether its provider refused it; a key never comes back.
@@ -477,6 +480,15 @@ mod tests {
         assert_eq!(status.voice_keys, None);
         let keys: VoiceKeys = serde_json::from_str(r#"{"elevenlabs": {"set": true, "refused": true}, "volc": {"set": false, "refused": false}}"#).expect("keys");
         assert_eq!(keys, VoiceKeys { elevenlabs: VoiceKey { set: true, refused: true }, volc: VoiceKey::default() });
+    }
+
+    #[test]
+    fn the_character_being_made_reads_and_is_absent_from_an_older_daemon() {
+        let status: Status = serde_json::from_str(LIVE).expect("status");
+        assert_eq!(status.making, None);
+        let status: Status = serde_json::from_str(r#"{"making":{"id":"owl-1a2b3c4d","name":"Owl","state":"making","done":3,"total":12,"reason":null,"error":null}}"#).expect("status");
+        let making = status.making.expect("making");
+        assert!(making.running() && making.id == "owl-1a2b3c4d" && making.progress() == 0.25, "{making:?}");
     }
 
     #[test]

@@ -83,6 +83,12 @@ enum Resources {
         FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Library/Application Support/VibeBuddy")
     }
 
+    /// Where the daemon keeps a Character made here (`config_dir()/characters/<id>/`, docs/characters.md): its packs, its
+    /// manifest, and the look the user brought for it, which the App keeps there as `look.bin`.
+    static func madeCharacterDirectory(_ id: String) -> URL {
+        applicationSupport.appendingPathComponent("characters").appendingPathComponent(id)
+    }
+
     static var installedHookBinary: URL { applicationSupport.appendingPathComponent("bin/vibebuddy-hook") }
     static var logsDirectory: URL {
         FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Library/Logs/VibeBuddy")
