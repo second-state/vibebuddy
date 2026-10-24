@@ -1,5 +1,5 @@
 //! Navigates from an aggregated activity back to its source window: through LaunchServices on the Mac, through
-//! the compositor (Hyprland) on Linux.
+//! the window system on Linux (Hyprland, Sway or X11; see `window_focus`).
 //!
 //! All arguments go straight to the process API, never through a shell. Source data comes from hooks and is still treated
 //! as untrusted input: Codex thread ids, Claude session ids and GitHub repos are narrowed to a safe character set first.
@@ -11,6 +11,7 @@ use serde::Deserialize;
 use tokio::process::Command;
 
 use crate::activity::{ActivitySource, Surface, TmuxPane};
+use crate::window_focus::{self, Compositor};
 
 const OPEN_TIMEOUT: Duration = Duration::from_secs(5);
 const CODEX_BUNDLE_ID: &str = "com.openai.codex";
@@ -480,8 +481,13 @@ async fn run_osascript(script: &[&str], args: &[&str]) -> Result<String, String>
 }
 
 /// Runs a helper with arguments passed straight through, never a shell, and returns its stdout.
-async fn run(program: &str, args: &[&str]) -> Result<String, String> {
-    let output = tokio::time::timeout(OPEN_TIMEOUT, Command::new(program).args(args).kill_on_drop(true).output())
+pub(crate) async fn run(program: &str, args: &[&str]) -> Result<String, String> {
+    run_with_env(program, args, &window_focus::Session::new()).await
+}
+
+/// `run`, with variables set on top of the daemon's environment: the session's, for a window system's helper.
+pub(crate) async fn run_with_env(program: &str, args: &[&str], env: &window_focus::Session) -> Result<String, String> {
+    let output = tokio::time::timeout(OPEN_TIMEOUT, Command::new(program).args(args).envs(env).kill_on_drop(true).output())
         .await
         .map_err(|_| format!("{program} timed out"))?
         .map_err(|error| format!("cannot run {program}: {error}"))?;
@@ -505,18 +511,68 @@ fn activate(bundle_id: &str) -> Result<CommandSpec, String> {
     })
 }
 
-/// Focuses the window that owns the nearest of the agent's ancestors. Only Hyprland is supported: it's the one
-/// compositor here, and it can both list windows with their pids and focus one by address.
+/// Focuses the window that owns the nearest of the agent's ancestors, on the window system of the session those
+/// processes run in (see `window_focus`). Hyprland, Sway and X11 each list windows with their pids and focus one.
 async fn focus_window(pids: &[u32]) -> Result<String, String> {
-    let clients = run_hyprctl(&["clients", "-j"]).await?;
-    let address = window_for(&clients, pids)
-        .ok_or_else(|| "session has no host window (SSH, tmux or a background process)".to_owned())?;
+    let session = session_of(pids).await;
+    match window_focus::compositor(|name| session.get(name).cloned(), socket_answers) {
+        Some(Compositor::Hyprland) => focus_hyprland(pids, &session).await,
+        Some(Compositor::Sway) => window_focus::focus_sway(pids, &session).await,
+        Some(Compositor::X11) => window_focus::focus_x11(pids, &session).await,
+        None => Err(window_focus::NO_WINDOW_SYSTEM.to_owned()),
+    }
+}
+
+/// The session of the processes being focused, read from their own environments at each press. Only when none of
+/// them has a graphical one that can be read (a sandboxed terminal, say) does it fall back to systemd's user manager,
+/// then the daemon's own environment, each taken whole and only if it names a window system that answers.
+async fn session_of(pids: &[u32]) -> window_focus::Session {
+    if let Some(session) = window_focus::source_session(pids.iter().map(|&pid| process_session(pid))) {
+        return with_runtime_dir(session);
+    }
+    let manager = run("systemctl", &["--user", "show-environment"]).await.unwrap_or_else(|error| {
+        tracing::debug!(%error, "cannot read the session's environment from systemd");
+        String::new()
+    });
+    let own: Vec<String> = std::env::vars().map(|(name, value)| format!("{name}={value}")).collect();
+    [window_focus::session(manager.lines()), window_focus::session(own.iter().map(String::as_str))]
+        .into_iter()
+        .map(with_runtime_dir)
+        .find(|session| window_focus::compositor(|name| session.get(name).cloned(), socket_answers).is_some())
+        .unwrap_or_default()
+}
+
+/// A process's session variables, from `/proc/<pid>/environ`: what it started with. None when it can't be read,
+/// as for another user's process or one that has exited.
+fn process_session(pid: u32) -> Option<window_focus::Session> {
+    let environ = std::fs::read(format!("/proc/{pid}/environ")).ok()?;
+    Some(window_focus::session(String::from_utf8_lossy(&environ).split('\0')))
+}
+
+/// Hyprland's socket lives in the runtime directory; one the session doesn't name is the daemon's, which systemd sets.
+fn with_runtime_dir(mut session: window_focus::Session) -> window_focus::Session {
+    if !session.contains_key("XDG_RUNTIME_DIR")
+        && let Some(dir) = std::env::var("XDG_RUNTIME_DIR").ok().filter(|dir| !dir.is_empty())
+    {
+        session.insert("XDG_RUNTIME_DIR", dir);
+    }
+    session
+}
+
+/// Whether a compositor listens on this socket: a file a crashed one left behind refuses the connection.
+fn socket_answers(path: &str) -> bool {
+    std::os::unix::net::UnixStream::connect(path).is_ok()
+}
+
+async fn focus_hyprland(pids: &[u32], session: &window_focus::Session) -> Result<String, String> {
+    let clients = run_hyprctl(&["clients", "-j"], session).await?;
+    let address = window_for(&clients, pids).ok_or_else(|| window_focus::NO_HOST_WINDOW.to_owned())?;
     let target = format!("address:{address}");
     // Hyprland 0.56 made dispatch take Lua and rejects the old syntax; older releases only know the old one.
     // The address is plain hex (checked above), so it can't break out of the Lua string.
     let lua = format!("hl.dsp.focus({{ window = \"{target}\" }})");
-    if let Err(lua_error) = run_hyprctl(&["dispatch", &lua]).await {
-        run_hyprctl(&["dispatch", "focuswindow", &target])
+    if let Err(lua_error) = run_hyprctl(&["dispatch", &lua], session).await {
+        run_hyprctl(&["dispatch", "focuswindow", &target], session)
             .await
             .map_err(|legacy_error| format!("{lua_error}; legacy syntax: {legacy_error}"))?;
     }
@@ -524,8 +580,8 @@ async fn focus_window(pids: &[u32]) -> Result<String, String> {
 }
 
 /// hyprctl reports dispatch errors on stdout, sometimes with a zero exit code; a dispatch that worked says `ok`.
-async fn run_hyprctl(args: &[&str]) -> Result<String, String> {
-    let output = tokio::time::timeout(OPEN_TIMEOUT, Command::new("hyprctl").args(args).output())
+async fn run_hyprctl(args: &[&str], session: &window_focus::Session) -> Result<String, String> {
+    let output = tokio::time::timeout(OPEN_TIMEOUT, Command::new("hyprctl").args(args).envs(session).output())
         .await
         .map_err(|_| "hyprctl timed out".to_owned())?
         .map_err(|error| format!("cannot run hyprctl (is this Hyprland?): {error}"))?;

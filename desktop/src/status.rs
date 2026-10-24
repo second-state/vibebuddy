@@ -134,6 +134,19 @@ pub struct DaemonInfo {
     pub build: String,
     /// The git description alone; empty from a daemon older than the field.
     pub revision: String,
+    /// Who starts the daemon again when it exits; absent from a daemon older than the field.
+    pub supervisor: Option<Supervisor>,
+}
+
+/// Who starts the daemon again when it exits, as the daemon reports it.
+#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum Supervisor {
+    /// The `vibebuddyd` systemd user service, which `systemctl --user` restarts.
+    Systemd,
+    /// Anything else: started by hand, from a build, or by another service manager.
+    #[serde(other)]
+    Other,
 }
 
 impl DaemonInfo {

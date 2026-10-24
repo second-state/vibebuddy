@@ -14,6 +14,7 @@ pkgbase = vibebuddy-bin
 	optdepends = xdg-utils: opening the logs and diagnostics folders
 	optdepends = xdg-terminal-exec: showing the daemon log in a terminal
 	optdepends = xdg-user-dirs: saving screenshots and diagnostics in your usual folders
+	optdepends = wmctrl: raising the window of an agent on X11 when K2 is pressed
 	provides = vibebuddy
 	conflicts = vibebuddy
 	options = !debug

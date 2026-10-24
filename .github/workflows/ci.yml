@@ -37,6 +37,16 @@ jobs:
         run: python3 tools/check-localization.py
       - name: Tool tests
         run: python3 -m unittest discover -s tools -p "test_*.py"
+      - name: Linux host with a simulated box
+        run: bash tools/test-linux-host.sh
+      - name: Simulated-device diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-host-tests
+          path: target/host-tests
+          if-no-files-found: ignore
+          retention-days: 7
 
   mac-app:
     # The Mac app's model and status decoding, through its SelfTest; the app itself is built only for releases.

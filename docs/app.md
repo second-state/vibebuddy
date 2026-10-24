@@ -137,6 +137,25 @@ The box shows the Mac side's build on the `APP` row of the device menu's STATUS 
 - Task cards in the menu, and macOS notifications for agent events.
 - Installing any update without the user's confirmation, quiet hours, project-level hook config.
 
+## Linux app (`desktop/`)
+
+The Linux app is a client of the same daemon, with the same settings tabs and the same English keys and zh-Hans table.
+`docs/platform-parity.md` has the full comparison, row by row, with the code each row rests on. What a maintainer of
+this app most needs to know:
+
+- **Notifications.** The daemon sends the box-gone alert through `notify-send` (`daemon/src/link_alert.rs`), because it
+  is the one process that sees the box. The app sends the firmware-available alert, and the daemon-failure alert
+  (`desktop/src/outage.rs`): once after 30 seconds without the daemon, again only after it returns, and only while the
+  notify toggle is on, using the last value the daemon reported. A unit the user stopped stays silent.
+- **Tray.** A StatusNotifierItem through `ksni`. Without a tray host the settings window opens about 10 seconds after
+  start. The README's Linux section explains why and names the GNOME extension.
+- **K2.** The daemon focuses the agent's window on Hyprland, Sway or X11 (`daemon/src/window_focus.rs`), choosing the
+  window system from the environment of the processes it focuses, and Hyprland or Sway only while their socket answers.
+  GNOME and KDE under Wayland only switch the tmux pane, if there is one. The app itself has no K2 code.
+- **Supervision.** A systemd user service runs the daemon, so quitting the app leaves the box online. The daemon says in
+  its status whether it runs as that service. If it doesn't (started by hand, say), Restart, Show daemon log and the
+  daemon-failure alert say so instead of acting on the unit.
+
 ## Acceptance
 
 Walk through on real hardware: all six onboarding steps; change the voice once and hear the new voice; update the firmware once with the voice and stats still intact; get a notification 30 seconds after unplugging, and see the icon recover after plugging back in; after writing the hooks in one click, the Agents tab turns green on the next agent event.

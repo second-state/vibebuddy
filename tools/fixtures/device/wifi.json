@@ -1,0 +1,5 @@
+{
+  "scan": "WIFI SEEN 3\nWIFI SEEN -65 1 Test network\nWIFI SEEN -45 6 Office test\nWIFI SEEN -55 11 Test network\n",
+  "failed": "WIFI FAILED FourWayHandshakeTimeout\n",
+  "joined": "WIFI CONNECTED\nWIFI ADDRESS 192.0.2.10\n"
+}

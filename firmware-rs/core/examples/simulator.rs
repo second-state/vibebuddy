@@ -7,10 +7,13 @@
 //! "Local network link"); pair over the pseudo-terminal first, as a box is paired over USB.
 //! `--relay <url>` also plays the box on the Relay (docs/relay-protocol.md), e.g. `ws://127.0.0.1:8787`
 //! under `wrangler dev`: it reports its pairings and its own links, and carries a linked computer's lines.
+//! `--control <unix-socket>` enables test-only button levels, clock advance and reset controls.
 
 use std::collections::HashMap;
+use std::io::{BufRead, BufReader};
 use std::io::{Read, Write};
 use std::net::{TcpListener, TcpStream};
+use std::os::unix::net::{UnixListener, UnixStream};
 use std::sync::mpsc;
 use std::time::{Duration, Instant};
 
@@ -47,6 +50,8 @@ impl Flash for MemoryFlash {
 
 struct SimulatedBoard {
     start: Instant,
+    offset_ms: u32,
+    buttons: Levels,
     flash: MemoryFlash,
     frame: Vec<u8>,
     out: std::io::Stdout,
@@ -62,6 +67,8 @@ struct SimulatedBoard {
 /// What the main loop hears from the stdin and network threads.
 enum Input {
     Cable(Vec<u8>),
+    /// Test controls use a separate socket, never the device protocol or a product endpoint.
+    Control(serde_json::Value, UnixStream),
     Opened(u32, TcpStream),
     Received(u32, Vec<u8>),
     Closed(u32),
@@ -69,6 +76,21 @@ enum Input {
     RelayChallenge(String),
     RelayMessage(serde_json::Value),
     RelayGone,
+}
+
+#[derive(serde::Deserialize)]
+#[serde(tag = "action", rename_all = "snake_case", deny_unknown_fields)]
+enum Control {
+    Buttons {
+        #[serde(default)]
+        k0: bool,
+        #[serde(default)]
+        k1: bool,
+        #[serde(default)]
+        k2: bool,
+    },
+    Advance { ms: u32 },
+    Reboot,
 }
 
 impl Screen for SimulatedBoard {
@@ -85,7 +107,7 @@ impl Screen for SimulatedBoard {
 
 impl Board for SimulatedBoard {
     fn now_ms(&self) -> u32 {
-        self.start.elapsed().as_millis() as u32
+        (self.start.elapsed().as_millis() as u32).wrapping_add(self.offset_ms)
     }
     fn write(&mut self, bytes: &[u8]) {
         let _ = self.out.write_all(bytes);
@@ -155,7 +177,7 @@ impl Board for SimulatedBoard {
         Some(Levels::default())
     }
     fn read_buttons(&mut self) -> (bool, Option<(bool, bool)>) {
-        (false, Some((false, false)))
+        (self.buttons.k0, Some((self.buttons.k1, self.buttons.k2)))
     }
     fn play(&mut self, _sound: Sound) -> Result<(), ()> {
         Ok(())
@@ -190,6 +212,23 @@ fn flash_with_partitions() -> MemoryFlash {
         entry[12..12 + label.len()].copy_from_slice(label.as_bytes());
     }
     MemoryFlash(bytes)
+}
+
+/// One NDJSON command per connection. Reply only after the main loop applies it and polls firmware.
+fn controls(path: &str, sender: mpsc::Sender<Input>) {
+    let listener = UnixListener::bind(path).expect("bind simulator control socket");
+    std::thread::spawn(move || {
+        for stream in listener.incoming().flatten() {
+            let _ = stream.set_read_timeout(Some(Duration::from_secs(2)));
+            let mut line = String::new();
+            if BufReader::new(&stream).read_line(&mut line).is_ok()
+                && let Ok(command) = serde_json::from_str(&line)
+                && sender.send(Input::Control(command, stream)).is_err()
+            {
+                break;
+            }
+        }
+    });
 }
 
 /// Accepts connections on `port`, numbering them, and reads each on its own thread.
@@ -293,9 +332,14 @@ fn main() {
     if let Some(port) = option("--tcp") {
         listen(port.parse().expect("--tcp takes a port"), sender.clone());
     }
+    if let Some(path) = option("--control") {
+        controls(&path, sender.clone());
+    }
     let relay_url = option("--relay");
     let mut board = SimulatedBoard {
         start: Instant::now(),
+        offset_ms: 0,
+        buttons: Levels::default(),
         flash: flash_with_partitions(),
         frame: vec![0; FRAME_BYTES],
         out: std::io::stdout(),
@@ -304,8 +348,13 @@ fn main() {
         relay: None,
         relay_peer: None,
     };
-    let build = std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/../device/build/build.txt")).unwrap_or_else(|_| "simulator".to_owned());
-    let mut firmware = Firmware::new(1, board.now_ms(), build.trim().as_bytes(), "0.0.0");
+    // The smoke tool expects the local device build; integration tests override it with a stable identity.
+    let build = option("--build").unwrap_or_else(|| {
+        std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/../device/build/build.txt"))
+            .unwrap_or_else(|_| "simulator".to_owned())
+    });
+    let build = build.trim().as_bytes();
+    let mut firmware = Firmware::new(1, board.now_ms(), build, env!("CARGO_PKG_VERSION"));
     firmware.boot(&mut board);
     let mut relay_box = RelayBox::new();
     if let (Some(url), Some(link)) = (relay_url, firmware.link()) {
@@ -317,6 +366,31 @@ fn main() {
         while let Ok(input) = receiver.try_recv() {
             match input {
                 Input::Cable(bytes) => firmware.receive(&mut board, &bytes),
+                Input::Control(command, mut reply) => {
+                    let result = match serde_json::from_value::<Control>(command) {
+                        Ok(command) => {
+                            match command {
+                                Control::Buttons { k0, k1, k2 } => board.buttons = Levels { k0, k1, k2 },
+                                Control::Advance { ms } => board.offset_ms = board.offset_ms.wrapping_add(ms),
+                                Control::Reboot => {
+                                    board.buttons = Levels::default();
+                                    for (_, stream) in board.conns.drain() {
+                                        let _ = stream.shutdown(std::net::Shutdown::Both);
+                                    }
+                                    board.peer = None;
+                                    board.relay_peer = None;
+                                    board.write(b"ESP-ROM:esp32s3-20210327\r\n");
+                                    firmware = Firmware::new(1, board.now_ms(), build, env!("CARGO_PKG_VERSION"));
+                                    firmware.boot(&mut board);
+                                }
+                            }
+                            firmware.poll(&mut board);
+                            serde_json::json!({"ok": true, "now_ms": board.now_ms()})
+                        }
+                        Err(error) => serde_json::json!({"ok": false, "error": error.to_string()}),
+                    };
+                    let _ = writeln!(reply, "{result}");
+                }
                 Input::Opened(conn, stream) => {
                     board.conns.insert(conn, stream);
                     let ephemeral = board.random().unwrap_or_default();

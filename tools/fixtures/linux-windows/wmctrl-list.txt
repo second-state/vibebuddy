@@ -1,0 +1,3 @@
+0x01200003  0 4000   host fish
+0x01400007  0 4242   host Claude Code
+0x01600009 -1 5151   host Volume Control

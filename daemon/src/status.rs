@@ -334,6 +334,40 @@ pub struct DaemonInfo {
     /// The git description alone, for the settings window; `build` adds the app version and the build time.
     pub revision: String,
     pub app_version: Option<String>,
+    /// Who starts the daemon again when it exits, on Linux; None on macOS, where the app knows it already.
+    pub supervisor: Option<Supervisor>,
+}
+
+/// Who starts the daemon again when it exits.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Supervisor {
+    /// The `vibebuddyd` systemd user service, which `systemctl --user restart vibebuddyd` restarts.
+    Systemd,
+    /// Anything else: started by hand, from a build, or by another service manager.
+    Other,
+}
+
+impl Supervisor {
+    /// On Linux, whether this process runs as the `vibebuddyd` user service. systemd puts each service's processes in
+    /// a cgroup named after the unit. A variable such as `INVOCATION_ID` wouldn't tell: a terminal started as a service
+    /// of its own hands it down to everything run in it. `VIBEBUDDY_SUPERVISOR` (`systemd` or `other`) overrides the
+    /// answer, for tests. None on macOS.
+    pub fn detect() -> Option<Self> {
+        if !cfg!(target_os = "linux") {
+            return None;
+        }
+        if let Ok(value) = std::env::var("VIBEBUDDY_SUPERVISOR") {
+            return Some(if value == "systemd" { Self::Systemd } else { Self::Other });
+        }
+        Some(Self::from_cgroup(&std::fs::read_to_string("/proc/self/cgroup").unwrap_or_default()))
+    }
+
+    /// From `/proc/self/cgroup`: one `id:controllers:path` line per hierarchy, a single `0::path` with cgroup v2.
+    fn from_cgroup(cgroup: &str) -> Self {
+        let ours = cgroup.lines().any(|line| line.rsplit('/').next() == Some("vibebuddyd.service"));
+        if ours { Self::Systemd } else { Self::Other }
+    }
 }
 
 /// What `GET /v1/status` returns and the status stream pushes.
@@ -369,6 +403,20 @@ pub fn wifi_failure(why: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn only_the_vibebuddyd_service_cgroup_is_systemd() {
+        let service = "0::/user.slice/user-1000.slice/user@1000.service/app.slice/vibebuddyd.service\n";
+        assert_eq!(Supervisor::from_cgroup(service), Supervisor::Systemd);
+        // cgroup v1 names the unit on the systemd hierarchy's line.
+        let v1 = "12:cpu,cpuacct:/user.slice\n1:name=systemd:/user.slice/user-1000.slice/user@1000.service/vibebuddyd.service\n";
+        assert_eq!(Supervisor::from_cgroup(v1), Supervisor::Systemd);
+        // Started by hand from a terminal, itself a service or a scope: not the unit systemctl would restart.
+        let terminal = "0::/user.slice/user-1000.slice/user@1000.service/app.slice/app-org.gnome.Terminal.slice/vte-spawn-1.scope\n";
+        assert_eq!(Supervisor::from_cgroup(terminal), Supervisor::Other);
+        assert_eq!(Supervisor::from_cgroup("0::/user.slice/user-1000.slice/user@1000.service/app.slice/other-vibebuddyd.service\n"), Supervisor::Other);
+        assert_eq!(Supervisor::from_cgroup(""), Supervisor::Other);
+    }
 
     fn line(text: &str) -> DeviceMessage {
         DeviceMessage::Line(text.to_owned())
