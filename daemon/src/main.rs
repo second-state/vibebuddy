@@ -433,28 +433,19 @@ async fn publish_device_message(state: &AppState, message: DeviceMessage) {
 }
 
 /// Voice commands (docs/protocol.md, "Voice commands"): offered on every report of the box's build, which follows
-/// hello on each new link and every reboot, and taken over native USB or the local network. The box sends no audio
-/// over the UART bridge, which is too slow for it, and over the Relay it will talk to the voice service itself, so
-/// voice isn't offered on either, and voice lines over the Relay are ignored.
+/// hello on each new link and every reboot, and taken over native USB, the local network and the Relay alike: the
+/// audio always comes over the link (ADR-0018). The box sends no audio over the UART bridge, which is too slow for
+/// it, so voice isn't offered there.
 async fn handle_voice_line(state: &AppState, line: &str) -> Option<tokio::task::JoinHandle<()>> {
-    let (over_relay, on_bridge) = {
-        let device = state.device.lock().await;
-        (device.relay, device.bridge)
-    };
+    let on_bridge = state.device.lock().await.bridge;
     if line.contains(serial_transport::BUILD_MARKER) && state.voice.available() {
-        if over_relay {
-            info!("voice commands not offered: the box is reached through the Relay");
-        } else if on_bridge {
+        if on_bridge {
             info!("voice commands not offered: the box is on the UART bridge, which can't carry its audio; use its native USB port");
         } else {
             send_event(state, voice::available_event(true));
         }
     }
     if !line.starts_with("VOICE ") {
-        return None;
-    }
-    if over_relay {
-        tracing::debug!("ignoring a voice line over the Relay");
         return None;
     }
     state.voice.handle_line(line, &state.transport, &wearing(state).await)
@@ -473,13 +464,13 @@ async fn wearing(state: &AppState) -> persona::Wearing {
 
 /// Tells a box that has reported its build whether voice is on now, after the resident session's readiness or the account flipped
 /// (the user's Codex installed or gone, logged in or out). Told `false`, a long K0 gives up the Pomodoro phase as it
-/// did before voice. Never over the Relay or the UART bridge, where voice is never offered.
+/// did before voice. Never over the UART bridge, where voice is never offered.
 async fn offer_voice_again(state: &AppState) {
-    let (booted, over_relay, on_bridge) = {
+    let (booted, on_bridge) = {
         let device = state.device.lock().await;
-        (device.connected && device.firmware_build.is_some(), device.relay, device.bridge)
+        (device.connected && device.firmware_build.is_some(), device.bridge)
     };
-    if booted && !over_relay && !on_bridge {
+    if booted && !on_bridge {
         let on = state.voice.available();
         info!(on, "voice readiness changed; telling the box whether voice is on");
         send_event(state, voice::available_event(on));
@@ -2106,7 +2097,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn voice_is_offered_after_each_build_report_but_never_over_the_relay_or_the_uart_bridge() {
+    async fn voice_is_offered_after_each_build_report_over_every_link_but_the_uart_bridge() {
         let dir = std::env::temp_dir().join(format!("vibebuddy-voice-offer-{}", std::process::id()));
         let offers = |transport: &RecordingTransport| {
             transport.events().iter().filter(|event| event.event == "voice.available").map(|event| event.extra["on"].clone()).collect::<Vec<_>>()
@@ -2129,9 +2120,11 @@ mod tests {
             let expected = if enabled { vec![serde_json::json!(true); 3] } else { Vec::new() };
             assert_eq!(offers(&transport), expected);
 
+            // Over the Relay too: the audio comes over the link, which is end-to-end encrypted there (ADR-0018).
             publish_device_message(&state, DeviceMessage::ConnectedRelay { url: "wss://relay.example".to_owned() }).await;
             publish_device_message(&state, build()).await;
-            assert_eq!(offers(&transport), expected, "not over the Relay");
+            let expected = if enabled { vec![serde_json::json!(true); 4] } else { Vec::new() };
+            assert_eq!(offers(&transport), expected, "over the Relay");
             // The box sends no audio over the UART bridge.
             publish_device_message(&state, DeviceMessage::Connected { port: "/dev/cu.wchusbserial1".to_owned(), bridge: true, usb_serial: None }).await;
             publish_device_message(&state, build()).await;

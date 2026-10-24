@@ -202,6 +202,9 @@ impl Screen for DeviceBoard {
     }
 }
 
+/// Places in the Relay's outgoing queue a stream line never takes (see [`Board::write_stream`]).
+const STREAM_HEADROOM: usize = 8;
+
 impl Board for DeviceBoard {
     fn now_ms(&self) -> u32 {
         Instant::now().as_millis() as u32
@@ -221,12 +224,23 @@ impl Board for DeviceBoard {
         }
     }
 
-    /// `VOICE DATA`, 16 KB/s of it: USB and the local network only. The UART carries 11.5 KB/s at 115200
-    /// baud and its writes block, so the stream would stall the main loop there; the Relay's 50 messages a
-    /// second are for the box's other output (a voice command over the Relay is ADR-0018's).
+    /// `VOICE DATA`, 16 KB/s of it: USB, the local network and the Relay (ADR-0018), about 21 of the Relay's 50
+    /// messages a second. Not the UART, which carries 11.5 KB/s at 115200 baud and whose writes block, so the stream
+    /// would stall the main loop there. A line that doesn't fit the Relay's queue right now is dropped, as a full
+    /// network buffer drops one: a gap in `seq`, never a stalled recording. It leaves [`STREAM_HEADROOM`] of the queue
+    /// to the box's other lines, so `VOICE END` still gets through behind a backlog of audio.
     fn write_stream(&mut self, line: &[u8]) {
         self.transport.write_usb(line);
         self.write_lan(line);
+        if let Some(lines) = &mut self.relay_peer {
+            lines.lines(
+                line,
+                |_| relay::OUT.free_capacity() > STREAM_HEADROOM,
+                |line| {
+                    let _ = relay::OUT.try_send((relay::current_socket(), relay_box::data(line)));
+                },
+            );
+        }
     }
 
     fn lan_send(&mut self, conn: u32, bytes: &[u8]) {

@@ -1,4 +1,4 @@
-//! Voice commands from a box linked over USB or the local network (ADR-0017; docs/protocol.md, "Voice commands
+//! Voice commands from a box linked over USB, the local network or the Relay (ADR-0017, ADR-0018; docs/protocol.md, "Voice commands
 //! (experimental)").
 //!
 //! The box records while K0 is held and sends the audio as `VOICE` diagnostic lines: 24 kHz mono IMA ADPCM, each

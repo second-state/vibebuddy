@@ -50,7 +50,7 @@ The daemon sends the token as `Authorization: Bearer <token>` and keeps it in `c
 
 ## Voice
 
-Both calls need `Authorization: Bearer <session>` and answer 401 without a valid one. Over the Relay the box will use a voice token instead (vibebuddy-cloud#10).
+Both calls need `Authorization: Bearer <session>` and answer 401 without a valid one. Only daemons call them: the box's audio reaches the daemon over the link, however the box is linked (ADR-0018).
 
 ### Recognizing a voice command
 

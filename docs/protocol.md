@@ -233,7 +233,7 @@ USB stays in the clear: the cable is physical presence, as pairing already assum
 
 ## Voice commands (experimental)
 
-A voice command (ADR-0017) on a box linked over USB or the local network: the box records while K0 is held and streams the audio over the link; the computer turns it into text, hands it to the resident session and sends the spoken replies back. Over the Relay the box will talk to the voice service itself (ADR-0018); that path isn't described here yet.
+A voice command (ADR-0017) on a box linked over USB or the local network: the box records while K0 is held and streams the audio over the link; the computer turns it into text, hands it to the resident session and sends the spoken replies back. The same goes over the Relay (ADR-0018): the link is end-to-end encrypted there (ADR-0015), so the Relay carries only ciphertext.
 
 The computer offers voice, and the box only treats a long K0 as push-to-talk while it is offered:
 
@@ -246,7 +246,7 @@ One recording is a turn, numbered by the box from 1 after each boot. The box sen
 - `VOICE END <turn> <samples>`: K0 was released, or 30 s passed; `samples` is how many were recorded, always an even number (a last sample without a partner for its byte isn't sent). It counts the samples of lines that were dropped too, so the computer can tell how much is missing.
 - `VOICE CANCEL <turn>`: the recording was too short (under half a second) or the box gave it up (K2, or an event that needs the user took the screen, or voice was withdrawn); the computer drops the turn.
 
-`VOICE DATA` comes to about 21 lines and 16 KB a second, and goes only over the native USB port and the local network. The UART bridge carries 11.5 KB/s at 115200 baud and its writes hold up the box's main loop, so data lines never go there; a computer on the bridge would see `START` and `END` with no data, so it shouldn't offer voice there. The Relay doesn't carry them either (see above). A data line that doesn't fit right now (the USB host isn't reading, the network connection's buffer is full) is dropped whole rather than waited for: a gap in `seq`, never a stalled recording. `START`, `END` and `CANCEL` go everywhere the box's other lines go.
+`VOICE DATA` comes to about 21 lines and 16 KB a second, and goes over the native USB port, the local network and the Relay, inside the Relay's 50 messages a second (docs/relay-protocol.md). The UART bridge carries 11.5 KB/s at 115200 baud and its writes hold up the box's main loop, so data lines never go there; a computer on the bridge would see `START` and `END` with no data, so it shouldn't offer voice there. A data line that doesn't fit right now (the USB host isn't reading, the network connection's buffer is full) is dropped whole rather than waited for: a gap in `seq`, never a stalled recording. `START`, `END` and `CANCEL` go everywhere the box's other lines go.
 
 The computer answers with JSON events carrying the same `turn`:
 
