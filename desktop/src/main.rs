@@ -145,6 +145,8 @@ enum Message {
     MakeLines(&'static str, Result<Vec<making::Line>, String>),
     MakeName(String),
     MakeVoice(making::Voice),
+    /// The korekore sheet's pick: a preset's voice takes that preset's lines too, while none has changed.
+    MakeVoiceAndLines(making::Voice),
     MakeLine(usize, String),
     MakeRemoveLine(usize),
     MakeChooseDrawings,
@@ -944,6 +946,15 @@ impl App {
             Message::MakeVoice(voice) => {
                 if let Some(form) = &mut self.make {
                     form.voice = Some(voice);
+                }
+            }
+            Message::MakeVoiceAndLines(voice) => {
+                let Some(form) = &mut self.make else { return Task::none() };
+                let preset = self.voices.iter().find(|shipped| shipped.id == voice.id).map(Lender::of);
+                let follow = form.lines == form.original && preset.is_some_and(|preset| preset != form.base);
+                form.voice = Some(voice);
+                if let Some(preset) = preset.filter(|_| follow) {
+                    return Task::done(Message::MakeBase(preset));
                 }
             }
             Message::MakeLine(index, text) => {

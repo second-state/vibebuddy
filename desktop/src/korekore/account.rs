@@ -307,7 +307,7 @@ impl crate::App {
             )
             .padding(0)
             .style(|_, _| button::Style::default())
-            .on_press(Message::MakeVoice(voice));
+            .on_press(Message::MakeVoiceAndLines(voice));
             if index > 0 {
                 voice_rows.push(divider());
             }

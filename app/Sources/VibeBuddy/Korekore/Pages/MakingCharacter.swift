@@ -264,7 +264,7 @@ struct KorekoreMakeSheet: View {
     private func voiceRow(_ option: CharacterVoice) -> some View {
         let chosen = voice == option.id
         return HStack(spacing: 10) {
-            Button { voice = option.id } label: {
+            Button { pick(option) } label: {
                 HStack(spacing: 8) {
                     Circle()
                         .fill(chosen ? Theme.Colors.korePink : Theme.Colors.paper)
@@ -293,6 +293,15 @@ struct KorekoreMakeSheet: View {
         }
         .padding(.vertical, 8)
         .padding(.horizontal, 12)
+    }
+
+    /// A preset's voice takes that preset's lines too, while the user hasn't changed any: its own voice with its own
+    /// lines, which are already made.
+    private func pick(_ option: CharacterVoice) {
+        voice = option.id
+        if edited == original, Resources.bundledVoices.contains(where: { $0.id == option.id }) {
+            base = option.id
+        }
     }
 
     private func text(of id: UUID) -> Binding<String> {
