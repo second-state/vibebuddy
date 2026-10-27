@@ -252,7 +252,8 @@ impl crate::App {
     /// go to the box with the preset lending its voice. With new lines or another voice, the daemon makes the audio.
     pub(super) fn kk_make_form<'a>(&'a self, form: &'a MakeForm) -> Element<'a, Message> {
         let bases: Vec<Lender> = self.voices.iter().map(Lender::of).collect();
-        let voices = making::sorted(&self.character_voices, assets::language_of(form.base.id).map(assets::Language::code));
+        // In one order whatever the lines: the voice comes first, so the lines don't move it.
+        let voices = self.character_voices.clone();
         let keys = self.status.as_ref().and_then(|status| status.voice_keys.as_ref());
         let account = self.status.as_ref().map(|status| status.account.clone()).unwrap_or_default();
         let readiness = form.voice.as_ref().map(|voice| (making::Readiness::of(voice, keys, &account), voice.provider_name()));

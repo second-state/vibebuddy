@@ -191,7 +191,8 @@ struct KorekoreMakeSheet: View {
                     }
                     KHeading(String(localized: "Voice"))
                     KRows {
-                        let options = CharacterVoice.sorted(model.characterVoices, preferring: VoiceCatalogEntry.language(ofVoice: base))
+                        // In one order whatever the lines: the voice comes first, so the lines don't move it.
+                        let options = model.characterVoices
                         ForEach(Array(options.enumerated()), id: \.element.id) { index, option in
                             if index > 0 { KDivider() }
                             voiceRow(option)
