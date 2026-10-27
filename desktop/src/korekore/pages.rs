@@ -343,8 +343,14 @@ impl crate::App {
         } else {
             Space::new().into()
         };
+        // The agents' marks are drawn for the box's dark screen, so each sits on a dark tile here too.
+        let tile = container(sprite(icon, 2)).padding(4).style(|_| container::Style {
+            background: Some(theme::BOX_CARD.into()),
+            border: Border { radius: 8.0.into(), ..Border::default() },
+            ..container::Style::default()
+        });
         row![
-            sprite(icon, 3),
+            tile,
             column![
                 text(setup.name.clone()).font(bold()).size(15).color(theme::INK),
                 row![tag(state, color), small(detail)].spacing(8),
@@ -416,7 +422,7 @@ impl crate::App {
         let chip = |label: String, tile: Option<&'static super::Sprite>, option: client::BrainChoice| -> Element<'_, Message> {
             let on = choice == Some(option);
             let (background, foreground) = if on { (theme::INK, theme::CREAM) } else { (theme::PAPER, theme::INK) };
-            button(row![].push(tile.map(|tile| sprite(tile, 2))).push(text(label).font(bold()).size(13)).spacing(6).align_y(Alignment::Center))
+            button(row![].push(tile.map(|tile| sprite(tile, 1))).push(text(label).font(bold()).size(13)).spacing(6).align_y(Alignment::Center))
                 .padding(if tile.is_some() { Padding { top: 3.0, right: 12.0, bottom: 3.0, left: 4.0 } } else { Padding::from([4, 12]) })
                 .on_press(Message::PickBrain(option))
                 .style(move |_, _| button::Style {
@@ -532,7 +538,7 @@ impl crate::App {
         card(
             column![
                 row![
-                    sprite(if claude { &sprites::ICON_CC } else { &sprites::ICON_CX }, 3),
+                    sprite(if claude { &sprites::ICON_CC } else { &sprites::ICON_CX }, 2),
                     heading(if claude { tr("Voice needs Claude Code", &[]) } else { tr("Voice needs Codex", &[]) }),
                 ]
                 .spacing(10)

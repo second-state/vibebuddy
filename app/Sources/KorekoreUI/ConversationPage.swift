@@ -82,7 +82,7 @@ public struct KorekoreConversationPage: View {
     private func chip(_ label: String, tile: String?, on: Bool, action: @escaping () -> Void) -> some View {
         Button(action: action) {
             HStack(spacing: 6) {
-                if let tile { Sprite(name: tile, scale: 2) }
+                if let tile { Sprite(name: tile, scale: 1) }
                 Text(verbatim: label)
             }
             .font(.rounded(13))
@@ -185,7 +185,7 @@ public struct KorekoreConversationPage: View {
         return KCard {
             VStack(alignment: .leading, spacing: 8) {
                 HStack(spacing: 10) {
-                    Sprite(name: claude ? "icon-cc" : "icon-cx", scale: 3)
+                    Sprite(name: claude ? "icon-cc" : "icon-cx", scale: 2)
                     Text(claude ? "Voice needs Claude Code" : "Voice needs Codex").font(.rounded(15))
                 }
                 switch problem {

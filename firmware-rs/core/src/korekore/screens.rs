@@ -83,6 +83,8 @@ fn card_rect(slot: usize) -> Rect {
 
 /// Kore in the side panel on duty, at 4×.
 const BUDDY: Rect = Rect { x: 8, y: 51, width: 80, height: 72 };
+/// Where a Character's look stands in the side panel, at 2×: the bottom of its frame, just above the state word.
+const LOOK_PANEL_BOTTOM: i32 = 196;
 /// The page line and its bar under the cards.
 const PAGE_LINE: Rect = Rect { x: 98, y: 216, width: 220, height: 22 };
 /// The ticket on a takeover screen (needs input, done, failed).
@@ -185,18 +187,6 @@ fn heart(canvas: &mut Canvas, x: i32, y: i32) {
     }
 }
 
-/// The agent's tile from the korekore icons, at 2×.
-fn agent_tile(icon: AgentIcon) -> &'static Sprite {
-    match icon {
-        AgentIcon::ClaudeCode => &kk::ICON_CC,
-        AgentIcon::Codex => &kk::ICON_CX,
-        AgentIcon::OpenCode => &kk::ICON_OC,
-        AgentIcon::Copilot => &kk::ICON_GH,
-        AgentIcon::Pi => &kk::ICON_PI,
-        AgentIcon::Ci => &kk::ICON_CI,
-    }
-}
-
 /// Every pixel to the gray of its brightness, a little darker: the design's no-link filter.
 fn gray_out(canvas: &mut Canvas) {
     for y in 0..HEIGHT {
@@ -269,6 +259,14 @@ impl Display {
                 look.draw_scaled(canvas, expr.frame(), left, top, look_scale, mirror, gray);
             }
             None => sprite(canvas, expr.sprite(), x, y, scale, mirror, gray),
+        }
+    }
+
+    /// The buddy in the side panel, as drawn and tapped: Kore at 4×, or a Character's look at 2×.
+    fn kk_buddy_rect(&self) -> Rect {
+        match self.look {
+            Some(_) => Rect { x: 0, y: LOOK_PANEL_BOTTOM - look::HEIGHT * 2, width: 96, height: look::HEIGHT * 2 },
+            None => BUDDY,
         }
     }
 
@@ -408,7 +406,11 @@ impl Display {
         }
         kt::draw_centered(canvas, &TYPE_11, 48, 31, mark, color);
         let mirror = !self.link_lost && self.state == State::Idle && idle_mood(self.animation_frame) == IdleMood::Look && self.animation_frame % 4 < 2;
-        self.kk_buddy(canvas, expr, BUDDY.x, BUDDY.y + hop, 4, mirror, self.link_lost);
+        match &self.look {
+            // A Character fills the panel at 2× (96 × 128), standing just above the state word.
+            Some(look) => look.draw_scaled(canvas, expr.frame(), 0, LOOK_PANEL_BOTTOM - look::HEIGHT * 2 + hop, 2, mirror, self.link_lost),
+            None => self.kk_buddy(canvas, expr, BUDDY.x, BUDDY.y + hop, 4, mirror, self.link_lost),
+        }
         if petted && !self.link_lost {
             heart(canvas, BUDDY.x + BUDDY.width, BUDDY.y - 10 + hop);
         }
@@ -483,9 +485,10 @@ impl Display {
         chip(canvas, &TYPE_9, pill_x, rect.y + (rect.height - TYPE_9.line()) / 2, pill_word, BOX_GROUND, pill_fill);
         let mut text_x = rect.x + padding;
         let mut title = &task.title[..];
+        // The agents' own marks, as the robot screens draw them, at 2×: easier to tell apart than the design's tiles.
         if let Some(icon) = task.icon {
-            sprite(canvas, agent_tile(icon), text_x, rect.y + (rect.height - 24) / 2, 2, false, false);
-            text_x += 24 + 7;
+            icon.draw_scaled(canvas, text_x, rect.y + (rect.height - 32) / 2, 2);
+            text_x += 32 + 7;
             title = title.strip_prefix(icon.prefix()).unwrap_or(title);
         }
         let text_width = pill_x - 7 - text_x;
@@ -910,7 +913,7 @@ impl Display {
                 None => index.checked_sub(self.page * CARDS_PER_PAGE).filter(|&slot| slot < CARDS_PER_PAGE).map(card_rect),
             },
             (Target::PageLine, None) if self.mode == Mode::Duty && self.kk_takeover().is_none() && self.pages() > 1 => Some(PAGE_LINE),
-            (Target::Buddy, None) if self.mode == Mode::Duty && self.kk_takeover().is_none() => Some(BUDDY),
+            (Target::Buddy, None) if self.mode == Mode::Duty && self.kk_takeover().is_none() => Some(self.kk_buddy_rect()),
             _ => None,
         }
     }
@@ -949,7 +952,7 @@ impl Display {
         if self.pages() > 1 && PAGE_LINE.contains(x, y) {
             return Some(Target::PageLine);
         }
-        BUDDY.contains(x, y).then_some(Target::Buddy)
+        self.kk_buddy_rect().contains(x, y).then_some(Target::Buddy)
     }
 }
 

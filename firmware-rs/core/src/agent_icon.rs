@@ -58,10 +58,15 @@ impl AgentIcon {
     }
 
     pub fn draw(self, canvas: &mut Canvas, x: i32, y: i32) {
+        self.draw_scaled(canvas, x, y, 1);
+    }
+
+    /// `draw` at a whole-number scale; the korekore screens draw the icons at 2×.
+    pub fn draw_scaled(self, canvas: &mut Canvas, x: i32, y: i32, scale: i32) {
         for (index, &color) in self.pixels().iter().enumerate() {
             if color != 0 {
                 let index = index as i32;
-                canvas.fill_rect(x + index % SIZE, y + index / SIZE, 1, 1, color);
+                canvas.fill_rect(x + index % SIZE * scale, y + index / SIZE * scale, scale, scale, color);
             }
         }
     }

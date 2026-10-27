@@ -117,7 +117,10 @@ struct KorekoreAgentRow: View {
 
     var body: some View {
         HStack(spacing: 12) {
-            Sprite(name: tile, scale: 3)
+            // The agents' marks are drawn for the box's dark screen, so each sits on a dark tile here too.
+            Sprite(name: tile, scale: 2)
+                .padding(4)
+                .background(Theme.Colors.boxCard, in: RoundedRectangle(cornerRadius: 8))
             VStack(alignment: .leading, spacing: 3) {
                 Text(verbatim: agent.displayName).font(.rounded(15))
                 HStack(alignment: .firstTextBaseline, spacing: 8) {
