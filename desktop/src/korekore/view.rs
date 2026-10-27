@@ -12,7 +12,7 @@ use super::{Section, Sprite};
 use crate::i18n::tr;
 
 const ROUNDED: &str = "Rounded Mplus 1c";
-const PIXEL: Font = typography::BOX_TEXT.font;
+use super::controls::pixel;
 
 fn rounded(weight: iced::font::Weight) -> Font {
     Font { family: iced::font::Family::Name(ROUNDED), weight, ..Font::DEFAULT }
@@ -92,10 +92,10 @@ pub fn screen<'a, M: 'a>(picture: &BoxPicture, scale: f32) -> Element<'a, M> {
     let screen: Element<'a, M> = if picture.mood == Mood::NoLink {
         container(
             column![
-                text("Z z").font(PIXEL).size(14.0 * S).color(theme::MIST),
+                text("Z z").font(pixel(14.0 * S).0).size(pixel(14.0 * S).1).color(theme::MIST),
                 sized(&sprites::KORE_SLEEP, 6, true, 6.0 * S),
-                text("NO LINK").font(PIXEL).size(typography::BOX_STATE.size * S).color(theme::MIST),
-                text("waiting for the Mac").font(PIXEL).size(11.0 * S).color(theme::MIST_TEXT),
+                text("NO LINK").font(pixel(typography::BOX_STATE.size * S).0).size(pixel(typography::BOX_STATE.size * S).1).color(theme::MIST),
+                text("waiting for the Mac").font(pixel(11.0 * S).0).size(pixel(11.0 * S).1).color(theme::MIST_TEXT),
             ]
             .spacing(6.0 * S)
             .align_x(Alignment::Center),
@@ -112,7 +112,7 @@ pub fn screen<'a, M: 'a>(picture: &BoxPicture, scale: f32) -> Element<'a, M> {
         let side = container(
             column![
                 sized(kore(mood), 4, false, 4.0 * S),
-                text(mood_word(mood)).font(PIXEL).size(16.0 * S).color(mood_color(mood)),
+                text(mood_word(mood)).font(pixel(16.0 * S).0).size(pixel(16.0 * S).1).color(mood_color(mood)),
             ]
             .spacing(8.0 * S)
             .align_x(Alignment::Center),
@@ -127,15 +127,15 @@ pub fn screen<'a, M: 'a>(picture: &BoxPicture, scale: f32) -> Element<'a, M> {
         let cards: Element<'a, M> = if picture.tickets.is_empty() {
             container(
                 column![
-                    text("ALL QUIET").font(PIXEL).size(12.0 * S).color(theme::BOX_TEXT),
+                    text("ALL QUIET").font(pixel(12.0 * S).0).size(pixel(12.0 * S).1).color(theme::BOX_TEXT),
                     text(format!(
                         "{} done · {} asks · {} busy",
                         picture.today.done,
                         picture.today.asks,
                         super::picture::busy(picture.today.busy_seconds).to_uppercase()
                     ))
-                    .font(PIXEL)
-                    .size(10.0 * S)
+                    .font(pixel(10.0 * S).0)
+                    .size(pixel(10.0 * S).1)
                     .color(theme::BOX_TEXT_MUTED),
                 ]
                 .spacing(6.0 * S)
@@ -148,7 +148,7 @@ pub fn screen<'a, M: 'a>(picture: &BoxPicture, scale: f32) -> Element<'a, M> {
                 container(
                     row![
                         sized(tile(&format!("icon-{}", ticket.icon)), 2, false, 2.0 * S),
-                        text(ticket.title.clone()).font(PIXEL).size(13.0 * S).color(theme::BOX_TEXT).wrapping(text::Wrapping::None),
+                        text(ticket.title.clone()).font(pixel(13.0 * S).0).size(pixel(13.0 * S).1).color(theme::BOX_TEXT).wrapping(text::Wrapping::None),
                     ]
                     .spacing(8.0 * S)
                     .align_y(Alignment::Center),
@@ -202,8 +202,8 @@ fn sidebar<'a, M: Clone + 'a>(
             ..container::Style::default()
         });
     let status = column![
-        row![dot, text(link_line).font(PIXEL).size(12).color(theme::INK)].spacing(6).align_y(Alignment::Center),
-        text(tr("%lld done · %lld asks today", &[&picture.today.done, &picture.today.asks])).font(PIXEL).size(12).color(theme::MUTED),
+        row![dot, text(link_line).font(pixel(12.0).0).size(pixel(12.0).1).color(theme::INK)].spacing(6).align_y(Alignment::Center),
+        text(tr("%lld done · %lld asks today", &[&picture.today.done, &picture.today.asks])).font(pixel(12.0).0).size(pixel(12.0).1).color(theme::MUTED),
     ]
     .spacing(2)
     .padding(Padding::from([0, 4]));
@@ -241,7 +241,7 @@ fn sidebar<'a, M: Clone + 'a>(
         status,
         nav,
         Space::new().height(Length::Fill),
-        text(version).font(PIXEL).size(12).color(theme::MUTED_2),
+        text(version).font(pixel(12.0).0).size(pixel(12.0).1).color(theme::MUTED_2),
     ]
     .spacing(14);
     container(container(content).padding(Padding { top: 14.0, right: 14.0, bottom: 16.0, left: 14.0 }))

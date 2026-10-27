@@ -8,7 +8,12 @@ Latin, punctuation, symbols, kana, and the Chinese characters the box's 12 px ta
 (firmware-rs/core/fonts/cjk-12px.bin: level one of the 2013 general standard table, 3,500 characters) plus any
 other character the zh-Hans UI strings use.
 
-Both are Japanese fonts: M PLUS Rounded 1c lacks about 1,400 of those Chinese characters (你, 这, 说…). They are
+Small pixel type (below 16 pt) is Fusion Pixel 12 px instead (Ark Pixel with Cubic 11 and Galmuri filling in, OFL;
+the box's 12 px Chinese table and its small type are the same font): DotGothic16 is drawn on a 16 px grid, and at 12
+to 14 pt its strokes fall between pixels and its capitals crowd. It is cut to the same characters, pinned by
+SHA-256 like the others; its three licences go into one file.
+
+Both M PLUS Rounded 1c and DotGothic16 are Japanese fonts: M PLUS Rounded 1c lacks about 1,400 of those Chinese characters (你, 这, 说…). They are
 filled in from Resource Han Rounded CN (OFL; a rounded Source Han Sans), at the same weight, so Chinese text stays
 in one rounded face on the Mac and on Linux alike. Both fonts use 1,000 units per em and the same ideographic box,
 so the glyphs go in as they are. DotGothic16 is not filled in: a character it lacks falls back to the system font.
@@ -29,6 +34,7 @@ import struct
 import subprocess
 import sys
 import urllib.request
+import zipfile
 from pathlib import Path
 
 from fontTools import subset
@@ -49,6 +55,12 @@ ROUNDED = {
 DOTGOTHIC = ("DotGothic16-Regular.ttf", "3ad9af88726d42b40f7f365f0dcac785af73cf20ea6f1d5b44e57cc21150b8f1")
 DOTGOTHIC_OFL = ("OFL.txt", "b6630c61ea078cacd7fabe37d14ffe557a0b45b06683374a9aa9e24262993e33")
 
+FUSION = ("https://github.com/TakWolf/fusion-pixel-font/releases/download/2026.09.25/"
+          "fusion-pixel-font-12px-proportional-ttf-v2026.09.25.zip",
+          "47585b9c4b6d8d57380e9dec75bc7e8043fdbfa77d1843c3aaa19a1e7bd15d50")
+FUSION_MEMBER = "fusion-pixel-12px-proportional-latin.ttf"
+FUSION_OUTPUT = "FusionPixel12-Regular.ttf"
+FUSION_LICENSES = ["LICENSES/ark-pixel/OFL.txt", "LICENSES/cubic-11/OFL.txt", "LICENSES/galmuri/LICENSE.txt"]
 RESOURCE_HAN = ("https://github.com/CyanoHao/Resource-Han-Rounded/releases/download/v1.910/RHR-CFF2-CN-1.910.7z",
                 "4ad7b141535a1f11831287b0a6f71ddcec8daa92dc1d82c59892068f8ae5df09")
 RESOURCE_HAN_MEMBER = "ResourceHanRoundedCN-VF.otf"
@@ -178,7 +190,11 @@ def main():
         one_family(font, ROUNDED[weight][0].removeprefix("MPLUSRounded1c-").removesuffix(".ttf"))
         font.save(OUTPUT / ROUNDED[weight][0])
     cut(TTFont(google_font("dotgothic16", *DOTGOTHIC), recalcTimestamp=False), codepoints).save(OUTPUT / DOTGOTHIC[0])
-    for name in [*(source for source, _ in ROUNDED.values()), DOTGOTHIC[0]]:
+    fusion = zipfile.ZipFile(fetch(*FUSION))
+    cut(TTFont(io.BytesIO(fusion.read(FUSION_MEMBER)), recalcTimestamp=False), codepoints).save(OUTPUT / FUSION_OUTPUT)
+    (OUTPUT / "OFL-FusionPixel.txt").write_text(
+        "\n\n".join(f"{name}\n\n{fusion.read(name).decode()}" for name in FUSION_LICENSES))
+    for name in [*(source for source, _ in ROUNDED.values()), DOTGOTHIC[0], FUSION_OUTPUT]:
         print(f"{name}: {(OUTPUT / name).stat().st_size} bytes", file=sys.stderr)
     ofl = google_font("dotgothic16", *DOTGOTHIC_OFL).read_text()
     (OUTPUT / "OFL-DotGothic16.txt").write_text(ofl)

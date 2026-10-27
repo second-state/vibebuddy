@@ -6,7 +6,7 @@
 use iced::widget::{Space, button, column, container, row, scrollable, text};
 use iced::{Alignment, Border, Element, Length, Padding, Shadow, Vector};
 
-use super::controls::{Fill, PIXEL, bar, bold, card_with, heading, note, pill, regular, sprite, tag};
+use super::controls::{Fill, pixel, bar, bold, card_with, heading, note, pill, regular, sprite, tag};
 use super::{sprites, theme};
 use crate::i18n::tr;
 use crate::status::{OperationKind, OperationState};
@@ -158,7 +158,7 @@ impl crate::App {
         let gray = !online && !flashing;
         let face = if gray { super::controls::badge(kore, true, iced::Color::TRANSPARENT) } else { sprite(kore, 4) };
         let drawing = container(
-            container(column![face, text(word).font(PIXEL).size(18).color(ink)].spacing(6).align_x(Alignment::Center))
+            container(column![face, text(word).font(pixel(18.0).0).size(pixel(18.0).1).color(ink)].spacing(6).align_x(Alignment::Center))
                 .center_x(240)
                 .center_y(180)
                 .style(move |_| container::Style {
@@ -199,7 +199,7 @@ impl crate::App {
                 title(tr("Is this your box?", &[]), 32.0),
                 container(
                     row![
-                        text(format!("{port} · {kind}")).font(PIXEL).size(14).color(theme::INK).width(Length::Fill),
+                        text(format!("{port} · {kind}")).font(pixel(14.0).0).size(pixel(14.0).1).color(theme::INK).width(Length::Fill),
                         pill(tr("Make it blink", &[]), Fill::Paper, Some(Message::Identify)),
                     ]
                     .align_y(Alignment::Center),

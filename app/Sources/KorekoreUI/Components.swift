@@ -19,10 +19,19 @@ extension Font {
         return .custom(name, fixedSize: size)
     }
 
-    /// DotGothic16, for the machine-ish bits: state words, versions, counts.
+    /// Pixel type, for the machine-ish bits: state words, versions, counts. A pixel font is clean only at its own size or
+    /// a whole multiple, so the size snaps: below 15 pt Fusion Pixel at its own 12, then DotGothic16 at its own 16, and
+    /// at 32 from 24 pt. DotGothic16 at the design's 12 to 14 pt fell between pixels and crowded its capitals.
     public static func pixel(_ size: CGFloat) -> Font {
-        .custom(Theme.FontName.pixelRegular, fixedSize: size)
+        switch size {
+        case ..<15: .custom(fusionPixel, fixedSize: 12)
+        case ..<24: .custom(Theme.FontName.pixelRegular, fixedSize: 16)
+        default: .custom(Theme.FontName.pixelRegular, fixedSize: 32)
+        }
     }
+
+    /// Fusion Pixel 12 px (fonts/korekore, tools/korekore-fonts.py), by its PostScript name.
+    static let fusionPixel = "Fusion-Pixel-12px-Prop-latin-Regular"
 }
 
 /// A sprite from docs/design/korekore at a whole-number scale, every pixel a crisp square.

@@ -7,7 +7,7 @@ use iced::{Alignment, Border, Element, Length, Padding};
 
 use super::Section;
 use super::controls::{
-    Fill, PIXEL, badge, bar, bold, card, card_with, divider, field, heading, note, picker, pill, pill_sized, regular, rows, semibold,
+    Fill, pixel, badge, bar, bold, card, card_with, divider, field, heading, note, picker, pill, pill_sized, regular, rows, semibold,
     setting, small, sprite, switch, tag,
 };
 use super::picture::BoxPicture;
@@ -77,7 +77,7 @@ impl crate::App {
         }
         let volume_row = row![
             column![
-                row![text(tr("Volume", &[])).font(bold()).size(13), Space::new().width(Length::Fill), text(level.to_string()).font(PIXEL).size(13)],
+                row![text(tr("Volume", &[])).font(bold()).size(13), Space::new().width(Length::Fill), text(level.to_string()).font(pixel(13.0).0).size(pixel(13.0).1)],
                 volume,
             ]
             .spacing(6)
@@ -380,7 +380,7 @@ impl crate::App {
                         } else {
                             theme::BOX_TEXT_MUTED
                         };
-                        text(line.clone()).font(PIXEL).size(12).color(color).into()
+                        text(line.clone()).font(pixel(12.0).0).size(pixel(12.0).1).color(color).into()
                     })))
                     .height(Length::Fixed(160.0)),
                 )
@@ -482,7 +482,7 @@ impl crate::App {
         column![header]
             .push(key)
             .push(container(body).height(Length::Fill))
-            .push(text(tr("last 20 exchanges · newest at the bottom · stays on this computer", &[])).font(PIXEL).size(12).color(theme::MUTED_2))
+            .push(text(tr("last 20 exchanges · newest at the bottom · stays on this computer", &[])).font(pixel(12.0).0).size(pixel(12.0).1).color(theme::MUTED_2))
             .spacing(14)
             .height(Length::Fill)
             .into()
@@ -600,14 +600,14 @@ impl crate::App {
         let version = device.and_then(|device| device.firmware_version.clone()).or_else(|| device.and_then(|device| device.firmware_label())).unwrap_or_else(|| "—".to_owned());
         let firmware: Element<'_, Message> = match offer {
             Some(offer) if outdated => row![
-                text(format!("{version} ")).font(PIXEL).size(13).color(theme::INK),
+                text(format!("{version} ")).font(pixel(13.0).0).size(pixel(13.0).1).color(theme::INK),
                 tag(tr("· %@ available", &[&offer.version]), theme::WAIT_TEXT)
             ]
             .into(),
             _ if online && (offer.is_some() || updates.is_some_and(|updates| updates.last_check.is_some())) => {
-                row![text(format!("{version} ")).font(PIXEL).size(13).color(theme::INK), tag(tr("· up to date", &[]), theme::DONE_TEXT)].into()
+                row![text(format!("{version} ")).font(pixel(13.0).0).size(pixel(13.0).1).color(theme::INK), tag(tr("· up to date", &[]), theme::DONE_TEXT)].into()
             }
-            _ => text(version).font(PIXEL).size(13).color(theme::INK).into(),
+            _ => text(version).font(pixel(13.0).0).size(pixel(13.0).1).color(theme::INK).into(),
         };
         // Which set of screens the box draws (ADR-0021), as the box last said; firmware that predates the choice says nothing.
         // Without a way to grey out the picker, the value shows as text while it can't be changed.
@@ -617,7 +617,7 @@ impl crate::App {
                 let current = screens.and_then(BoxScreens::of);
                 let value: Element<'_, Message> = match current {
                     Some(current) if online && !busy => picker(BoxScreens::ALL.to_vec(), Some(current), Message::SetScreens),
-                    _ => text(current.map_or_else(|| "—".to_owned(), |current| current.to_string())).font(PIXEL).size(13).color(theme::INK).into(),
+                    _ => text(current.map_or_else(|| "—".to_owned(), |current| current.to_string())).font(pixel(13.0).0).size(pixel(13.0).1).color(theme::INK).into(),
                 };
                 row![small(tr("Box screens", &[])), Space::new().width(Length::Fill), value].align_y(Alignment::Center).into()
             }
@@ -625,7 +625,7 @@ impl crate::App {
         let the_box = card(
             column![
                 heading(tr("The box", &[])),
-                column![small(tr("Link", &[])), text(link).font(PIXEL).size(13).color(theme::INK)].spacing(2),
+                column![small(tr("Link", &[])), text(link).font(pixel(13.0).0).size(pixel(13.0).1).color(theme::INK)].spacing(2),
                 column![small(tr("Firmware", &[])), firmware].spacing(2),
                 screens,
             ]
@@ -701,7 +701,7 @@ impl crate::App {
                     None => candidate.port.clone(),
                 };
                 let pick = candidate.usb_serial.clone().map(|serial| pill(tr("This is the box", &[]), Fill::Sun, (!busy).then_some(Message::ChooseBox(serial))));
-                column![divider(), row![text(label).font(PIXEL).size(12).color(theme::INK).width(Length::Fill)].push(pick).align_y(Alignment::Center)]
+                column![divider(), row![text(label).font(pixel(12.0).0).size(pixel(12.0).1).color(theme::INK).width(Length::Fill)].push(pick).align_y(Alignment::Center)]
                     .spacing(8)
                     .into()
             });
@@ -1080,16 +1080,16 @@ impl crate::App {
         let running = self.status.is_some();
         let state: Element<'_, Message> = match &self.status {
             Some(status) => row![
-                text(tr("Running", &[]).to_uppercase()).font(PIXEL).size(16).color(theme::MINT),
-                text(format!(" · {}", status.daemon.short_build())).font(PIXEL).size(16).color(theme::CREAM),
+                text(tr("Running", &[]).to_uppercase()).font(pixel(16.0).0).size(pixel(16.0).1).color(theme::MINT),
+                text(format!(" · {}", status.daemon.short_build())).font(pixel(16.0).0).size(pixel(16.0).1).color(theme::CREAM),
             ]
             .into(),
-            None => text(tr("Not running", &[]).to_uppercase()).font(PIXEL).size(16).color(theme::PEACH).into(),
+            None => text(tr("Not running", &[]).to_uppercase()).font(pixel(16.0).0).size(pixel(16.0).1).color(theme::PEACH).into(),
         };
         let daemon = card_with(
             row![
                 sprite(if running { &sprites::KORE_WORKING } else { &sprites::KORE_SAD }, 3),
-                column![text("DAEMON").font(PIXEL).size(13).color(theme::BOX_TEXT_MUTED), state, text("127.0.0.1:7331").font(PIXEL).size(12).color(theme::BOX_TEXT_MUTED)]
+                column![text("DAEMON").font(pixel(13.0).0).size(pixel(13.0).1).color(theme::BOX_TEXT_MUTED), state, text("127.0.0.1:7331").font(pixel(12.0).0).size(pixel(12.0).1).color(theme::BOX_TEXT_MUTED)]
                     .spacing(4)
                     .width(Length::Fill),
                 button(text(tr("Restart daemon", &[])).font(bold()).size(13))
@@ -1134,7 +1134,7 @@ impl crate::App {
                     ),
                 ]
                 .spacing(14),
-                container(column![small(tr("Config file", &[])), text(config).font(PIXEL).size(13).color(theme::INK)].spacing(2))
+                container(column![small(tr("Config file", &[])), text(config).font(pixel(13.0).0).size(pixel(13.0).1).color(theme::INK)].spacing(2))
                     .padding(Padding::from([10, 14]))
                     .width(Length::Fill)
                     .style(|_| container::Style {
@@ -1153,7 +1153,7 @@ pub(super) fn dashed<'a>(title: String, detail: String, on_press: Option<Message
     button(
         container(
             column![
-                text("+").font(PIXEL).size(32).color(theme::KORE_PINK_TEXT),
+                text("+").font(pixel(32.0).0).size(pixel(32.0).1).color(theme::KORE_PINK_TEXT),
                 text(title).font(bold()).size(14).color(theme::INK),
                 small(detail),
             ]
