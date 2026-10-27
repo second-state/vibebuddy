@@ -5,10 +5,10 @@ The design sets the box screens in DotGothic16 at 9 to 38 px. DotGothic16 is dra
 strokes fall between pixels and come out as faint gray lines, and the letters run into each other. So each size is
 drawn the way a pixel font draws well, whole pixels only (no anti-aliasing), at a font's own size or a whole
 multiple of it:
-  - 9 to 11 px: Fusion Pixel 10 px, proportional
-  - 12 to 14 px: Fusion Pixel 12 px, proportional
-  - 16 to 22 px: DotGothic16 at 16 px
+  - 9 to 11 px: Fusion Pixel 12 px, proportional
+  - 12 to 22 px: DotGothic16 at 16 px
   - 30 to 38 px: DotGothic16 at 16 px, doubled
+Each is a step bigger than the design's size: at the box's 320 × 240 the design's sizes read as too small.
 Fusion Pixel is Ark Pixel with Cubic 11 filling in (SIL OFL 1.1, like the 12 px Chinese table, whose licenses are in
 firmware-rs/core/fonts); DotGothic16 is the one the apps bundle (fonts/korekore). Every character keeps at least one
 blank column after it. The "korekore" wordmark is M PLUS Rounded 1c ExtraBold, kept smooth: a rounded logo, not text.
@@ -35,19 +35,18 @@ CACHE = Path.home() / ".cache/vibebuddy-fonts"
 
 FUSION_VERSION = "2026.09.25"
 FUSION = {
-    10: ("3d37465880abe927648b2c15c48f3d5442bcd801d78470ecbcffcfd3558ba6f0", "fusion-pixel-10px-proportional-latin.bdf"),
     12: ("7cae5ea83b46086f146002d194d46bbba70ec7264ac3a309219f5ad491626cef", "fusion-pixel-12px-proportional-latin.bdf"),
 }
 
 ASCII = "".join(chr(code) for code in range(0x20, 0x7F)) + "·›‹…×"
 # The design's size, what draws it, and the characters it needs.
 FACES = [
-    (9, ("fusion", 10), ASCII),
-    (10, ("fusion", 10), ASCII),
-    (11, ("fusion", 10), ASCII),
-    (12, ("fusion", 12), ASCII),
-    (13, ("fusion", 12), ASCII),
-    (14, ("fusion", 12), ASCII),
+    (9, ("fusion", 12), ASCII),
+    (10, ("fusion", 12), ASCII),
+    (11, ("fusion", 12), ASCII),
+    (12, ("dot", 1), ASCII),
+    (13, ("dot", 1), ASCII),
+    (14, ("dot", 1), ASCII),
     (16, ("dot", 1), ASCII),
     (18, ("dot", 1), ASCII),
     (22, ("dot", 1), ASCII),

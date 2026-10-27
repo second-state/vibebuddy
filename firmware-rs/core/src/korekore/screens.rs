@@ -76,9 +76,9 @@ const STG: u16 = AGENT_CC;
 /// The menu's level meter: low, middle, near the top.
 const METER_LOW: u16 = MINT;
 
-/// The card column on duty: x 104–312, from y 29, 39 high, 5 apart (the design's 7 px padding and 5 px gap).
+/// The card column on duty: x 104–312, from y 29, 46 high (two lines of 12 px type), 5 apart.
 fn card_rect(slot: usize) -> Rect {
-    Rect { x: 104, y: 29 + slot as i32 * 44, width: 208, height: 39 }
+    Rect { x: 104, y: 29 + slot as i32 * 51, width: 208, height: 46 }
 }
 
 /// Kore in the side panel on duty, at 4×.
@@ -86,16 +86,16 @@ const BUDDY: Rect = Rect { x: 8, y: 51, width: 80, height: 72 };
 /// The page line and its bar under the cards.
 const PAGE_LINE: Rect = Rect { x: 98, y: 216, width: 220, height: 22 };
 /// The ticket on a takeover screen (needs input, done, failed).
-const TICKET: Rect = Rect { x: 12, y: 112, width: 296, height: 42 };
-const DONE_TICKET: Rect = Rect { x: 12, y: 150, width: 296, height: 42 };
-const FAILED_TICKET: Rect = Rect { x: 15, y: 115, width: 290, height: 42 };
+const TICKET: Rect = Rect { x: 12, y: 112, width: 296, height: 52 };
+const DONE_TICKET: Rect = Rect { x: 12, y: 150, width: 296, height: 52 };
+const FAILED_TICKET: Rect = Rect { x: 15, y: 115, width: 290, height: 52 };
 /// The cream card a panel is drawn on, 10 px in from the edges.
 const PANEL_CARD: Rect = Rect { x: 10, y: 10, width: 300, height: 220 };
 const PANEL_INNER_LEFT: i32 = 23;
 const PANEL_INNER_RIGHT: i32 = 297;
-/// The rows of a panel's list, 23 apart, under the title's rule.
+/// The rows of a panel's list, 26 apart, under the title's rule.
 fn panel_row(index: usize) -> Rect {
-    Rect { x: PANEL_INNER_LEFT, y: 49 + index as i32 * 23, width: PANEL_INNER_RIGHT - PANEL_INNER_LEFT, height: 20 }
+    Rect { x: PANEL_INNER_LEFT, y: 49 + index as i32 * 26, width: PANEL_INNER_RIGHT - PANEL_INNER_LEFT, height: 24 }
 }
 const PANEL_HINTS_Y: i32 = 208;
 const PANEL_RULE_Y: i32 = 202;
@@ -491,7 +491,8 @@ impl Display {
         let text_width = pill_x - 7 - text_x;
         let title_y = rect.y + padding;
         kt::draw(canvas, title_face, text_x, title_y, title, BOX_TEXT, text_width);
-        let line_y = title_y + title_face.line() + 3;
+        // Under the title's letters; DotGothic16's line has room for descenders the titles rarely use.
+        let line_y = title_y + title_face.line() - if title_face.line() > 20 { 4 } else { 0 };
         let elapsed = format_elapsed(self.task_elapsed_seconds(task, scene.now_ms));
         let time: Text<24> = match (takeover, task.state) {
             (true, State::InputRequired) => text!(24, "waiting {}", core::str::from_utf8(elapsed.as_bytes()).unwrap_or("")),
@@ -643,16 +644,16 @@ impl Display {
         };
         for (row, (key, action)) in hints.iter().enumerate() {
             if !key.is_empty() {
-                hint(canvas, &TYPE_9, 164, 38 + row as i32 * 14, key, action, BOX_GROUND, BOX_TEXT, BOX_TEXT_MUTED);
+                hint(canvas, &TYPE_9, 164, 38 + row as i32 * 18, key, action, BOX_GROUND, BOX_TEXT, BOX_TEXT_MUTED);
             }
         }
-        kt::draw(canvas, &TYPE_9, 164, 70, b"TODAY", BOX_TEXT_MUTED, i32::MAX);
+        kt::draw(canvas, &TYPE_9, 164, 78, b"TODAY", BOX_TEXT_MUTED, i32::MAX);
         let squares = view.completed.clamp(4, 12) as i32;
         for square in 0..squares {
             let fill = if (square as u32) < view.completed { KORE_PINK } else { BOX_FACE };
-            fill_round(canvas, Rect { x: 164 + square * 11, y: 84, width: 8, height: 8 }, 2, fill);
+            fill_round(canvas, Rect { x: 164 + square * 11, y: 96, width: 8, height: 8 }, 2, fill);
         }
-        kt::draw(canvas, &TYPE_10, 164, 95, format_tally(view.completed, view.focus_s).as_bytes(), KORE_PINK, 148);
+        kt::draw(canvas, &TYPE_10, 164, 108, format_tally(view.completed, view.focus_s).as_bytes(), KORE_PINK, 148);
 
         let expr = match (view.is_idle(), view.phase, paused) {
             (true, _, _) | (_, _, true) => Expr::Normal,
@@ -660,7 +661,7 @@ impl Display {
             _ => Expr::Working,
         };
         self.kk_buddy(canvas, expr, 164, 198, 2, false, false);
-        self.kk_agent_strip(canvas, Rect { x: 210, y: 203, width: 102, height: 31 });
+        self.kk_agent_strip(canvas, Rect { x: 208, y: 196, width: 104, height: 38 });
     }
 
     /// The agents during a Pomodoro: they never take the screen, only this strip.
@@ -672,7 +673,7 @@ impl Display {
             (SUN, BOX_GROUND, BOX_GROUND, b"KORE KORE! ASK")
         } else {
             match self.state {
-                State::Working => (BOX_CARD, BOX_TEXT, SKY, b"AGENTS WORKING"),
+                State::Working => (BOX_CARD, BOX_TEXT, SKY, b"WORKING"),
                 State::Done => (BOX_CARD, BOX_TEXT, MINT, b"DONE"),
                 State::Failed => (BOX_CARD, BOX_TEXT, PEACH, b"FAILED"),
                 _ => (BOX_CARD, BOX_TEXT_MUTED, BOX_TEXT_MUTED, b"NO AGENTS"),
@@ -686,7 +687,7 @@ impl Display {
             let task = self.tasks.iter().find(|task| task.state == State::InputRequired).or(self.tasks.first());
             task.map(|task| task.icon.and_then(|icon| task.title.strip_prefix(icon.prefix())).unwrap_or(&task.title)).unwrap_or(b"all quiet")
         };
-        kt::draw(canvas, &TYPE_9, rect.x + 5, rect.y + 16, title, ink, rect.width - 10);
+        kt::draw(canvas, &TYPE_9, rect.x + 5, rect.y + 19, title, ink, rect.width - 10);
     }
 
     /// A phase just ended: the screen fills, pink after focus and lavender after a break, until a key.
@@ -701,11 +702,11 @@ impl Display {
         let hop = if self.animation_frame.is_multiple_of(2) { -4 } else { 0 };
         self.kk_buddy(canvas, Expr::Happy, 14, 35 + hop, 5, false, false);
         let line: &[u8] = if focus_ended { b"Nice work. Time for a break!" } else { b"Break's over. Ready?" };
-        let bubble = Rect { x: 126, y: 41, width: 180, height: 54 };
+        let bubble = Rect { x: 126, y: 33, width: 180, height: 62 };
         outlined_round(canvas, bubble, 10, 2, BOX_GROUND, CREAM);
         let (first, rest) = split_line(&TYPE_12, line, bubble.width - 16);
-        kt::draw(canvas, &TYPE_12, bubble.x + 8, bubble.y + 8, first, BOX_GROUND, bubble.width - 16);
-        kt::draw(canvas, &TYPE_12, bubble.x + 8, bubble.y + 8 + TYPE_12.line(), rest, BOX_GROUND, bubble.width - 16);
+        kt::draw(canvas, &TYPE_12, bubble.x + 8, bubble.y + 6, first, BOX_GROUND, bubble.width - 16);
+        kt::draw(canvas, &TYPE_12, bubble.x + 8, bubble.y + 6 + TYPE_12.line() - 4, rest, BOX_GROUND, bubble.width - 16);
         let big: &[u8] = if focus_ended { b"BREAK 05:00" } else { b"FOCUS 25:00" };
         kt::draw(canvas, &TYPE_30, 14, tight(&TYPE_30, 133), big, BOX_GROUND, i32::MAX);
         let hints: [(&[u8], &[u8]); 2] = if focus_ended { [(b"K0", b"start break"), (b"HOLD K0", b"skip")] } else { [(b"K0", b"start focus"), (b"K1", b"on duty")] };
@@ -837,12 +838,12 @@ impl Display {
                     let selected = panel.kind == PanelKind::List && panel.selected == Some(index);
                     if selected {
                         fill_round(canvas, row, 4, KORE_PINK);
-                        pointer(canvas, row.x + 6, row.y + 7, BOX_GROUND);
+                        pointer(canvas, row.x + 6, row.y + 9, BOX_GROUND);
                     }
                     // A Facts label's second line is a note the robot draws small; one line here.
                     let label = label.split(|&byte| byte == b'\n').next().unwrap_or_default();
-                    kt::draw(canvas, &TYPE_13, row.x + 14, row.y + 2, label, BOX_GROUND, 150);
-                    kt::draw_right(canvas, &TYPE_13, row.x + row.width - 6, row.y + 2, value, tone(*value_tone));
+                    kt::draw(canvas, &TYPE_13, row.x + 14, row.y, label, BOX_GROUND, 150);
+                    kt::draw_right(canvas, &TYPE_13, row.x + row.width - 6, row.y, value, tone(*value_tone));
                 }
             }
             PanelKind::Meter(level) => {
