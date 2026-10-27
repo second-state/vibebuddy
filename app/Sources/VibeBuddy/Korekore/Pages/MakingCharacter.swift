@@ -162,25 +162,32 @@ struct KorekoreMakeSheet: View {
                         KRow(String(localized: "Name")) {
                             KField(String(localized: "Name"), text: $name).frame(width: 240)
                         }
-                        KDivider()
-                        KRow(String(localized: "Look")) {
-                            HStack(spacing: 8) {
-                                if let frame = (look ?? Resources.voicePack(base)?.look).flatMap(LookBuilder.frames(of:))?.first {
-                                    Image(nsImage: LookImages.image(frame, scale: 1)).interpolation(.none)
-                                        .padding(4)
-                                        .background(Theme.Colors.boxCard, in: RoundedRectangle(cornerRadius: Theme.Radius.sm))
-                                }
-                                Button(String(localized: "Choose images…")) { chooseLook() }.kButton()
-                                Button(String(localized: "Copy a prompt")) {
-                                    NSPasteboard.general.clearContents()
-                                    NSPasteboard.general.setString(CustomCharacterCard.prompt, forType: .string)
-                                }
-                                .kButton()
-                                if look != nil {
-                                    Button(String(localized: "Use \(baseName)'s look")) { look = nil }.kButton()
+                    }
+                    KHeading(String(localized: "Look"))
+                    KRows {
+                        HStack(alignment: .top, spacing: 14) {
+                            if let frame = (look ?? Resources.voicePack(base)?.look).flatMap(LookBuilder.frames(of:))?.first {
+                                Image(nsImage: LookImages.image(frame, scale: 1)).interpolation(.none)
+                                    .padding(4)
+                                    .background(Theme.Colors.boxCard, in: RoundedRectangle(cornerRadius: Theme.Radius.sm))
+                            }
+                            VStack(alignment: .leading, spacing: 10) {
+                                KNote(String(localized: "One to four PNG or JPEG images of the figure on a plain white or transparent background, in the order normal, eyes closed, happy, sad. Any size: VibeBuddy cuts out the figure and makes it 48 × 64 pixels in 15 colors. No drawings yet? Copy a prompt into an image tool, such as ChatGPT or Gemini, with your character in place of the brackets."))
+                                HStack(spacing: 8) {
+                                    Button(String(localized: "Choose images…")) { chooseLook() }.kButton()
+                                    Button(String(localized: "Copy a prompt")) {
+                                        NSPasteboard.general.clearContents()
+                                        NSPasteboard.general.setString(CustomCharacterCard.prompt, forType: .string)
+                                    }
+                                    .kButton()
+                                    if look != nil {
+                                        Button(String(localized: "Use \(baseName)'s look")) { look = nil }.kButton()
+                                    }
                                 }
                             }
                         }
+                        .padding(.vertical, 12)
+                        .padding(.horizontal, 12)
                     }
                     KHeading(String(localized: "Voice"))
                     KRows {
