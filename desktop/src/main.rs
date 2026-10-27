@@ -912,7 +912,7 @@ impl App {
             }
             Message::MakeBase(base) => {
                 let Some(form) = &mut self.make else { return Task::none() };
-                (form.base, form.lines, form.occasions, form.voice) = (base, Vec::new(), Vec::new(), None);
+                (form.base, form.lines, form.occasions) = (base, Vec::new(), Vec::new());
                 return Task::perform(client::preset_lines(base.id), move |lines| Message::MakeLines(base.id, lines));
             }
             Message::MakeLines(base, lines) => {
@@ -931,8 +931,10 @@ impl App {
                     }
                     Err(error) => form.problem = Some(tr("Couldn't read the lines of %@: %@", &[&assets::voice_name(base), &error])),
                 }
-                // The preset's own voice to begin with: voices.tsv has each preset's under its id.
-                form.voice = self.character_voices.iter().find(|voice| voice.id == base).cloned();
+                // The preset's own voice to begin with (voices.tsv has each preset's under its id); one the user picked stays.
+                if form.voice.is_none() {
+                    form.voice = self.character_voices.iter().find(|voice| voice.id == base).cloned();
+                }
             }
             Message::MakeName(name) => {
                 if let Some(form) = &mut self.make {

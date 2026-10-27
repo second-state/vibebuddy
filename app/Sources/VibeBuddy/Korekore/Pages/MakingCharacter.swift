@@ -115,8 +115,8 @@ struct KorekoreMakingRow: View {
     }
 }
 
-/// Making a Character of the user's own: start from a preset, bring a look, change its lines (occasions stay, each keeps
-/// a line) and pick a voice. With only a look, nothing is made: the drawings go to the box with the preset lending its
+/// Making a Character of the user's own: bring a look, pick a voice, and take a preset's lines to change (occasions stay,
+/// each keeps a line). With only a look, nothing is made: the drawings go to the box with the preset lending its
 /// voice and lines, as `CustomCharacterCard` does. With new lines or another voice, the daemon makes the line audio, as
 /// `MakeCharacterSheet` does.
 struct KorekoreMakeSheet: View {
@@ -155,14 +155,10 @@ struct KorekoreMakeSheet: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             Text("Make your own").font(.rounded(18))
-            KNote(String(localized: "Start from a character and bring your own drawings, its lines and voice as they are. Or change what it says and pick a voice: VibeBuddy then makes each line in that voice, which needs the Paid plan or your own key."))
+            KNote(String(localized: "Bring your own drawings, pick a voice and say what it says. A character's own voice with its lines as they are is free: they are already made. Any other voice, or lines you change, VibeBuddy makes in that voice, which needs the Paid plan or your own key."))
             ScrollView {
                 VStack(alignment: .leading, spacing: 14) {
                     KRows {
-                        KRow(String(localized: "Start from")) {
-                            KMenu(selection: base, options: Resources.bundledVoices.map { ($0.id, $0.name) }) { base = $0 }
-                        }
-                        KDivider()
                         KRow(String(localized: "Name")) {
                             KField(String(localized: "Name"), text: $name).frame(width: 240)
                         }
@@ -197,6 +193,12 @@ struct KorekoreMakeSheet: View {
                     if !lookOnly, let readiness, let chosenVoice {
                         KNote(readiness.explanation(provider: chosenVoice.providerName),
                               color: readiness.canStart ? Theme.Colors.muted : Theme.Colors.korePinkText)
+                    }
+                    KHeading(String(localized: "Lines"))
+                    KRows {
+                        KRow(String(localized: "Lines from")) {
+                            KMenu(selection: base, options: Resources.bundledVoices.map { ($0.id, $0.name) }) { base = $0 }
+                        }
                     }
                     ForEach(occasions, id: \.self) { occasion in
                         KHeading(CharacterOccasion.name(occasion))
@@ -259,6 +261,9 @@ struct KorekoreMakeSheet: View {
                         .frame(width: 16, height: 16)
                     Text(verbatim: option.name).font(.rounded(14))
                     KTag(option.providerName)
+                    if option.id == base && edited == original {
+                        KTag(String(localized: "Free · already made"), color: Theme.Colors.doneText)
+                    }
                 }
                 .contentShape(Rectangle())
             }
@@ -284,9 +289,9 @@ struct KorekoreMakeSheet: View {
                 set: { new in if let index = lines.firstIndex(where: { $0.id == id }) { lines[index].text = new } })
     }
 
-    /// The base's lines, in its voice; picking another base starts over.
+    /// The base's lines; picking another base starts them over. The voice starts as the base's and stays as the user picks it.
     private func load() async {
-        voice = base
+        if voice.isEmpty { voice = base }
         do {
             let fetched = try await model.client.presetLines(base)
             lines = fetched.map { Draft(occasion: $0.occasion, text: $0.text) }

@@ -626,4 +626,7 @@
 "Changing the box screens was rejected (%lld)" = "更换盒子界面未被接受（%lld）";
 "Make your own" = "做一个自己的";
 "Your drawings, your lines, a voice you pick" = "你的画、你的台词、你挑的声音";
-"Start from a character and bring your own drawings, its lines and voice as they are. Or change what it says and pick a voice: VibeBuddy then makes each line in that voice, which needs the Paid plan or your own key." = "从一个角色出发，换上你自己画的形象，台词和声音照旧；也可以改它说的话、挑一个声音，VibeBuddy 会用那个声音把每句台词做出来，这需要付费版或你自己的 key。";
+"Bring your own drawings, pick a voice and say what it says. A character's own voice with its lines as they are is free: they are already made. Any other voice, or lines you change, VibeBuddy makes in that voice, which needs the Paid plan or your own key." = "换上你自己画的形象，挑一个声音，再定它说什么。用某个角色自己的声音、台词不改，就是免费的：这些已经做好了。换别的声音或改了台词，VibeBuddy 会用那个声音重新做每句台词，这需要付费版或你自己的 key。";
+"Lines" = "台词";
+"Lines from" = "台词取自";
+"Free · already made" = "免费 · 已做好";

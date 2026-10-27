@@ -277,8 +277,6 @@ impl crate::App {
             .spacing(8)
             .align_y(Alignment::Center);
         let basics = rows([
-            line(row![label(tr("Start from", &[])), picker(bases, Some(form.base), Message::MakeBase)].spacing(8).align_y(Alignment::Center).into()),
-            divider(),
             line(row![label(tr("Name", &[])), field(&tr("Name", &[]), &form.name).on_input(Message::MakeName).width(280)].spacing(8).align_y(Alignment::Center).into()),
             divider(),
             line(look.into()),
@@ -296,8 +294,12 @@ impl crate::App {
                 ..container::Style::default()
             });
             let provider = voice.provider_name();
+            let made = (voice.id == form.base.id && form.lines == form.original).then(|| tag(tr("Free · already made", &[]), theme::DONE_TEXT));
             let pick = button(
-                row![dot, text(voice.name.clone()).font(bold()).size(14).color(theme::INK), tag(provider, theme::MUTED_2)].spacing(8).align_y(Alignment::Center),
+                row![dot, text(voice.name.clone()).font(bold()).size(14).color(theme::INK), tag(provider, theme::MUTED_2)]
+                    .push(made)
+                    .spacing(8)
+                    .align_y(Alignment::Center),
             )
             .padding(0)
             .style(|_, _| button::Style::default())
@@ -314,12 +316,14 @@ impl crate::App {
         }
         let mut page = column![
             text(tr("Make your own", &[])).font(bold()).size(18).color(theme::INK),
-            note(tr("Start from a character and bring your own drawings, its lines and voice as they are. Or change what it says and pick a voice: VibeBuddy then makes each line in that voice, which needs the Paid plan or your own key.", &[])),
+            note(tr("Bring your own drawings, pick a voice and say what it says. A character's own voice with its lines as they are is free: they are already made. Any other voice, or lines you change, VibeBuddy makes in that voice, which needs the Paid plan or your own key.", &[])),
             basics,
             heading(tr("Voice", &[])),
             rows(voice_rows),
         ]
         .push(readiness)
+        .push(heading(tr("Lines", &[])))
+        .push(rows([line(row![label(tr("Lines from", &[])), picker(bases, Some(form.base), Message::MakeBase)].spacing(8).align_y(Alignment::Center).into())]))
         .spacing(14);
         for occasion in &form.occasions {
             let mut items: Vec<Element<'a, Message>> = Vec::new();
