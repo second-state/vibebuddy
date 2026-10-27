@@ -1120,15 +1120,17 @@ struct CustomCharacterCard: View {
     }
 
     private func choose() {
-        switch LookImages.chooseLook() {
-        case .success(let built):
-            look = built
-            frames = LookBuilder.frames(of: built) ?? []
-            problem = nil
-        case .failure(let failure):
-            problem = failure.message
-        case nil:
-            break
+        LookImages.chooseLook { result in
+            switch result {
+            case .success(let built):
+                look = built
+                frames = LookBuilder.frames(of: built) ?? []
+                problem = nil
+            case .failure(let failure):
+                problem = failure.message
+            case nil:
+                break
+            }
         }
     }
 
@@ -1379,14 +1381,16 @@ struct MakeCharacterSheet: View {
     }
 
     private func chooseLook() {
-        switch LookImages.chooseLook() {
-        case .success(let built):
-            look = built
-            problem = nil
-        case .failure(let failure):
-            problem = failure.message
-        case nil:
-            break
+        LookImages.chooseLook { result in
+            switch result {
+            case .success(let built):
+                look = built
+                problem = nil
+            case .failure(let failure):
+                problem = failure.message
+            case nil:
+                break
+            }
         }
     }
 

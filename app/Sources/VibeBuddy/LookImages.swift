@@ -21,14 +21,25 @@ enum LookImages {
     }
 
     /// Asks for one to four drawings (normal, eyes closed, happy, sad, in file name order) and makes a look of them:
-    /// nil when the user cancels, else the look or what is wrong with the images.
-    static func chooseLook() -> Result<Data, LookProblem>? {
+    /// nil when the user cancels, else the look or what is wrong with the images. The panel is a sheet on the key
+    /// window: on its own, it can open on another display, out of sight, and hold the whole App.
+    static func chooseLook(then done: @escaping (Result<Data, LookProblem>?) -> Void) {
         let panel = NSOpenPanel()
         panel.allowsMultipleSelection = true
         panel.allowedContentTypes = [.png, .jpeg]
-        guard panel.runModal() == .OK else { return nil }
+        let finish = { (response: NSApplication.ModalResponse) in
+            done(response == .OK ? look(of: panel.urls) : nil)
+        }
+        if let window = NSApp.keyWindow {
+            panel.beginSheetModal(for: window, completionHandler: finish)
+        } else {
+            finish(panel.runModal())
+        }
+    }
+
+    private static func look(of chosen: [URL]) -> Result<Data, LookProblem> {
         // In name order, so normal.png, closed.png, ... or 1.png, 2.png, ... come in as meant.
-        let urls = panel.urls.sorted { $0.lastPathComponent.localizedStandardCompare($1.lastPathComponent) == .orderedAscending }
+        let urls = chosen.sorted { $0.lastPathComponent.localizedStandardCompare($1.lastPathComponent) == .orderedAscending }
         let images = urls.compactMap(load)
         guard images.count == urls.count, (1...4).contains(images.count) else {
             return .failure(LookProblem(message: String(localized: "Pick one to four PNG or JPEG images.")))
