@@ -14,7 +14,7 @@ use super::picture::BoxPicture;
 use super::{sprites, theme, view};
 use crate::i18n::{UiLanguage, tr};
 use crate::status::{self, OperationKind, OperationState};
-use crate::{AddressChoice, BUILTIN, CUSTOM, Lender, Message, ROBOT, agents, assets, client, config_dir, short_time, wifi_failure};
+use crate::{AddressChoice, BUILTIN, BoxScreens, CUSTOM, Lender, Message, ROBOT, agents, assets, client, config_dir, short_time, wifi_failure};
 
 /// Leaves room for the scroll bar and the cards' shadows.
 pub(super) fn page<'a>(content: impl Into<Element<'a, Message>>) -> Element<'a, Message> {
@@ -603,11 +603,25 @@ impl crate::App {
             }
             _ => text(version).font(PIXEL).size(13).color(theme::INK).into(),
         };
+        // Which set of screens the box draws (ADR-0021), as the box last said; firmware that predates the choice says nothing.
+        // Without a way to grey out the picker, the value shows as text while it can't be changed.
+        let screens: Element<'_, Message> = match device.and_then(|device| device.screens.as_deref()) {
+            None if online => note(tr("Update the box's firmware to choose its screens.", &[])),
+            screens => {
+                let current = screens.and_then(BoxScreens::of);
+                let value: Element<'_, Message> = match current {
+                    Some(current) if online && !busy => picker(BoxScreens::ALL.to_vec(), Some(current), Message::SetScreens),
+                    _ => text(current.map_or_else(|| "—".to_owned(), |current| current.to_string())).font(PIXEL).size(13).color(theme::INK).into(),
+                };
+                row![small(tr("Box screens", &[])), Space::new().width(Length::Fill), value].align_y(Alignment::Center).into()
+            }
+        };
         let the_box = card(
             column![
                 heading(tr("The box", &[])),
                 column![small(tr("Link", &[])), text(link).font(PIXEL).size(13).color(theme::INK)].spacing(2),
                 column![small(tr("Firmware", &[])), firmware].spacing(2),
+                screens,
             ]
             .push(device.filter(|device| !device.connected).and_then(status::Device::relay_refusal).map(|why| text(why).font(regular()).size(12).color(theme::KORE_PINK_TEXT)))
             .push(Space::new().height(Length::Fill))

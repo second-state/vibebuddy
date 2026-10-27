@@ -167,6 +167,10 @@ struct KorekoreDevicePage: View {
                     KNote(relayRefusal, color: Theme.Colors.korePinkText)
                 }
                 field(String(localized: "Firmware")) { firmwareLine }
+                field(String(localized: "Box screens")) { screensChoice }
+                if connected, device?.screens == nil {
+                    KNote(String(localized: "Update the box's firmware to choose its screens."))
+                }
                 Spacer(minLength: 8)
                 if model.firmwareUpdateAvailable, connected, !canFlash {
                     KNote(String(localized: "Plug in the cable to update the box's firmware."))
@@ -183,6 +187,18 @@ struct KorekoreDevicePage: View {
                     .disabled(model.operationRunning || !canFlash)
             }
             .frame(minHeight: 290, alignment: .top)
+        }
+    }
+
+    /// Which set of screens the box draws (ADR-0021), as the box last said; firmware that predates the choice says nothing.
+    @ViewBuilder private var screensChoice: some View {
+        if let screens = device?.screens {
+            KMenu(selection: screens, options: [("robot", String(localized: "Robot")), ("korekore", "korekore")]) { style in
+                if style != screens { model.setScreens(style) }
+            }
+            .disabled(model.operationRunning || !connected)
+        } else {
+            Text(verbatim: "—")
         }
     }
 

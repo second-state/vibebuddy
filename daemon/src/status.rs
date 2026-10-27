@@ -44,6 +44,9 @@ pub struct DeviceState {
     pub voice: Option<String>,
     /// Speaker volume (the codec's 20 to 100), stored on the device; the app is just a remote.
     pub volume: Option<u8>,
+    /// Which set of screens the box draws, `robot` or `korekore` (ADR-0021), stored on the device; None from firmware that
+    /// predates the choice.
+    pub screens: Option<String>,
     /// The connected port's USB serial number, which tells this device from another ESP32-S3.
     pub usb_serial: Option<String>,
     /// The box's public key, its id on the Relay (ADR-0012); None for firmware that can't pair.
@@ -132,6 +135,7 @@ impl DeviceState {
                 self.mode = None;
                 self.voice = None;
                 self.volume = None;
+                self.screens = None;
                 self.box_key = None;
                 self.paired = false;
                 self.paired_computers.clear();
@@ -166,6 +170,7 @@ impl DeviceState {
                 self.mode = None;
                 self.voice = None;
                 self.volume = None;
+                self.screens = None;
                 self.box_key = None;
                 self.paired = false;
                 self.paired_computers.clear();
@@ -284,6 +289,11 @@ impl DeviceState {
                     // `VOLUME ERROR` has no number to parse, so the volume stays as it was.
                     if let Ok(level) = volume.trim().parse::<u8>() {
                         self.volume = Some(level);
+                    }
+                } else if let Some(screens) = line.strip_prefix("SCREENS ") {
+                    let screens = screens.trim().to_ascii_lowercase();
+                    if screens == "robot" || screens == "korekore" {
+                        self.screens = Some(screens);
                     }
                 }
             }
@@ -422,6 +432,8 @@ mod tests {
         assert!(!state.apply(&line("MODE POMODORO")), "no change is not a change");
         assert!(state.apply(&line("VOLUME 65")));
         assert!(!state.apply(&line("VOLUME ERROR")), "an error does not change the volume");
+        assert!(state.apply(&line("SCREENS KOREKORE")));
+        assert!(!state.apply(&line("SCREENS ERROR")), "an unknown style does not change the screens");
         assert_eq!(
             state,
             DeviceState {
@@ -438,6 +450,7 @@ mod tests {
                 firmware_version: Some("0.2.2".to_owned()),
                 voice: Some("builtin".to_owned()),
                 volume: Some(65),
+                screens: Some("korekore".to_owned()),
                 usb_serial: None,
                 box_key: None,
                 paired: false,
@@ -652,12 +665,13 @@ mod tests {
     fn a_new_connection_forgets_everything_the_previous_device_said() {
         let mut state = DeviceState::default();
         state.apply(&DeviceMessage::Connected { port: "/dev/cu.x".to_owned(), bridge: false, usb_serial: None });
-        for said in ["MODE DUTY", "VOICES ahu", "VOLUME 50"] {
+        for said in ["MODE DUTY", "VOICES ahu", "VOLUME 50", "SCREENS ROBOT"] {
             state.apply(&line(said));
         }
         state.apply(&DeviceMessage::Disconnected);
         state.apply(&DeviceMessage::Connected { port: "/dev/cu.y".to_owned(), bridge: false, usb_serial: None });
         assert_eq!((state.mode.as_deref(), state.voice.as_deref(), state.volume), (None, None, None));
+        assert_eq!(state.screens, None);
     }
 
     #[test]

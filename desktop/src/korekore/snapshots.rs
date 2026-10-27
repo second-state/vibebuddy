@@ -66,7 +66,7 @@ const SAMPLE: &str = r#"{"daemon":{"build":"0.5.0 cc16829","revision":"firmware-
  "device":{"connected":true,"port":"/dev/ttyACM0","mode":"duty","firmware_version":"0.5.0","firmware_build":"cc16829",
    "voice":"robot","volume":50,"box_key":"k","computer_key":"me",
    "paired_computers":[{"key":"me","name":"ThinkPad · Omarchy"},{"key":"m","name":"Michael's Mac Studio"}],
-   "wifi_network":"ByteTrade","wifi_address":"192.168.1.160","transfer":true},
+   "wifi_network":"ByteTrade","wifi_address":"192.168.1.160","transfer":true,"screens":"korekore"},
  "today":{"done":7,"asks":3,"busy_seconds":15120},
  "hooks":{"codex":"2026-10-21T16:40:00+08:00","claude":"2026-10-21T17:03:00+08:00"},
  "config":{"notify_link":true,"check_updates":true,"relay":false},

@@ -57,6 +57,13 @@ struct DaemonClient {
         guard code == 202 else { throw DaemonError(message: DaemonClient.message(in: data) ?? String(localized: "Volume change was rejected (\(code))")) }
     }
 
+    /// `style` is `robot` or `korekore`; the box reports a SCREENS line once it has stored it, which is when the status follows.
+    func setScreens(_ style: String) async throws {
+        let body = try JSONSerialization.data(withJSONObject: ["style": style])
+        let (code, data) = try await post("/v1/device/screens", body: body, contentType: "application/json")
+        guard code == 202 else { throw DaemonError(message: DaemonClient.message(in: data) ?? String(localized: "Changing the box screens was rejected (\(code))")) }
+    }
+
     /// The daemon remembers the choice and connects to that device on its next look around.
     func chooseBox(usbSerial: String) async throws {
         let body = try JSONSerialization.data(withJSONObject: ["usb_serial": usbSerial])

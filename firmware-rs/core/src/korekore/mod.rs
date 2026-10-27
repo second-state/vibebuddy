@@ -1,8 +1,10 @@
-//! The korekore look's colours and pixel art (ADR-0020, ADR-0021), generated from docs/design/korekore by
-//! `tools/korekore-codegen.py`. Nothing draws with them yet: the korekore screens come later, and until then the
-//! linker leaves all of this out of the device image.
+//! The korekore look on the box (ADR-0020, ADR-0021): its colours and pixel art, generated from docs/design/korekore
+//! by `tools/korekore-codegen.py`; its type, from `tools/korekore-box-fonts.py`; and the screens drawn with them
+//! (display.rs draws them in place of the robot screens when the box is told to).
 
+pub mod glyphs;
 pub mod sprites;
+pub mod text;
 pub mod theme;
 
 /// A palette-indexed sprite, kept in flash: one index per pixel, row by row; 0 is transparent and n is

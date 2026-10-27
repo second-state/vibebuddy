@@ -623,3 +623,7 @@
 "Couldn't delete “%@”: %@" = "删除「%@」失败：%@";
 "Its own lines, in a voice you pick" = "自己的台词，配上你挑的声音";
 "Making “%@”…" = "正在创建「%@」…";
+"Box screens" = "盒子界面";
+"Robot" = "机器人";
+"Update the box's firmware to choose its screens." = "更新盒子固件后才能选择盒子界面。";
+"Changing the box screens was rejected (%lld)" = "更换盒子界面未被接受（%lld）";

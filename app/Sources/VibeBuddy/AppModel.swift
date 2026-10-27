@@ -198,6 +198,8 @@ final class AppModel: ObservableObject {
         run { try await self.client.setVolume(level, preview: preview) }
     }
 
+    func setScreens(_ style: String) { run { try await self.client.setScreens(style) } }
+
     func chooseBox(usbSerial: String) { run { try await self.client.chooseBox(usbSerial: usbSerial) } }
 
     func unpair(key: String) { run { try await self.client.unpair(key: key) } }

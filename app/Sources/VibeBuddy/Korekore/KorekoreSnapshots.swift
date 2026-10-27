@@ -15,7 +15,7 @@ enum KorekoreSnapshots {
      "device":{"connected":true,"port":"/dev/cu.usbmodem8301","bridge":false,"mode":"duty","firmware_version":"0.5.0",
        "firmware_build":"cc16829","voice":"mei","volume":50,"box_key":"k","computer_key":"me","paired":true,
        "paired_computers":[{"key":"me","name":"Michael's Mac Studio"},{"key":"t","name":"ThinkPad · Omarchy"}],
-       "wifi_network":"ByteTrade","wifi_address":"192.168.1.160","transfer":true},
+       "wifi_network":"ByteTrade","wifi_address":"192.168.1.160","transfer":true,"screens":"korekore"},
      "today":{"done":7,"asks":3,"busy_seconds":15120},
      "hooks":{"codex":"2026-10-21T16:40:00+08:00","claude":"2026-10-21T17:03:00+08:00"},
      "config":{"notify_link":true,"check_updates":true,"relay":false},

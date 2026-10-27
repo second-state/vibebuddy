@@ -114,6 +114,8 @@ enum Message {
     VolumeDragged(u8),
     VolumeReleased,
     PlayLine,
+    /// Which set of screens the box draws (ADR-0021).
+    SetScreens(BoxScreens),
     /// The user says which of several devices is the box, by its USB serial number.
     ChooseBox(String),
     /// Forget another computer on the box, by its key.
@@ -800,6 +802,7 @@ impl App {
                 let level = self.volume.or_else(|| self.status.as_ref()?.device.volume).unwrap_or(60);
                 return Task::perform(client::set_volume(level, true), Message::Done);
             }
+            Message::SetScreens(screens) => return Task::perform(client::set_screens(screens.0), Message::Done),
             Message::ChooseBox(usb_serial) => return Task::perform(client::choose_box(usb_serial), Message::Done),
             Message::Unpair(key) => return Task::perform(client::unpair(key), Message::Done),
             Message::TakeOver => return Task::perform(client::take_over(), Message::Done),
@@ -2702,6 +2705,27 @@ impl Lender {
 impl std::fmt::Display for Lender {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str(&assets::voice_name(self.id))
+    }
+}
+
+/// One entry of the box screens picker: `robot` or `korekore` (ADR-0021).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct BoxScreens(&'static str);
+
+impl BoxScreens {
+    const ALL: [BoxScreens; 2] = [BoxScreens("robot"), BoxScreens("korekore")];
+
+    fn of(style: &str) -> Option<BoxScreens> {
+        Self::ALL.into_iter().find(|screens| screens.0 == style)
+    }
+}
+
+impl std::fmt::Display for BoxScreens {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self.0 {
+            "robot" => f.write_str(&tr("Robot", &[])),
+            other => f.write_str(other),
+        }
     }
 }
 
