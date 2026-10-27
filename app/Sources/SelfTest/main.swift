@@ -294,6 +294,36 @@ if let look = try? LookBuilder.build([RGBAImage(width: 100, height: 100, pixels:
 } else {
     check(false, "a look builds from one drawing")
 }
+// A sheet: four figures in one image, as image tools often draw them, become the four frames in reading order.
+func sheet(_ figures: [(x: Int, y: Int, w: Int, h: Int, rgb: (UInt8, UInt8, UInt8))]) -> RGBAImage {
+    var pixels = [UInt8](repeating: 255, count: 200 * 200 * 4)
+    for figure in figures {
+        for y in figure.y..<(figure.y + figure.h) {
+            for x in figure.x..<(figure.x + figure.w) {
+                let at = (y * 200 + x) * 4
+                (pixels[at], pixels[at + 1], pixels[at + 2]) = figure.rgb
+            }
+        }
+    }
+    return RGBAImage(width: 200, height: 200, pixels: pixels)
+}
+let four = sheet([(40, 20, 20, 60, (250, 20, 20)), (140, 20, 20, 60, (20, 200, 20)),
+                  (40, 120, 20, 60, (20, 20, 250)), (140, 120, 20, 60, (250, 220, 20))])
+if let look = try? LookBuilder.build([four]), let frames = LookBuilder.frames(of: look) {
+    let middles = frames.map { $0.pixel(24, 40) }
+    check(middles[0].0 > 200 && middles[1].1 > 150 && middles[2].2 > 200 && middles[3].0 > 200 && middles[3].1 > 150,
+          "a 2 × 2 sheet gives normal, closed, happy, sad from left to right, top to bottom")
+    check(frames[0].pixel(24, 4).3 == 255 && frames[0].pixel(24, 3).3 == 0, "each figure of a sheet is drawn full height")
+} else {
+    check(false, "a look builds from a sheet")
+}
+// A loose speck beside one figure doesn't make a sheet.
+if let look = try? LookBuilder.build([sheet([(40, 20, 20, 160, (250, 20, 20)), (150, 30, 4, 4, (250, 20, 20))])]),
+   let frames = LookBuilder.frames(of: look) {
+    check(frames[0] == frames[1], "one figure and a speck stay one figure")
+} else {
+    check(false, "a look builds from a figure with a speck")
+}
 check(CRC32.of(Data("123456789".utf8)) == 0xCBF4_3926, "CRC32 as in zlib")
 
 // The app lays a pack out byte for byte as tools/character_pack.py does: rebuilding a shipped pack

@@ -172,7 +172,7 @@ struct KorekoreMakeSheet: View {
                                     .background(Theme.Colors.boxCard, in: RoundedRectangle(cornerRadius: Theme.Radius.sm))
                             }
                             VStack(alignment: .leading, spacing: 10) {
-                                KNote(String(localized: "One to four PNG or JPEG images of the figure on a plain white or transparent background, in the order normal, eyes closed, happy, sad. Any size: VibeBuddy cuts out the figure and makes it 48 × 64 pixels in 15 colors. No drawings yet? Copy a prompt into an image tool, such as ChatGPT or Gemini, with your character in place of the brackets."))
+                                KNote(String(localized: "The figure on a plain white or transparent background, four times: normal, eyes closed, happy, sad. One image with all four, left to right and top to bottom, or one to four PNG or JPEG images in that order. Any size: VibeBuddy cuts out each figure and makes it 48 × 64 pixels in 15 colors. No drawings yet? Copy a prompt into an image tool, such as ChatGPT or Gemini, with your character in place of the brackets."))
                                 HStack(spacing: 8) {
                                     Button(String(localized: "Choose images…")) { chooseLook() }.kButton()
                                     Button(String(localized: "Copy a prompt")) {

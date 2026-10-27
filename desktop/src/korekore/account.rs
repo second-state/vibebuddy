@@ -280,7 +280,7 @@ impl crate::App {
         .spacing(8);
         let look = row![]
             .push(face.map(|face| container(image(face).filter_method(image::FilterMethod::Nearest)).padding(4).style(|_| super::pages::stage(theme::BOX_CARD))))
-            .push(column![note(tr("One to four PNG or JPEG images of the figure on a plain white or transparent background, in the order normal, eyes closed, happy, sad. Any size: VibeBuddy cuts out the figure and makes it 48 × 64 pixels in 15 colors. No drawings yet? Copy a prompt into an image tool, such as ChatGPT or Gemini, with your character in place of the brackets.", &[])), buttons].spacing(10))
+            .push(column![note(tr("The figure on a plain white or transparent background, four times: normal, eyes closed, happy, sad. One image with all four, left to right and top to bottom, or one to four PNG or JPEG images in that order. Any size: VibeBuddy cuts out each figure and makes it 48 × 64 pixels in 15 colors. No drawings yet? Copy a prompt into an image tool, such as ChatGPT or Gemini, with your character in place of the brackets.", &[])), buttons].spacing(10))
             .spacing(14);
         let basics = rows([line(
             row![label(tr("Name", &[])), field(&tr("Name", &[]), &form.name).on_input(Message::MakeName).width(280)].spacing(8).align_y(Alignment::Center).into(),
