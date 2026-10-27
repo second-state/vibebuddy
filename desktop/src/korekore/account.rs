@@ -267,6 +267,8 @@ impl crate::App {
         let readiness = readiness.filter(|_| !look_only).map(|(ready, provider)| {
             text(ready.explanation(&provider)).font(super::controls::regular()).size(13).color(if ready.can_start() { theme::MUTED } else { theme::KORE_PINK_TEXT })
         });
+        let mixed = form.voice.as_ref().is_some_and(|voice| Some(voice.language.as_str()) != assets::language_of(form.base.id).map(assets::Language::code));
+        let mixed = mixed.then(|| text(tr("This voice and the lines are in different languages, so the lines may sound wrong.", &[])).font(super::controls::regular()).size(13).color(theme::WAIT_TEXT));
         let busy = self.busy();
         let label = |words: String| text(words).font(bold()).size(14).color(theme::INK).width(120);
         let line = |content: Element<'a, Message>| -> Element<'a, Message> { container(content).padding(Padding::from([10, 14])).width(Length::Fill).into() };
@@ -325,6 +327,7 @@ impl crate::App {
             heading(tr("Voice", &[])),
             rows(voice_rows),
         ]
+        .push(mixed)
         .push(readiness)
         .push(heading(tr("Lines", &[])))
         .push(rows([line(row![label(tr("Lines from", &[])), picker(bases, Some(form.base), Message::MakeBase)].spacing(8).align_y(Alignment::Center).into())]))

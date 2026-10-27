@@ -198,6 +198,9 @@ struct KorekoreMakeSheet: View {
                             voiceRow(option)
                         }
                     }
+                    if let chosenVoice, chosenVoice.voiceLanguage != VoiceCatalogEntry.language(ofVoice: base) {
+                        KNote(String(localized: "This voice and the lines are in different languages, so the lines may sound wrong."), color: Theme.Colors.waitText)
+                    }
                     if !lookOnly, let readiness, let chosenVoice {
                         KNote(readiness.explanation(provider: chosenVoice.providerName),
                               color: readiness.canStart ? Theme.Colors.muted : Theme.Colors.korePinkText)
