@@ -115,8 +115,10 @@ struct KorekoreMakingRow: View {
     }
 }
 
-/// Making a Character: start from a preset, change its lines (occasions stay, each keeps a line), pick a voice and,
-/// optionally, bring a look; the daemon then makes the line audio. The same steps as `MakeCharacterSheet`.
+/// Making a Character of the user's own: start from a preset, bring a look, change its lines (occasions stay, each keeps
+/// a line) and pick a voice. With only a look, nothing is made: the drawings go to the box with the preset lending its
+/// voice and lines, as `CustomCharacterCard` does. With new lines or another voice, the daemon makes the line audio, as
+/// `MakeCharacterSheet` does.
 struct KorekoreMakeSheet: View {
     @ObservedObject var model: AppModel
     @Environment(\.dismiss) private var dismiss
@@ -131,6 +133,8 @@ struct KorekoreMakeSheet: View {
     @State private var name = ""
     @State private var voice = ""
     @State private var lines: [Draft] = []
+    /// The preset's lines as they came, to tell whether any changed.
+    @State private var original: [CharacterLine] = []
     /// The preset's occasions, in its order.
     @State private var occasions: [String] = []
     /// The user's own look; nil wears the base's.
@@ -142,14 +146,16 @@ struct KorekoreMakeSheet: View {
     private var chosenVoice: CharacterVoice? { model.characterVoice(voice) }
     private var edited: [CharacterLine] { lines.map { CharacterLine(occasion: $0.occasion, text: $0.text) } }
     private var draftProblem: String? { lines.isEmpty ? nil : CharacterDraft.problem(name: name, lines: edited, occasions: occasions) }
+    /// Only the look is new: nothing to make, the preset lends its voice and lines.
+    private var lookOnly: Bool { look != nil && edited == original && voice == base }
     private var readiness: MakingReadiness? {
         chosenVoice.map { MakingReadiness.of($0, keys: model.status?.voiceKeys, account: model.status?.account) }
     }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text("Make a Character").font(.rounded(18))
-            KNote(String(localized: "Start from a character, change what it says, and pick a voice. VibeBuddy makes each line in that voice, then you can write it to the box."))
+            Text("Make your own").font(.rounded(18))
+            KNote(String(localized: "Start from a character and bring your own drawings, its lines and voice as they are. Or change what it says and pick a voice: VibeBuddy then makes each line in that voice, which needs the Paid plan or your own key."))
             ScrollView {
                 VStack(alignment: .leading, spacing: 14) {
                     KRows {
@@ -169,6 +175,11 @@ struct KorekoreMakeSheet: View {
                                         .background(Theme.Colors.boxCard, in: RoundedRectangle(cornerRadius: Theme.Radius.sm))
                                 }
                                 Button(String(localized: "Choose images…")) { chooseLook() }.kButton()
+                                Button(String(localized: "Copy a prompt")) {
+                                    NSPasteboard.general.clearContents()
+                                    NSPasteboard.general.setString(CustomCharacterCard.prompt, forType: .string)
+                                }
+                                .kButton()
                                 if look != nil {
                                     Button(String(localized: "Use \(baseName)'s look")) { look = nil }.kButton()
                                 }
@@ -183,7 +194,7 @@ struct KorekoreMakeSheet: View {
                             voiceRow(option)
                         }
                     }
-                    if let readiness, let chosenVoice {
+                    if !lookOnly, let readiness, let chosenVoice {
                         KNote(readiness.explanation(provider: chosenVoice.providerName),
                               color: readiness.canStart ? Theme.Colors.muted : Theme.Colors.korePinkText)
                     }
@@ -210,15 +221,21 @@ struct KorekoreMakeSheet: View {
                 .padding(.bottom, Theme.Sticker.sm + 4)
             }
             .scrollIndicators(.never)
-            if let shown = problem ?? draftProblem {
+            if let shown = problem ?? (lookOnly ? nil : draftProblem) {
                 KTag(shown, color: Theme.Colors.korePinkText)
             }
             HStack {
                 Spacer()
                 Button(String(localized: "Cancel")) { dismiss() }.kButton().keyboardShortcut(.cancelAction)
-                Button(String(localized: "Make")) { make() }.kButton(.sun)
-                    .keyboardShortcut(.defaultAction)
-                    .disabled(starting || lines.isEmpty || draftProblem != nil || !(readiness?.canStart ?? false) || model.status?.making?.running == true)
+                if lookOnly {
+                    Button(String(localized: "Use this look")) { useLook() }.kButton(.pink)
+                        .keyboardShortcut(.defaultAction)
+                        .disabled(model.operationRunning || !(model.status?.device.connected ?? false))
+                } else {
+                    Button(String(localized: "Make")) { make() }.kButton(.sun)
+                        .keyboardShortcut(.defaultAction)
+                        .disabled(starting || lines.isEmpty || draftProblem != nil || !(readiness?.canStart ?? false) || model.status?.making?.running == true)
+                }
             }
         }
         .foregroundStyle(Theme.Colors.ink)
@@ -273,10 +290,12 @@ struct KorekoreMakeSheet: View {
         do {
             let fetched = try await model.client.presetLines(base)
             lines = fetched.map { Draft(occasion: $0.occasion, text: $0.text) }
+            original = fetched
             occasions = fetched.reduce(into: []) { seen, line in if !seen.contains(line.occasion) { seen.append(line.occasion) } }
             problem = nil
         } catch {
             lines = []
+            original = []
             occasions = []
             problem = String(localized: "Couldn't read the lines of \(baseName): \(error.localizedDescription)")
         }
@@ -292,6 +311,15 @@ struct KorekoreMakeSheet: View {
         case nil:
             break
         }
+    }
+
+    /// The drawings go to the box as the user's own Character, the preset lending its voice and lines.
+    private func useLook() {
+        guard let look, model.writeCustomCharacter(look: look, lender: base) else {
+            problem = String(localized: "That character can't lend its voice; pick another.")
+            return
+        }
+        dismiss()
     }
 
     private func make() {

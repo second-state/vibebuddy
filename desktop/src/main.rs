@@ -151,6 +151,8 @@ enum Message {
     MakeDrawings(Result<Option<Vec<character::Image>>, String>),
     /// Wear the base's look again rather than the user's.
     MakeBaseLook,
+    /// The form has only a new look: it goes to the box as the user's own Character, the preset lending its voice.
+    MakeUseLook,
     MakeStart,
     /// The daemon took the job, from the form or a Resume, or didn't.
     MakeStarted(Result<making::Making, String>),
@@ -348,12 +350,21 @@ struct MakeForm {
     name: String,
     voice: Option<making::Voice>,
     lines: Vec<making::Line>,
+    /// The preset's lines as they came, to tell whether any changed.
+    original: Vec<making::Line>,
     /// The preset's occasions, in its order.
     occasions: Vec<String>,
     /// The user's own look and its face; None wears the base's.
     look: Option<(Vec<u8>, image::Handle)>,
     problem: Option<String>,
     starting: bool,
+}
+
+impl MakeForm {
+    /// Only the look is new: nothing to make, the preset lends its voice and lines.
+    fn look_only(&self) -> bool {
+        self.look.is_some() && self.lines == self.original && self.voice.as_ref().is_none_or(|voice| voice.id == self.base.id)
+    }
 }
 
 struct RestartOffer {
@@ -891,6 +902,7 @@ impl App {
                     name: String::new(),
                     voice: None,
                     lines: Vec::new(),
+                    original: Vec::new(),
                     occasions: Vec::new(),
                     look: None,
                     problem: None,
@@ -913,6 +925,7 @@ impl App {
                             }
                             seen
                         });
+                        form.original = lines.clone();
                         form.lines = lines;
                         form.problem = None;
                     }
@@ -956,6 +969,15 @@ impl App {
                     },
                     Err(error) => form.problem = Some(error),
                 }
+            }
+            Message::MakeUseLook => {
+                let Some(form) = self.make.take() else { return Task::none() };
+                let Some((look, _)) = form.look else { return Task::none() };
+                let frames = character::look_frames(&look).unwrap_or_default();
+                self.custom_look = Some((look, frames.iter().map(|frame| handle(frame, 2)).collect()));
+                self.custom_problem = None;
+                self.lender = Some(form.base);
+                return Task::done(Message::UseCustom);
             }
             Message::MakeBaseLook => {
                 if let Some(form) = &mut self.make {

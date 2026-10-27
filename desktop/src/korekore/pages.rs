@@ -129,7 +129,6 @@ impl crate::App {
         for made in &self.made {
             cards.push(self.kk_made_card(made, job));
         }
-        cards.push(self.make_your_own());
         cards.push(self.kk_make_character());
         let mut grid = column![].spacing(12);
         let mut cards = cards.into_iter().peekable();
@@ -221,10 +220,6 @@ impl crate::App {
         .spacing(6);
         let (outline, stroke) = if in_use { (theme::KORE_PINK, theme::STROKE_BOLD) } else { (theme::INK, theme::STROKE_BASE) };
         card_with(content, theme::PAPER, outline, stroke).padding(9).into()
-    }
-
-    fn make_your_own(&self) -> Element<'_, Message> {
-        dashed(tr("Make your own look", &[]), tr("1–4 images, made pixel here", &[]), Some(Message::ChooseDrawings))
     }
 
     fn custom_look_card(&self, in_use: bool) -> Element<'_, Message> {

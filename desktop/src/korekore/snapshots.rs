@@ -137,6 +137,7 @@ fn draw_the_korekore_pages() {
             name: "Night owl".to_owned(),
             voice: None,
             lines: vec![crate::making::Line { occasion: "done".to_owned(), text: "All done, {address}.".to_owned() }],
+            original: Vec::new(),
             occasions: vec!["done".to_owned()],
             look: None,
             problem: None,

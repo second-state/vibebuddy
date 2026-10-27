@@ -238,14 +238,18 @@ impl crate::App {
         )
     }
 
-    /// The dashed card that opens the form.
+    /// One way in to a Character of the user's own: their drawings, their lines, a voice they pick.
     pub(super) fn kk_make_character(&self) -> Element<'_, Message> {
-        let job_running = self.status.as_ref().and_then(|status| status.making.as_ref()).is_some_and(making::Making::running);
-        super::pages::dashed(tr("Make a Character", &[]), tr("Its own lines, in a voice you pick", &[]), (self.status.is_some() && !job_running).then_some(Message::MakeCharacter(true)))
+        super::pages::dashed(
+            tr("Make your own", &[]),
+            tr("Your drawings, your lines, a voice you pick", &[]),
+            self.status.is_some().then_some(Message::MakeCharacter(true)),
+        )
     }
 
-    /// Making a Character, in place of the Character page: start from a preset, change its lines (occasions stay, each
-    /// keeps a line), pick a voice and, optionally, bring a look; the daemon then makes the line audio.
+    /// Making a Character of the user's own, in place of the Character page: start from a preset, bring a look, change
+    /// its lines (occasions stay, each keeps a line) and pick a voice. With only a look nothing is made: the drawings
+    /// go to the box with the preset lending its voice. With new lines or another voice, the daemon makes the audio.
     pub(super) fn kk_make_form<'a>(&'a self, form: &'a MakeForm) -> Element<'a, Message> {
         let bases: Vec<Lender> = self.voices.iter().map(Lender::of).collect();
         let voices = making::sorted(&self.character_voices, assets::language_of(form.base.id).map(assets::Language::code));
@@ -254,10 +258,12 @@ impl crate::App {
         let readiness = form.voice.as_ref().map(|voice| (making::Readiness::of(voice, keys, &account), voice.provider_name()));
         let job_running = self.status.as_ref().and_then(|status| status.making.as_ref()).is_some_and(making::Making::running);
         let problem = form.problem.clone().or_else(|| if form.lines.is_empty() { None } else { making::problem(&form.name, &form.lines, &form.occasions) });
+        let look_only = form.look_only();
+        let problem = if look_only { form.problem.clone() } else { problem };
         let can_make = !form.starting && !form.lines.is_empty() && problem.is_none() && readiness.as_ref().is_some_and(|(ready, _)| ready.can_start()) && !job_running;
         let base_face = self.voices.iter().position(|voice| voice.id == form.base.id).and_then(|index| self.faces.get(index).cloned().flatten());
         let face = form.look.as_ref().map(|(_, face)| face.clone()).or(base_face);
-        let readiness = readiness.map(|(ready, provider)| {
+        let readiness = readiness.filter(|_| !look_only).map(|(ready, provider)| {
             text(ready.explanation(&provider)).font(super::controls::regular()).size(13).color(if ready.can_start() { theme::MUTED } else { theme::KORE_PINK_TEXT })
         });
         let busy = self.busy();
@@ -266,6 +272,7 @@ impl crate::App {
         let look = row![label(tr("Look", &[]))]
             .push(face.map(|face| container(image(face).filter_method(image::FilterMethod::Nearest)).padding(4).style(|_| super::pages::stage(theme::BOX_CARD))))
             .push(pill(tr("Choose images…", &[]), Fill::Paper, Some(Message::MakeChooseDrawings)))
+            .push(pill(tr("Copy a prompt", &[]), Fill::Paper, Some(Message::CopyPrompt)))
             .push(form.look.is_some().then(|| pill(tr("Use %@'s look", &[&assets::voice_name(form.base.id)]), Fill::Paper, Some(Message::MakeBaseLook))))
             .spacing(8)
             .align_y(Alignment::Center);
@@ -306,8 +313,8 @@ impl crate::App {
             ));
         }
         let mut page = column![
-            text(tr("Make a Character", &[])).font(bold()).size(18).color(theme::INK),
-            note(tr("Start from a character, change what it says, and pick a voice. VibeBuddy makes each line in that voice, then you can write it to the box.", &[])),
+            text(tr("Make your own", &[])).font(bold()).size(18).color(theme::INK),
+            note(tr("Start from a character and bring your own drawings, its lines and voice as they are. Or change what it says and pick a voice: VibeBuddy then makes each line in that voice, which needs the Paid plan or your own key.", &[])),
             basics,
             heading(tr("Voice", &[])),
             rows(voice_rows),
@@ -339,7 +346,11 @@ impl crate::App {
                 row![
                     Space::new().width(Length::Fill),
                     pill(tr("Cancel", &[]), Fill::Paper, Some(Message::MakeCharacter(false))),
-                    pill(tr("Make", &[]), Fill::Sun, can_make.then_some(Message::MakeStart)),
+                    if look_only {
+                        pill(tr("Use this look", &[]), Fill::Pink, (self.online() && !busy).then_some(Message::MakeUseLook))
+                    } else {
+                        pill(tr("Make", &[]), Fill::Sun, can_make.then_some(Message::MakeStart))
+                    },
                 ]
                 .spacing(8),
             );

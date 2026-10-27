@@ -7,49 +7,40 @@ import VibeBuddyCore
 /// tab's (`VoicesView`, `RobotCard`, `CustomCharacterCard`, `AddressRow`), copied, in the korekore look.
 struct KorekoreCharacterPage: View {
     @ObservedObject var model: AppModel
-    @State private var makingOwn = false
-    /// Bumped by Make your own look, so the page scrolls down to the card it opens below the grid.
-    @State private var showOwn = 0
     @State private var makingCharacter = false
 
     private var connected: Bool { model.status?.device.connected ?? false }
 
     var body: some View {
-        ScrollViewReader { proxy in
-            ScrollView {
-                VStack(alignment: .leading, spacing: 14) {
-                    KorekoreVolumeCard(model: model)
-                    if let operation = model.operation, operation.kind == .voicePack {
-                        writeProgress(operation)
-                    }
-                    if let making = model.status?.making {
-                        KorekoreMakingRow(model: model, making: making)
-                    }
-                    LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 12, alignment: .top), count: 3), spacing: 12) {
-                        koreCard
-                        robotCard
-                        ForEach(Resources.bundledVoices) { entry in
-                            voiceCard(entry)
-                        }
-                        ForEach(model.madeCharacters) { made in
-                            KorekoreMadeCard(model: model, made: made)
-                        }
-                        makeYourOwn
-                        makeCharacter
-                    }
-                    .padding(.bottom, Theme.Sticker.sm)
-                    if makingOwn || model.status?.device.voice == CustomCharacterCard.id {
-                        KorekoreCustomLook(model: model).id("own")
-                    }
+        ScrollView {
+            VStack(alignment: .leading, spacing: 14) {
+                KorekoreVolumeCard(model: model)
+                if let operation = model.operation, operation.kind == .voicePack {
+                    writeProgress(operation)
                 }
-                .padding(.bottom, 8)
+                if let making = model.status?.making {
+                    KorekoreMakingRow(model: model, making: making)
+                }
+                LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 12, alignment: .top), count: 3), spacing: 12) {
+                    koreCard
+                    robotCard
+                    ForEach(Resources.bundledVoices) { entry in
+                        voiceCard(entry)
+                    }
+                    ForEach(model.madeCharacters) { made in
+                        KorekoreMadeCard(model: model, made: made)
+                    }
+                    makeYourOwn
+                }
+                .padding(.bottom, Theme.Sticker.sm)
+                // The box wears drawings of the user's own: they can change them or the Character lending its voice.
+                if model.status?.device.voice == CustomCharacterCard.id {
+                    KorekoreCustomLook(model: model)
+                }
             }
-            .scrollIndicators(.never)
-            .onChange(of: showOwn) {
-                // After the card is laid out, or there is nothing to scroll to yet.
-                DispatchQueue.main.async { withAnimation { proxy.scrollTo("own", anchor: .top) } }
-            }
+            .padding(.bottom, 8)
         }
+        .scrollIndicators(.never)
         .onAppear { model.refreshMadeCharacters() }
         .sheet(isPresented: $makingCharacter) { KorekoreMakeSheet(model: model) }
     }
@@ -162,22 +153,14 @@ struct KorekoreCharacterPage: View {
         }
     }
 
+    /// One way in to a Character of the user's own: their drawings, their lines, a voice they pick. Drawings alone go
+    /// straight to the box; new lines or another voice are made first (KorekoreMakeSheet).
     private var makeYourOwn: some View {
-        Button {
-            makingOwn = true
-            showOwn += 1
-        } label: {
-            dashed(String(localized: "Make your own look"), String(localized: "1–4 images, made pixel here"))
-        }
-        .buttonStyle(.plain)
-    }
-
-    private var makeCharacter: some View {
         Button { makingCharacter = true } label: {
-            dashed(String(localized: "Make a Character"), String(localized: "Its own lines, in a voice you pick"))
+            dashed(String(localized: "Make your own"), String(localized: "Your drawings, your lines, a voice you pick"))
         }
         .buttonStyle(.plain)
-        .disabled(model.status == nil || model.status?.making?.running == true)
+        .disabled(model.status == nil)
     }
 
     /// The dashed card that starts something new.

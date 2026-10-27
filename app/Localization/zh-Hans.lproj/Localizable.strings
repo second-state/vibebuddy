@@ -394,7 +394,6 @@
 "The update didn't finish" = "更新没有完成";
 "The update didn't take" = "更新没有生效";
 "Update checks are off, so korekore doesn't download firmware. Turn them on in General, or get it from Releases." = "检查更新已关闭，所以 korekore 不会下载固件。在“通用”里打开，或者从发布页下载。";
-"1–4 images, made pixel here" = "1–4 张图片，在这里变成像素";
 "Allow it in System Settings › Privacy › Automation." = "在“系统设置 › 隐私与安全性 › 自动化”里允许它。";
 "Coming soon" = "即将推出";
 "Config file" = "配置文件";
@@ -413,7 +412,6 @@
 "K2 jumps straight to the tab a session runs in" = "按 K2 直接跳到会话所在的标签页";
 "Loading the conversation…" = "正在读取对话…";
 "Logs" = "日志";
-"Make your own look" = "做一个自己的形象";
 "Not checked" = "尚未检查";
 "Not found" = "未找到";
 "Nothing to change · already connected" = "无需改动 · 已经接入";
@@ -621,9 +619,11 @@
 "Its lines made in its voice go with it; making it again would make them again." = "用它的声音做好的台词会一起删掉；再创建一次就得重新做。";
 "It's on the box: put another character on the box to delete this one." = "它正在盒子上：先给盒子换个角色，才能删除它。";
 "Couldn't delete “%@”: %@" = "删除「%@」失败：%@";
-"Its own lines, in a voice you pick" = "自己的台词，配上你挑的声音";
 "Making “%@”…" = "正在创建「%@」…";
 "Box screens" = "盒子界面";
 "Robot" = "机器人";
 "Update the box's firmware to choose its screens." = "更新盒子固件后才能选择盒子界面。";
 "Changing the box screens was rejected (%lld)" = "更换盒子界面未被接受（%lld）";
+"Make your own" = "做一个自己的";
+"Your drawings, your lines, a voice you pick" = "你的画、你的台词、你挑的声音";
+"Start from a character and bring your own drawings, its lines and voice as they are. Or change what it says and pick a voice: VibeBuddy then makes each line in that voice, which needs the Paid plan or your own key." = "从一个角色出发，换上你自己画的形象，台词和声音照旧；也可以改它说的话、挑一个声音，VibeBuddy 会用那个声音把每句台词做出来，这需要付费版或你自己的 key。";
