@@ -167,6 +167,9 @@ enum Message {
     ResumeMade(String),
     /// Ask to delete a made Character (by id), or (None) don't; deleting waits for a second click.
     AskDeleteMade(Option<String>),
+    /// Asking before forgetting the user's own Character, or not.
+    AskDeleteCustom(bool),
+    DeleteCustom,
     DeleteMade(String),
     MadeDeleted(Result<(), String>),
     AskFirmwareUpdate(bool),
@@ -284,6 +287,7 @@ struct App {
     make: Option<MakeForm>,
     /// The made Character waiting for a second click to be deleted, since it can't be undone.
     confirm_delete_made: Option<String>,
+    confirm_delete_custom: bool,
     /// The firmware update waits for a second click, since the box restarts.
     confirm_firmware: bool,
     /// A firmware zip picked with Flash from file…, waiting for the user to confirm.
@@ -400,6 +404,7 @@ impl App {
             character_voices: Vec::new(),
             make: None,
             confirm_delete_made: None,
+            confirm_delete_custom: false,
             confirm_firmware: false,
             file_firmware: None,
             wifi_ssid: String::new(),
@@ -1060,6 +1065,22 @@ impl App {
                 return Task::perform(write, Message::Done);
             }
             Message::AskDeleteMade(id) => self.confirm_delete_made = id,
+            Message::AskDeleteCustom(asking) => self.confirm_delete_custom = asking,
+            // A box wearing it goes back to the Character that lent it voice and lines.
+            Message::DeleteCustom => {
+                self.confirm_delete_custom = false;
+                if let Some(path) = custom::custom_look_file() {
+                    let _ = std::fs::remove_file(path);
+                }
+                self.custom_look = None;
+                self.custom_problem = None;
+                let lender = self.characters.custom_lender.take().and_then(|id| self.voices.iter().find(|voice| voice.id == id).map(|voice| voice.id));
+                self.characters.save();
+                let current = self.status.as_ref().and_then(|status| status.device.voice.clone());
+                if let Some(lender) = lender.filter(|_| current.as_deref() == Some(CUSTOM)) {
+                    return Task::done(Message::UseVoice(lender));
+                }
+            }
             Message::DeleteMade(id) => {
                 self.confirm_delete_made = None;
                 return Task::perform(client::delete_character(id), Message::MadeDeleted);
@@ -2675,7 +2696,7 @@ const ROBOT: &str = "robot";
 const BUILTIN: &str = "builtin";
 
 /// The Mac app's `CustomCharacterCard.prompt`: a start for any image model.
-const CUSTOM_PROMPT: &str = "Pixel art game sprite of [describe your character], chibi proportions, standing, front view, full body, centered, arms down, flat colors, thick dark outline, limited 16-color palette, plain solid white background. Then the same character in exactly the same pose with the eyes closed; with a big happy smile; with a sad face.";
+const CUSTOM_PROMPT: &str = "Pixel art game sprite sheet of [describe your character]: one image, a 2 × 2 grid of the same character in exactly the same pose, with clear white space between the four. Chibi proportions, standing, front view, full body, arms down, flat colors, thick dark outline, limited 16-color palette, plain solid white background. Top left: normal. Top right: eyes closed. Bottom left: a big happy smile. Bottom right: a sad face.";
 
 /// A look frame as an image to draw, each pixel `scale` pixels wide.
 /// The user's words on the right in the accent color, the buddy's replies on the left, as in a chat.

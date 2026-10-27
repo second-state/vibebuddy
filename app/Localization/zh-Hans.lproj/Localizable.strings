@@ -630,5 +630,7 @@
 "Lines" = "台词";
 "Lines from" = "台词取自";
 "Free · already made" = "免费 · 已做好";
-"The figure on a plain white or transparent background, four times: normal, eyes closed, happy, sad. One image with all four, left to right and top to bottom, or one to four PNG or JPEG images in that order. Any size: VibeBuddy cuts out each figure and makes it 48 × 64 pixels in 15 colors. No drawings yet? Copy a prompt into an image tool, such as ChatGPT or Gemini, with your character in place of the brackets." = "人物放在纯白或透明的背景上，画四次：正常、闭眼、开心、难过。可以是一张图里画齐四个（从左到右、从上到下），也可以按这个顺序选 1 到 4 张 PNG 或 JPEG 图。尺寸不限：VibeBuddy 会抠出每个人物，做成 48 × 64 像素、15 色。还没有图？复制提示词，把方括号里换成你的角色，贴到 ChatGPT、Gemini 等生图工具里。";
+"One PNG or JPEG image: the figure four times in a 2 × 2 grid, on a plain white or transparent background. Top left normal, top right eyes closed, bottom left happy, bottom right sad. Any size: VibeBuddy cuts out each figure and makes it 48 × 64 pixels in 15 colors. No drawing yet? Copy a prompt into an image tool, such as ChatGPT or Gemini, with your character in place of the brackets." = "一张 PNG 或 JPEG 图：同一个人物画四次，排成 2 × 2，放在纯白或透明的背景上。左上正常，右上闭眼，左下开心，右下难过。尺寸不限：VibeBuddy 会抠出每个人物，做成 48 × 64 像素、15 色。还没有图？复制提示词，把方括号里换成你的角色，贴到 ChatGPT、Gemini 等生图工具里。";
 "This voice and the lines are in different languages, so the lines may sound wrong." = "这个声音和台词的语言不一样，念出来可能会很怪。";
+"Delete your own character? This can't be undone." = "删除你自己的角色？删除后无法恢复。";
+"The box goes back to %@." = "盒子会换回 %@。";

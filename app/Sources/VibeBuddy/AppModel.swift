@@ -347,6 +347,15 @@ final class AppModel: ObservableObject {
         return true
     }
 
+    /// Forgets the user's own Character. A box wearing it goes back to the Character that lent it voice and lines.
+    func deleteCustomCharacter() {
+        let lender = savedCustomCharacter?.lender
+        try? FileManager.default.removeItem(at: Self.customLookURL)
+        UserDefaults.standard.removeObject(forKey: Self.customLenderKey)
+        objectWillChange.send()
+        if status?.device.voice == CustomCharacterCard.id, let lender { writeVoice(lender) }
+    }
+
     // MARK: Making a Character
 
     /// The language a made Character speaks: its voice's, else its base preset's.

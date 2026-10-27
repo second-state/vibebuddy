@@ -1068,7 +1068,7 @@ struct CustomCharacterCard: View {
 
     private var inUse: Bool { model.status?.device.voice == Self.id }
 
-    static let prompt = "Pixel art game sprite of [describe your character], chibi proportions, standing, front view, full body, centered, arms down, flat colors, thick dark outline, limited 16-color palette, plain solid white background. Then the same character in exactly the same pose with the eyes closed; with a big happy smile; with a sad face."
+    static let prompt = "Pixel art game sprite sheet of [describe your character]: one image, a 2 × 2 grid of the same character in exactly the same pose, with clear white space between the four. Chibi proportions, standing, front view, full body, arms down, flat colors, thick dark outline, limited 16-color palette, plain solid white background. Top left: normal. Top right: eyes closed. Bottom left: a big happy smile. Bottom right: a sad face."
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {

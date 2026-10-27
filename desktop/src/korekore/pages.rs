@@ -240,10 +240,10 @@ impl crate::App {
             column![
                 row![note(tr("Voice and lines from", &[])), Space::new().width(Length::Fill), picker(lenders, self.lender, Message::PickLender)]
                     .align_y(Alignment::Center),
-                row![
-                    Space::new().width(Length::Fill),
-                    pill(tr("Use this look", &[]), Fill::Pink, (online && !busy && self.lender.is_some()).then_some(Message::UseCustom))
-                ],
+                row![]
+                    .push((self.characters.custom_lender.is_some() && !self.confirm_delete_custom).then(|| pill(tr("Delete…", &[]), Fill::Paper, Some(Message::AskDeleteCustom(true)))))
+                    .push(Space::new().width(Length::Fill))
+                    .push(pill(tr("Use this look", &[]), Fill::Pink, (online && !busy && self.lender.is_some()).then_some(Message::UseCustom))),
             ]
             .spacing(8)
         });
@@ -253,12 +253,20 @@ impl crate::App {
                     .push(in_use.then(|| tag(tr("In use", &[]), theme::KORE_PINK_TEXT))),
             ]
             .push(frames)
-            .push(note(tr(
-                "Draw a figure with any image tool, on a plain white background: one image, or four in the order normal, eyes closed, happy, sad. The box shows it in place of the robot, with the voice and lines of the character you pick.",
-                &[],
-            )))
+            .push(note(tr("One PNG or JPEG image: the figure four times in a 2 × 2 grid, on a plain white or transparent background. Top left normal, top right eyes closed, bottom left happy, bottom right sad. Any size: VibeBuddy cuts out each figure and makes it 48 × 64 pixels in 15 colors. No drawing yet? Copy a prompt into an image tool, such as ChatGPT or Gemini, with your character in place of the brackets.", &[])))
             .push(row![pill(tr("Choose images…", &[]), Fill::Paper, Some(Message::ChooseDrawings)), pill(tr("Copy a prompt", &[]), Fill::Paper, Some(Message::CopyPrompt))].spacing(8))
             .push(pick)
+            .push(self.confirm_delete_custom.then(|| {
+                let lender = self.characters.custom_lender.as_deref().map(assets::voice_name).unwrap_or_default();
+                column![note(tr("Delete your own character? This can't be undone.", &[]))]
+                    .push(in_use.then(|| note(tr("The box goes back to %@.", &[&lender]))))
+                    .push(row![
+                        Space::new().width(Length::Fill),
+                        pill(tr("Cancel", &[]), Fill::Paper, Some(Message::AskDeleteCustom(false))),
+                        pill(tr("Delete", &[]), Fill::Pink, Some(Message::DeleteCustom)),
+                    ].spacing(6))
+                    .spacing(6)
+            }))
             .push(self.custom_problem.as_ref().map(|problem| tag(problem, theme::KORE_PINK_TEXT)))
             .spacing(10),
             theme::PAPER,

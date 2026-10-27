@@ -33,8 +33,9 @@ struct KorekoreCharacterPage: View {
                     makeYourOwn
                 }
                 .padding(.bottom, Theme.Sticker.sm)
-                // The box wears drawings of the user's own: they can change them or the Character lending its voice.
-                if model.status?.device.voice == CustomCharacterCard.id {
+                // Drawings of the user's own, kept or on the box: they can change them, the Character lending its voice, or
+                // delete them.
+                if model.status?.device.voice == CustomCharacterCard.id || model.savedCustomCharacter != nil {
                     KorekoreCustomLook(model: model)
                 }
             }
@@ -273,7 +274,7 @@ struct KorekoreCustomLook: View {
                 .background(Theme.Colors.boxCard, in: RoundedRectangle(cornerRadius: 12))
                 .overlay(RoundedRectangle(cornerRadius: 12)
                     .strokeBorder(Theme.Colors.ink, style: StrokeStyle(lineWidth: Theme.Stroke.base, dash: [6, 4])))
-                KNote(String(localized: "Draw a figure with any image tool, on a plain white background: one image, or four in the order normal, eyes closed, happy, sad. The box shows it in place of the robot, with the voice and lines of the character you pick."))
+                KNote(String(localized: "One PNG or JPEG image: the figure four times in a 2 × 2 grid, on a plain white or transparent background. Top left normal, top right eyes closed, bottom left happy, bottom right sad. Any size: VibeBuddy cuts out each figure and makes it 48 × 64 pixels in 15 colors. No drawing yet? Copy a prompt into an image tool, such as ChatGPT or Gemini, with your character in place of the brackets."))
                 HStack {
                     Button(String(localized: "Choose images…"), action: choose).kButton()
                     Button(String(localized: "Copy a prompt")) {
@@ -289,6 +290,9 @@ struct KorekoreCustomLook: View {
                         KMenu(selection: lender, options: Resources.bundledVoices.map { ($0.id, $0.name) }) { lender = $0 }
                     }
                     HStack {
+                        if model.savedCustomCharacter != nil {
+                            Button(String(localized: "Delete…"), action: confirmDelete).kButton()
+                        }
                         Spacer()
                         Button(String(localized: "Use this look"), action: use).kButton(.pink)
                             .disabled(model.operationRunning || !(model.status?.device.connected ?? false))
@@ -308,24 +312,30 @@ struct KorekoreCustomLook: View {
     }
 
     private func choose() {
-        let panel = NSOpenPanel()
-        panel.allowsMultipleSelection = true
-        panel.allowedContentTypes = [.png, .jpeg]
-        guard panel.runModal() == .OK else { return }
-        let urls = panel.urls.sorted { $0.lastPathComponent.localizedStandardCompare($1.lastPathComponent) == .orderedAscending }
-        let images = urls.compactMap(LookImages.load)
-        guard images.count == urls.count, (1...4).contains(images.count) else {
-            problem = String(localized: "Pick one to four PNG or JPEG images.")
-            return
+        LookImages.chooseLook { result in
+            switch result {
+            case .success(let built):
+                look = built
+                frames = LookBuilder.frames(of: built) ?? []
+                problem = nil
+            case .failure(let failure):
+                problem = failure.message
+            case nil:
+                break
+            }
         }
-        do {
-            let built = try LookBuilder.build(images)
-            look = built
-            frames = LookBuilder.frames(of: built) ?? []
-            problem = nil
-        } catch {
-            problem = String(localized: "No figure found: use a plain white or transparent background.")
-        }
+    }
+
+    private func confirmDelete() {
+        let lenderName = VoiceCatalogEntry.all.first { $0.id == model.savedCustomCharacter?.lender }?.name ?? lender
+        let answer = KorekoreAlert.run(title: String(localized: "Delete your own character? This can't be undone."),
+                                       message: inUse ? String(localized: "The box goes back to \(lenderName).") : nil,
+                                       buttons: [String(localized: "Delete"), String(localized: "Cancel")], warning: true)
+        guard answer.button == 0 else { return }
+        model.deleteCustomCharacter()
+        look = nil
+        frames = []
+        problem = nil
     }
 
     private func use() {
