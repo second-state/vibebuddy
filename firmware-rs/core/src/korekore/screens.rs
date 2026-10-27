@@ -406,22 +406,22 @@ impl Display {
         } else if self.state == State::Working {
             hop = if self.animation_frame.is_multiple_of(2) { 0 } else { -1 };
         }
-        kt::draw_centered(canvas, &DOT_11, 48, 31, mark, color);
+        kt::draw_centered(canvas, &TYPE_11, 48, 31, mark, color);
         let mirror = !self.link_lost && self.state == State::Idle && idle_mood(self.animation_frame) == IdleMood::Look && self.animation_frame % 4 < 2;
         self.kk_buddy(canvas, expr, BUDDY.x, BUDDY.y + hop, 4, mirror, self.link_lost);
         if petted && !self.link_lost {
             heart(canvas, BUDDY.x + BUDDY.width, BUDDY.y - 10 + hop);
         }
-        kt::draw_centered(canvas, &DOT_14, 48, 201, word, color);
+        kt::draw_centered(canvas, &TYPE_14, 48, 201, word, color);
         let tally = format_tally(scene.pomodoro.view(scene.now_ms).completed, scene.pomodoro.view(scene.now_ms).focus_s);
         let sub = self.kk_sub_line(scene, tally.as_bytes());
         let sub = &sub[..font::fit(sub, 1, 90).min(sub.len())];
-        kt::draw_centered(canvas, &DOT_9, 48, 222, sub, BOX_TEXT_MUTED);
+        kt::draw_centered(canvas, &TYPE_9, 48, 222, sub, BOX_TEXT_MUTED);
 
         self.kk_top_line(canvas, scene);
         if self.tasks.is_empty() {
             let quiet: &[u8] = if self.link_lost { b"" } else { b"ALL QUIET" };
-            kt::draw_centered(canvas, &DOT_12, 208, 100, quiet, BOX_TEXT);
+            kt::draw_centered(canvas, &TYPE_12, 208, 100, quiet, BOX_TEXT);
             let mut stats = Text::<64>::new();
             for (index, stat) in self.stats.iter().enumerate() {
                 if index > 0 {
@@ -429,13 +429,13 @@ impl Display {
                 }
                 stats.push_bytes(stat);
             }
-            kt::draw_centered(canvas, &DOT_10, 208, 120, stats.as_bytes(), BOX_TEXT_MUTED);
+            kt::draw_centered(canvas, &TYPE_10, 208, 120, stats.as_bytes(), BOX_TEXT_MUTED);
             return;
         }
         for (slot, task) in self.tasks_on_page().iter().enumerate() {
-            self.kk_card(canvas, scene, task, card_rect(slot), BOX_CARD, 8, &DOT_11, false);
+            self.kk_card(canvas, scene, task, card_rect(slot), BOX_CARD, 8, &TYPE_11, false);
         }
-        kt::draw(canvas, &DOT_9, 104, 223, self.page_line().as_bytes(), BOX_TEXT_MUTED, 150);
+        kt::draw(canvas, &TYPE_9, 104, 223, self.page_line().as_bytes(), BOX_TEXT_MUTED, 150);
         let pages = self.pages() as i32;
         if pages > 1 {
             for page in 0..pages {
@@ -450,13 +450,13 @@ impl Display {
     fn kk_top_line(&self, canvas: &mut Canvas, scene: &Scene) {
         let mut x = 104;
         if self.muted {
-            x += chip(canvas, &DOT_9, x, 11, b"MUTE", BOX_GROUND, BOX_TEXT) + 6;
+            x += chip(canvas, &TYPE_9, x, 11, b"MUTE", BOX_GROUND, BOX_TEXT) + 6;
         }
-        kt::draw(canvas, &DOT_9, x, 11, b"ON DUTY", BOX_TEXT_MUTED, 100);
+        kt::draw(canvas, &TYPE_9, x, 11, b"ON DUTY", BOX_TEXT_MUTED, 100);
         let mut right = 312;
         if self.link.1 {
-            right -= kt::width(&DOT_9, b"STG");
-            kt::draw(canvas, &DOT_9, right, 11, b"STG", STG, i32::MAX);
+            right -= kt::width(&TYPE_9, b"STG");
+            kt::draw(canvas, &TYPE_9, right, 11, b"STG", STG, i32::MAX);
             right -= 6;
         }
         if let Some(path) = self.link.0 {
@@ -467,8 +467,8 @@ impl Display {
             let mut badge = Text::<11>::new();
             badge.push_bytes(if view.phase == Phase::Focus { b"F " } else { b"B " });
             badge.push_bytes(format_countdown(view.remaining_ms).as_bytes());
-            let width = kt::width(&DOT_10, badge.as_bytes()) + 8;
-            chip(canvas, &DOT_10, right - width, 10, badge.as_bytes(), BOX_GROUND, KORE_PINK);
+            let width = kt::width(&TYPE_10, badge.as_bytes()) + 8;
+            chip(canvas, &TYPE_10, right - width, 10, badge.as_bytes(), BOX_GROUND, KORE_PINK);
         }
     }
 
@@ -478,9 +478,9 @@ impl Display {
         fill_round(canvas, rect, radius, fill);
         let padding = if takeover { 7 } else { 6 };
         let (pill_fill, pill_word) = pill(task.state);
-        let pill_width = kt::width(&DOT_9, pill_word) + 8;
+        let pill_width = kt::width(&TYPE_9, pill_word) + 8;
         let pill_x = rect.x + rect.width - padding - pill_width;
-        chip(canvas, &DOT_9, pill_x, rect.y + (rect.height - DOT_9.line()) / 2, pill_word, BOX_GROUND, pill_fill);
+        chip(canvas, &TYPE_9, pill_x, rect.y + (rect.height - TYPE_9.line()) / 2, pill_word, BOX_GROUND, pill_fill);
         let mut text_x = rect.x + padding;
         let mut title = &task.title[..];
         if let Some(icon) = task.icon {
@@ -508,11 +508,11 @@ impl Display {
                 line.push_bytes(" · ".as_bytes());
             }
             line.push_bytes(time.as_bytes());
-            kt::draw(canvas, &DOT_9, text_x, line_y, line.as_bytes(), BOX_TEXT_MUTED, text_width);
+            kt::draw(canvas, &TYPE_9, text_x, line_y, line.as_bytes(), BOX_TEXT_MUTED, text_width);
         } else {
-            let time_width = kt::width(&DOT_9, time.as_bytes());
-            kt::draw(canvas, &DOT_9, text_x, line_y, line.as_bytes(), BOX_TEXT_MUTED, text_width - time_width - 6);
-            kt::draw_right(canvas, &DOT_9, pill_x - 7, line_y, time.as_bytes(), time_color);
+            let time_width = kt::width(&TYPE_9, time.as_bytes());
+            kt::draw(canvas, &TYPE_9, text_x, line_y, line.as_bytes(), BOX_TEXT_MUTED, text_width - time_width - 6);
+            kt::draw_right(canvas, &TYPE_9, pill_x - 7, line_y, time.as_bytes(), time_color);
         }
     }
 
@@ -521,14 +521,14 @@ impl Display {
         canvas.fill_rect(0, 0, WIDTH, HEIGHT, SUN);
         let bob = if self.animation_frame.is_multiple_of(2) { -2 } else { 0 };
         self.kk_buddy(canvas, Expr::Input, 12, 10 + bob, 5, false, false);
-        kt::draw(canvas, &DOT_34, 122, tight(&DOT_34, 20), "これこれ!".as_bytes(), BOX_GROUND, i32::MAX);
-        kt::draw(canvas, &DOT_16, 122, tight(&DOT_16, 60), b"KORE KORE!", BOX_GROUND, i32::MAX);
-        kt::draw(canvas, &DOT_10, 122, 79, b"this one needs you", BOX_GROUND, i32::MAX);
-        self.kk_card(canvas, scene, &self.tasks[index], TICKET, BOX_GROUND, 10, &DOT_12, true);
+        kt::draw(canvas, &TYPE_34, 122, tight(&TYPE_34, 20), "これこれ!".as_bytes(), BOX_GROUND, i32::MAX);
+        kt::draw(canvas, &TYPE_16, 122, tight(&TYPE_16, 60), b"KORE KORE!", BOX_GROUND, i32::MAX);
+        kt::draw(canvas, &TYPE_10, 122, 79, b"this one needs you", BOX_GROUND, i32::MAX);
+        self.kk_card(canvas, scene, &self.tasks[index], TICKET, BOX_GROUND, 10, &TYPE_12, true);
         let others = self.tasks.iter().filter(|task| task.state == State::InputRequired).count() - 1;
         if others > 0 {
             let more = text!(24, "+{} more waiting", others % 100);
-            kt::draw(canvas, &DOT_10, 12, 218, more.as_bytes(), BOX_GROUND, i32::MAX);
+            kt::draw(canvas, &TYPE_10, 12, 218, more.as_bytes(), BOX_GROUND, i32::MAX);
         }
         self.kk_key_hint_right(canvas, 308, 218, b"take me there", BOX_GROUND, SUN, BOX_GROUND);
     }
@@ -536,8 +536,8 @@ impl Display {
     /// K2 and what it does, against the right edge.
     #[allow(clippy::too_many_arguments, reason = "where and in which colours")]
     fn kk_key_hint_right(&self, canvas: &mut Canvas, right: i32, y: i32, action: &[u8], chip_fill: u16, chip_ink: u16, color: u16) {
-        let width = kt::width(&DOT_10, b"K2") + 8 + 5 + kt::width(&DOT_10, action);
-        hint(canvas, &DOT_10, right - width + 1, y, b"K2", action, chip_ink, chip_fill, color);
+        let width = kt::width(&TYPE_10, b"K2") + 8 + 5 + kt::width(&TYPE_10, action);
+        hint(canvas, &TYPE_10, right - width + 1, y, b"K2", action, chip_ink, chip_fill, color);
     }
 
     /// Done: 3 s in `mint` with sparkles, then back on duty (the firmware settles after the line).
@@ -550,12 +550,12 @@ impl Display {
         let right: [(i32, i32, &[u8]); 3] = [(234, 16, b"*"), (224, 44, b"+"), (230, 72, b"*")];
         for (place, (x, y, mark)) in left.iter().chain(right.iter()).enumerate() {
             if place as u32 % 2 == twinkle || place < 2 {
-                kt::draw(canvas, &DOT_14, *x, *y, mark, BOX_GROUND, i32::MAX);
+                kt::draw(canvas, &TYPE_14, *x, *y, mark, BOX_GROUND, i32::MAX);
             }
         }
-        kt::draw_centered(canvas, &DOT_36, 160, tight(&DOT_36, 108), b"YATTA!", BOX_GROUND);
+        kt::draw_centered(canvas, &TYPE_36, 160, tight(&TYPE_36, 108), b"YATTA!", BOX_GROUND);
         if let Some(index) = index {
-            self.kk_card(canvas, scene, &self.tasks[index], DONE_TICKET, BOX_GROUND, 10, &DOT_12, true);
+            self.kk_card(canvas, scene, &self.tasks[index], DONE_TICKET, BOX_GROUND, 10, &TYPE_12, true);
         }
     }
 
@@ -564,11 +564,11 @@ impl Display {
         canvas.fill_rect(0, 0, WIDTH, HEIGHT, PEACH);
         canvas.fill_rect(3, 3, WIDTH - 6, HEIGHT - 6, BOX_GROUND);
         self.kk_buddy(canvas, Expr::Sad, 15, 15, 5, false, false);
-        kt::draw(canvas, &DOT_22, 127, tight(&DOT_22, 26), b"daijoubu,", PEACH, i32::MAX);
-        kt::draw(canvas, &DOT_22, 127, tight(&DOT_22, 52), b"daijoubu.", PEACH, i32::MAX);
-        kt::draw(canvas, &DOT_10, 127, 80, b"it happens. have a look?", BOX_TEXT_MUTED, i32::MAX);
+        kt::draw(canvas, &TYPE_22, 127, tight(&TYPE_22, 26), b"daijoubu,", PEACH, i32::MAX);
+        kt::draw(canvas, &TYPE_22, 127, tight(&TYPE_22, 52), b"daijoubu.", PEACH, i32::MAX);
+        kt::draw(canvas, &TYPE_10, 127, 80, b"it happens. have a look?", BOX_TEXT_MUTED, i32::MAX);
         if let Some(index) = index {
-            self.kk_card(canvas, scene, &self.tasks[index], FAILED_TICKET, BOX_CARD, 10, &DOT_12, true);
+            self.kk_card(canvas, scene, &self.tasks[index], FAILED_TICKET, BOX_CARD, 10, &TYPE_12, true);
         }
         self.kk_key_hint_right(canvas, 305, 213, b"open the run", BOX_TEXT, BOX_GROUND, BOX_TEXT);
     }
@@ -578,10 +578,10 @@ impl Display {
         canvas.fill_rect(0, 0, WIDTH, HEIGHT, BOX_GRAY_GROUND);
         self.kk_buddy(canvas, Expr::Sleep, 93, 41, 6, false, true);
         let float = (self.animation_frame % 4) as i32;
-        kt::draw(canvas, &DOT_14, 227, 45 - float, b"Z", MIST, i32::MAX);
-        kt::draw(canvas, &DOT_14, 217, 62 - float, b"z", MIST, i32::MAX);
-        kt::draw_centered(canvas, &DOT_22, 160, tight(&DOT_22, 155), b"NO LINK", MIST);
-        kt::draw_centered(canvas, &DOT_10, 160, 187, b"waiting for the computer", MIST_TEXT);
+        kt::draw(canvas, &TYPE_14, 227, 45 - float, b"Z", MIST, i32::MAX);
+        kt::draw(canvas, &TYPE_14, 217, 62 - float, b"z", MIST, i32::MAX);
+        kt::draw_centered(canvas, &TYPE_22, 160, tight(&TYPE_22, 155), b"NO LINK", MIST);
+        kt::draw_centered(canvas, &TYPE_10, 160, 187, b"waiting for the computer", MIST_TEXT);
     }
 
     // ---------- pomodoro ----------
@@ -613,7 +613,7 @@ impl Display {
         fill_rotated(canvas, center_x, center_y, minutes as f32 * 6.0, 44.0, 4.0, 18.0, BOX_TEXT);
         if !paused || self.animation_frame.is_multiple_of(2) {
             let digits = if paused { BOX_TEXT_MUTED } else { BOX_TEXT };
-            kt::draw_centered(canvas, &DOT_38, 78, tight(&DOT_38, 99), format_countdown(view.remaining_ms).as_bytes(), digits);
+            kt::draw_centered(canvas, &TYPE_38, 78, tight(&TYPE_38, 99), format_countdown(view.remaining_ms).as_bytes(), digits);
         }
         let under: &[u8] = match (view.is_idle(), view.phase, paused) {
             (true, _, _) => b"FOCUS 25 MIN",
@@ -621,7 +621,7 @@ impl Display {
             (_, Phase::Break, _) => b"rest your eyes",
             _ => b"ganbatte!",
         };
-        kt::draw_centered(canvas, &DOT_10, 78, 143, under, color);
+        kt::draw_centered(canvas, &TYPE_10, 78, 143, under, color);
 
         // The column on the right: the phase, the keys, today, the buddy and the agents.
         let label: &[u8] = if view.is_idle() {
@@ -631,9 +631,9 @@ impl Display {
         } else {
             b"FOCUS"
         };
-        let label_width = kt::draw(canvas, &DOT_22, 164, tight(&DOT_22, 11), label, color, i32::MAX);
+        let label_width = kt::draw(canvas, &TYPE_22, 164, tight(&TYPE_22, 11), label, color, i32::MAX);
         if paused {
-            chip(canvas, &DOT_9, 164 + label_width + 6, 16, b"PAUSED", BOX_GROUND, BOX_TEXT);
+            chip(canvas, &TYPE_9, 164 + label_width + 6, 16, b"PAUSED", BOX_GROUND, BOX_TEXT);
         }
         let hints: [(&[u8], &[u8]); 2] = match (view.run, view.is_idle()) {
             (Run::Pending, true) => [(b"K0", b"start focus"), (b"", b"")],
@@ -643,16 +643,16 @@ impl Display {
         };
         for (row, (key, action)) in hints.iter().enumerate() {
             if !key.is_empty() {
-                hint(canvas, &DOT_9, 164, 38 + row as i32 * 14, key, action, BOX_GROUND, BOX_TEXT, BOX_TEXT_MUTED);
+                hint(canvas, &TYPE_9, 164, 38 + row as i32 * 14, key, action, BOX_GROUND, BOX_TEXT, BOX_TEXT_MUTED);
             }
         }
-        kt::draw(canvas, &DOT_9, 164, 70, b"TODAY", BOX_TEXT_MUTED, i32::MAX);
+        kt::draw(canvas, &TYPE_9, 164, 70, b"TODAY", BOX_TEXT_MUTED, i32::MAX);
         let squares = view.completed.clamp(4, 12) as i32;
         for square in 0..squares {
             let fill = if (square as u32) < view.completed { KORE_PINK } else { BOX_FACE };
             fill_round(canvas, Rect { x: 164 + square * 11, y: 84, width: 8, height: 8 }, 2, fill);
         }
-        kt::draw(canvas, &DOT_10, 164, 95, format_tally(view.completed, view.focus_s).as_bytes(), KORE_PINK, 148);
+        kt::draw(canvas, &TYPE_10, 164, 95, format_tally(view.completed, view.focus_s).as_bytes(), KORE_PINK, 148);
 
         let expr = match (view.is_idle(), view.phase, paused) {
             (true, _, _) | (_, _, true) => Expr::Normal,
@@ -679,14 +679,14 @@ impl Display {
             }
         };
         fill_round(canvas, rect, 6, fill);
-        kt::draw(canvas, &DOT_9, rect.x + 5, rect.y + 4, word, word_color, rect.width - 10);
+        kt::draw(canvas, &TYPE_9, rect.x + 5, rect.y + 4, word, word_color, rect.width - 10);
         let title: &[u8] = if self.link_lost {
             b"timer keeps going"
         } else {
             let task = self.tasks.iter().find(|task| task.state == State::InputRequired).or(self.tasks.first());
             task.map(|task| task.icon.and_then(|icon| task.title.strip_prefix(icon.prefix())).unwrap_or(&task.title)).unwrap_or(b"all quiet")
         };
-        kt::draw(canvas, &DOT_9, rect.x + 5, rect.y + 16, title, ink, rect.width - 10);
+        kt::draw(canvas, &TYPE_9, rect.x + 5, rect.y + 16, title, ink, rect.width - 10);
     }
 
     /// A phase just ended: the screen fills, pink after focus and lavender after a break, until a key.
@@ -696,22 +696,22 @@ impl Display {
         let ground = if focus_ended { KORE_PINK } else { LAVENDER };
         canvas.fill_rect(0, 0, WIDTH, HEIGHT, ground);
         let tally = format_tally(view.completed, view.focus_s);
-        kt::draw(canvas, &DOT_10, 14, 15, b"POMODORO", BOX_GROUND, i32::MAX);
-        kt::draw_right(canvas, &DOT_10, 306, 15, tally.as_bytes(), BOX_GROUND);
+        kt::draw(canvas, &TYPE_10, 14, 15, b"POMODORO", BOX_GROUND, i32::MAX);
+        kt::draw_right(canvas, &TYPE_10, 306, 15, tally.as_bytes(), BOX_GROUND);
         let hop = if self.animation_frame.is_multiple_of(2) { -4 } else { 0 };
         self.kk_buddy(canvas, Expr::Happy, 14, 35 + hop, 5, false, false);
         let line: &[u8] = if focus_ended { b"Nice work. Time for a break!" } else { b"Break's over. Ready?" };
         let bubble = Rect { x: 126, y: 41, width: 180, height: 54 };
         outlined_round(canvas, bubble, 10, 2, BOX_GROUND, CREAM);
-        let (first, rest) = split_line(&DOT_12, line, bubble.width - 16);
-        kt::draw(canvas, &DOT_12, bubble.x + 8, bubble.y + 8, first, BOX_GROUND, bubble.width - 16);
-        kt::draw(canvas, &DOT_12, bubble.x + 8, bubble.y + 8 + DOT_12.line(), rest, BOX_GROUND, bubble.width - 16);
+        let (first, rest) = split_line(&TYPE_12, line, bubble.width - 16);
+        kt::draw(canvas, &TYPE_12, bubble.x + 8, bubble.y + 8, first, BOX_GROUND, bubble.width - 16);
+        kt::draw(canvas, &TYPE_12, bubble.x + 8, bubble.y + 8 + TYPE_12.line(), rest, BOX_GROUND, bubble.width - 16);
         let big: &[u8] = if focus_ended { b"BREAK 05:00" } else { b"FOCUS 25:00" };
-        kt::draw(canvas, &DOT_30, 14, tight(&DOT_30, 133), big, BOX_GROUND, i32::MAX);
+        kt::draw(canvas, &TYPE_30, 14, tight(&TYPE_30, 133), big, BOX_GROUND, i32::MAX);
         let hints: [(&[u8], &[u8]); 2] = if focus_ended { [(b"K0", b"start break"), (b"HOLD K0", b"skip")] } else { [(b"K0", b"start focus"), (b"K1", b"on duty")] };
         let mut x = 14;
         for (key, action) in hints {
-            x += hint(canvas, &DOT_10, x, 216, key, action, CREAM, BOX_GROUND, BOX_GROUND) + 10;
+            x += hint(canvas, &TYPE_10, x, 216, key, action, CREAM, BOX_GROUND, BOX_GROUND) + 10;
         }
     }
 
@@ -721,16 +721,16 @@ impl Display {
         let frame = view.skit_frame;
         let ground = if view.skit == Skit::Stars { BOX_DIM } else { BOX_GROUND };
         canvas.fill_rect(0, 0, WIDTH, HEIGHT, ground);
-        kt::draw(canvas, &DOT_9, 8, 6, b"LEISURE", BOX_TEXT_MUTED, i32::MAX);
+        kt::draw(canvas, &TYPE_9, 8, 6, b"LEISURE", BOX_TEXT_MUTED, i32::MAX);
         let pomodoro = scene.pomodoro.view(scene.now_ms);
         if !pomodoro.is_idle() {
             let mut badge = Text::<11>::new();
             badge.push_bytes(if pomodoro.phase == Phase::Focus { b"F " } else { b"B " });
             badge.push_bytes(format_countdown(pomodoro.remaining_ms).as_bytes());
-            let width = kt::width(&DOT_10, badge.as_bytes()) + 8;
-            chip(canvas, &DOT_10, 312 - width, 5, badge.as_bytes(), BOX_GROUND, KORE_PINK);
+            let width = kt::width(&TYPE_10, badge.as_bytes()) + 8;
+            chip(canvas, &TYPE_10, 312 - width, 5, badge.as_bytes(), BOX_GROUND, KORE_PINK);
         } else if let Some(stat) = self.stats.first() {
-            kt::draw_right(canvas, &DOT_9, 312, 6, stat, BOX_TEXT_MUTED);
+            kt::draw_right(canvas, &TYPE_9, 312, 6, stat, BOX_TEXT_MUTED);
         }
         canvas.fill_rect(0, 198, WIDTH, 2, BOX_FACE);
 
@@ -747,7 +747,7 @@ impl Display {
                 (expr, mirror) = (Expr::Working, left);
                 let arrows: &[u8] = if left { b"< < <" } else { b"> > >" };
                 if walking {
-                    kt::draw(canvas, &DOT_12, if left { x - 50 } else { x + 90 }, 168, arrows, BOX_TEXT_MUTED, i32::MAX);
+                    kt::draw(canvas, &TYPE_12, if left { x - 50 } else { x + 90 }, 168, arrows, BOX_TEXT_MUTED, i32::MAX);
                 }
             }
             Skit::Ball if !looks => {
@@ -763,21 +763,21 @@ impl Display {
                 canvas.fill_rect(172, 152, 30, 20, SKY);
                 canvas.fill_rect(186, 152, 2, 20, BOX_TEXT);
                 if frame >= 60 {
-                    kt::draw(canvas, &DOT_16, 150, 104, b"!", SUN, i32::MAX);
+                    kt::draw(canvas, &TYPE_16, 150, 104, b"!", SUN, i32::MAX);
                 }
             }
             Skit::Stars => {
                 const SKY_STARS: [(i32, i32); 7] = [(30, 40), (80, 70), (140, 30), (210, 55), (270, 35), (250, 95), (40, 100)];
                 let count = (frame / 12 + 1).min(7) as usize;
                 for &(star_x, star_y) in &SKY_STARS[..count] {
-                    kt::draw(canvas, &DOT_12, star_x, star_y, b"+", SUN, i32::MAX);
+                    kt::draw(canvas, &TYPE_12, star_x, star_y, b"+", SUN, i32::MAX);
                 }
                 if frame >= 88 {
                     expr = Expr::Sleep;
                 } else {
                     expr = Expr::Normal;
                     let number = text!(4, "{}", count);
-                    kt::draw(canvas, &DOT_18, 210, 104, number.as_bytes(), SUN, i32::MAX);
+                    kt::draw(canvas, &TYPE_18, 210, 104, number.as_bytes(), SUN, i32::MAX);
                 }
             }
             Skit::Hide => {
@@ -785,13 +785,13 @@ impl Display {
                 x = 120 + dx;
                 (expr, mirror) = (Expr::Happy, hide_path(frame + 1) < dx);
                 if (28..52).contains(&frame) {
-                    kt::draw(canvas, &DOT_12, 236, 112, b"hi!", BOX_TEXT, i32::MAX);
+                    kt::draw(canvas, &TYPE_12, 236, 112, b"hi!", BOX_TEXT, i32::MAX);
                 }
             }
             Skit::Startle => match frame {
                 24..32 => {
                     (expr, y) = (Expr::Input, 120);
-                    kt::draw(canvas, &DOT_22, 210, 98, b"!", SUN, i32::MAX);
+                    kt::draw(canvas, &TYPE_22, 210, 98, b"!", SUN, i32::MAX);
                 }
                 32..56 => (expr, mirror) = (Expr::Input, (36..44).contains(&frame)),
                 _ => expr = Expr::Sleep,
@@ -800,11 +800,11 @@ impl Display {
                 (x, expr) = (60, Expr::Sleep);
                 fill_round(canvas, Rect { x: 150, y: 70, width: 150, height: 24 }, 10, BOX_FACE);
                 let line: &[u8] = if self.stats.is_empty() { b"zzz" } else { &self.stats[(frame / 32) as usize % self.stats.len()] };
-                kt::draw(canvas, &DOT_10, 158, 76, line, BOX_TEXT, 134);
+                kt::draw(canvas, &TYPE_10, 158, 76, line, BOX_TEXT, 134);
             }
             Skit::Sleep => {
                 expr = Expr::Sleep;
-                kt::draw(canvas, &DOT_16, 210, 110 - (frame % 16) as i32, b"Z", LAVENDER, i32::MAX);
+                kt::draw(canvas, &TYPE_16, 210, 110 - (frame % 16) as i32, b"Z", LAVENDER, i32::MAX);
             }
             Skit::Ball | Skit::Read | Skit::None => {}
         }
@@ -822,7 +822,7 @@ impl Display {
     fn kk_panel(&self, canvas: &mut Canvas, panel: &Panel) {
         canvas.fill_rect(0, 0, WIDTH, HEIGHT, BOX_DIM);
         outlined_round(canvas, PANEL_CARD, 12, 3, BOX_GROUND, CREAM);
-        kt::draw(canvas, &DOT_16, PANEL_INNER_LEFT, 21, &panel.title, title_color(&panel.title), PANEL_INNER_RIGHT - PANEL_INNER_LEFT);
+        kt::draw(canvas, &TYPE_16, PANEL_INNER_LEFT, 21, &panel.title, title_color(&panel.title), PANEL_INNER_RIGHT - PANEL_INNER_LEFT);
         canvas.fill_rect(PANEL_INNER_LEFT, 44, PANEL_INNER_RIGHT - PANEL_INNER_LEFT, 2, BOX_GROUND);
         let tone = |tone: Tone| match tone {
             Tone::Plain => BOX_GROUND,
@@ -841,8 +841,8 @@ impl Display {
                     }
                     // A Facts label's second line is a note the robot draws small; one line here.
                     let label = label.split(|&byte| byte == b'\n').next().unwrap_or_default();
-                    kt::draw(canvas, &DOT_13, row.x + 14, row.y + 2, label, BOX_GROUND, 150);
-                    kt::draw_right(canvas, &DOT_13, row.x + row.width - 6, row.y + 2, value, tone(*value_tone));
+                    kt::draw(canvas, &TYPE_13, row.x + 14, row.y + 2, label, BOX_GROUND, 150);
+                    kt::draw_right(canvas, &TYPE_13, row.x + row.width - 6, row.y + 2, value, tone(*value_tone));
                 }
             }
             PanelKind::Meter(level) => {
@@ -862,11 +862,11 @@ impl Display {
                     canvas.fill_rect(left + step * (bar + 2), 90 - height, bar, height, color);
                 }
                 if let Some((label, _, line_tone)) = panel.lines.first() {
-                    kt::draw(canvas, &DOT_12, left, 98, label, tone(*line_tone), PANEL_INNER_RIGHT - left);
+                    kt::draw(canvas, &TYPE_12, left, 98, label, tone(*line_tone), PANEL_INNER_RIGHT - left);
                 }
             }
             PanelKind::Text(scale) => {
-                let face = if scale >= 2 { &DOT_16 } else { &DOT_11 };
+                let face = if scale >= 2 { &TYPE_16 } else { &TYPE_11 };
                 for (index, (label, _, line_tone)) in panel.lines.iter().enumerate() {
                     let y = 50 + index as i32 * (face.line() + 1);
                     if y + face.line() > PANEL_RULE_Y {
@@ -885,13 +885,13 @@ impl Display {
                     canvas.fill_rect(bar.x + 4 + index * (segment + 2), bar.y + 4, segment, bar.height - 8, KORE_PINK);
                 }
                 for (index, (label, _, line_tone)) in panel.lines.iter().enumerate() {
-                    kt::draw(canvas, &DOT_12, bar.x, 94 + index as i32 * 16, label, tone(*line_tone), bar.width);
+                    kt::draw(canvas, &TYPE_12, bar.x, 94 + index as i32 * 16, label, tone(*line_tone), bar.width);
                 }
             }
         }
         canvas.fill_rect(PANEL_INNER_LEFT, PANEL_RULE_Y, PANEL_INNER_RIGHT - PANEL_INNER_LEFT, 2, BOX_GROUND);
         for (rect, (key, action)) in kk_hint_rects(panel).iter().zip(&panel.hints) {
-            hint(canvas, &DOT_10, rect.x + 2, PANEL_HINTS_Y, key, action, CREAM, BOX_GROUND, BOX_GROUND);
+            hint(canvas, &TYPE_10, rect.x + 2, PANEL_HINTS_Y, key, action, CREAM, BOX_GROUND, BOX_GROUND);
         }
     }
 
@@ -973,7 +973,7 @@ fn kk_hint_rects(panel: &Panel) -> Vec<Rect> {
         .hints
         .iter()
         .map(|(key, action)| {
-            let width = kt::width(&DOT_10, key) + 8 + 4 + kt::width(&DOT_10, action) + 10;
+            let width = kt::width(&TYPE_10, key) + 8 + 4 + kt::width(&TYPE_10, action) + 10;
             let rect = Rect { x: x - 2, y: PANEL_RULE_Y + 2, width, height: PANEL_CARD.y + PANEL_CARD.height - PANEL_RULE_Y - 2 };
             x += width;
             rect
