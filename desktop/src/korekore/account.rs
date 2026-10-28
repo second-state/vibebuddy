@@ -267,7 +267,8 @@ impl crate::App {
         let readiness = readiness.filter(|_| !look_only).map(|(ready, provider)| {
             text(ready.explanation(&provider)).font(super::controls::regular()).size(13).color(if ready.can_start() { theme::MUTED } else { theme::KORE_PINK_TEXT })
         });
-        let mixed = form.voice.as_ref().is_some_and(|voice| Some(voice.language.as_str()) != assets::language_of(form.base.id).map(assets::Language::code));
+        // A voice of the user's own has no language of its own: it says the lines as they are written.
+        let mixed = form.voice.as_ref().is_some_and(|voice| !voice.own && Some(voice.language.as_str()) != assets::language_of(form.base.id).map(assets::Language::code));
         let mixed = mixed.then(|| text(tr("This voice and the lines are in different languages, so the lines may sound wrong.", &[])).font(super::controls::regular()).size(13).color(theme::WAIT_TEXT));
         let busy = self.busy();
         let label = |words: String| text(words).font(bold()).size(14).color(theme::INK).width(120);
@@ -299,8 +300,11 @@ impl crate::App {
             });
             let provider = voice.provider_name();
             let made = (voice.id == form.base.id && form.lines == form.original).then(|| tag(tr("Free · already made", &[]), theme::DONE_TEXT));
+            let yours = voice.own.then(|| tag(tr("Yours", &[]), theme::KORE_PINK_TEXT));
+            let remove = voice.own.then(|| pill(tr("Remove", &[]), Fill::Paper, Some(Message::RemoveOwnVoice(voice.id.clone()))));
             let pick = button(
                 row![dot, text(voice.name.clone()).font(bold()).size(14).color(theme::INK), tag(provider, theme::MUTED_2)]
+                    .push(yours)
                     .push(made)
                     .spacing(8)
                     .align_y(Alignment::Center),
@@ -313,11 +317,15 @@ impl crate::App {
             }
             voice_rows.push(line(
                 row![pick, Space::new().width(Length::Fill)]
+                    .push(remove)
                     .push(preview.map(|id| pill(if playing { "■".to_owned() } else { "▶".to_owned() }, Fill::Paper, (!busy).then_some(Message::TogglePreview(id)))))
+                    .spacing(8)
                     .align_y(Alignment::Center)
                     .into(),
             ));
         }
+        voice_rows.push(divider());
+        voice_rows.push(line(self.kk_own_voice_form(form.own.as_ref())));
         let mut page = column![
             text(tr("Make your own", &[])).font(bold()).size(18).color(theme::INK),
             note(tr("Bring your own drawings, pick a voice and say what it says. A character's own voice with its lines as they are is free: they are already made. Any other voice, or lines you change, VibeBuddy makes in that voice, which needs the Paid plan or your own key.", &[])),
@@ -366,5 +374,37 @@ impl crate::App {
                 .spacing(8),
             );
         super::pages::page(page)
+    }
+
+    /// The last voice row: a voice cloned or designed in the user's own account, tried with their own key on the first
+    /// line before it is kept.
+    fn kk_own_voice_form<'a>(&'a self, own: Option<&'a crate::OwnVoiceForm>) -> Element<'a, Message> {
+        let Some(own) = own else { return pill(tr("Your own voice…", &[]), Fill::Paper, Some(Message::MakeOwnOpen(true))).into() };
+        let keys = self.status.as_ref().and_then(|status| status.voice_keys.as_ref());
+        let has_key = keys.is_some_and(|keys| if own.provider == crate::OwnProvider::Volc { keys.volc.set } else { keys.elevenlabs.set });
+        let id_label = if own.provider == crate::OwnProvider::Volc { tr("Speaker ID", &[]) } else { tr("Voice ID", &[]) };
+        let ready = has_key && !own.trying && !own.voice.trim().is_empty() && !own.name.trim().is_empty();
+        column![
+            note(tr("A voice you cloned or designed in your own ElevenLabs or Volcano Engine account. Paste its ID: VibeBuddy tries it with your own key by saying the first line, and keeps it for next time.", &[])),
+            row![
+                picker(vec![crate::OwnProvider::ElevenLabs, crate::OwnProvider::Volc], Some(own.provider), Message::MakeOwnProvider),
+                field(&id_label, &own.voice).on_input(Message::MakeOwnVoice),
+                field(&tr("Name", &[]), &own.name).on_input(Message::MakeOwnName).width(160),
+            ]
+            .spacing(8)
+            .align_y(Alignment::Center),
+        ]
+        .push((!has_key).then(|| text(making::Readiness::OwnKeyOnly.explanation(&own.provider.to_string())).font(super::controls::regular()).size(13).color(theme::KORE_PINK_TEXT)))
+        .push(own.problem.clone().map(|problem| tag(problem, theme::KORE_PINK_TEXT)))
+        .push(
+            row![
+                Space::new().width(Length::Fill),
+                pill(tr("Cancel", &[]), Fill::Paper, Some(Message::MakeOwnOpen(false))),
+                pill(if own.trying { tr("Trying…", &[]) } else { tr("Try", &[]) }, Fill::Sun, ready.then_some(Message::MakeOwnTry)),
+            ]
+            .spacing(8),
+        )
+        .spacing(10)
+        .into()
     }
 }

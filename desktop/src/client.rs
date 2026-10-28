@@ -281,6 +281,38 @@ pub async fn character_voices() -> Result<Vec<crate::making::Voice>, String> {
     get_json("/v1/voices").await
 }
 
+/// Tries a voice in the user's own account with their own key, saying `text`; the daemon keeps it when the provider
+/// speaks it. Answers the voice and what it said, as a 16 kHz WAV.
+pub async fn add_own_voice(provider: String, voice: String, name: String, text: String) -> Result<(crate::making::Voice, Vec<u8>), String> {
+    #[derive(Deserialize)]
+    struct Answer {
+        voice: crate::making::Voice,
+        audio: String,
+    }
+    let body = serde_json::json!({"provider": provider, "voice": voice, "name": name, "text": text});
+    // Volcano Engine may be tried on four resources, each a whole line.
+    let response = reqwest::Client::new().post(format!("{BASE}/v1/voices")).json(&body).timeout(Duration::from_secs(120)).send().await.map_err(|error| error.to_string())?;
+    let status = response.status();
+    if !status.is_success() {
+        let body: serde_json::Value = response.json().await.unwrap_or_default();
+        return Err(body["message"].as_str().map(str::to_owned).unwrap_or_else(|| format!("the daemon answered {status}")));
+    }
+    let answer: Answer = response.json().await.map_err(|error| error.to_string())?;
+    let audio = base64::Engine::decode(&base64::engine::general_purpose::STANDARD, answer.audio).map_err(|error| error.to_string())?;
+    Ok((answer.voice, audio))
+}
+
+/// Forgets one of the user's own voices; the daemon refuses while a Character made here speaks with it.
+pub async fn delete_own_voice(id: String) -> Result<(), String> {
+    let response = reqwest::Client::new().delete(format!("{BASE}/v1/voices/{id}")).timeout(Duration::from_secs(10)).send().await.map_err(|error| error.to_string())?;
+    let status = response.status();
+    if status.is_success() {
+        return Ok(());
+    }
+    let body: serde_json::Value = response.json().await.unwrap_or_default();
+    Err(body["message"].as_str().map(str::to_owned).unwrap_or_else(|| format!("the daemon answered {status}")))
+}
+
 /// The Characters made on this computer.
 pub async fn made_characters() -> Result<Vec<crate::making::MadeCharacter>, String> {
     get_json("/v1/characters").await

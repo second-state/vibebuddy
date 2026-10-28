@@ -147,6 +147,15 @@ enum Message {
     MakeVoice(making::Voice),
     /// The korekore sheet's pick: a preset's voice takes that preset's lines too, while none has changed.
     MakeVoiceAndLines(making::Voice),
+    /// The form for a voice of the user's own: open or closed, its provider, voice id and name.
+    MakeOwnOpen(bool),
+    MakeOwnProvider(OwnProvider),
+    MakeOwnVoice(String),
+    MakeOwnName(String),
+    MakeOwnTry,
+    MakeOwnTried(Result<(making::Voice, Vec<u8>), String>),
+    RemoveOwnVoice(String),
+    OwnVoiceRemoved(String, Result<(), String>),
     MakeLine(usize, String),
     MakeRemoveLine(usize),
     MakeChooseDrawings,
@@ -366,6 +375,44 @@ struct MakeForm {
     look: Option<(Vec<u8>, image::Handle)>,
     problem: Option<String>,
     starting: bool,
+    /// Adding a voice of the user's own: None while the form is closed.
+    own: Option<OwnVoiceForm>,
+}
+
+/// A voice of the user's own being added: where it is, the name to keep it under, and why trying it failed.
+#[derive(Debug, Default)]
+struct OwnVoiceForm {
+    provider: OwnProvider,
+    voice: String,
+    name: String,
+    trying: bool,
+    problem: Option<String>,
+}
+
+/// The providers a voice of the user's own can be in, for the form's picker.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+enum OwnProvider {
+    #[default]
+    ElevenLabs,
+    Volc,
+}
+
+impl OwnProvider {
+    fn id(self) -> &'static str {
+        match self {
+            OwnProvider::ElevenLabs => "elevenlabs",
+            OwnProvider::Volc => "volc",
+        }
+    }
+}
+
+impl std::fmt::Display for OwnProvider {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            OwnProvider::ElevenLabs => write!(f, "ElevenLabs"),
+            OwnProvider::Volc => write!(f, "{}", tr("Volcano Engine", &[])),
+        }
+    }
 }
 
 impl MakeForm {
@@ -920,6 +967,7 @@ impl App {
                     look: None,
                     problem: None,
                     starting: false,
+                    own: None,
                 });
                 return Task::batch([Task::done(Message::MakeBase(base)), self.refresh_made()]);
             }
@@ -968,6 +1016,71 @@ impl App {
                     return Task::done(Message::MakeBase(preset));
                 }
             }
+            Message::MakeOwnOpen(open) => {
+                if let Some(form) = &mut self.make {
+                    form.own = open.then(OwnVoiceForm::default);
+                }
+            }
+            Message::MakeOwnProvider(provider) => {
+                if let Some(own) = self.make.as_mut().and_then(|form| form.own.as_mut()) {
+                    own.provider = provider;
+                }
+            }
+            Message::MakeOwnVoice(voice) => {
+                if let Some(own) = self.make.as_mut().and_then(|form| form.own.as_mut()) {
+                    own.voice = voice;
+                }
+            }
+            Message::MakeOwnName(name) => {
+                if let Some(own) = self.make.as_mut().and_then(|form| form.own.as_mut()) {
+                    own.name = name;
+                }
+            }
+            Message::MakeOwnTry => {
+                let Some(form) = &mut self.make else { return Task::none() };
+                // The first line, as the box would say it, is what the voice is tried with.
+                let text = form.lines.first().map(|line| line.text.clone()).unwrap_or_else(|| tr("All done!", &[]));
+                let Some(own) = form.own.as_mut().filter(|own| !own.trying) else { return Task::none() };
+                own.trying = true;
+                own.problem = None;
+                let tried = client::add_own_voice(own.provider.id().to_owned(), own.voice.trim().to_owned(), own.name.trim().to_owned(), text);
+                return Task::perform(tried, Message::MakeOwnTried);
+            }
+            Message::MakeOwnTried(result) => {
+                let Some(form) = &mut self.make else { return Task::none() };
+                match result {
+                    Ok((voice, audio)) => {
+                        self.character_voices.retain(|kept| kept.id != voice.id);
+                        self.character_voices.push(voice.clone());
+                        form.voice = Some(voice.clone());
+                        form.own = None;
+                        // What it said plays at once, as a preview does.
+                        if let Some((_, stop)) = self.previewing.take() {
+                            stop.notify_one();
+                        }
+                        let Some(pcm) = preview::wav(&audio) else { return Task::none() };
+                        let stop = std::sync::Arc::new(tokio::sync::Notify::new());
+                        self.previewing = Some((voice.id.clone(), stop.clone()));
+                        return Task::perform(preview::play(pcm, stop), move |result| Message::PreviewDone(voice.id.clone(), result));
+                    }
+                    Err(error) => {
+                        if let Some(own) = form.own.as_mut() {
+                            own.trying = false;
+                            own.problem = Some(tr("Couldn't use that voice: %@", &[&error]));
+                        }
+                    }
+                }
+            }
+            Message::RemoveOwnVoice(id) => return Task::perform(client::delete_own_voice(id.clone()), move |result| Message::OwnVoiceRemoved(id.clone(), result)),
+            Message::OwnVoiceRemoved(id, result) => match result {
+                Ok(()) => {
+                    self.character_voices.retain(|voice| voice.id != id);
+                    if let Some(form) = self.make.as_mut().filter(|form| form.voice.as_ref().is_some_and(|voice| voice.id == id)) {
+                        form.voice = self.character_voices.iter().find(|voice| voice.id == form.base.id).cloned();
+                    }
+                }
+                Err(error) => self.notice = Some(Err(tr("Couldn't remove the voice: %@", &[&error]))),
+            },
             Message::MakeLine(index, text) => {
                 if let Some(line) = self.make.as_mut().and_then(|form| form.lines.get_mut(index)) {
                     line.text = text;
