@@ -274,6 +274,17 @@ fn voice_with(dir: &Path, id: &str, own: Option<(&OwnVoices, &VoiceKeys)>) -> Op
     Some(usable.unwrap_or_else(|| crate::synthesis::voice_for(Some(&manifest.base))))
 }
 
+/// A voice the user's own ElevenLabs key can speak, from that account's voice library: its id, name and kind
+/// (`premade`, `cloned`, `generated`, `professional`).
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+pub struct ProviderVoice {
+    #[serde(rename(deserialize = "voice_id"))]
+    pub voice: String,
+    pub name: String,
+    #[serde(default)]
+    pub category: String,
+}
+
 /// Why one of the user's own voices can't be kept or forgotten.
 #[derive(Debug, PartialEq)]
 pub enum OwnVoiceError {
@@ -429,6 +440,33 @@ impl Maker {
             }
         }
         Err(OwnVoiceError::Provider(first_error.unwrap_or_default()))
+    }
+
+    /// The voices in the account of the user's own ElevenLabs key, to pick one from rather than paste its id: the
+    /// key may belong to an account the user never signs in to. A key without the voices permission is answered
+    /// with what ElevenLabs said, and is not marked refused, since it still speaks.
+    pub fn elevenlabs_voices(&self) -> Result<Vec<ProviderVoice>, OwnVoiceError> {
+        #[derive(Deserialize)]
+        struct Library {
+            voices: Vec<ProviderVoice>,
+        }
+        let key = self.keys.key(Provider::ElevenLabs).ok_or_else(|| OwnVoiceError::Invalid("no own key for elevenlabs".to_owned()))?;
+        let url = format!("{}/v1/voices", self.elevenlabs_url);
+        let mut response = agent()
+            .get(&url)
+            .header("xi-api-key", &key)
+            .call()
+            .map_err(|error| OwnVoiceError::Provider(format!("calling ElevenLabs: {error}")))?;
+        let status = response.status().as_u16();
+        let body = response.body_mut().with_config().limit(MAX_AUDIO).read_to_string().unwrap_or_default();
+        if status != 200 {
+            return Err(OwnVoiceError::Provider(format!("ElevenLabs answered {status}: {}", body.trim().chars().take(200).collect::<String>())));
+        }
+        let library: Library = serde_json::from_str(&body).map_err(|error| OwnVoiceError::Provider(format!("reading ElevenLabs' voices: {error}")))?;
+        let mut voices = library.voices;
+        // The account's own voices first, then ElevenLabs' stock ones, each by name.
+        voices.sort_by_key(|voice| (voice.category == "premade", voice.name.to_lowercase()));
+        Ok(voices)
     }
 
     /// Forgets one of the user's own voices; not while a Character made here speaks with it.
@@ -1267,5 +1305,28 @@ mod tests {
         assert_eq!(&wav[..4], b"RIFF");
         assert_eq!(&wav[24..28], &16_000u32.to_le_bytes());
         assert_eq!(wav.len(), 48);
+    }
+
+    #[test]
+    fn the_own_elevenlabs_keys_voices_are_listed_its_own_first_and_a_missing_permission_is_said() {
+        let library = br#"{"voices":[{"voice_id":"p1","name":"Rachel","category":"premade","labels":{}},{"voice_id":"c1","name":"me","category":"cloned"}]}"#;
+        let (eleven, requests) = serve(move |number, _| {
+            if number == 0 {
+                answer("200 OK", "application/json", library)
+            } else {
+                answer("401 Unauthorized", "application/json", br#"{"detail":{"status":"missing_permissions","message":"voices_read"}}"#)
+            }
+        });
+        let (maker, scratch) = maker("own-eleven-list", None, &[(Provider::ElevenLabs, "sk_own")], &eleven, "http://127.0.0.1:9");
+        let voices = maker.elevenlabs_voices().unwrap();
+        assert_eq!(voices.iter().map(|voice| voice.voice.as_str()).collect::<Vec<_>>(), ["c1", "p1"]);
+        assert_eq!((voices[0].name.as_str(), voices[0].category.as_str()), ("me", "cloned"));
+        let sent = requests.lock().unwrap()[0].clone();
+        assert!(sent.starts_with("GET /v1/voices HTTP/1.1\r\n") && sent.to_ascii_lowercase().contains("xi-api-key: sk_own"), "{sent}");
+        assert!(matches!(maker.elevenlabs_voices(), Err(OwnVoiceError::Provider(why)) if why.contains("missing_permissions")));
+        assert!(!maker.keys.status().elevenlabs.refused, "a key without the voices permission still speaks");
+        maker.keys.set(&[(Provider::ElevenLabs, None)]).unwrap();
+        assert!(matches!(maker.elevenlabs_voices(), Err(OwnVoiceError::Invalid(_))));
+        let _ = std::fs::remove_dir_all(scratch);
     }
 }

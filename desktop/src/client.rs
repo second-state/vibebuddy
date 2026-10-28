@@ -302,6 +302,11 @@ pub async fn add_own_voice(provider: String, voice: String, name: String, text: 
     Ok((answer.voice, audio))
 }
 
+/// The voices in the account of the user's own ElevenLabs key, its own first.
+pub async fn elevenlabs_voices() -> Result<Vec<crate::making::ProviderVoice>, String> {
+    get_json("/v1/voices/elevenlabs").await
+}
+
 /// Forgets one of the user's own voices; the daemon refuses while a Character made here speaks with it.
 pub async fn delete_own_voice(id: String) -> Result<(), String> {
     let response = reqwest::Client::new().delete(format!("{BASE}/v1/voices/{id}")).timeout(Duration::from_secs(10)).send().await.map_err(|error| error.to_string())?;

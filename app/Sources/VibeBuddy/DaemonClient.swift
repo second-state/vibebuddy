@@ -215,6 +215,11 @@ struct DaemonClient {
         return (answer.voice, Data(base64Encoded: answer.audio) ?? Data())
     }
 
+    /// The voices in the account of the user's own ElevenLabs key, its own first.
+    func elevenLabsVoices() async throws -> [ProviderVoice] {
+        try await get("/v1/voices/elevenlabs")
+    }
+
     /// Forgets one of the user's own voices; the daemon refuses while a Character made here speaks with it.
     func deleteOwnVoice(_ id: String) async throws {
         let (data, response) = try await URLSession.shared.data(for: request("/v1/voices/\(id)", method: "DELETE"))

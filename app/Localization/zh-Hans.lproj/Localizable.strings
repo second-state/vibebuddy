@@ -647,3 +647,6 @@
 "All done!" = "搞定了！";
 "Couldn't use that voice: %@" = "用不了这个声音：%@";
 "Couldn't remove the voice: %@" = "删不掉这个声音：%@";
+"Pick a voice…" = "选一个声音…";
+"Couldn't list the voices of your ElevenLabs key, so paste a voice id: %@" = "列不出你这个 ElevenLabs key 的声音，请粘贴 voice ID：%@";
+"%@ · stock" = "%@ · 自带";

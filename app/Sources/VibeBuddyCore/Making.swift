@@ -46,6 +46,18 @@ public struct CharacterVoice: Codable, Equatable, Identifiable, Sendable {
     }
 }
 
+/// A voice the user's own ElevenLabs key can speak, from `GET /v1/voices/elevenlabs`: picked rather than its id pasted.
+public struct ProviderVoice: Codable, Equatable, Sendable {
+    public var voice: String
+    public var name: String
+    /// `premade` for ElevenLabs' stock voices; `cloned`, `generated` or `professional` for the account's own.
+    public var category: String
+    public init(voice: String, name: String, category: String) { self.voice = voice; self.name = name; self.category = category }
+
+    /// As the menu lists it: the account's own by name, ElevenLabs' stock ones marked.
+    public var label: String { category == "premade" ? String(localized: "\(name) · stock") : name }
+}
+
 public struct CharacterLine: Codable, Equatable, Sendable {
     public var occasion: String
     public var text: String

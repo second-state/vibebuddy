@@ -152,6 +152,8 @@ enum Message {
     MakeOwnProvider(OwnProvider),
     MakeOwnVoice(String),
     MakeOwnName(String),
+    MakeOwnPick(making::ProviderVoice),
+    ElevenVoices(Result<Vec<making::ProviderVoice>, String>),
     MakeOwnTry,
     MakeOwnTried(Result<(making::Voice, Vec<u8>), String>),
     RemoveOwnVoice(String),
@@ -387,6 +389,8 @@ struct OwnVoiceForm {
     name: String,
     trying: bool,
     problem: Option<String>,
+    /// The voices of the own ElevenLabs key, to pick from, or why they couldn't be listed; None until asked.
+    listed: Option<Result<Vec<making::ProviderVoice>, String>>,
 }
 
 /// The providers a voice of the user's own can be in, for the form's picker.
@@ -1020,10 +1024,29 @@ impl App {
                 if let Some(form) = &mut self.make {
                     form.own = open.then(OwnVoiceForm::default);
                 }
+                // ElevenLabs lists the key's voices, so the id needn't be looked up; Volcano Engine can't with a key alone.
+                if open {
+                    return Task::perform(client::elevenlabs_voices(), Message::ElevenVoices);
+                }
             }
             Message::MakeOwnProvider(provider) => {
                 if let Some(own) = self.make.as_mut().and_then(|form| form.own.as_mut()) {
                     own.provider = provider;
+                    own.voice.clear();
+                    if provider == OwnProvider::ElevenLabs && !matches!(own.listed, Some(Ok(_))) {
+                        return Task::perform(client::elevenlabs_voices(), Message::ElevenVoices);
+                    }
+                }
+            }
+            Message::MakeOwnPick(picked) => {
+                if let Some(own) = self.make.as_mut().and_then(|form| form.own.as_mut()) {
+                    own.voice = picked.voice;
+                    own.name = picked.name;
+                }
+            }
+            Message::ElevenVoices(listed) => {
+                if let Some(own) = self.make.as_mut().and_then(|form| form.own.as_mut()) {
+                    own.listed = Some(listed);
                 }
             }
             Message::MakeOwnVoice(voice) => {

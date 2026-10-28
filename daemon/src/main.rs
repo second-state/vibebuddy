@@ -730,6 +730,7 @@ fn app(state: AppState) -> Router {
         .route("/v1/resident/anthropic-key", axum::routing::put(put_anthropic_key).delete(delete_anthropic_key))
         .route("/v1/voice-keys", axum::routing::put(put_voice_keys))
         .route("/v1/voices", get(get_voices).post(post_voice))
+        .route("/v1/voices/elevenlabs", get(get_elevenlabs_voices))
         .route("/v1/voices/{id}", axum::routing::delete(delete_voice))
         .route("/v1/characters", get(get_characters).post(post_character))
         .route("/v1/characters/presets/{id}/lines", get(get_preset_lines))
@@ -1819,6 +1820,21 @@ async fn post_voice(State(state): State<AppState>, Json(request): Json<OwnVoiceR
             let audio = base64::Engine::encode(&base64::engine::general_purpose::STANDARD, making::wav(&samples));
             return Json(OwnVoiceAnswer { voice, audio }).into_response();
         }
+        Ok(Err(making::OwnVoiceError::Invalid(message))) => (StatusCode::BAD_REQUEST, message),
+        Ok(Err(making::OwnVoiceError::Provider(message))) => (StatusCode::BAD_GATEWAY, message),
+        Ok(Err(error)) => (StatusCode::INTERNAL_SERVER_ERROR, format!("{error:?}")),
+        Err(error) => (StatusCode::INTERNAL_SERVER_ERROR, error.to_string()),
+    };
+    (status, Json(ApiResponse { accepted: false, message })).into_response()
+}
+
+/// The voices in the account of the user's own ElevenLabs key: `[{"voice", "name", "category"}]`. 400 without the
+/// key, 502 with what ElevenLabs answered otherwise.
+async fn get_elevenlabs_voices(State(state): State<AppState>) -> axum::response::Response {
+    use axum::response::IntoResponse;
+    let making = state.making.clone();
+    let (status, message) = match tokio::task::spawn_blocking(move || making.elevenlabs_voices()).await {
+        Ok(Ok(voices)) => return Json(voices).into_response(),
         Ok(Err(making::OwnVoiceError::Invalid(message))) => (StatusCode::BAD_REQUEST, message),
         Ok(Err(making::OwnVoiceError::Provider(message))) => (StatusCode::BAD_GATEWAY, message),
         Ok(Err(error)) => (StatusCode::INTERNAL_SERVER_ERROR, format!("{error:?}")),

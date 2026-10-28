@@ -149,6 +149,9 @@ struct KorekoreMakeSheet: View {
     @State private var ownName = ""
     @State private var trying = false
     @State private var ownProblem: String?
+    /// The voices of the own ElevenLabs key, to pick from; nil until listed, or when they couldn't be (`listProblem`).
+    @State private var elevenVoices: [ProviderVoice]?
+    @State private var listProblem: String?
 
     private var baseName: String { VoiceCatalogEntry.all.first { $0.id == base }?.name ?? base }
     private var chosenVoice: CharacterVoice? { model.characterVoice(voice) }
@@ -327,9 +330,23 @@ struct KorekoreMakeSheet: View {
             if addingOwn {
                 KNote(String(localized: "A voice you cloned or designed in your own ElevenLabs or Volcano Engine account. Paste its ID: VibeBuddy tries it with your own key by saying the first line, and keeps it for next time."))
                 HStack(spacing: 8) {
-                    KMenu(selection: ownProvider, options: [("elevenlabs", "ElevenLabs"), ("volc", String(localized: "Volcano Engine"))]) { ownProvider = $0 }
-                    KField(ownProvider == "volc" ? String(localized: "Speaker ID") : String(localized: "Voice ID"), text: $ownVoiceID)
+                    KMenu(selection: ownProvider, options: [("elevenlabs", "ElevenLabs"), ("volc", String(localized: "Volcano Engine"))]) {
+                        ownProvider = $0
+                        ownVoiceID = ""
+                    }
+                    // ElevenLabs lists the key's voices, so the id needn't be looked up; Volcano Engine can't with a key alone.
+                    if ownProvider == "elevenlabs", let elevenVoices, !elevenVoices.isEmpty {
+                        KMenu(selection: ownVoiceID, options: [("", String(localized: "Pick a voice…"))] + elevenVoices.map { ($0.voice, $0.label) }) { picked in
+                            ownVoiceID = picked
+                            if let voice = elevenVoices.first(where: { $0.voice == picked }) { ownName = voice.name }
+                        }
+                    } else {
+                        KField(ownProvider == "volc" ? String(localized: "Speaker ID") : String(localized: "Voice ID"), text: $ownVoiceID)
+                    }
                     KField(String(localized: "Name"), text: $ownName).frame(width: 140)
+                }
+                if ownProvider == "elevenlabs", hasKey, let listProblem {
+                    KNote(String(localized: "Couldn't list the voices of your ElevenLabs key, so paste a voice id: \(listProblem)"), color: Theme.Colors.waitText)
                 }
                 if !hasKey {
                     KNote(MakingReadiness.ownKeyOnly.explanation(provider: providerName), color: Theme.Colors.korePinkText)
@@ -351,6 +368,15 @@ struct KorekoreMakeSheet: View {
         }
         .padding(.vertical, 8)
         .padding(.horizontal, 12)
+        .task(id: "\(addingOwn) \(ownProvider) \(hasKey)") {
+            guard addingOwn, ownProvider == "elevenlabs", hasKey, elevenVoices == nil else { return }
+            do {
+                elevenVoices = try await model.client.elevenLabsVoices()
+                listProblem = nil
+            } catch {
+                listProblem = error.localizedDescription
+            }
+        }
     }
 
     private func tryOwnVoice() {

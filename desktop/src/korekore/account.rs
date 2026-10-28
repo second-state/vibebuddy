@@ -388,12 +388,24 @@ impl crate::App {
             note(tr("A voice you cloned or designed in your own ElevenLabs or Volcano Engine account. Paste its ID: VibeBuddy tries it with your own key by saying the first line, and keeps it for next time.", &[])),
             row![
                 picker(vec![crate::OwnProvider::ElevenLabs, crate::OwnProvider::Volc], Some(own.provider), Message::MakeOwnProvider),
-                field(&id_label, &own.voice).on_input(Message::MakeOwnVoice),
+                match (own.provider, &own.listed) {
+                    (crate::OwnProvider::ElevenLabs, Some(Ok(voices))) if !voices.is_empty() => {
+                        let picked = voices.iter().find(|voice| voice.voice == own.voice).cloned();
+                        picker(voices.clone(), picked, Message::MakeOwnPick)
+                    }
+                    _ => field(&id_label, &own.voice).on_input(Message::MakeOwnVoice).into(),
+                },
                 field(&tr("Name", &[]), &own.name).on_input(Message::MakeOwnName).width(160),
             ]
             .spacing(8)
             .align_y(Alignment::Center),
         ]
+        .push(match (own.provider, &own.listed) {
+            (crate::OwnProvider::ElevenLabs, Some(Err(why))) if has_key => Some(
+                text(tr("Couldn't list the voices of your ElevenLabs key, so paste a voice id: %@", &[why])).font(super::controls::regular()).size(13).color(theme::WAIT_TEXT),
+            ),
+            _ => None,
+        })
         .push((!has_key).then(|| text(making::Readiness::OwnKeyOnly.explanation(&own.provider.to_string())).font(super::controls::regular()).size(13).color(theme::KORE_PINK_TEXT)))
         .push(own.problem.clone().map(|problem| tag(problem, theme::KORE_PINK_TEXT)))
         .push(

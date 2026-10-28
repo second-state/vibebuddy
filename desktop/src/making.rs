@@ -48,6 +48,23 @@ pub fn sorted(voices: &[Voice], language: Option<&str>) -> Vec<Voice> {
     first
 }
 
+/// A voice the user's own ElevenLabs key can speak, from `GET /v1/voices/elevenlabs`: picked rather than its id pasted.
+#[derive(Clone, Debug, Default, Deserialize, PartialEq, Eq)]
+#[serde(default)]
+pub struct ProviderVoice {
+    pub voice: String,
+    pub name: String,
+    /// `premade` for ElevenLabs' stock voices; `cloned`, `generated` or `professional` for the account's own.
+    pub category: String,
+}
+
+impl std::fmt::Display for ProviderVoice {
+    /// As the menu lists it: the account's own by name, ElevenLabs' stock ones marked.
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        if self.category == "premade" { write!(f, "{}", tr("%@ · stock", &[&self.name])) } else { write!(f, "{}", self.name) }
+    }
+}
+
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
 pub struct Line {
     pub occasion: String,
@@ -310,6 +327,9 @@ mod tests {
         let voices: Vec<Voice> = serde_json::from_str(r#"[{"id":"own-1a2b3c4d","provider":"volc","voice":"S_me","language":"","gender":"","name":"Me","own":true},{"id":"ada","provider":"elevenlabs","voice":"t","language":"en","gender":"female","name":"Ada"}]"#).unwrap();
         assert!(voices[0].own && !voices[1].own, "a voice without own is ours");
         assert_eq!(sorted(&voices, None).iter().map(|voice| voice.id.as_str()).collect::<Vec<_>>(), ["ada", "own-1a2b3c4d"]);
+        let library: Vec<ProviderVoice> = serde_json::from_str(r#"[{"voice":"c1","name":"me","category":"cloned"},{"voice":"p1","name":"Rachel","category":"premade"}]"#).unwrap();
+        assert_eq!(library[0].to_string(), "me");
+        assert!(library[1].to_string().starts_with("Rachel"), "a stock voice keeps its name");
     }
 
     #[test]
