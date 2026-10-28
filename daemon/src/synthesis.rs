@@ -152,14 +152,16 @@ impl Synthesis {
                 ("ElevenLabs", request.header("Content-Type", "application/json").send(json!({"text": text, "model_id": ELEVENLABS_MODEL}).to_string().as_bytes()))
             }
             Provider::Volc => {
+                // A speaker of the user's own carries the resource it answered on: `<speaker>#<resource>`.
+                let (speaker, resource) = voice.split_once('#').unwrap_or((voice, VOLC_RESOURCE_ID));
                 let body = json!({
                     "user": {"uid": "vibebuddy"},
-                    "req_params": {"text": text, "speaker": voice, "audio_params": {"format": "mp3", "sample_rate": 24_000, "bit_rate": 48_000}},
+                    "req_params": {"text": text, "speaker": speaker, "audio_params": {"format": "mp3", "sample_rate": 24_000, "bit_rate": 48_000}},
                 });
                 let request = agent
                     .post(&self.volc_url)
                     .header("X-Api-Key", key)
-                    .header("X-Api-Resource-Id", VOLC_RESOURCE_ID)
+                    .header("X-Api-Resource-Id", resource)
                     .header("X-Api-Request-Id", &request_id()?)
                     .header("Content-Type", "application/json");
                 ("Volcano Engine", request.send(body.to_string().as_bytes()))

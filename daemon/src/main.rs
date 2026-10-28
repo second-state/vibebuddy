@@ -15,6 +15,7 @@ mod resident_claude;
 mod link_alert;
 mod making;
 mod occasions;
+mod own_voices;
 mod persona;
 mod rom_flasher;
 mod screenshot;
@@ -159,7 +160,7 @@ impl AppState {
             voice: Arc::new(voice::Voice::new(None, None)),
             noise_seen: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             written: Arc::default(),
-            making: Arc::new(making::Maker::new(None, None, account.clone(), voice_keys.clone())),
+            making: Arc::new(making::Maker::new(None, None, account.clone(), voice_keys.clone(), Arc::new(own_voices::OwnVoices::new(None)))),
             account,
             voice_keys,
         }
@@ -314,11 +315,14 @@ async fn main() {
     if let Some(made) = &made {
         let _ = making::DIR.set(made.clone());
     }
+    let own_voices = Arc::new(own_voices::OwnVoices::new(config::config_dir().as_deref()));
+    let _ = making::OWN.set((own_voices.clone(), state.voice_keys.clone()));
     state.making = Arc::new(making::Maker::new(
         made,
         synthesis::service_base(env::var(synthesis::BASE_URL_VARIABLE).ok(), relay::release()),
         state.account.clone(),
         state.voice_keys.clone(),
+        own_voices,
     ));
     state.voice = Arc::new(voice::Voice::new(speech::from_env(session), state.resident.clone()).with_synthesizer(Some(synthesizer)));
     if let Some(resident) = state.resident.clone() {
@@ -725,7 +729,8 @@ fn app(state: AppState) -> Router {
         .route("/v1/resident/brain", axum::routing::put(put_resident_brain))
         .route("/v1/resident/anthropic-key", axum::routing::put(put_anthropic_key).delete(delete_anthropic_key))
         .route("/v1/voice-keys", axum::routing::put(put_voice_keys))
-        .route("/v1/voices", get(get_voices))
+        .route("/v1/voices", get(get_voices).post(post_voice))
+        .route("/v1/voices/{id}", axum::routing::delete(delete_voice))
         .route("/v1/characters", get(get_characters).post(post_character))
         .route("/v1/characters/presets/{id}/lines", get(get_preset_lines))
         .route("/v1/characters/{id}", axum::routing::delete(delete_character))
@@ -1781,9 +1786,56 @@ async fn put_voice_keys(State(state): State<AppState>, Json(request): Json<serde
     Json(state.voice_keys.status()).into_response()
 }
 
-/// The voices a made Character can speak with: `characters/voices.tsv`.
-async fn get_voices() -> Json<Vec<making::Voice>> {
-    Json(making::voices())
+/// The voices a made Character can speak with: `characters/voices.tsv`, then the user's own.
+async fn get_voices(State(state): State<AppState>) -> Json<Vec<making::Voice>> {
+    Json(state.making.voices())
+}
+
+#[derive(serde::Deserialize)]
+struct OwnVoiceRequest {
+    provider: String,
+    voice: String,
+    name: String,
+    /// What to say to try it.
+    text: String,
+}
+
+#[derive(Serialize)]
+struct OwnVoiceAnswer {
+    voice: making::Voice,
+    /// What was said, as a 16 kHz WAV file, base64.
+    audio: String,
+}
+
+/// Tries a voice in the user's own account with their own key and keeps it when the provider speaks it: the voice and
+/// the line it said. 400 for a request that can't be tried, 502 when the provider said no.
+async fn post_voice(State(state): State<AppState>, Json(request): Json<OwnVoiceRequest>) -> axum::response::Response {
+    use axum::response::IntoResponse;
+    let making = state.making.clone();
+    let tried = tokio::task::spawn_blocking(move || making.add_own(&request.provider, &request.voice, &request.name, &request.text)).await;
+    let (status, message) = match tried {
+        Ok(Ok((voice, samples))) => {
+            state.notify_status();
+            let audio = base64::Engine::encode(&base64::engine::general_purpose::STANDARD, making::wav(&samples));
+            return Json(OwnVoiceAnswer { voice, audio }).into_response();
+        }
+        Ok(Err(making::OwnVoiceError::Invalid(message))) => (StatusCode::BAD_REQUEST, message),
+        Ok(Err(making::OwnVoiceError::Provider(message))) => (StatusCode::BAD_GATEWAY, message),
+        Ok(Err(error)) => (StatusCode::INTERNAL_SERVER_ERROR, format!("{error:?}")),
+        Err(error) => (StatusCode::INTERNAL_SERVER_ERROR, error.to_string()),
+    };
+    (status, Json(ApiResponse { accepted: false, message })).into_response()
+}
+
+/// Forgets one of the user's own voices: 404 for one not kept, 409 while a Character made here speaks with it.
+async fn delete_voice(State(state): State<AppState>, axum::extract::Path(id): axum::extract::Path<String>) -> (StatusCode, Json<ApiResponse>) {
+    let (status, message) = match state.making.remove_own(&id) {
+        Ok(()) => return (StatusCode::OK, Json(ApiResponse { accepted: true, message: format!("forgot {id}") })),
+        Err(making::OwnVoiceError::NotFound) => (StatusCode::NOT_FOUND, format!("{id} is not one of your voices")),
+        Err(making::OwnVoiceError::InUse(names)) => (StatusCode::CONFLICT, format!("{} speak with it", names.join(", "))),
+        Err(error) => (StatusCode::INTERNAL_SERVER_ERROR, format!("{error:?}")),
+    };
+    (status, Json(ApiResponse { accepted: false, message }))
 }
 
 /// The Characters made here, for the App to list beside the presets.
@@ -2285,10 +2337,11 @@ mod tests {
 
     #[tokio::test]
     async fn voices_are_listed_and_only_a_character_in_one_of_them_starts() {
-        assert!(get_voices().await.0.iter().any(|voice| voice.id == "wanwanxiaohe" && voice.provider == "volc"));
         let dir = voice_keys::tests::scratch("making-main");
         let mut state = test_state(Arc::new(RecordingTransport::default()));
-        state.making = Arc::new(making::Maker::new(Some(dir.clone()), None, state.account.clone(), state.voice_keys.clone()));
+        state.making = Arc::new(making::Maker::new(Some(dir.clone()), None, state.account.clone(), state.voice_keys.clone(), Arc::new(own_voices::OwnVoices::new(Some(&dir)))));
+        let voices = get_voices(State(state.clone())).await.0;
+        assert!(voices.iter().any(|voice| voice.id == "wanwanxiaohe" && voice.provider == "volc" && !voice.own));
         let post = |voice: &str| {
             let body = serde_json::json!({"name": "Owl", "base": "ada", "voice": voice, "lines": [{"occasion": "done", "text": "Done."}]});
             post_character(State(state.clone()), Json(serde_json::from_value(body).unwrap()))
@@ -2301,10 +2354,25 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn a_voice_of_ones_own_is_refused_without_a_key_and_an_unknown_one_isnt_forgotten() {
+        let dir = voice_keys::tests::scratch("own-voice-main");
+        let mut state = test_state(Arc::new(RecordingTransport::default()));
+        state.making = Arc::new(making::Maker::new(Some(dir.clone()), None, state.account.clone(), state.voice_keys.clone(), Arc::new(own_voices::OwnVoices::new(Some(&dir)))));
+        let post = |provider: &str| {
+            let body = serde_json::json!({"provider": provider, "voice": "S_me", "name": "Me", "text": "Hi."});
+            post_voice(State(state.clone()), Json(serde_json::from_value(body).unwrap()))
+        };
+        assert_eq!(post("volc").await.status(), StatusCode::BAD_REQUEST, "no own key");
+        assert_eq!(post("openai").await.status(), StatusCode::BAD_REQUEST);
+        assert_eq!(delete_voice(State(state.clone()), axum::extract::Path("own-00000000".to_owned())).await.0, StatusCode::NOT_FOUND);
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[tokio::test]
     async fn a_made_character_is_deleted_through_the_api_but_not_while_it_is_made() {
         let dir = voice_keys::tests::scratch("making-delete-main");
         let mut state = test_state(Arc::new(RecordingTransport::default()));
-        state.making = Arc::new(making::Maker::new(Some(dir.clone()), None, state.account.clone(), state.voice_keys.clone()));
+        state.making = Arc::new(making::Maker::new(Some(dir.clone()), None, state.account.clone(), state.voice_keys.clone(), Arc::new(own_voices::OwnVoices::new(Some(&dir)))));
         let body = serde_json::json!({"name": "Owl", "base": "ada", "voice": "ada", "lines": [{"occasion": "done", "text": "Done."}]});
         let started = post_character(State(state.clone()), Json(serde_json::from_value(body.clone()).unwrap())).await;
         let bytes = http_body_util::BodyExt::collect(started.into_body()).await.unwrap().to_bytes();
