@@ -20,7 +20,7 @@ struct KorekoreMadeCard: View {
                 ZStack(alignment: .bottom) {
                     Color.clear
                     if let frame = model.look(of: made).flatMap(LookBuilder.frames(of:))?.first {
-                        Image(nsImage: LookImages.image(frame, scale: 1)).interpolation(.none).padding(.bottom, 2)
+                        Image(nsImage: LookImages.figure(frame)).interpolation(.none).padding(.bottom, 2)
                     }
                 }
                 .frame(maxWidth: .infinity)

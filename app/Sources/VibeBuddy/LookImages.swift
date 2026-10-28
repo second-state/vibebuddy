@@ -67,6 +67,21 @@ enum LookImages {
         image.addRepresentation(rep)
         return image
     }
+
+    /// A look frame as a Character card shows it: 1.5 points a look pixel (72 × 96, the design's figure on a 104 pt
+    /// stage), drawn 3 pixels a look pixel so a Retina screen keeps every look pixel square.
+    static func figure(_ frame: RGBAImage) -> NSImage {
+        let image = image(frame, scale: 3)
+        image.size = NSSize(width: Double(frame.width) * 1.5, height: Double(frame.height) * 1.5)
+        return image
+    }
+
+    /// The robot's face at the same 1.5 points a pixel, drawn unsmoothed.
+    static func figure(_ face: NSImage) -> NSImage {
+        let image = face.copy() as! NSImage
+        image.size = NSSize(width: face.size.width * 1.5, height: face.size.height * 1.5)
+        return image
+    }
 }
 
 struct LookProblem: Error {

@@ -140,7 +140,7 @@ struct KorekoreCharacterPage: View {
         card(name: "VibeBuddy", summary: String(localized: "The original robot, drawn by the box itself"),
              inUse: model.wearsRobot && !model.robotBorrowsVoice, previewID: AppModel.robotID, use: model.writeRobot) {
             if let face = Resources.robotFace {
-                Image(nsImage: face).interpolation(.none).padding(.bottom, 8)
+                Image(nsImage: LookImages.figure(face)).interpolation(.none).padding(.bottom, 8)
             }
         }
     }
@@ -149,7 +149,7 @@ struct KorekoreCharacterPage: View {
         card(name: entry.name, summary: entry.summary, inUse: model.status?.device.voice == entry.id,
              previewID: entry.id, use: { model.writeVoice(entry.id) }) {
             if let frame = Resources.voicePack(entry.id)?.look.flatMap(LookBuilder.frames(of:))?.first {
-                Image(nsImage: LookImages.image(frame, scale: 1)).interpolation(.none).padding(.bottom, 2)
+                Image(nsImage: LookImages.figure(frame)).interpolation(.none).padding(.bottom, 2)
             }
         }
     }

@@ -163,7 +163,7 @@ impl crate::App {
         let voice = self.character_voices.iter().find(|voice| voice.id == made.voice).map_or_else(|| made.voice.clone(), |voice| voice.name.clone());
         let detail = if made.complete { tr("Made from %@ · voice: %@", &[&base, &voice]) } else { tr("Not finished · made from %@ · voice: %@", &[&base, &voice]) };
         let face: Element<'_, Message> = match self.made_faces.iter().find(|(id, _)| *id == made.id) {
-            Some((_, face)) => image(face.clone()).filter_method(image::FilterMethod::Nearest).into(),
+            Some((_, face)) => super::pages::figure(face.clone()).into(),
             None => Space::new().into(),
         };
         let delete: Element<'_, Message> = if self.confirm_delete_made.as_deref() == Some(made.id.as_str()) {

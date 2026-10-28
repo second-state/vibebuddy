@@ -207,7 +207,9 @@ impl crate::App {
                 .into()
         };
         let stage_content: Element<'_, Message> = match face {
-            Some(face) => image(face).filter_method(image::FilterMethod::Nearest).into(),
+            // The robot's face (55 × 54) at the same 1.5 × as a look.
+            Some(face) if preview == Some(ROBOT) => image(face).filter_method(image::FilterMethod::Nearest).width(82.5).height(81).into(),
+            Some(face) => figure(face).into(),
             None => Space::new().into(),
         };
         let content = column![
@@ -1244,4 +1246,10 @@ fn buddy(words: &str) -> Element<'_, Message> {
     .spacing(8)
     .align_y(Alignment::End)
     .into()
+}
+
+/// A look frame as a Character card shows it: 1.5 × (72 × 96, the design's figure on a 104 px stage), each look pixel
+/// three screen pixels on a 2× display.
+pub(super) fn figure(face: image::Handle) -> iced::widget::Image {
+    image(face).filter_method(image::FilterMethod::Nearest).width(72).height(96)
 }
