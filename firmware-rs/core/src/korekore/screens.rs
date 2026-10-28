@@ -82,6 +82,8 @@ fn card_rect(slot: usize) -> Rect {
 }
 
 /// Kore in the side panel on duty, at 4×.
+/// An agent's mark on a task card.
+const ICON: i32 = 28;
 const BUDDY: Rect = Rect { x: 8, y: 51, width: 80, height: 72 };
 /// Where a Character's look stands in the side panel, at 2×: the bottom of its frame, just above the state word.
 const LOOK_PANEL_BOTTOM: i32 = 196;
@@ -485,10 +487,11 @@ impl Display {
         chip(canvas, &TYPE_9, pill_x, rect.y + (rect.height - TYPE_9.line()) / 2, pill_word, BOX_GROUND, pill_fill);
         let mut text_x = rect.x + padding;
         let mut title = &task.title[..];
-        // The agents' own marks, as the robot screens draw them, at 2×: easier to tell apart than the design's tiles.
+        // The agents' own marks, as the robot screens draw them, at 28 px (1.75×): easier to tell apart than the
+        // design's tiles, and at 2× they crowded the title.
         if let Some(icon) = task.icon {
-            icon.draw_scaled(canvas, text_x, rect.y + (rect.height - 32) / 2, 2);
-            text_x += 32 + 7;
+            icon.draw_sized(canvas, text_x, rect.y + (rect.height - ICON) / 2, ICON);
+            text_x += ICON + 7;
             title = title.strip_prefix(icon.prefix()).unwrap_or(title);
         }
         let text_width = pill_x - 7 - text_x;
