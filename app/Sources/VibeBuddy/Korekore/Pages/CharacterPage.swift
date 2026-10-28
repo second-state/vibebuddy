@@ -137,7 +137,7 @@ struct KorekoreCharacterPage: View {
     }
 
     private var robotCard: some View {
-        card(name: "VibeBuddy", summary: String(localized: "The original robot, drawn by the box itself"),
+        card(name: "VibeBuddy", summary: String(localized: "The original robot"),
              inUse: model.wearsRobot && !model.robotBorrowsVoice, previewID: AppModel.robotID, use: model.writeRobot) {
             if let face = Resources.robotFace {
                 Image(nsImage: LookImages.figure(face)).interpolation(.none).padding(.bottom, 8)

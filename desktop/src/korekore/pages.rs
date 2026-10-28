@@ -107,7 +107,7 @@ impl crate::App {
         let mut cards: Vec<Element<'_, Message>> = vec![self.kore_card()];
         cards.push(self.character_card(
             "VibeBuddy".to_owned(),
-            tr("The original robot, drawn by the box itself", &[]),
+            tr("The original robot", &[]),
             self.robot_face.clone(),
             robot_in_use,
             Some(ROBOT),
