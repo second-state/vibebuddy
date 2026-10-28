@@ -52,6 +52,15 @@ The daemon sends the token as `Authorization: Bearer <token>` and keeps it in `c
 
 Both calls need `Authorization: Bearer <session>` and answer 401 without a valid one. Only daemons call them: the box's audio reaches the daemon over the link, however the box is linked (ADR-0018).
 
+### The voice key
+
+```text
+POST /v1/account/voice-key
+Authorization: Bearer <session>
+```
+
+It answers `{"key":"gw-…","url":"https://…","model":"oraki/asr"}`. The daemon recognizes voice commands with it at Token Station directly (ADR-0020): `POST {url}/v1/audio/transcriptions` with `Authorization: Bearer {key}` and a multipart body of `file` (a WAV with a filename such as `turn.wav`), `model` and an optional `language`; the answer is `{"text":"…"}`. The key is allowed only `model`. The service keeps no copy, so each call issues a new key and revokes the one before it: the daemon keeps the key in `config_dir()`, mode 0600, and asks again only without one or when Token Station answers `revoked_api_key`, `invalid_api_key` or `expired_api_key`. The credit is the account's, not the key's, so a new key gives no new credit. The first call gives the account a one-time gift; on the Paid plan, reading the account adds credit for each billing period. When the credit is used up, Token Station answers `account_credit_exhausted` (402 or 429, by its build; go by `error.code`). The call gets 404 when the service has no Token Station, and 502 `{"reason":"unavailable"}` when Token Station fails.
+
 ### Recognizing a voice command
 
 ```text
