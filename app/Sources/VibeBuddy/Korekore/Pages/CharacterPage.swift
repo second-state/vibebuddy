@@ -255,6 +255,8 @@ struct KorekoreCustomLook: View {
     @State private var problem: String?
 
     private var inUse: Bool { model.status?.device.voice == CustomCharacterCard.id }
+    /// The box already wears this look with this lender, so writing it again would only redo it.
+    private var onTheBox: Bool { inUse && model.savedCustomCharacter.map { $0.look == look && $0.lender == lender } == true }
 
     var body: some View {
         KCard(stroke: Theme.Stroke.bold) {
@@ -295,7 +297,7 @@ struct KorekoreCustomLook: View {
                         }
                         Spacer()
                         Button(String(localized: "Use this look"), action: use).kButton(.pink)
-                            .disabled(model.operationRunning || !(model.status?.device.connected ?? false))
+                            .disabled(model.operationRunning || !(model.status?.device.connected ?? false) || onTheBox)
                     }
                 }
                 if let problem {

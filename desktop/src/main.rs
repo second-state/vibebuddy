@@ -274,6 +274,8 @@ struct App {
     characters: custom::Settings,
     /// The user's own Character on the card: its look, its four frames to show, and who lends it voice and lines.
     custom_look: Option<(Vec<u8>, Vec<image::Handle>)>,
+    /// `custom_look` is the look last written (with `characters.custom_lender`), not one just chosen.
+    custom_look_written: bool,
     lender: Option<Lender>,
     custom_problem: Option<String>,
     /// The robot's face for its card.
@@ -396,6 +398,7 @@ impl App {
             faces: Vec::new(),
             characters: custom::Settings::load(),
             custom_look: None,
+            custom_look_written: false,
             lender: None,
             custom_problem: None,
             robot_face: None,
@@ -458,6 +461,7 @@ impl App {
         app.custom_look = custom::custom_look_file()
             .and_then(|path| std::fs::read(path).ok())
             .and_then(|look| character::look_frames(&look).map(|frames| (look, frames.iter().map(|frame| handle(frame, 2)).collect())));
+        app.custom_look_written = app.custom_look.is_some();
         // Debug builds only: open the korekore UI on a given section or first-run step, for checking it on a desktop
         // without a pointer (VIBEBUDDY_KOREKORE_SECTION=device, VIBEBUDDY_KOREKORE_GUIDE=1).
         #[cfg(debug_assertions)]
@@ -868,6 +872,7 @@ impl App {
                     Some(look) => {
                         let frames = character::look_frames(&look).unwrap_or_default();
                         self.custom_look = Some((look, frames.iter().map(|frame| handle(frame, 2)).collect()));
+                        self.custom_look_written = false;
                         self.custom_problem = None;
                     }
                     None => self.custom_problem = Some(tr("No figure found: use a plain white or transparent background.", &[])),
@@ -892,6 +897,7 @@ impl App {
                 }
                 self.characters.custom_lender = Some(lender.id.to_owned());
                 self.characters.save();
+                self.custom_look_written = true;
                 let form = assets::language_of(lender.id).and_then(|language| self.characters.address(language)).map(str::to_owned);
                 let write = async move {
                     let pack = assets::read_character(lender.id, form.as_deref()).await?.with_look(look, CUSTOM);
@@ -993,6 +999,7 @@ impl App {
                 let Some((look, _)) = form.look else { return Task::none() };
                 let frames = character::look_frames(&look).unwrap_or_default();
                 self.custom_look = Some((look, frames.iter().map(|frame| handle(frame, 2)).collect()));
+                self.custom_look_written = false;
                 self.custom_problem = None;
                 self.lender = Some(form.base);
                 return Task::done(Message::UseCustom);
@@ -1073,6 +1080,7 @@ impl App {
                     let _ = std::fs::remove_file(path);
                 }
                 self.custom_look = None;
+                self.custom_look_written = false;
                 self.custom_problem = None;
                 let lender = self.characters.custom_lender.take().and_then(|id| self.voices.iter().find(|voice| voice.id == id).map(|voice| voice.id));
                 self.characters.save();

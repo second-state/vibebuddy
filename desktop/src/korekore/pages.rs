@@ -226,6 +226,8 @@ impl crate::App {
         let online = self.online();
         let busy = self.busy();
         let lenders: Vec<Lender> = self.voices.iter().map(Lender::of).collect();
+        // The box already wears this look with this lender, so writing it again would only redo it.
+        let on_the_box = in_use && self.custom_look_written && self.characters.custom_lender.as_deref() == self.lender.map(|lender| lender.id);
         let frames = self.custom_look.as_ref().map(|(_, frames)| {
             container(row(frames.iter().map(|frame| image(frame.clone()).filter_method(image::FilterMethod::Nearest).into())).spacing(14))
                 .center_x(Length::Fill)
@@ -243,7 +245,7 @@ impl crate::App {
                 row![]
                     .push((self.characters.custom_lender.is_some() && !self.confirm_delete_custom).then(|| pill(tr("Delete…", &[]), Fill::Paper, Some(Message::AskDeleteCustom(true)))))
                     .push(Space::new().width(Length::Fill))
-                    .push(pill(tr("Use this look", &[]), Fill::Pink, (online && !busy && self.lender.is_some()).then_some(Message::UseCustom))),
+                    .push(pill(tr("Use this look", &[]), Fill::Pink, (online && !busy && self.lender.is_some() && !on_the_box).then_some(Message::UseCustom))),
             ]
             .spacing(8)
         });
