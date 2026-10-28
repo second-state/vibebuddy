@@ -87,22 +87,20 @@ impl crate::App {
         .spacing(14)
         .align_y(Alignment::Center)
         .padding(Padding::from([10, 14]));
-        let address = row![text(tr("What the buddy calls you", &[])).font(semibold()).size(13).color(theme::INK).width(Length::Fill)]
-            .extend(assets::Language::ALL.map(|language| {
-                let options: Vec<AddressChoice> = std::iter::once(AddressChoice { form: None, language })
-                    .chain(
-                        assets::FORMS_OF_ADDRESS
-                            .iter()
-                            .filter(|form| form.language == language)
-                            .map(|form| AddressChoice { form: Some(form.id), language }),
-                    )
-                    .collect();
-                let picked = options.iter().copied().find(|choice| choice.form == self.characters.address(language));
-                picker(options, picked, move |choice: AddressChoice| Message::PickAddress(language, choice.form))
-            }))
+        // Only the language the box's Character speaks: the robot says no one's name.
+        let address = self.box_language().map(|language| {
+            let options: Vec<AddressChoice> = std::iter::once(AddressChoice { form: None, language })
+                .chain(assets::FORMS_OF_ADDRESS.iter().filter(|form| form.language == language).map(|form| AddressChoice { form: Some(form.id), language }))
+                .collect();
+            let picked = options.iter().copied().find(|choice| choice.form == self.characters.address(language));
+            row![
+                text(tr("What the buddy calls you", &[])).font(semibold()).size(13).color(theme::INK).width(Length::Fill),
+                picker(options, picked, move |choice: AddressChoice| Message::PickAddress(language, choice.form)),
+            ]
             .spacing(10)
             .align_y(Alignment::Center)
-            .padding(Padding::from([8, 14]));
+            .padding(Padding::from([8, 14]))
+        });
         let current = self.status.as_ref().and_then(|status| status.device.voice.clone());
         let wears_robot = matches!(current.as_deref(), Some(ROBOT | BUILTIN));
         let robot_in_use = wears_robot && self.characters.robot_lender.is_none();
@@ -164,7 +162,7 @@ impl crate::App {
         });
         let custom = (self.custom_look.is_some() || self.custom_problem.is_some() || current.as_deref() == Some(CUSTOM))
             .then(|| self.custom_look_card(current.as_deref() == Some(CUSTOM)));
-        let content = column![rows([volume_row.into(), address.into()])]
+        let content = column![rows(std::iter::once(volume_row.into()).chain(address.map(Into::into)))]
             .push(progress)
             .push(job.and_then(|job| self.kk_making_row(job)))
             .push(grid)

@@ -270,6 +270,16 @@ final class AppModel: ObservableObject {
         run { try await self.client.writeVoicePack(self.addressed(pack, id: id).data, address: address) }
     }
 
+    /// The language of the Character the box wears, the one whose form of address it says; nil for the robot, an
+    /// unknown Character or no box.
+    var boxLanguage: VoiceLanguage? {
+        guard let current = status?.device.voice, current != "builtin" else { return nil }
+        if let language = VoiceCatalogEntry.language(ofVoice: current) { return language }
+        if let made = madeCharacters.first(where: { $0.id == current }), made.complete { return language(of: made) }
+        if current == "custom", let saved = savedCustomCharacter { return VoiceCatalogEntry.language(ofVoice: saved.lender) }
+        return nil
+    }
+
     /// The form of address picked for a language; nil for none.
     func formOfAddress(_ language: VoiceLanguage) -> String? {
         UserDefaults.standard.string(forKey: "address.\(language.rawValue)")

@@ -220,20 +220,21 @@ struct KorekoreVolumeCard: View {
             .padding(.vertical, 10)
             .padding(.horizontal, 14)
             .disabled(!connected || model.operationRunning)
-            KDivider()
-            HStack(spacing: 10) {
-                Text("What the buddy calls you").font(.rounded(13, weight: 700))
-                Spacer()
-                ForEach([VoiceLanguage.zh, .en], id: \.self) { language in
+            // Only the language the box's Character speaks: the robot says no one's name.
+            if let language = model.boxLanguage {
+                KDivider()
+                HStack(spacing: 10) {
+                    Text("What the buddy calls you").font(.rounded(13, weight: 700))
+                    Spacer()
                     KMenu(selection: model.formOfAddress(language) ?? "",
                           options: [("", String(localized: "Nothing"))] + FormOfAddress.all.filter { $0.language == language }.map { ($0.id, $0.words) }) {
                         model.setFormOfAddress($0.isEmpty ? nil : $0, for: language)
                     }
                     .disabled(model.operationRunning)
                 }
+                .padding(.vertical, 8)
+                .padding(.horizontal, 14)
             }
-            .padding(.vertical, 8)
-            .padding(.horizontal, 14)
         }
         .onAppear(perform: sync)
         .onChange(of: model.status?.device.volume) { sync() }

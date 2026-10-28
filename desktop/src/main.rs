@@ -1305,6 +1305,22 @@ impl App {
         }
     }
 
+    /// The language of the Character the box wears, the one whose form of address it says; None for the robot, an
+    /// unknown Character or no box.
+    fn box_language(&self) -> Option<assets::Language> {
+        let current = self.status.as_ref()?.device.voice.as_deref()?;
+        if let Some(language) = assets::language_of(current) {
+            return Some(language);
+        }
+        if let Some(made) = self.made.iter().find(|made| made.complete && made.id == current) {
+            return self.made_language(made);
+        }
+        if current == CUSTOM {
+            return self.characters.custom_lender.as_deref().and_then(assets::language_of);
+        }
+        None
+    }
+
     fn refresh_tray(&self) -> Task<Message> {
         #[cfg(target_os = "linux")]
         if let Some(TrayHandle(handle)) = self.tray.clone() {
