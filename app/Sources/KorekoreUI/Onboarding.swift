@@ -115,8 +115,8 @@ public enum KorekoreAlert {
     public static func run(title: String, message: String?, buttons: [String], checkbox: Checkbox? = nil,
                            warning: Bool = false, facts: [(String, String)] = []) -> (button: Int, checked: Bool) {
         let state = AlertState(checked: checkbox?.isOn ?? false)
-        let panel = NSPanel(contentRect: NSRect(x: 0, y: 0, width: 460, height: 200), styleMask: [.borderless],
-                            backing: .buffered, defer: false)
+        let panel = KeyPanel(contentRect: NSRect(x: 0, y: 0, width: 460, height: 200), styleMask: [.borderless],
+                             backing: .buffered, defer: false)
         panel.isOpaque = false
         panel.backgroundColor = .clear
         panel.hasShadow = false
@@ -142,6 +142,11 @@ public enum KorekoreAlert {
                                warning: Bool = false, facts: [(String, String)] = []) -> some View {
         AlertView(title: title, message: message, buttons: buttons, checkboxLabel: checkbox?.label, warning: warning, facts: facts,
                   state: AlertState(checked: checkbox?.isOn ?? false)) { _ in }
+    }
+
+    /// A borderless panel can't become key by default, and then the modal session drops every click and key press.
+    final class KeyPanel: NSPanel {
+        override var canBecomeKey: Bool { true }
     }
 
     final class AlertState: ObservableObject {
