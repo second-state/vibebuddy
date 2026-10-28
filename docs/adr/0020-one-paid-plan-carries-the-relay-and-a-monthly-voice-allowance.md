@@ -20,7 +20,7 @@ The Relay and our voices cost us money to run, and users now want to make their 
 - **Keeping users' keys on our server.** We would hold other people's secrets. Their audio would also be converted in our Worker, which is at the Workers Free CPU limit (vibebuddy-cloud#11).
 - **A free Relay, with only voice paid.** USB and the local network already give the full product. Reaching the box from another network is the clearest thing to pay for. ADR-0018 rejected a Relay that needs sign-in because 0.5.0 users had it without an account. The Relay is not released yet (2026-10-24), so that reason no longer holds.
 - **Payment inside the App.** Card details would pass through our code. The website already takes payments with Stripe.
-- **Cloning the user's own voice.** This needs proof of consent and protection against copying other people's voices. Deferred.
+- **Cloning the user's own voice.** This needs proof of consent and protection against copying other people's voices. Deferred. Since 2026-10-28 a made Character can speak in a voice the user cloned or designed in their own ElevenLabs or Volcano Engine account, through their own key ([characters.md](../characters.md#your-own-voice)): the provider handles consent there, and we keep only the voice's id.
 - **A language model writes lines from a persona.** This would bring a second kind of model into the App and break ADR-0007's rule that lines are reviewed before anyone hears them.
 
 ## Consequences
