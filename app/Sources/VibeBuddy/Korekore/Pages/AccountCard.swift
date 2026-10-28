@@ -140,12 +140,13 @@ struct KorekoreAccountCard: View {
     }
 
     private func confirmDelete() {
-        let answer = KorekoreAlert.run(title: String(localized: "Delete your VibeBuddy account?"),
-                                       message: String(localized: "This deletes the account and everything kept about it, and signs out on every computer. It can't be undone."),
-                                       buttons: [String(localized: "Delete account"), String(localized: "Cancel")], warning: true)
-        guard answer.button == 0 else { return }
-        Task {
-            do { try await model.client.deleteAccount() } catch { model.lastError = String(localized: "Couldn't delete the account: \(error.localizedDescription)") }
+        KorekoreAlert.ask(title: String(localized: "Delete your VibeBuddy account?"),
+                          message: String(localized: "This deletes the account and everything kept about it, and signs out on every computer. It can't be undone."),
+                          buttons: [String(localized: "Delete account"), String(localized: "Cancel")], warning: true) { [model] answer in
+            guard answer.button == 0 else { return }
+            Task {
+                do { try await model.client.deleteAccount() } catch { model.lastError = String(localized: "Couldn't delete the account: \(error.localizedDescription)") }
+            }
         }
     }
 }

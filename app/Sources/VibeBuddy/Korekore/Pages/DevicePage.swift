@@ -343,12 +343,13 @@ struct KorekoreDevicePage: View {
         }
         let current = model.boxFirmware ?? String(localized: "unknown")
         let offered = Firmware.label(version: package.version, build: package.build) ?? package.build
-        let answer = KorekoreAlert.run(
+        KorekoreAlert.ask(
             title: String(localized: "Flash this firmware?"),
             message: String(localized: "The box restarts once; its voice pack and today's stats are kept. Over the UART bridge this takes a few minutes."),
             buttons: [String(localized: "Flash"), String(localized: "Cancel")],
-            facts: [(String(localized: "Firmware package"), offered), (String(localized: "Box now"), current)])
-        if answer.button == 0 { model.flashFirmware(package) }
+            facts: [(String(localized: "Firmware package"), offered), (String(localized: "Box now"), current)]) { [model] answer in
+            if answer.button == 0 { model.flashFirmware(package) }
+        }
     }
 }
 

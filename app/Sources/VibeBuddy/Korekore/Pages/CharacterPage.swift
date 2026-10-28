@@ -328,14 +328,15 @@ struct KorekoreCustomLook: View {
 
     private func confirmDelete() {
         let lenderName = VoiceCatalogEntry.all.first { $0.id == model.savedCustomCharacter?.lender }?.name ?? lender
-        let answer = KorekoreAlert.run(title: String(localized: "Delete your own character? This can't be undone."),
-                                       message: inUse ? String(localized: "The box goes back to \(lenderName).") : nil,
-                                       buttons: [String(localized: "Delete"), String(localized: "Cancel")], warning: true)
-        guard answer.button == 0 else { return }
-        model.deleteCustomCharacter()
-        look = nil
-        frames = []
-        problem = nil
+        KorekoreAlert.ask(title: String(localized: "Delete your own character? This can't be undone."),
+                          message: inUse ? String(localized: "The box goes back to \(lenderName).") : nil,
+                          buttons: [String(localized: "Delete"), String(localized: "Cancel")], warning: true) { answer in
+            guard answer.button == 0 else { return }
+            model.deleteCustomCharacter()
+            look = nil
+            frames = []
+            problem = nil
+        }
     }
 
     private func use() {

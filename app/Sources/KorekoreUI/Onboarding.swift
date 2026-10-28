@@ -110,8 +110,21 @@ public enum KorekoreAlert {
         }
     }
 
+    /// Shows the sheet once the current event is handled, then calls `answer` with the button pressed and the
+    /// checkbox's state. Call this, not `run`, from a SwiftUI action: a modal loop started inside one gets no clicks,
+    /// as SwiftUI holds the sheet's events until the action returns, and the App hangs.
+    public static func ask(title: String, message: String?, buttons: [String], checkbox: Checkbox? = nil, warning: Bool = false,
+                           facts: [(String, String)] = [], then answer: @escaping @MainActor ((button: Int, checked: Bool)) -> Void) {
+        // A run loop block, not the main queue: the main queue stays free for SwiftUI while the sheet is up.
+        RunLoop.main.perform {
+            MainActor.assumeIsolated {
+                answer(run(title: title, message: message, buttons: buttons, checkbox: checkbox, warning: warning, facts: facts))
+            }
+        }
+    }
+
     /// The index of the button pressed (0 is the first in `buttons`), and the checkbox's final state. `warning`
-    /// draws the outline and the action in `kore-pink`, for what can't be undone.
+    /// draws the outline and the action in `kore-pink`, for what can't be undone. Not from a SwiftUI action: see `ask`.
     public static func run(title: String, message: String?, buttons: [String], checkbox: Checkbox? = nil,
                            warning: Bool = false, facts: [(String, String)] = []) -> (button: Int, checked: Bool) {
         let state = AlertState(checked: checkbox?.isOn ?? false)

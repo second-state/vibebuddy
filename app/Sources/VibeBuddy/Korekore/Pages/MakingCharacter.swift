@@ -63,10 +63,11 @@ struct KorekoreMadeCard: View {
     }
 
     private func confirmDelete() {
-        let answer = KorekoreAlert.run(title: String(localized: "Delete “\(made.name)”? This can't be undone."),
-                                       message: String(localized: "Its lines made in its voice go with it; making it again would make them again."),
-                                       buttons: [String(localized: "Delete"), String(localized: "Cancel")], warning: true)
-        if answer.button == 0 { model.deleteMadeCharacter(made) }
+        KorekoreAlert.ask(title: String(localized: "Delete “\(made.name)”? This can't be undone."),
+                          message: String(localized: "Its lines made in its voice go with it; making it again would make them again."),
+                          buttons: [String(localized: "Delete"), String(localized: "Cancel")], warning: true) { [model, made] answer in
+            if answer.button == 0 { model.deleteMadeCharacter(made) }
+        }
     }
 }
 
