@@ -55,11 +55,11 @@ A person's identity with VibeBuddy's online services, needed only for features t
 _Avoid_: user (the person, not their account), box account, device registration, login (the act of signing in)
 
 **Daily allowance (每日额度)**:
-How many voice commands an account on the Paid plan may have recognized by us in a day. Past it, our recognition stops for that account until the next day; nothing else about the box changes.
+How many voice commands an account on the Paid plan may have recognized through `vibebuddy-api` in a day. The daemon now recognizes through Token Station, with credit instead (ADR-0020), so this applies only to computers that still call `vibebuddy-api`.
 _Avoid_: quota, credits, plan, limit (on its own)
 
 **Paid plan (付费版)**:
-The one thing VibeBuddy sells: a monthly subscription on an account, paid through Stripe on the website. It opens the Relay, lets the user talk to the Agent with our recognition and our voices, and gives the monthly allowance. An account without it is on Free (免费版), which keeps everything over USB and the local network, and talking to the Agent with the user's own keys. When the plan ends, the account goes back to Free, and nothing the user has made is taken away.
+The one thing VibeBuddy sells: a monthly subscription on an account, paid through Stripe on the website. It opens the Relay, gives spoken replies in our voices, the monthly allowance, and recognition credit each period. An account without it is on Free (免费版), which keeps everything over USB and the local network, voice commands with a one-time gift of recognition credit, and the user's own keys for everything else. When the plan ends, the account goes back to Free, and nothing the user has made is taken away.
 _Avoid_: subscription (Stripe's word), Pro, premium, membership, VIP, credits
 
 **Monthly allowance (每月额度)**:
