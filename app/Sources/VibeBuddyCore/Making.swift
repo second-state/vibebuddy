@@ -93,6 +93,7 @@ public struct MakingStatus: Codable, Equatable, Sendable {
     public func explanation(provider: String) -> String? {
         guard failed else { return nil }
         switch reason {
+        case "plan" where !AccountPlan.shown: return String(localized: "Set your own key for \(provider) on the Account tab first.")
         case "plan": return String(localized: "Making a Character with VibeBuddy's voices needs the Paid plan, or your own key for \(provider).")
         case "monthly": return String(localized: "This month's Characters on the Paid plan are used up. The lines made so far are kept: resume next month, or with your own key for \(provider).")
         case "global_cap": return String(localized: "VibeBuddy's voices are paused for today. The lines made so far are kept: resume tomorrow.")
@@ -121,6 +122,7 @@ public enum MakingReadiness: Equatable, Sendable {
     public static func of(_ voice: CharacterVoice, keys: VoiceKeysStatus?, account: AccountStatus?) -> MakingReadiness {
         let key = voice.provider == "volc" ? keys?.volc : keys?.elevenlabs
         if let key, key.set, !key.refused { return .ownKey }
+        guard AccountPlan.shown else { return .ownKeyOnly }
         if account?.signedIn == true { return .paidPlan }
         return account?.available == true ? .signIn : .ownKeyOnly
     }

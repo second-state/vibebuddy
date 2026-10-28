@@ -1446,11 +1446,11 @@ impl App {
                     .on_toggle_maybe(self.status.is_some().then_some(Message::NotifyLink)),
             )
             // ADR-0012: the Relay carries the box's messages through VibeBuddy's server, so it can be turned off.
-            .push(
+            .push(status::Plan::SHOWN.then(|| {
                 toggler(self.status.as_ref().is_none_or(|status| status.config.relay))
                     .label(tr("Reach the box through the VibeBuddy Relay when it's away from this computer", &[]))
-                    .on_toggle_maybe(self.status.is_some().then_some(Message::Relay)),
-            )
+                    .on_toggle_maybe(self.status.is_some().then_some(Message::Relay))
+            }))
             .push(
                 toggler(check)
                     .label(tr("Check for updates", &[]))
@@ -2519,11 +2519,11 @@ impl App {
             (None, Some(usage)) => Some(text(tr("Voice today: %lld of %lld", &[&usage.commands, &usage.commands_limit])).size(13).style(text::secondary)),
             (None, None) => None,
         };
-        let plan = account.plan.as_ref().map(|plan| {
+        let plan = account.plan.as_ref().filter(|_| status::Plan::SHOWN).map(|plan| {
             let name = if plan.paid() { tr("Paid plan", &[]) } else { tr("Free", &[]) };
             row![text(tr("Plan", &[])).width(140), text(name)].spacing(12)
         });
-        let month = account.plan.as_ref().and_then(|plan| plan.month_line()).map(|line| text(line).size(13).style(text::secondary));
+        let month = account.plan.as_ref().filter(|_| status::Plan::SHOWN).and_then(|plan| plan.month_line()).map(|line| text(line).size(13).style(text::secondary));
         column![text(who)].push(plan).push(month).push(today).push(actions).spacing(12).into()
     }
 

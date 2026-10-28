@@ -51,8 +51,10 @@ struct GeneralView: View {
             Toggle("Notify me when the box disconnects or the daemon fails", isOn: Binding(get: { model.status?.config.notifyLink ?? true }, set: { model.setNotifyLink($0) }))
                 .disabled(model.status == nil)
             // ADR-0012: the Relay carries the box's messages through VibeBuddy's server, so it can be turned off.
-            Toggle("Reach the box through the VibeBuddy Relay when it's away from this computer", isOn: Binding(get: { model.status?.config.relay ?? true }, set: { model.setRelay($0) }))
-                .disabled(model.status == nil)
+            if AccountPlan.shown {
+                Toggle("Reach the box through the VibeBuddy Relay when it's away from this computer", isOn: Binding(get: { model.status?.config.relay ?? true }, set: { model.setRelay($0) }))
+                    .disabled(model.status == nil)
+            }
             Section("Updates") {
                 Toggle("Check for updates", isOn: Binding(get: { model.status?.config.checkUpdates ?? model.updates?.enabled ?? false }, set: { model.setCheckUpdates($0) }))
                     .disabled(model.status == nil)
@@ -657,7 +659,8 @@ struct DeviceView: View {
 
     /// Why the Relay won't carry the link, shown while the box is away (ADR-0020).
     private var relayRefusal: String? {
-        switch model.status?.device.relayRefused {
+        guard AccountPlan.shown else { return nil }
+        return switch model.status?.device.relayRefused {
         case nil: nil
         case "signed_out": String(localized: "Sign in to use the Relay.")
         case "plan": String(localized: "The Relay needs the Paid plan.")
@@ -848,7 +851,7 @@ struct AccountView: View {
             } else if let account, account.available {
                 if account.signedIn {
                     Text(signedInText)
-                    if let plan = account.plan {
+                    if AccountPlan.shown, let plan = account.plan {
                         LabeledContent("Plan", value: plan.paid ? String(localized: "Paid plan") : String(localized: "Free"))
                         if plan.paid, let used = plan.characters, let limit = plan.charactersLimit, let end = plan.periodEnd {
                             Text("This month: \(used.formatted()) of \(limit.formatted()) characters · renews \(end.formatted(.dateTime.day().month(.abbreviated)))")

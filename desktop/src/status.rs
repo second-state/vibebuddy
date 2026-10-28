@@ -74,6 +74,10 @@ pub struct Plan {
 }
 
 impl Plan {
+    /// Whether the app shows the Paid plan. Off until the plan is on sale (2026-10-28): the plan row, the Relay switch
+    /// and its refusals, and making a Character with VibeBuddy's voices are hidden. The daemon doesn't change.
+    pub const SHOWN: bool = false;
+
     pub fn paid(&self) -> bool {
         self.name == "paid"
     }
@@ -334,6 +338,9 @@ impl Device {
 
     /// What the link section says about the Relay turning this computer away.
     pub fn relay_refusal(&self) -> Option<String> {
+        if !Plan::SHOWN {
+            return None;
+        }
         Some(match self.relay_refused.as_deref()? {
             "signed_out" => tr("Sign in to use the Relay.", &[]),
             "plan" => tr("The Relay needs the Paid plan.", &[]),
@@ -554,7 +561,7 @@ mod tests {
     #[test]
     fn the_relays_refusal_is_explained() {
         let device: Device = serde_json::from_str(r#"{"connected":false,"relay_refused":"plan"}"#).expect("device");
-        assert_eq!(device.relay_refusal().as_deref(), Some("The Relay needs the Paid plan."));
+        assert_eq!(device.relay_refusal().as_deref(), Plan::SHOWN.then_some("The Relay needs the Paid plan."));
         assert_eq!(Device::default().relay_refusal(), None);
     }
 

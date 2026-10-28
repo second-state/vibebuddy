@@ -73,7 +73,7 @@ impl crate::App {
                 .into(),
             ));
         }
-        if let Some(plan) = &account.plan {
+        if status::Plan::SHOWN && let Some(plan) = &account.plan {
             let (name, color) = if plan.paid() { (tr("Paid plan", &[]), theme::DONE_TEXT) } else { (tr("Free", &[]), theme::INK) };
             items.push(divider());
             items.push(line(row![text(tr("Plan", &[])).font(bold()).size(14).color(theme::INK).width(Length::Fill), tag(name, color)].align_y(Alignment::Center).into()));

@@ -206,7 +206,8 @@ struct KorekoreDevicePage: View {
 
     /// Why the Relay won't carry the link, shown while the box is away (ADR-0020).
     private var relayRefusal: String? {
-        switch device?.relayRefused {
+        guard AccountPlan.shown else { return nil }
+        return switch device?.relayRefused {
         case nil: nil
         case "signed_out": String(localized: "Sign in to use the Relay.")
         case "plan": String(localized: "The Relay needs the Paid plan.")
