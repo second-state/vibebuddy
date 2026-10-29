@@ -88,6 +88,19 @@ public struct AccountStatus: Codable, Equatable {
         self.available = available; self.signedIn = signedIn; self.email = email; self.githubID = githubID; self.githubLogin = githubLogin
         self.today = today; self.refused = refused; self.plan = plan
     }
+
+    /// When refused voice comes back: the next 00:00 UTC after `now`, when the service's day starts over, as HH:mm
+    /// (24 hours) in `timeZone`, the same time the box shows.
+    public static func voiceComesBack(after now: Date = Date(), in timeZone: TimeZone = .current) -> String {
+        var utc = Calendar(identifier: .gregorian)
+        utc.timeZone = TimeZone(identifier: "UTC")!
+        let midnight = utc.date(byAdding: .day, value: 1, to: utc.startOfDay(for: now))!
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.timeZone = timeZone
+        formatter.dateFormat = "HH:mm"
+        return formatter.string(from: midnight)
+    }
 }
 
 /// `free`, or `paid` with the billing period's end and its monthly allowance, in characters of our voices.

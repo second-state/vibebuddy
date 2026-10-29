@@ -170,11 +170,61 @@ pub fn wav(samples: &[i16]) -> Vec<u8> {
     out
 }
 
-/// `voice.available`: whether the box may treat a long K0 as push-to-talk.
-pub fn available_event(on: bool) -> Event {
+/// Whether voice is offered to the box, and if not, why.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum Availability {
+    On,
+    /// Off for `reason`: `signed_out`, `allowance`, `global_cap` or `not_ready` (docs/protocol.md).
+    Off(&'static str),
+    /// Voice commands aren't set up on this computer (no recognizer, or the resident session is switched off), so
+    /// there is nothing for the user to be told.
+    Unset,
+}
+
+/// `voice.available`: whether the box may treat a long K0 as push-to-talk, and when it may not, why, with the text
+/// the box shows for it.
+pub fn available_event(availability: Availability) -> Event {
     let mut event = Event::named("voice.available");
-    event.extra.insert("on".to_owned(), on.into());
+    event.extra.insert("on".to_owned(), (availability == Availability::On).into());
+    if let Availability::Off(reason) = availability {
+        event.extra.insert("reason".to_owned(), reason.into());
+        event.message = refusal_message(reason);
+    }
     event
+}
+
+/// `voice.available` off for `slow_link`: the box is on its UART bridge at 115200, which can't carry the audio.
+/// Firmware that can't move the bridge to a faster rate is told to update; otherwise moving it failed.
+pub fn slow_link_event(firmware_switches: bool) -> Event {
+    let mut event = Event::named("voice.available");
+    event.extra.insert("on".to_owned(), false.into());
+    event.extra.insert("reason".to_owned(), "slow_link".into());
+    event.message = Some(
+        if firmware_switches { "This port is too slow for voice. Use my other USB port." } else { "Update my firmware, or use my other USB port, to talk to me." }
+            .to_owned(),
+    );
+    event
+}
+
+/// What the box shows when voice is off for `reason`, in `voice.available` and `voice.error` alike: English, like
+/// the rest of its screens, with when voice comes back in this computer's local time.
+pub fn refusal_message(reason: &str) -> Option<String> {
+    let back = || comes_back_at(chrono::Utc::now(), &chrono::Local);
+    Some(match reason {
+        "signed_out" => "Sign in on the computer to talk to me.".to_owned(),
+        "allowance" => format!("Today's voice is used up. It comes back at {}.", back()),
+        "global_cap" => format!("Voice is paused for everyone today. It comes back at {}.", back()),
+        "not_ready" => "My session on the computer isn't ready.".to_owned(),
+        _ => return None,
+    })
+}
+
+/// The next 00:00 UTC after `now`, when the service's day starts over, as `HH:MM` (24 hours) in `zone`.
+fn comes_back_at<Zone: chrono::TimeZone>(now: chrono::DateTime<chrono::Utc>, zone: &Zone) -> String
+where
+    Zone::Offset: std::fmt::Display,
+{
+    crate::account::next_utc_day(now).with_timezone(zone).format("%H:%M").to_string()
 }
 
 fn turn_event(name: &str, turn: u32) -> Event {
@@ -314,9 +364,21 @@ impl Voice {
     }
 
     /// Voice is offered when speech recognition can be asked (the voice service needs the person signed in to their
-    /// account, ADR-0018) and the resident session is on and ready: the user's Codex is installed and logged in.
-    pub fn available(&self) -> bool {
-        self.recognizer.as_ref().is_some_and(|recognizer| recognizer.ready()) && self.resident.as_ref().is_some_and(|resident| resident.ready())
+    /// account and hasn't refused today, ADR-0018) and the resident session is on and ready: the user's Codex is
+    /// installed and logged in. Signing in comes first, since nothing else works without it; then the session, since
+    /// voice doesn't come back with the day while it isn't ready.
+    pub fn availability(&self) -> Availability {
+        let (Some(recognizer), Some(resident)) = (&self.recognizer, self.resident.as_ref().filter(|resident| resident.enabled())) else {
+            return Availability::Unset;
+        };
+        let refusal = recognizer.refusal();
+        if refusal == Some("signed_out") {
+            return Availability::Off("signed_out");
+        }
+        if !resident.ready() {
+            return Availability::Off("not_ready");
+        }
+        refusal.map_or(Availability::On, Availability::Off)
     }
 
     /// Takes one `VOICE` line from the box. A turn that ends starts a task, returned so tests can wait for it;
@@ -1255,6 +1317,35 @@ pub mod tests {
         }
     }
 
+    #[test]
+    fn each_reason_goes_with_voice_off_and_the_text_the_box_shows() {
+        let on = serde_json::to_value(available_event(Availability::On)).unwrap();
+        assert_eq!(on, json!({"version": 1, "event": "voice.available", "on": true}));
+        assert_eq!(serde_json::to_value(available_event(Availability::Unset)).unwrap(), json!({"version": 1, "event": "voice.available", "on": false}));
+        for reason in ["signed_out", "allowance", "global_cap", "not_ready"] {
+            let event = available_event(Availability::Off(reason));
+            assert_eq!((event.extra["on"].clone(), event.extra["reason"].clone()), (json!(false), json!(reason)));
+            assert_eq!(event.message, refusal_message(reason));
+            assert!(event.message.is_some(), "{reason} has a text");
+        }
+        let back = comes_back_at(chrono::Utc::now(), &chrono::Local);
+        assert_eq!(refusal_message("allowance").unwrap(), format!("Today's voice is used up. It comes back at {back}."));
+        assert_eq!(refusal_message("global_cap").unwrap(), format!("Voice is paused for everyone today. It comes back at {back}."));
+        assert_eq!(refusal_message("busy"), None);
+    }
+
+    #[test]
+    fn voice_comes_back_at_the_next_midnight_utc_in_local_time() {
+        let at = |text: &str| chrono::DateTime::parse_from_rfc3339(text).unwrap().with_timezone(&chrono::Utc);
+        let zone = |hours: i32| chrono::FixedOffset::east_opt(hours * 3600).unwrap();
+        assert_eq!(comes_back_at(at("2026-10-27T03:00:00Z"), &zone(8)), "08:00");
+        // Late in the local evening, the UTC day still ends the next morning.
+        assert_eq!(comes_back_at(at("2026-10-27T15:59:00Z"), &zone(8)), "08:00");
+        assert_eq!(comes_back_at(at("2026-10-27T20:00:00Z"), &zone(-5)), "19:00");
+        assert_eq!(comes_back_at(at("2026-10-27T20:00:00Z"), &chrono::FixedOffset::east_opt(5 * 3600 + 1800).unwrap()), "05:30");
+        assert_eq!(comes_back_at(at("2026-10-27T20:00:00Z"), &chrono::Utc), "00:00");
+    }
+
     #[tokio::test]
     async fn voice_is_offered_only_with_a_recognizer_and_the_resident_session_on_and_ready() {
         let dir = temp_dir("voice-offer");
@@ -1267,14 +1358,33 @@ pub mod tests {
         let off = Resident::new(false, &dir, crate::resident::Launcher::Codex, Arc::default());
         off.note(None);
         let recognizer = || Some(Arc::new(FakeRecognizer { answer: Ok(""), heard: Default::default() }) as Arc<dyn Recognizer>);
-        assert!(Voice::new(recognizer(), on()).available());
-        assert!(!Voice::new(None, on()).available());
-        assert!(!Voice::new(recognizer(), Some(Arc::new(off))).available());
-        assert!(!Voice::new(recognizer(), None).available());
+        use Availability::{Off, On, Unset};
+        assert_eq!(Voice::new(recognizer(), on()).availability(), On);
+        assert_eq!(Voice::new(None, on()).availability(), Unset);
+        assert_eq!(Voice::new(recognizer(), Some(Arc::new(off))).availability(), Unset);
+        assert_eq!(Voice::new(recognizer(), None).availability(), Unset);
         let unchecked = Some(Arc::new(resident(&dir, &logged_in(), Arc::default())));
-        assert!(!Voice::new(recognizer(), unchecked).available(), "not before the first check");
-        assert!(!Voice::new(recognizer(), with(Some(crate::resident::Problem::CodexMissing))).available());
-        assert!(!Voice::new(recognizer(), with(Some(crate::resident::Problem::CodexLoggedOut))).available());
+        assert_eq!(Voice::new(recognizer(), unchecked).availability(), Off("not_ready"), "not before the first check");
+        assert_eq!(Voice::new(recognizer(), with(Some(crate::resident::Problem::CodexMissing))).availability(), Off("not_ready"));
+        assert_eq!(Voice::new(recognizer(), with(Some(crate::resident::Problem::CodexLoggedOut))).availability(), Off("not_ready"));
+
+        // The recognizer's refusals: signing in comes before the session, the day's refusals after it.
+        struct Refusing(&'static str);
+        impl Recognizer for Refusing {
+            fn recognize(&self, _wav: &[u8]) -> Result<crate::speech::Transcript, crate::speech::RecognitionError> {
+                unreachable!("voice is off")
+            }
+            fn refusal(&self) -> Option<&'static str> {
+                Some(self.0)
+            }
+        }
+        let refusing = |reason| Some(Arc::new(Refusing(reason)) as Arc<dyn Recognizer>);
+        for reason in ["signed_out", "allowance", "global_cap"] {
+            assert_eq!(Voice::new(refusing(reason), on()).availability(), Off(reason));
+        }
+        let not_ready = || with(Some(crate::resident::Problem::CodexLoggedOut));
+        assert_eq!(Voice::new(refusing("signed_out"), not_ready()).availability(), Off("signed_out"));
+        assert_eq!(Voice::new(refusing("allowance"), not_ready()).availability(), Off("not_ready"));
 
         // Lines that arrive anyway are told voice is off.
         let voice = Voice::new(None, on());

@@ -6,6 +6,7 @@ use std::time::Duration;
 use futures::{SinkExt, Stream, StreamExt};
 use serde::Deserialize;
 
+use crate::i18n::tr;
 use crate::status::{Config, Status};
 
 const BASE: &str = "http://127.0.0.1:7331";
@@ -188,6 +189,26 @@ pub struct ResidentInfo {
     /// Whether the daemon holds an Anthropic API key; the key itself never comes back.
     #[serde(default)]
     pub anthropic_key_set: Option<bool>,
+    /// Why the box can't take voice commands right now besides `problem`: `bridge_firmware`, `bridge_slow`,
+    /// `signed_out`, `allowance` or `global_cap`. None when nothing else holds voice back, and from an older daemon.
+    #[serde(default)]
+    pub voice_off: Option<String>,
+}
+
+impl ResidentInfo {
+    /// Why holding K0 does nothing right now, said for the user, as on the Mac; None when nothing but `problem` holds
+    /// voice back, or for a reason this app doesn't know.
+    pub fn voice_off_note(&self) -> Option<String> {
+        let back = || crate::status::voice_comes_back(chrono::Utc::now(), &chrono::Local);
+        Some(match self.voice_off.as_deref()? {
+            "bridge_firmware" => tr("The box is on its UART bridge, and its firmware can't carry voice there. Update the firmware, or plug the cable into the box's native USB port.", &[]),
+            "bridge_slow" => tr("The box is on its UART bridge, which didn't hold the speed voice needs. Plug the cable into the box's native USB port, or plug it in again to try once more.", &[]),
+            "signed_out" => tr("Voice needs this computer signed in to VibeBuddy.", &[]),
+            "allowance" => tr("Today's voice is used up. It comes back at %@.", &[&back()]),
+            "global_cap" => tr("Voice is paused for everyone today. It comes back at %@.", &[&back()]),
+            _ => return None,
+        })
+    }
 }
 
 /// Why the resident session can't take voice commands now: voice needs the user's Codex, or the user's Claude Code
@@ -464,7 +485,7 @@ mod tests {
     fn the_resident_info_reads_its_revision_and_problem_and_an_older_daemons_without_them() {
         let parse = |json: &str| serde_json::from_str::<ResidentInfo>(json).unwrap();
         let older = parse(r#"{"enabled":true,"thread_id":null}"#);
-        let nothing = ResidentInfo { enabled: true, revision: None, problem: None, brain_setting: None, anthropic_key_set: None };
+        let nothing = ResidentInfo { enabled: true, revision: None, problem: None, brain_setting: None, anthropic_key_set: None, voice_off: None };
         assert_eq!(older, nothing);
         let ready = parse(r#"{"enabled":true,"thread_id":"t1","revision":7,"ready":true,"problem":null}"#);
         assert_eq!(ready, ResidentInfo { revision: Some(7), ..nothing.clone() });
@@ -474,6 +495,16 @@ mod tests {
         assert_eq!(logged_out.problem, Some(Problem::CodexLoggedOut));
         let later = parse(r#"{"enabled":true,"thread_id":null,"revision":0,"ready":false,"problem":"something_new"}"#);
         assert_eq!(later.problem, Some(Problem::Other));
+    }
+
+    #[test]
+    fn the_resident_info_says_why_voice_is_off() {
+        let parse = |json: &str| serde_json::from_str::<ResidentInfo>(json).unwrap();
+        assert_eq!(parse(r#"{"enabled":true}"#).voice_off_note(), None, "an older daemon says nothing");
+        let bridge = parse(r#"{"enabled":true,"ready":true,"voice_off":"bridge_firmware"}"#);
+        assert!(bridge.voice_off_note().is_some_and(|note| note.contains("UART bridge")), "{bridge:?}");
+        assert!(parse(r#"{"enabled":true,"voice_off":"allowance"}"#).voice_off_note().is_some_and(|note| note.contains("comes back at")));
+        assert_eq!(parse(r#"{"enabled":true,"voice_off":"something_new"}"#).voice_off_note(), None);
     }
 
     #[test]

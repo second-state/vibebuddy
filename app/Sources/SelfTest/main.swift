@@ -125,6 +125,11 @@ do {
     {"available":true,"signed_in":true,"github_id":1,"today":{"day":"2026-10-24","commands":7,"commands_limit":100},"refused":"allowance"}
     """.utf8))
     check(used.today == AccountUsage(day: "2026-10-24", commands: 7, commandsLimit: 100) && used.refused == "allowance", "today's voice use decodes")
+    // Refused voice comes back at the next 00:00 UTC, in the computer's own time.
+    let afternoon = ISO8601DateFormatter().date(from: "2026-10-27T15:59:00Z")!
+    check(AccountStatus.voiceComesBack(after: afternoon, in: TimeZone(secondsFromGMT: 8 * 3600)!) == "08:00", "voice comes back at 08:00 in UTC+8")
+    check(AccountStatus.voiceComesBack(after: afternoon, in: TimeZone(secondsFromGMT: -5 * 3600)!) == "19:00", "voice comes back at 19:00 in UTC-5")
+    check(AccountStatus.voiceComesBack(after: ISO8601DateFormatter().date(from: "2026-12-31T23:59:59Z")!, in: TimeZone(identifier: "UTC")!) == "00:00", "and at 00:00 in UTC")
     let free = try StatusCoding.decoder().decode(AccountStatus.self, from: Data("""
     {"available":true,"signed_in":true,"plan":{"name":"free"}}
     """.utf8))
@@ -459,6 +464,11 @@ do {
     check(noKey.problem == .anthropicKeyMissing && noKey.brainSetting == .claude, "resident info says the Anthropic API key is missing")
     let noClaude = try StatusCoding.decoder().decode(ResidentInfo.self, from: Data(#"{"enabled":true,"problem":"claude_missing","brain_setting":"something_new"}"#.utf8))
     check(noClaude.problem == .claudeMissing && noClaude.brainSetting == nil, "resident info says Claude Code is missing; an unknown setting is nil")
+    check(claude.voiceOff == nil && claude.voiceOffNote == nil, "an older daemon says nothing about voice being off")
+    let bridge = try StatusCoding.decoder().decode(ResidentInfo.self, from: Data(#"{"enabled":true,"problem":null,"ready":true,"voice_off":"bridge_firmware"}"#.utf8))
+    check(bridge.voiceOff == "bridge_firmware" && bridge.voiceOffNote?.contains("UART bridge") == true, "resident info says the bridge's firmware can't carry voice")
+    let unknownOff = try StatusCoding.decoder().decode(ResidentInfo.self, from: Data(#"{"enabled":true,"voice_off":"something_new"}"#.utf8))
+    check(unknownOff.voiceOffNote == nil, "a reason this App doesn't know says nothing")
     let history = try StatusCoding.decoder().decode(ResidentHistory.self, from: Data(#"{"exchanges":[{"replies":["现在没有 Agent 在工作。"],"said":"现在有几个agent在工作呀"},{"replies":["a","b"],"said":"two","at":"2026-10-29T03:05:00Z"}],"thread_id":"t1"}"#.utf8))
     check(history.threadId == "t1" && history.exchanges.count == 2, "resident history decodes")
     check(history.exchanges.last == ResidentExchange(said: "two", replies: ["a", "b"], at: Date(timeIntervalSince1970: 1_793_243_100)), "exchanges keep their order, every reply and when")

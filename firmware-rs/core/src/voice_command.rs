@@ -30,8 +30,9 @@ pub const MIN_RECORDING_MS: u32 = 500;
 /// defaults to, a voice close to the box was only about -31 dBFS; 42 dB (the most the PGA has) brings it
 /// to about -19.
 pub const GAIN_DB: u32 = 42;
-/// With nothing from the computer for this long after the recording, the overlay closes.
-pub const QUIET_CLOSE_MS: u32 = 60_000;
+/// With nothing from the computer for this long after the recording, the box says it didn't answer: a little
+/// longer than the daemon's 120 s turn timeout, so a turn that times out there gets its own error first.
+pub const QUIET_CLOSE_MS: u32 = 130_000;
 /// After `voice.done`, the replies stay up this long to be read (or until K2).
 pub const READ_MS: u32 = 15_000;
 /// An error stays up this long.
@@ -54,16 +55,29 @@ pub enum Out {
     Data(String),
 }
 
-/// Why a turn ended badly, from `voice.error`'s `reason`, or the box's own.
+/// Why a turn ended badly, or why voice is off, from `voice.error`'s or `voice.available`'s `reason`, or the
+/// box's own.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Reason {
     NotHeard,
     Unavailable,
     Busy,
+    /// The computer isn't signed in to the VibeBuddy account.
+    SignedOut,
+    /// The account's daily allowance is used up.
+    Allowance,
+    /// Voice is paused for everyone today.
+    GlobalCap,
+    /// The resident session on the computer isn't ready.
+    NotReady,
+    /// The box is on its UART bridge, which runs too slowly for the audio.
+    SlowLink,
     /// A reason this firmware doesn't know.
     Other,
     /// The box couldn't start its microphone.
     NoMicrophone,
+    /// Nothing came back from the computer.
+    NoAnswer,
 }
 
 impl Reason {
@@ -72,6 +86,11 @@ impl Reason {
             "not_heard" => Self::NotHeard,
             "unavailable" => Self::Unavailable,
             "busy" => Self::Busy,
+            "signed_out" => Self::SignedOut,
+            "allowance" => Self::Allowance,
+            "global_cap" => Self::GlobalCap,
+            "not_ready" => Self::NotReady,
+            "slow_link" => Self::SlowLink,
             _ => Self::Other,
         }
     }
@@ -81,8 +100,14 @@ impl Reason {
             Self::NotHeard => b"NOT HEARD",
             Self::Unavailable => b"UNAVAILABLE",
             Self::Busy => b"BUSY",
+            Self::SignedOut => b"SIGN IN",
+            Self::Allowance => b"VOICE USED UP",
+            Self::GlobalCap => b"VOICE PAUSED",
+            Self::NotReady => b"NOT READY",
+            Self::SlowLink => b"SLOW CABLE",
             Self::Other => b"VOICE ERROR",
             Self::NoMicrophone => b"NO MICROPHONE",
+            Self::NoAnswer => b"NO ANSWER",
         }
     }
 
@@ -91,8 +116,15 @@ impl Reason {
             Self::NotHeard => "Didn't catch that. Try again, a bit closer.",
             Self::Unavailable => "Voice isn't working on the computer right now.",
             Self::Busy => "Still on the last one.",
+            // The computer's message says when voice comes back; without one, the box can't.
+            Self::SignedOut => "Sign in on the computer to talk to me.",
+            Self::Allowance => "Today's voice is used up.",
+            Self::GlobalCap => "Voice is paused for everyone today.",
+            Self::NotReady => "My session on the computer isn't ready.",
+            Self::SlowLink => "This port is too slow for voice. Use my other USB port.",
             Self::Other => "Something went wrong.",
             Self::NoMicrophone => "This box can't record.",
+            Self::NoAnswer => "The computer didn't answer.",
         }
     }
 }
@@ -213,6 +245,9 @@ enum Stage {
 
 pub struct VoiceCommand {
     available: bool,
+    /// Why voice is off and what to say about it, when the computer said (`voice.available`'s `reason` and
+    /// `message`).
+    off: Option<(Reason, Option<String>)>,
     /// The last turn's number; turns count from 1 after each boot.
     turn: u32,
     stage: Stage,
@@ -226,7 +261,7 @@ impl Default for VoiceCommand {
 
 impl VoiceCommand {
     pub const fn new() -> Self {
-        Self { available: false, turn: 0, stage: Stage::Idle }
+        Self { available: false, off: None, turn: 0, stage: Stage::Idle }
     }
 
     /// The computer offers voice: K0 long is push-to-talk.
@@ -234,11 +269,41 @@ impl VoiceCommand {
         self.available
     }
 
-    /// `voice.available`, or a new link (which starts with voice off). Withdrawn mid-recording, the turn is
-    /// given up.
+    /// A new link (which starts with voice off) or a lost one, or `voice.available` without a reason. Withdrawn
+    /// mid-recording, the turn is given up.
     pub fn set_available(&mut self, on: bool) -> Option<Out> {
+        self.offer(on, None, None, 0)
+    }
+
+    /// `voice.available`, with why voice is off when it is (docs/protocol.md). Withdrawn with a reason while a
+    /// turn is on the overlay, the overlay says why instead of closing: the computer may say it just before its
+    /// `voice.error` for that turn, which would then be ignored. An error already on the overlay stays.
+    pub fn offer(&mut self, on: bool, reason: Option<&str>, message: Option<&str>, now: u32) -> Option<Out> {
         self.available = on;
-        if on { None } else { self.cancel() }
+        self.off = reason.filter(|_| !on).map(|reason| (Reason::from_name(reason), message.filter(|message| !message.is_empty()).map(String::from)));
+        if on {
+            return None;
+        }
+        let turn_open = matches!(self.stage, Stage::Listening(_) | Stage::Thinking { .. });
+        match (&self.off, &self.stage) {
+            (Some(_), Stage::Failed { .. }) => None,
+            (Some((reason, message)), _) if turn_open => {
+                let (reason, message) = (*reason, message.clone());
+                let out = self.cancel();
+                self.fail(reason, message, now);
+                out
+            }
+            _ => self.cancel(),
+        }
+    }
+
+    /// K0 long while voice is off and Pomodoro is idle: if the computer said why, the overlay says it, and
+    /// nothing is recorded. False when there is no reason to show.
+    pub fn show_why_off(&mut self, now: u32) -> bool {
+        let Some((reason, message)) = self.off.clone().filter(|_| !self.available) else { return false };
+        self.cancel();
+        self.fail(reason, message, now);
+        true
     }
 
     /// The last turn's number.
@@ -369,8 +434,9 @@ impl VoiceCommand {
         self.stage = Stage::Failed { reason, message, until: now.wrapping_add(ERROR_MS) };
     }
 
-    /// Closes the overlay once its time is up: an error or the replies read, or the computer quiet for a
-    /// minute. True if it just closed.
+    /// Closes the overlay once its time is up: an error or the replies read, or the computer quiet for
+    /// [`QUIET_CLOSE_MS`]; quiet before any reply, it first says the computer didn't answer. True if it just
+    /// closed or changed.
     pub fn expire(&mut self, now: u32) -> bool {
         let over = match &self.stage {
             Stage::Thinking { quiet_since, .. } => now.wrapping_sub(*quiet_since) >= QUIET_CLOSE_MS,
@@ -378,7 +444,10 @@ impl VoiceCommand {
             Stage::Idle | Stage::Listening(_) => false,
         };
         if over {
-            self.stage = Stage::Idle;
+            match &self.stage {
+                Stage::Thinking { replies, .. } if replies.is_empty() => self.fail(Reason::NoAnswer, None, now),
+                _ => self.stage = Stage::Idle,
+            }
         }
         over
     }
@@ -645,13 +714,105 @@ mod tests {
     }
 
     #[test]
-    fn a_quiet_computer_closes_the_overlay_after_a_minute() {
+    fn a_quiet_computer_is_said_not_to_have_answered_after_the_daemons_timeout() {
+        const { assert!(QUIET_CLOSE_MS > 120_000, "past the daemon's 120 s turn timeout") };
         let mut voice = VoiceCommand::new();
         voice.start(0);
         voice.release(1000);
         voice.event("voice.heard", 1, Some("hello"), None, 20_000);
         assert!(!voice.expire(20_000 + QUIET_CLOSE_MS - 1), "each event restarts the wait");
-        assert!(voice.expire(20_000 + QUIET_CLOSE_MS));
+        let at = 20_000 + QUIET_CLOSE_MS;
+        assert!(voice.expire(at));
+        let panel = voice.panel(at).unwrap();
+        assert_eq!((panel.title.as_slice(), panel_text(&panel).as_str()), (&b"NO ANSWER"[..], "The computer didn't answer."));
+        assert!(!voice.event("voice.reply", 1, Some("late"), None, at + 1), "the turn is over");
+        assert!(voice.expire(at + ERROR_MS));
+        assert!(!voice.is_open());
+
+        // With replies on the overlay, the computer did answer: it just closes.
+        voice.start(200_000);
+        voice.release(201_000);
+        voice.event("voice.reply", 2, Some("Working on it."), None, 202_000);
+        assert!(voice.expire(202_000 + QUIET_CLOSE_MS));
+        assert!(!voice.is_open());
+    }
+
+    const REASONS: [(&str, &[u8], &str); 5] = [
+        ("signed_out", b"SIGN IN", "Sign in on the computer to talk to me."),
+        ("allowance", b"VOICE USED UP", "Today's voice is used up."),
+        ("global_cap", b"VOICE PAUSED", "Voice is paused for everyone today."),
+        ("not_ready", b"NOT READY", "My session on the computer isn't ready."),
+        ("slow_link", b"SLOW CABLE", "This port is too slow for voice. Use my other USB port."),
+    ];
+
+    /// The panel's text, its rows joined again.
+    fn panel_text(panel: &Panel) -> String {
+        panel.lines.iter().map(|(row, _, _)| String::from_utf8(row.clone()).unwrap()).collect::<Vec<_>>().join(" ")
+    }
+
+    #[test]
+    fn each_reason_voice_is_off_for_has_its_own_title_and_text() {
+        for (name, title, text) in REASONS {
+            // After speaking, as `voice.error`.
+            let mut voice = VoiceCommand::new();
+            voice.start(0);
+            voice.release(1000);
+            assert!(voice.event("voice.error", 1, None, Some(name), 2000));
+            let panel = voice.panel(2000).unwrap();
+            assert_eq!((panel.title.as_slice(), panel_text(&panel).as_str()), (title, text), "{name}");
+
+            // Before speaking, from `voice.available`, with the computer's message.
+            let mut voice = VoiceCommand::new();
+            voice.offer(false, Some(name), Some("It comes back at 08:00."), 0);
+            assert!(!voice.is_open(), "nothing shows until K0");
+            assert!(voice.show_why_off(5000));
+            let panel = voice.panel(5000).unwrap();
+            assert_eq!((panel.title.as_slice(), panel_text(&panel).as_str()), (title, "It comes back at 08:00."), "{name}");
+            assert!(!voice.listening() && voice.turn() == 0, "nothing is recorded");
+            assert!(!voice.expire(5000 + ERROR_MS - 1));
+            assert!(voice.expire(5000 + ERROR_MS));
+        }
+    }
+
+    #[test]
+    fn without_a_reason_there_is_nothing_to_show() {
+        let mut voice = VoiceCommand::new();
+        assert!(!voice.show_why_off(0), "never told");
+        voice.offer(false, Some("signed_out"), None, 0);
+        voice.set_available(false);
+        assert!(!voice.show_why_off(0), "a new link forgets the reason");
+        voice.offer(false, None, None, 0);
+        assert!(!voice.show_why_off(0));
+        voice.offer(false, Some("allowance"), None, 0);
+        voice.offer(true, None, None, 0);
+        assert!(!voice.show_why_off(0), "voice is on");
+        assert!(!voice.is_open());
+    }
+
+    #[test]
+    fn withdrawn_with_a_reason_during_a_turn_the_overlay_says_why() {
+        let mut voice = VoiceCommand::new();
+        voice.set_available(true);
+        voice.start(0);
+        assert_eq!(voice.offer(false, Some("signed_out"), None, 300), Some(Out::Line("VOICE CANCEL 1\n".into())));
+        assert_eq!(voice.panel(300).unwrap().title, b"SIGN IN");
+
+        // Waiting for the computer: the refusal may come just before the turn's own `voice.error`.
+        voice.offer(true, None, None, 0);
+        voice.start(1000);
+        voice.release(3000);
+        assert_eq!(voice.offer(false, Some("allowance"), Some("Used up."), 4000), None);
+        assert_eq!(voice.panel(4000).unwrap().title, b"VOICE USED UP");
+        assert!(!voice.event("voice.error", 2, Some("Used up."), Some("allowance"), 4100));
+
+        // And just after it: the error stays.
+        voice.offer(true, None, None, 0);
+        voice.start(10_000);
+        voice.release(12_000);
+        voice.event("voice.error", 3, None, Some("global_cap"), 13_000);
+        voice.offer(false, Some("global_cap"), None, 13_100);
+        assert_eq!(voice.panel(13_100).unwrap().title, b"VOICE PAUSED");
+        assert!(!voice.expire(13_000 + ERROR_MS - 1), "its time runs from the error");
     }
 
     #[test]

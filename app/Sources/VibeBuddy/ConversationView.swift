@@ -43,6 +43,12 @@ struct ConversationView: View {
             if let choice = latest?.brainSetting {
                 agentSetting(choice)
             }
+            if problem == nil, let note = latest?.voiceOffNote {
+                Label(note, systemImage: "mic.slash")
+                    .font(.callout)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
             content.frame(maxWidth: .infinity, maxHeight: .infinity)
         }
         .padding(16)

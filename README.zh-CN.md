@@ -262,7 +262,7 @@ cargo run -p vibebuddyd
 
 daemon 平时由 App 看管。没有 App 的开发机可以用 [`packaging/com.vibebuddy.vibebuddyd.plist`](packaging/com.vibebuddy.vibebuddyd.plist) 装成 LaunchAgent，但两者不能同时跑，会抢串口。daemon 还为 App 提供 `GET /v1/status`、SSE `/v1/status/stream`、`/v1/config`、`/v1/device/{identify,volume,choice,screenshot,voice-pack,firmware}` 与 `/v1/daemon/restart`。
 
-经盒子的 CH343 UART 桥发送时 daemon 按线速分段写：这条桥一次吞不下超过两百字节的连续数据，会把内容错位而长度不变；原生 USB 口不受影响。教训见 [`LESSONS.md`](LESSONS.md)。
+经盒子的 CH343 UART 桥发送时 daemon 按线速分段写：这条桥一次吞不下超过两百字节的连续数据，会把内容错位而长度不变；原生 USB 口不受影响。盒子报出版本后，daemon 和固件会把这条桥从 115200 提到 921600 波特，语音指令在这里也能用；固件太旧时停在 115200，这条线上语音关闭（见 docs/protocol.md 的 “Link speed on the UART bridge”）。教训见 [`LESSONS.md`](LESSONS.md)。
 
 ### 发布
 

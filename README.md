@@ -262,7 +262,7 @@ Voice commands are experimental and off by default: `VIBEBUDDY_RESIDENT_SESSION=
 
 The app normally supervises the daemon. On a development machine without the app you can install it as a LaunchAgent with [`packaging/com.vibebuddy.vibebuddyd.plist`](packaging/com.vibebuddy.vibebuddyd.plist), but don't run both: they'd fight over the serial port. For the app, the daemon also serves `GET /v1/status`, SSE `/v1/status/stream`, `/v1/config`, `/v1/device/{identify,volume,choice,screenshot,voice-pack,firmware}` and `/v1/daemon/restart`.
 
-When sending through the box's CH343 UART bridge, the daemon writes in line-rate chunks: the bridge can't take more than about two hundred bytes of continuous data and garbles the content without changing its length. The native USB port doesn't have this problem. See [`LESSONS.md`](LESSONS.md).
+When sending through the box's CH343 UART bridge, the daemon writes in line-rate chunks: the bridge can't take more than about two hundred bytes of continuous data and garbles the content without changing its length. The native USB port doesn't have this problem. Once the box reports its build, the daemon and the firmware move the bridge from 115200 to 921600 baud, so voice commands work there too; with older firmware it stays at 115200 and voice is off there (docs/protocol.md, "Link speed on the UART bridge"). See [`LESSONS.md`](LESSONS.md).
 
 ### Releases
 

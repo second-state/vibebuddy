@@ -448,6 +448,9 @@ async fn publish_device_message(state: &AppState, message: DeviceMessage) {
     if let DeviceMessage::Line(line) = &message {
         handle_voice_line(state, line).await;
     }
+    if matches!(message, DeviceMessage::BridgeRate { .. }) {
+        offer_voice_again(state).await;
+    }
     let _ = state.device_bus.send(message.clone());
     // Ask right after connecting; the device reports its mode, firmware build and voice again.
     if matches!(message, DeviceMessage::Connected { .. } | DeviceMessage::ConnectedNetwork { .. } | DeviceMessage::ConnectedRelay { .. }) {
@@ -466,22 +469,58 @@ async fn publish_device_message(state: &AppState, message: DeviceMessage) {
 }
 
 /// Voice commands (docs/protocol.md, "Voice commands"): offered on every report of the box's build, which follows
-/// hello on each new link and every reboot, and taken over native USB, the local network and the Relay alike: the
-/// audio always comes over the link (ADR-0018). The box sends no audio over the UART bridge, which is too slow for
-/// it, so voice isn't offered there.
+/// hello on each new link and every reboot, and taken over native USB, the local network, the Relay and the UART bridge
+/// once it runs fast enough: the audio always comes over the link (ADR-0018). On the bridge the offer waits until the
+/// box and the serial worker have settled its rate ([`DeviceMessage::BridgeRate`]).
 async fn handle_voice_line(state: &AppState, line: &str) -> Option<tokio::task::JoinHandle<()>> {
-    let on_bridge = state.device.lock().await.bridge;
-    if line.contains(serial_transport::BUILD_MARKER) && state.voice.available() {
-        if on_bridge {
-            info!("voice commands not offered: the box is on the UART bridge, which can't carry its audio; use its native USB port");
-        } else {
-            send_event(state, voice::available_event(true));
-        }
+    if line.contains(serial_transport::BUILD_MARKER)
+        && let Some(event) = voice_offer(state).await
+    {
+        // Off with a reason too, so the box can show it before anyone speaks.
+        send_event(state, event);
     }
     if !line.starts_with("VOICE ") {
         return None;
     }
     state.voice.handle_line(line, &state.transport, &wearing(state).await)
+}
+
+/// What to tell the box about voice now: None when voice isn't set up on this computer, or while the bridge's rate
+/// isn't settled yet. On the bridge at 115200 voice is off, for `slow_link`, whatever else holds.
+async fn voice_offer(state: &AppState) -> Option<Event> {
+    let availability = state.voice.availability();
+    if availability == voice::Availability::Unset {
+        return None;
+    }
+    let device = state.device.lock().await.clone();
+    if !device.bridge {
+        return Some(voice::available_event(availability));
+    }
+    match device.bridge_baud {
+        None => {
+            info!("voice waits for the UART bridge's rate to settle");
+            None
+        }
+        Some(serial_transport::FAST_BAUD_RATE) => Some(voice::available_event(availability)),
+        Some(_) => {
+            info!(firmware_switches = device.bridge_switches, "voice commands off: the UART bridge runs at 115200, too slow for the audio");
+            Some(voice::slow_link_event(device.bridge_switches))
+        }
+    }
+}
+
+/// Why voice commands can't be taken right now, for the Conversation tab: the bridge at 115200 (`bridge_firmware`
+/// when the firmware can't move it, `bridge_slow` when moving it failed), or the account's refusal (`signed_out`,
+/// `allowance`, `global_cap`). The resident session not being ready is the tab's `problem` already.
+async fn voice_off(state: &AppState) -> Option<String> {
+    let device = state.device.lock().await.clone();
+    if device.connected && device.bridge && device.bridge_baud.is_some_and(|baud| baud != serial_transport::FAST_BAUD_RATE) {
+        return Some(if device.bridge_switches { "bridge_slow" } else { "bridge_firmware" }.to_owned());
+    }
+    match state.voice.availability() {
+        voice::Availability::Off(reason) if reason != "not_ready" => Some(reason.to_owned()),
+        _ => None,
+    }
 }
 
 /// What the buddy wears for spoken replies: the Character the box reported wearing, before it has the one last
@@ -495,18 +534,18 @@ async fn wearing(state: &AppState) -> persona::Wearing {
     persona::Wearing::of(id, &*state.written.lock().await)
 }
 
-/// Tells a box that has reported its build whether voice is on now, after the resident session's readiness or the account flipped
-/// (the user's Codex installed or gone, logged in or out). Told `false`, a long K0 gives up the Pomodoro phase as it
-/// did before voice. Never over the UART bridge, where voice is never offered.
+/// Tells a box that has reported its build whether voice is on now, and if not why, after the resident session's
+/// readiness or the account flipped (the user's Codex installed or gone, logged in or out, the service refusing
+/// voice for the day or the day ending), or the UART bridge's rate settled. Told `false`, a long K0 gives up the
+/// Pomodoro phase as it did before voice.
 async fn offer_voice_again(state: &AppState) {
-    let (booted, on_bridge) = {
+    let booted = {
         let device = state.device.lock().await;
-        (device.connected && device.firmware_build.is_some(), device.bridge)
+        device.connected && device.firmware_build.is_some()
     };
-    if booted && !on_bridge {
-        let on = state.voice.available();
-        info!(on, "voice readiness changed; telling the box whether voice is on");
-        send_event(state, voice::available_event(on));
+    if booted && let Some(event) = voice_offer(state).await {
+        info!(on = ?event.extra.get("on"), "telling the box whether voice is on");
+        send_event(state, event);
     }
 }
 
@@ -520,12 +559,26 @@ fn follow_account(state: &AppState) {
             offer_voice_again(&follower).await;
         }
     });
-    // Today's usage and refusals are only shown.
+    // Today's usage is only shown. A refusal for the day also withdraws voice until the UTC day ends or a read of
+    // the account shows voice again; the day's end changes both without a word from the service.
     let mut usage = state.account.watch_usage();
     let follower = state.clone();
+    let mut refusal = state.account.voice_refusal();
     tokio::spawn(async move {
-        while usage.changed().await.is_ok() {
+        loop {
+            let now = chrono::Utc::now();
+            let day_ends = account::next_utc_day(now) - now;
+            tokio::select! {
+                changed = usage.changed() => if changed.is_err() { break },
+                // A second late, so the clock is surely in the new day.
+                () = tokio::time::sleep(day_ends.to_std().unwrap_or_default() + Duration::from_secs(1)) => {}
+            }
             follower.notify_status();
+            let today = follower.account.voice_refusal();
+            if today != refusal {
+                refusal = today;
+                offer_voice_again(&follower).await;
+            }
         }
     });
     // So is why the Relay turned this computer away.
@@ -1680,6 +1733,9 @@ struct ResidentInfo {
     brain_setting: resident::BrainChoice,
     /// Whether an Anthropic API key is stored; the key itself is never sent back.
     anthropic_key_set: bool,
+    /// Why the box can't take voice commands right now besides `problem`: `bridge_firmware`, `bridge_slow`,
+    /// `signed_out`, `allowance` or `global_cap` (see [`voice_off`]).
+    voice_off: Option<String>,
 }
 
 /// Asking checks the resident session's readiness again when the last check is older than
@@ -1695,6 +1751,7 @@ async fn get_resident(State(state): State<AppState>) -> Json<ResidentInfo> {
             brain: None,
             brain_setting: resident::BrainChoice::default(),
             anthropic_key_set: false,
+            voice_off: None,
         });
     };
     let readiness = resident.check_readiness().await;
@@ -1708,6 +1765,7 @@ async fn get_resident(State(state): State<AppState>) -> Json<ResidentInfo> {
         brain: if resident.ready() { readiness.brain } else { None },
         brain_setting: resident.brain_setting(),
         anthropic_key_set: resident.anthropic_key_set(),
+        voice_off: if on { voice_off(&state).await } else { None },
     })
 }
 
@@ -2360,7 +2418,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn voice_is_offered_after_each_build_report_over_every_link_but_the_uart_bridge() {
+    async fn voice_is_offered_after_each_build_report_over_every_link_and_the_fast_uart_bridge() {
         let dir = std::env::temp_dir().join(format!("vibebuddy-voice-offer-{}", std::process::id()));
         let offers = |transport: &RecordingTransport| {
             transport.events().iter().filter(|event| event.event == "voice.available").map(|event| event.extra["on"].clone()).collect::<Vec<_>>()
@@ -2388,10 +2446,35 @@ mod tests {
             publish_device_message(&state, build()).await;
             let expected = if enabled { vec![serde_json::json!(true); 4] } else { Vec::new() };
             assert_eq!(offers(&transport), expected, "over the Relay");
-            // The box sends no audio over the UART bridge.
+            // Over the UART bridge only once it runs fast; until its rate settles, nothing.
             publish_device_message(&state, DeviceMessage::Connected { port: "/dev/cu.wchusbserial1".to_owned(), bridge: true, usb_serial: None }).await;
             publish_device_message(&state, build()).await;
-            assert_eq!(offers(&transport), expected, "not over the UART bridge");
+            assert_eq!(offers(&transport), expected, "not before the bridge's rate settles");
+            publish_device_message(&state, DeviceMessage::BridgeRate { baud: serial_transport::FAST_BAUD_RATE, switches: true }).await;
+            publish_device_message(&state, build()).await;
+            let expected = if enabled { vec![serde_json::json!(true); 6] } else { Vec::new() };
+            assert_eq!(offers(&transport), expected, "on the bridge at 921600, as the rate settles and on each build");
+
+            // Firmware that can't move the bridge: off, saying why and what to do.
+            publish_device_message(&state, DeviceMessage::Connected { port: "/dev/cu.wchusbserial1".to_owned(), bridge: true, usb_serial: None }).await;
+            publish_device_message(&state, build()).await;
+            publish_device_message(&state, DeviceMessage::BridgeRate { baud: 115_200, switches: false }).await;
+            let mut expected = expected;
+            if enabled {
+                expected.push(serde_json::json!(false));
+                let off = transport.events().last().unwrap().clone();
+                assert_eq!(off.extra["reason"], "slow_link");
+                assert_eq!(off.message.as_deref(), Some("Update my firmware, or use my other USB port, to talk to me."));
+            }
+            assert_eq!(offers(&transport), expected, "off at 115200");
+            assert_eq!(voice_off(&state).await.as_deref(), Some("bridge_firmware"));
+            publish_device_message(&state, DeviceMessage::BridgeRate { baud: 115_200, switches: true }).await;
+            if enabled {
+                assert_eq!(transport.events().last().unwrap().message.as_deref(), Some("This port is too slow for voice. Use my other USB port."));
+            }
+            assert_eq!(voice_off(&state).await.as_deref(), Some("bridge_slow"));
+            publish_device_message(&state, DeviceMessage::Disconnected).await;
+            assert_eq!(voice_off(&state).await, None, "no box, nothing about its cable");
         }
         let _ = std::fs::remove_dir_all(dir);
     }
@@ -2412,25 +2495,95 @@ mod tests {
 
         publish_device_message(&state, DeviceMessage::Connected { port: "/dev/cu.x".to_owned(), bridge: false, usb_serial: None }).await;
         publish_device_message(&state, build()).await;
-        assert!(offers().is_empty(), "not offered before the session is found ready");
+        assert_eq!(offers(), [serde_json::json!(false)], "not offered before the session is found ready");
+        assert_eq!(transport.events().last().unwrap().extra["reason"], "not_ready");
 
         // The first check finds Codex installed and logged in.
         follow_resident_readiness(&state, resident.clone());
         settle().await;
-        assert_eq!(offers(), [serde_json::json!(true)]);
+        assert_eq!(offers(), [serde_json::json!(false), serde_json::json!(true)]);
         resident.note(Some(resident::Problem::CodexLoggedOut));
         settle().await;
-        assert_eq!(offers(), [serde_json::json!(true), serde_json::json!(false)], "withdrawn when the user logs out");
+        assert_eq!(offers(), [serde_json::json!(false), serde_json::json!(true), serde_json::json!(false)], "withdrawn when the user logs out");
+        assert_eq!(transport.events().last().unwrap().extra["reason"], "not_ready");
         resident.note(Some(resident::Problem::CodexMissing));
         settle().await;
-        assert_eq!(offers().len(), 2, "still not ready: nothing new to tell");
+        assert_eq!(offers().len(), 3, "still not ready: nothing new to tell");
 
-        // Never over the UART bridge, where voice isn't offered at all.
+        // On the UART bridge at 115200 voice stays off whatever the session does, and the box hears why each time.
         publish_device_message(&state, DeviceMessage::Connected { port: "/dev/cu.wchusbserial1".to_owned(), bridge: true, usb_serial: None }).await;
         publish_device_message(&state, build()).await;
+        assert_eq!(offers().len(), 3, "nothing before the bridge's rate settles");
+        publish_device_message(&state, DeviceMessage::BridgeRate { baud: 115_200, switches: false }).await;
         resident.note(None);
         settle().await;
-        assert_eq!(offers().len(), 2);
+        assert_eq!(offers()[3..], [serde_json::json!(false), serde_json::json!(false)]);
+        assert_eq!(transport.events().last().unwrap().extra["reason"], "slow_link");
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    /// Asks the account why voice is off, as the voice service does.
+    struct AccountRecognizer(Arc<account::Account>);
+
+    impl speech::Recognizer for AccountRecognizer {
+        fn recognize(&self, _wav: &[u8]) -> Result<speech::Transcript, speech::RecognitionError> {
+            Ok(speech::Transcript::default())
+        }
+
+        fn refusal(&self) -> Option<&'static str> {
+            if self.0.token().is_none() {
+                return Some("signed_out");
+            }
+            self.0.voice_refusal()
+        }
+    }
+
+    #[tokio::test]
+    async fn a_refusal_for_the_day_withdraws_voice_with_its_reason_until_a_read_shows_voice_again() {
+        let dir = resident::tests::temp_dir("main-refusal-offer");
+        let transport = Arc::new(RecordingTransport::default());
+        let mut state = test_state(transport.clone());
+        let resident = Arc::new(resident::tests::resident(&dir, &resident::tests::logged_in(), Arc::default()));
+        resident.note(None);
+        state.account = Arc::new(account::signed_in_for_tests(&dir.join("config"), "tok"));
+        state.voice = Arc::new(voice::Voice::new(Some(Arc::new(AccountRecognizer(state.account.clone()))), Some(resident)));
+        let offers = || {
+            transport
+                .events()
+                .iter()
+                .filter(|event| event.event == "voice.available")
+                .map(|event| (event.extra["on"].clone(), event.extra.get("reason").cloned(), event.message.clone()))
+                .collect::<Vec<_>>()
+        };
+        let settle = || tokio::time::sleep(Duration::from_millis(50));
+        publish_device_message(&state, DeviceMessage::Connected { port: "/dev/cu.x".to_owned(), bridge: false, usb_serial: None }).await;
+        publish_device_message(&state, DeviceMessage::Line("DISPLAY READY BUILD v9 2026-10-01".to_owned())).await;
+        follow_account(&state);
+        assert_eq!(offers(), [(serde_json::json!(true), None, None)]);
+
+        state.account.note_refusal("allowance");
+        settle().await;
+        let (on, reason, message) = offers()[1].clone();
+        assert_eq!((on, reason), (serde_json::json!(false), Some(serde_json::json!("allowance"))));
+        assert_eq!(message, voice::refusal_message("allowance"));
+        // A rebooted box is told again, reason and all.
+        publish_device_message(&state, DeviceMessage::Line("DISPLAY READY BUILD v9 2026-10-01".to_owned())).await;
+        assert_eq!(offers().len(), 3);
+        assert_eq!(offers()[2].1, Some(serde_json::json!("allowance")));
+
+        // Usage that leaves the refusal as it was tells the box nothing new.
+        state.account.read_usage_for_tests(20, 20);
+        settle().await;
+        assert_eq!(offers().len(), 3);
+        // A read that shows commands left (a higher limit) brings voice back.
+        state.account.read_usage_for_tests(20, 100);
+        settle().await;
+        assert_eq!(offers().len(), 4);
+        assert_eq!(offers()[3], (serde_json::json!(true), None, None));
+
+        state.account.forget();
+        settle().await;
+        assert_eq!(offers().last().unwrap().1, Some(serde_json::json!("signed_out")));
         let _ = std::fs::remove_dir_all(dir);
     }
 
@@ -2453,6 +2606,7 @@ mod tests {
                 "brain": "codex",
                 "brain_setting": "auto",
                 "anthropic_key_set": false,
+                "voice_off": null,
             })
         );
         assert_eq!(script.lock().unwrap().starts, 0, "asking never starts the app-server");

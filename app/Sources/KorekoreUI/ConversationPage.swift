@@ -64,6 +64,14 @@ public struct KorekoreConversationPage: View {
             if let choice = latest?.brainSetting, choice != .codex {
                 keyCard
             }
+            if problem == nil, let note = latest?.voiceOffNote {
+                KCard(outline: Theme.Colors.korePinkText) {
+                    HStack(alignment: .top, spacing: 10) {
+                        KoreBadge()
+                        KNote(note)
+                    }
+                }
+            }
             content.frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
             Text("last 20 exchanges · newest at the bottom · stays on this Mac")
                 .font(.pixel(12)).foregroundStyle(Theme.Colors.muted2)
