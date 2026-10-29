@@ -92,8 +92,9 @@ fn draw_the_korekore_pages() {
         client::Exchange {
             said: "Quick check: what time is it, and how many agents are working?".to_owned(),
             replies: vec!["It's 10:09 a.m. in Singapore. Three agents are working.".to_owned()],
+            at: Some(chrono::Utc::now() - chrono::Duration::days(1)),
         },
-        client::Exchange { said: "新加坡明天天气怎么样".to_owned(), replies: vec!["明天上午多云转晴，最高约三十四度；午后可能有雷阵雨，出门记得带伞。".to_owned()] },
+        client::Exchange { said: "新加坡明天天气怎么样".to_owned(), replies: vec!["明天上午多云转晴，最高约三十四度；午后可能有雷阵雨，出门记得带伞。".to_owned()], at: Some(chrono::Utc::now()) },
     ]));
     let setup = |agent: &str, name: &str, present: bool, installed: bool| agents::Setup {
         agent: agent.to_owned(),

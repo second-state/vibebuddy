@@ -466,9 +466,10 @@ do {
     check(noKey.problem == .anthropicKeyMissing && noKey.brainSetting == .claude, "resident info says the Anthropic API key is missing")
     let noClaude = try StatusCoding.decoder().decode(ResidentInfo.self, from: Data(#"{"enabled":true,"problem":"claude_missing","brain_setting":"something_new"}"#.utf8))
     check(noClaude.problem == .claudeMissing && noClaude.brainSetting == nil, "resident info says Claude Code is missing; an unknown setting is nil")
-    let history = try StatusCoding.decoder().decode(ResidentHistory.self, from: Data(#"{"exchanges":[{"replies":["现在没有 Agent 在工作。"],"said":"现在有几个agent在工作呀"},{"replies":["a","b"],"said":"two"}],"thread_id":"t1"}"#.utf8))
+    let history = try StatusCoding.decoder().decode(ResidentHistory.self, from: Data(#"{"exchanges":[{"replies":["现在没有 Agent 在工作。"],"said":"现在有几个agent在工作呀"},{"replies":["a","b"],"said":"two","at":"2026-10-29T03:05:00Z"}],"thread_id":"t1"}"#.utf8))
     check(history.threadId == "t1" && history.exchanges.count == 2, "resident history decodes")
-    check(history.exchanges.last == ResidentExchange(said: "two", replies: ["a", "b"]), "exchanges keep their order and every reply")
+    check(history.exchanges.last == ResidentExchange(said: "two", replies: ["a", "b"], at: Date(timeIntervalSince1970: 1_793_243_100)), "exchanges keep their order, every reply and when")
+    check(history.exchanges.first?.at == nil, "an exchange without a time decodes")
 } catch {
     check(false, "resident JSON fails to decode: \(error)")
 }
