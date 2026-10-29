@@ -97,8 +97,8 @@ struct KorekoreAccountCard: View {
     private var refusal: String? {
         switch account?.refused {
         case nil: nil
-        case "global_cap": String(localized: "Voice is paused for everyone today. It comes back at midnight UTC.")
-        default: String(localized: "Today's voice is used up. It comes back at midnight UTC.")
+        case "global_cap": String(localized: "Voice is paused for everyone today. It comes back at \(AccountStatus.voiceComesBack()).")
+        default: String(localized: "Today's voice is used up. It comes back at \(AccountStatus.voiceComesBack()).")
         }
     }
 

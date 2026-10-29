@@ -128,13 +128,14 @@ A voice command has an overlay of its own, drawn like the menu's panel and, like
 
 | Gesture | Without voice commands | While the computer offers them |
 |---|---|---|
-| K0 long | gives up the Pomodoro phase | push-to-talk: records while K0 stays down, up to 30 s; giving up the phase is the menu's STOP FOCUS / END BREAK |
+| K0 long | gives up the Pomodoro phase; with Pomodoro idle, shows why voice is off if the computer said (below) | push-to-talk: records while K0 stays down, up to 30 s; giving up the phase is the menu's STOP FOCUS / END BREAK |
 
 ![Recording](images/voice-listening.png) ![What was heard and the reply](images/voice-reply.png) ![An error](images/voice-error.png)
 
 - **LISTENING** appears when the long press fires, a second after K0 went down, and that is when recording starts. The meter shows the level of each 100 ms (green, then yellow, then orange near the top); under it, the seconds left. Letting go sends it; under half a second is taken as a slip and cancelled. K2 cancels; other keys do nothing while recording.
 - **THINKING** follows until the computer answers. What it heard shows dimmed, then each spoken reply as it comes, in large type while it fits and small type after that; past what small type holds, the oldest rows give way. The title says **REPLY** once there is one.
-- After the computer says the turn is done, the text stays up 15 s to be read. An error shows a short message for 6 s: NOT HEARD, UNAVAILABLE, BUSY, or NO MICROPHONE when the box couldn't start recording. With nothing from the computer for a minute, the overlay closes on its own.
+- After the computer says the turn is done, the text stays up 15 s to be read. An error shows a short message for 6 s: NOT HEARD, UNAVAILABLE, BUSY, or NO MICROPHONE when the box couldn't start recording; for the account and the computer, SIGN IN, VOICE USED UP, VOICE PAUSED and NOT READY, with the computer's text ("Today's voice is used up. It comes back at 08:00."). With nothing from the computer for 130 s, it says NO ANSWER, "The computer didn't answer."; with replies already up, it just closes.
+- **Why voice is off.** When the computer says why it doesn't offer voice (signed out, the day's voice used up or paused for everyone, its session not ready), a long K0 with Pomodoro idle shows that panel for 6 s and records nothing. No spoken line goes with it: these are states of the system, not moments for the Character.
 - K2 closes the overlay; a long K0 starts the next command; any other key closes it and does its own job.
 - **Events that need the user win**, as with the menu: input required, failed, or a Pomodoro phase ending closes the overlay, and a recording in progress is given up (`VOICE CANCEL`).
 - **Text only.** Spoken replies are text until there is speech synthesis, so mute changes nothing here. Chinese draws in a 12 px pixel font beside the 5×7 ASCII one, and text with Chinese in it uses small type throughout ([`firmware-bringup.md`](firmware-bringup.md), "Fonts").

@@ -83,8 +83,15 @@ impl crate::App {
             }
         }
         let today = match (account.refused.as_deref(), &account.today) {
-            (Some("global_cap"), _) => Some(tag(tr("Voice is paused for everyone today. It comes back at midnight UTC.", &[]), theme::KORE_PINK_TEXT)),
-            (Some(_), _) => Some(tag(tr("Today's voice is used up. It comes back at midnight UTC.", &[]), theme::KORE_PINK_TEXT)),
+            (Some(refused), _) => {
+                let back = status::voice_comes_back(chrono::Utc::now(), &chrono::Local);
+                let line = if refused == "global_cap" {
+                    tr("Voice is paused for everyone today. It comes back at %@.", &[&back])
+                } else {
+                    tr("Today's voice is used up. It comes back at %@.", &[&back])
+                };
+                Some(tag(line, theme::KORE_PINK_TEXT))
+            }
             (None, Some(usage)) => Some(tag(tr("Voice today: %lld of %lld", &[&usage.commands, &usage.commands_limit]), theme::MUTED_2)),
             (None, None) => None,
         };

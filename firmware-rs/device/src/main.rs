@@ -41,7 +41,7 @@ use esp_hal::lcd_cam::lcd::i8080::{Config as I8080Config, I8080};
 use esp_hal::rng::{Rng, Trng, TrngSource};
 use esp_hal::time::Rate;
 use esp_hal::timer::timg::TimerGroup;
-use esp_hal::uart::{Config as UartConfig, Uart};
+use esp_hal::uart::Uart;
 use esp_hal::usb::usb_serial_jtag::UsbSerialJtag;
 use esp_hal::{Blocking, dma_tx_buffer, dma_tx_stream_buffer};
 use esp_storage::FlashStorage;
@@ -55,6 +55,7 @@ use vibebuddy_firmware_core::relay_box::{self, RelayBox};
 use vibebuddy_firmware_core::spoken_reply::ReplyAudio;
 use vibebuddy_firmware_core::storage::Flash;
 use vibebuddy_firmware_core::touch;
+use vibebuddy_firmware_core::uart_rate::{self, UartRate};
 
 use crate::audio::{PLAYING, PlayCommand, QUEUE, STOP, STREAM_BYTES, STREAM_CHUNK};
 use crate::lcd::Lcd;
@@ -160,6 +161,9 @@ struct DeviceBoard {
     relay_peer: Option<SealedLines>,
     /// The firmware asked to restart; the main loop closes the sockets first.
     restart: bool,
+    /// The UART bridge's rate and whether the computer confirmed it (docs/protocol.md, "Link speed on the UART
+    /// bridge").
+    uart_rate: UartRate,
 }
 
 impl DeviceBoard {
@@ -225,12 +229,15 @@ impl Board for DeviceBoard {
     }
 
     /// `VOICE DATA`, 16 KB/s of it: USB, the local network and the Relay (ADR-0018), about 21 of the Relay's 50
-    /// messages a second. Not the UART, which carries 11.5 KB/s at 115200 baud and whose writes block, so the stream
-    /// would stall the main loop there. A line that doesn't fit the Relay's queue right now is dropped, as a full
+    /// messages a second. The UART only once the computer on the bridge moved it to the fast rate: 115200 baud carries
+    /// 11.5 KB/s. A line that doesn't fit the UART's send ring or the Relay's queue right now is dropped, as a full
     /// network buffer drops one: a gap in `seq`, never a stalled recording. It leaves [`STREAM_HEADROOM`] of the queue
     /// to the box's other lines, so `VOICE END` still gets through behind a backlog of audio.
     fn write_stream(&mut self, line: &[u8]) {
         self.transport.write_usb(line);
+        if self.uart_rate.carries_stream() {
+            self.transport.write_uart_stream(line);
+        }
         self.write_lan(line);
         if let Some(lines) = &mut self.relay_peer {
             lines.lines(
@@ -283,6 +290,16 @@ impl Board for DeviceBoard {
 
     fn restart(&mut self) {
         self.restart = true;
+    }
+
+    /// Says `BAUD SWITCH <rate>` at the current rate, then moves once it is out; a whole line at the new rate keeps
+    /// it (see the main loop).
+    fn set_uart_rate(&mut self, rate: u32) {
+        let now = self.now_ms();
+        if let Some(rate) = self.uart_rate.request(rate, now) {
+            self.transport.write_uart(alloc::format!("BAUD SWITCH {rate}\n").as_bytes());
+            serial::set_uart_rate(rate);
+        }
     }
 
     fn flash(&mut self) -> &mut dyn Flash {
@@ -439,7 +456,7 @@ async fn main(spawner: Spawner) -> ! {
     esp_rtos::start(timg0.timer0, peripherals.FROM_CPU_INTR0);
 
     // Serial comes up first: the result of every later step is reported to the Mac.
-    let uart = Uart::new(peripherals.UART0, UartConfig::default().with_baudrate(115_200))
+    let uart = Uart::new(peripherals.UART0, serial::uart_config(uart_rate::SLOW))
         .expect("UART0 config")
         .with_tx(peripherals.GPIO43)
         .with_rx(peripherals.GPIO44);
@@ -512,6 +529,7 @@ async fn main(spawner: Spawner) -> ! {
         lan_peer: None,
         relay_peer: None,
         restart: false,
+        uart_rate: UartRate::new(),
     };
 
     // Let the audio task run once to start the I2S stream: the ES8311 is clocked by BCLK, and the C
@@ -547,14 +565,23 @@ async fn main(spawner: Spawner) -> ! {
     // UART and USB feed one line parser, so UART bytes are held here until their line is whole: a stray byte on
     // the bridge must not land in the middle of a line arriving over USB.
     let mut uart_line: alloc::vec::Vec<u8> = alloc::vec::Vec::new();
+    // Bytes the computer never sends: at the fast rate, the computer talks at 115200 (see uart_rate::TextCheck).
+    let mut uart_text = uart_rate::TextCheck::new();
     loop {
+        let mut garbled = 0;
         loop {
             let count = serial::take_uart(&mut input);
             if count == 0 {
                 break;
             }
             for &byte in &input[..count] {
+                garbled += u32::from(uart_text.garbled(byte));
                 if vibebuddy_firmware_core::firmware::hold_line_byte(&mut uart_line, byte) {
+                    // A whole line at a new rate confirms it; said before the line is handled, so the computer
+                    // hears it before any answer.
+                    if let Some(rate) = board.uart_rate.heard_line(board.now_ms()) {
+                        board.transport.write_uart(alloc::format!("BAUD {rate}\n").as_bytes());
+                    }
                     firmware.receive(&mut board, &uart_line);
                     uart_line.clear();
                 }
@@ -625,6 +652,15 @@ async fn main(spawner: Spawner) -> ! {
         if firmware.take_wifi_change() {
             net::CREDENTIALS.signal(wifi_credentials(&firmware));
         }
+        // Back to 115200 when the computer and the box may no longer agree on the UART's rate.
+        let errors = serial::take_uart_errors() + garbled;
+        let back = board.uart_rate.receive_errors(errors).or_else(|| board.uart_rate.poll(board.now_ms()));
+        if let Some(rate) = back {
+            uart_line.clear();
+            serial::set_uart_rate(rate);
+            // A newline first: what the computer read of the box's last bytes at the fast rate ends its own line.
+            board.transport.write_uart(alloc::format!("\nBAUD {rate}\n").as_bytes());
+        }
         firmware.poll(&mut board);
         // The microphone's own report on a stream that just ended.
         while let Ok(note) = mic::NOTES.try_receive() {
@@ -635,6 +671,10 @@ async fn main(spawner: Spawner) -> ! {
         // Relay see the box go at once, rather than after their silence timeouts; a new identity has a new
         // box-id, so nothing would replace the old one's socket (#122). The wait also lets the last line out.
         if board.restart {
+            // The box comes back at 115200; a computer on the bridge at the fast rate must move first.
+            if board.uart_rate.reset() {
+                board.transport.write_uart(alloc::format!("BAUD {}\n", uart_rate::SLOW).as_bytes());
+            }
             relay::STOP.signal(());
             net::close_all();
             Timer::after_millis(500).await;

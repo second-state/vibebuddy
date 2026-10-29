@@ -225,6 +225,15 @@ impl Account {
         self.usage_changed.send_modify(|n| *n += 1);
     }
 
+    /// Why voice is off today, as [`AccountStatus::refused`] says it: the box isn't offered voice until the UTC day
+    /// ends, or until a read of the account shows voice again.
+    pub fn voice_refusal(&self) -> Option<&'static str> {
+        match self.status().refused.as_deref()? {
+            "global_cap" => Some("global_cap"),
+            _ => Some("allowance"),
+        }
+    }
+
     /// Reads today's usage from the service. Blocking.
     pub fn refresh_usage(&self) -> Result<(), AccountError> {
         let token = self.token().ok_or(AccountError::NotSignedIn)?;
@@ -258,7 +267,16 @@ impl Account {
         if plan.as_ref().is_some_and(|plan| plan.name == "paid") {
             self.relay_chance.send_modify(|n| *n += 1);
         }
-        self.today.lock().unwrap().usage = usage;
+        let mut today = self.today.lock().unwrap();
+        // Commands left today (a higher limit, say on the Paid plan) end a refusal for the allowance; only the day's
+        // end ends the global cap, which the account doesn't show.
+        if usage.as_ref().is_some_and(|usage| usage.commands < usage.commands_limit)
+            && today.refused.as_ref().is_some_and(|(_, reason)| reason == "allowance")
+        {
+            today.refused = None;
+        }
+        today.usage = usage;
+        drop(today);
         *self.plan.lock().unwrap() = plan;
         self.usage_changed.send_modify(|n| *n += 1);
     }
@@ -400,6 +418,11 @@ impl Account {
     pub fn read_plan_for_tests(&self, plan: &str) {
         self.take_usage(&serde_json::json!({"plan": {"name": plan}}));
     }
+
+    /// As if a read of the account had found `commands` of today's `limit` used.
+    pub fn read_usage_for_tests(&self, commands: u64, limit: u64) {
+        self.take_usage(&serde_json::json!({"today": {"day": utc_day(), "commands": commands}, "limits": {"commands": limit}}));
+    }
 }
 
 /// An account signed in with `token`, its file in `dir`, for other modules' tests.
@@ -412,6 +435,11 @@ pub fn signed_in_for_tests(dir: &Path, token: &str) -> Account {
 
 fn utc_day() -> String {
     chrono::Utc::now().format("%Y-%m-%d").to_string()
+}
+
+/// The next 00:00 UTC after `now`, when the service's day starts over (docs/api.md).
+pub fn next_utc_day(now: chrono::DateTime<chrono::Utc>) -> chrono::DateTime<chrono::Utc> {
+    (now.date_naive() + chrono::Days::new(1)).and_time(chrono::NaiveTime::MIN).and_utc()
 }
 
 fn load(path: &Path) -> Option<Saved> {
@@ -634,6 +662,38 @@ mod tests {
         assert_eq!(account.status().refused, None);
         account.forget();
         assert_eq!((account.status().today, account.status().refused), (None, None));
+    }
+
+    #[test]
+    fn a_refusal_holds_until_the_utc_day_ends_or_a_read_shows_commands_left() {
+        let dir = scratch();
+        let day = utc_day();
+        let read = |commands: u32, limit: u32| {
+            let answer = format!(r#"{{"today":{{"day":"{day}","commands":{commands},"replies":0}},"limits":{{"commands":{limit},"replies":20}}}}"#);
+            (200, Box::leak(answer.into_boxed_str()) as &'static str)
+        };
+        let (service, _) = serve(vec![read(20, 20), read(20, 100), read(0, 20)]);
+        let account = signed_in(&service, dir.as_path());
+        account.note_refusal("allowance");
+        assert_eq!(account.voice_refusal(), Some("allowance"));
+        account.refresh_usage().unwrap();
+        assert_eq!(account.voice_refusal(), Some("allowance"), "still used up");
+        account.refresh_usage().unwrap();
+        assert_eq!(account.voice_refusal(), None, "a higher limit leaves commands");
+        // The global cap isn't in the account; only the day's end lifts it.
+        account.note_refusal("global_cap");
+        account.refresh_usage().unwrap();
+        assert_eq!(account.voice_refusal(), Some("global_cap"));
+        account.today.lock().unwrap().refused = Some(("2001-01-01".to_owned(), "global_cap".to_owned()));
+        assert_eq!(account.voice_refusal(), None, "a new UTC day");
+    }
+
+    #[test]
+    fn the_next_utc_day_starts_at_midnight_utc() {
+        let at = |text: &str| chrono::DateTime::parse_from_rfc3339(text).unwrap().with_timezone(&chrono::Utc);
+        assert_eq!(next_utc_day(at("2026-10-27T15:30:00Z")), at("2026-10-28T00:00:00Z"));
+        assert_eq!(next_utc_day(at("2026-10-27T00:00:00Z")), at("2026-10-28T00:00:00Z"));
+        assert_eq!(next_utc_day(at("2026-12-31T23:59:59Z")), at("2027-01-01T00:00:00Z"));
     }
 
     #[test]

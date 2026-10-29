@@ -87,6 +87,16 @@ impl Plan {
     }
 }
 
+/// When refused voice comes back: the next 00:00 UTC after `now`, when the service's day starts over, as `HH:MM`
+/// (24 hours) in `zone`, the same time the box shows.
+pub fn voice_comes_back<Zone: chrono::TimeZone>(now: chrono::DateTime<chrono::Utc>, zone: &Zone) -> String
+where
+    Zone::Offset: std::fmt::Display,
+{
+    let midnight = (now.date_naive() + chrono::Days::new(1)).and_time(chrono::NaiveTime::MIN).and_utc();
+    midnight.with_timezone(zone).format("%H:%M").to_string()
+}
+
 /// `12300` as "12,300".
 fn grouped(number: u64) -> String {
     let digits = number.to_string();
@@ -572,6 +582,15 @@ mod tests {
         assert_eq!(used.today, Some(Usage { day: "2026-10-24".to_owned(), commands: 7, commands_limit: 100 }));
         assert_eq!(used.refused.as_deref(), Some("global_cap"));
         assert_eq!(used.plan, None);
+    }
+
+    #[test]
+    fn refused_voice_comes_back_at_the_next_midnight_utc_in_local_time() {
+        let at = |text: &str| chrono::DateTime::parse_from_rfc3339(text).unwrap().with_timezone(&chrono::Utc);
+        let zone = |hours: i32| chrono::FixedOffset::east_opt(hours * 3600).unwrap();
+        assert_eq!(voice_comes_back(at("2026-10-27T15:59:00Z"), &zone(8)), "08:00");
+        assert_eq!(voice_comes_back(at("2026-10-27T15:59:00Z"), &zone(-5)), "19:00");
+        assert_eq!(voice_comes_back(at("2026-12-31T23:59:59Z"), &chrono::Utc), "00:00");
     }
 
     #[test]

@@ -78,9 +78,11 @@ pub trait Recognizer: Send + Sync {
     /// `wav` is a whole 16-bit PCM WAV file.
     fn recognize(&self, wav: &[u8]) -> Result<Transcript, RecognitionError>;
 
-    /// Whether it can be asked now; the voice service needs the person signed in.
-    fn ready(&self) -> bool {
-        true
+    /// Why it can't be asked now, as `voice.available` says it (docs/protocol.md): the voice service needs the person
+    /// signed in (`signed_out`), and after refusing today it is off until the UTC day ends (`allowance`,
+    /// `global_cap`). None when it can be asked.
+    fn refusal(&self) -> Option<&'static str> {
+        None
     }
 }
 
@@ -186,8 +188,12 @@ impl Recognizer for VoiceService {
         Ok(transcript)
     }
 
-    fn ready(&self) -> bool {
-        self.session.is_none() || self.token().is_some()
+    fn refusal(&self) -> Option<&'static str> {
+        let session = self.session.as_ref()?;
+        if session.token().is_none() {
+            return Some("signed_out");
+        }
+        session.voice_refusal()
     }
 }
 
@@ -203,8 +209,8 @@ pub fn refusal(status: u16, body: &str, session: Option<&Account>) -> Option<Rec
         }
         429 => {
             let refusal = match serde_json::from_str::<Value>(body).ok().and_then(|value| value.get("reason")?.as_str().map(str::to_owned)).as_deref() {
-                Some("global_cap") => RecognitionError { reason: "global_cap", message: "Voice is paused for today".to_owned() },
-                _ => RecognitionError { reason: "allowance", message: "Today's voice is used up".to_owned() },
+                Some("global_cap") => named("global_cap"),
+                _ => named("allowance"),
             };
             if let Some(session) = session {
                 session.note_refusal(refusal.reason);
@@ -216,7 +222,12 @@ pub fn refusal(status: u16, body: &str, session: Option<&Account>) -> Option<Rec
 }
 
 fn signed_out() -> RecognitionError {
-    RecognitionError { reason: "signed_out", message: "Sign in on the computer".to_owned() }
+    named("signed_out")
+}
+
+/// A refusal with the text the box shows for it, the same as when it comes in `voice.available`.
+fn named(reason: &'static str) -> RecognitionError {
+    RecognitionError { reason, message: crate::voice::refusal_message(reason).unwrap_or_default() }
 }
 
 /// An OpenAI-compatible `POST {base}/audio/transcriptions`: OpenAI itself, or a server the user runs.
@@ -513,10 +524,12 @@ mod tests {
         let session = Arc::new(crate::account::signed_in_for_tests(&scratch("session"), "tok_abc"));
         let service = VoiceService { base_url: "http://127.0.0.1:9".to_owned(), language: None, session: Some(session.clone()) };
         assert!(service.request(b"").headers.contains(&("Authorization".to_owned(), "Bearer tok_abc".to_owned())));
-        assert!(service.ready());
+        assert_eq!(service.refusal(), None);
+        session.note_refusal("global_cap");
+        assert_eq!(service.refusal(), Some("global_cap"), "off for the rest of the UTC day");
 
         session.forget();
-        assert!(!service.ready());
+        assert_eq!(service.refusal(), Some("signed_out"));
         // Nothing is sent without a session: port 9 has no listener, and the error would name it otherwise.
         assert_eq!(service.recognize(b"").unwrap_err().reason, "signed_out");
     }

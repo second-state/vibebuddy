@@ -536,8 +536,8 @@
 "Couldn't sign out: %@" = "退出登录失败：%@";
 "Couldn't delete the account: %@" = "删除账户失败：%@";
 "Voice today: %lld of %lld" = "今天的语音：已用 %lld / %lld 条";
-"Today's voice is used up. It comes back at midnight UTC." = "今天的语音已用完，UTC 零点后恢复。";
-"Voice is paused for everyone today. It comes back at midnight UTC." = "今天的语音已全局暂停，UTC 零点后恢复。";
+"Today's voice is used up. It comes back at %@." = "今天的语音已用完，%@ 恢复。";
+"Voice is paused for everyone today. It comes back at %@." = "今天的语音已全局暂停，%@ 恢复。";
 "Plan" = "方案";
 "Free" = "免费版";
 "Paid plan" = "付费版";
@@ -650,3 +650,6 @@
 "Pick a voice…" = "选一个声音…";
 "Couldn't list the voices of your ElevenLabs key, so paste a voice id: %@" = "列不出你这个 ElevenLabs key 的声音，请粘贴 voice ID：%@";
 "%@ · stock" = "%@ · 自带";
+"The box is on its UART bridge, and its firmware can't carry voice there. Update the firmware, or plug the cable into the box's native USB port." = "盒子接在 UART 桥上，它现在的固件没法在这条线上传语音。更新固件，或把线改插到盒子的原生 USB 口。";
+"The box is on its UART bridge, which didn't hold the speed voice needs. Plug the cable into the box's native USB port, or plug it in again to try once more." = "盒子接在 UART 桥上，这条线没跑到语音需要的速度。把线改插到盒子的原生 USB 口，或重新插一次再试。";
+"Voice needs this computer signed in to VibeBuddy." = "语音要先在这台电脑上登录 VibeBuddy。";

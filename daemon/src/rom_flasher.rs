@@ -192,7 +192,7 @@ impl RomFlasher {
         for piece in bytes.chunks(crate::serial_transport::PACE_PIECE_BYTES) {
             self.port.write_all(piece).map_err(|error| error.to_string())?;
             self.port.flush().map_err(|error| error.to_string())?;
-            std::thread::sleep(crate::serial_transport::piece_delay(piece.len()));
+            std::thread::sleep(crate::serial_transport::piece_delay(piece.len(), BAUD));
         }
         Ok(())
     }
