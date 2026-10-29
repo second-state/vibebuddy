@@ -133,13 +133,15 @@ impl Engine {
                     )
                 })
             {
+                // VibeBuddy: clip the shadow like the quad, so a card's
+                // shadow stays inside a scrollable; see desktop/vendor/README.md.
                 pixels.draw_pixmap(
                     x as i32,
                     y as i32,
                     pixmap.as_ref(),
                     &tiny_skia::PixmapPaint::default(),
                     tiny_skia::Transform::default(),
-                    None,
+                    clip_mask,
                 );
             }
         }
