@@ -28,3 +28,4 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 # The MP3 decoder for spoken replies, patched for the Xtensa backend (see its Cargo.toml).
 [patch.crates-io]
 nanomp3-core = { path = "firmware-rs/vendor/nanomp3-core" }
+iced_tiny_skia = { path = "desktop/vendor/iced_tiny_skia" }
