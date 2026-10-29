@@ -22,7 +22,8 @@ struct DaemonClient {
     /// Reads the status stream, calling back with each snapshot; throws when it drops, and the caller decides when to reconnect.
     func stream(onStatus: @escaping (Status) -> Void) async throws {
         var request = self.request("/v1/status/stream")
-        request.timeoutInterval = 3600 * 24
+        // This is an inactivity timeout: SSE keepalives keep a quiet, healthy stream alive, as on Linux.
+        request.timeoutInterval = 45
         let (bytes, response) = try await URLSession.shared.bytes(for: request)
         guard (response as? HTTPURLResponse)?.statusCode == 200 else { throw URLError(.badServerResponse) }
         let decoder = StatusCoding.decoder()

@@ -5168,6 +5168,7 @@ dependencies = [
  "libm",
  "nanomp3-core",
  "rand_core 0.6.4",
+ "serde",
  "serde_json",
  "sha2",
  "tungstenite",

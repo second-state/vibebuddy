@@ -29,6 +29,7 @@ vibebuddy-protocol = { path = "../../protocol", default-features = false }
 
 [dev-dependencies]
 ed25519-dalek = "2"
+serde.workspace = true
 # The simulator's Relay client (examples/simulator.rs --relay).
 serde_json = "1"
 tungstenite = { version = "0.30", features = ["native-tls"] }

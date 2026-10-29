@@ -29,6 +29,7 @@ mod updates;
 mod voice;
 mod voice_keys;
 mod voice_writer;
+mod window_focus;
 
 use std::convert::Infallible;
 use std::env;
@@ -54,7 +55,7 @@ use config::Config;
 use serde::Serialize;
 use serial_transport::{DeviceMessage, SerialConfig, SerialTransport, Transport, TransportError};
 use session_titles::SessionTitles;
-use status::{DaemonInfo, DeviceState, HooksSeen, Operation, OperationKind, OperationState, Status};
+use status::{DaemonInfo, DeviceState, HooksSeen, Operation, OperationKind, OperationState, Status, Supervisor};
 use tokio::sync::{Mutex, Notify, broadcast};
 use tokio_stream::StreamExt;
 use tokio_stream::wrappers::BroadcastStream;
@@ -91,6 +92,8 @@ struct AppState {
     status_changed: broadcast::Sender<()>,
     /// The app's version, reported to the device with the heartbeat; None when there is no app.
     app_version: Option<String>,
+    /// Who starts the daemon again when it exits; checked once, since it can't change while the daemon runs.
+    supervisor: Option<Supervisor>,
     /// The real serial worker, which must give up the port while flashing; absent in tests.
     serial: Option<Arc<SerialTransport>>,
     /// This computer's pairing key; None when it couldn't be read or made, and then nothing is paired.
@@ -149,6 +152,7 @@ impl AppState {
             device_bus,
             status_changed,
             app_version: env::var("VIBEBUDDY_APP_VERSION").ok().filter(|value| !value.is_empty()),
+            supervisor: Supervisor::detect(),
             serial: None,
             identity: None,
             relay: None,
@@ -186,6 +190,7 @@ impl AppState {
                 build: build_identity(self.app_version.as_deref()),
                 revision: BUILD_REVISION.to_owned(),
                 app_version: self.app_version.clone(),
+                supervisor: self.supervisor,
             },
             device,
             today,
@@ -1427,8 +1432,14 @@ async fn firmware_build_reported(state: &AppState) {
     }
 }
 
-/// The app supervises the daemon: exiting means restarting. Send the response first, then exit.
-async fn post_restart() -> (StatusCode, Json<ApiResponse>) {
+/// Exiting means restarting under a supervisor: the Mac app, a LaunchAgent or the systemd service. Send the response
+/// first, then exit.
+async fn post_restart(State(state): State<AppState>) -> (StatusCode, Json<ApiResponse>) {
+    // Exiting is all the daemon can do; only a supervisor makes that a restart. Outside the service it would just stop.
+    if state.supervisor == Some(Supervisor::Other) {
+        let message = "this daemon doesn't run as the vibebuddyd systemd service, so nothing would start it again".to_owned();
+        return (StatusCode::CONFLICT, Json(ApiResponse { accepted: false, message }));
+    }
     tokio::spawn(async {
         tokio::time::sleep(Duration::from_millis(200)).await;
         info!("exiting at the app's request; it will relaunch us");
