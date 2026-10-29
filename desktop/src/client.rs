@@ -343,6 +343,9 @@ pub async fn resident_info() -> Result<ResidentInfo, HistoryError> {
 pub struct Exchange {
     pub said: String,
     pub replies: Vec<String>,
+    /// When it was said; None from a daemon or thread that doesn't say.
+    #[serde(default)]
+    pub at: Option<chrono::DateTime<chrono::Utc>>,
 }
 
 #[derive(Clone, Debug)]

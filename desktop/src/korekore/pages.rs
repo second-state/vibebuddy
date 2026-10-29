@@ -471,7 +471,14 @@ impl crate::App {
                 Some(Ok(exchanges)) => card(
                     scrollable(
                         column(exchanges.iter().map(|exchange| {
-                            column![mine(&exchange.said)].extend(exchange.replies.iter().map(|reply| buddy(reply))).spacing(8).into()
+                            column![]
+                                .push(exchange.at.map(|at| {
+                                    container(text(when(at, chrono::Local::now())).font(pixel(12.0).0).size(pixel(12.0).1).color(theme::MUTED_2)).center_x(Length::Fill)
+                                }))
+                                .push(mine(&exchange.said))
+                                .extend(exchange.replies.iter().map(|reply| buddy(reply)))
+                                .spacing(8)
+                                .into()
                         }))
                         .spacing(12)
                         .padding(Padding::ZERO.right(14)),
@@ -1207,6 +1214,19 @@ fn trouble<'a>(detail: String) -> Element<'a, Message> {
 
 fn link<'a>(label: String, on_press: Message) -> Element<'a, Message> {
     button(text(label).font(regular()).size(13).color(theme::KORE_PINK_TEXT)).padding(0).on_press(on_press).style(|_, _| button::Style::default()).into()
+}
+
+/// When an exchange was said: the time for today, the day and the time before that.
+fn when(at: chrono::DateTime<chrono::Utc>, now: chrono::DateTime<chrono::Local>) -> String {
+    let at = at.with_timezone(&chrono::Local);
+    let format = if at.date_naive() == now.date_naive() {
+        "%H:%M"
+    } else if crate::i18n::is_chinese() {
+        "%-m月%-d日 %H:%M"
+    } else {
+        "%-d %b %H:%M"
+    };
+    at.format(format).to_string()
 }
 
 /// Your words: right, in an Ink bubble.

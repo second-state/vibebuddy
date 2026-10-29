@@ -223,6 +223,9 @@ public struct KorekoreConversationPage: View {
                 VStack(spacing: 12) {
                     ForEach(Array(exchanges.enumerated()), id: \.offset) { index, exchange in
                         VStack(spacing: 8) {
+                            if let at = exchange.at {
+                                Text(verbatim: Self.when(at)).font(.pixel(12)).foregroundStyle(Theme.Colors.muted2)
+                            }
                             mine(exchange.said)
                             ForEach(Array(exchange.replies.enumerated()), id: \.offset) { _, reply in
                                 buddy(reply)
@@ -241,6 +244,13 @@ public struct KorekoreConversationPage: View {
         .clipShape(RoundedRectangle(cornerRadius: Theme.Radius.md))
         .overlay(RoundedRectangle(cornerRadius: Theme.Radius.md).strokeBorder(Theme.Colors.ink, lineWidth: Theme.Stroke.base))
         .background(RoundedRectangle(cornerRadius: Theme.Radius.md).fill(Theme.Colors.ink).offset(y: Theme.Sticker.sm))
+    }
+
+    /// When an exchange was said: the time for today, the day and the time before that.
+    static func when(_ date: Date, now: Date = .now) -> String {
+        Calendar.current.isDate(date, inSameDayAs: now)
+            ? date.formatted(date: .omitted, time: .shortened)
+            : date.formatted(.dateTime.month(.abbreviated).day().hour().minute())
     }
 
     /// Your words: right, in an Ink bubble.
