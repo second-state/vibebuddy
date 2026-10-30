@@ -383,6 +383,16 @@ impl ActivityTracker {
         }
     }
 
+    /// The whole screen as it should be now, for a box that just linked: it may still show another computer's cards,
+    /// and dedup keeps this computer quiet while nothing changes here. Idle when nothing runs. It never speaks: the box
+    /// spoke when the state came, perhaps on another link.
+    pub fn current_screen(&mut self) -> Event {
+        let mut current = self.activity_snapshot().unwrap_or_else(|| event("agent.idle", "", ""));
+        self.last_visible = Some(current.clone());
+        current.extra.insert("suppress_audio".to_owned(), json!(true));
+        current
+    }
+
     /// Remember the activity whose end was just announced, so K2 can still return to it shortly afterwards.
     fn remember_announced(&mut self, activity: Activity) {
         if let Some(source) = activity.source {
@@ -1634,6 +1644,22 @@ mod tests {
                 .is_none(),
             "timing must not bypass dedup: redrawing on every tool event would reset the working animation to its first frame"
         );
+    }
+
+    #[test]
+    fn a_new_link_gets_the_whole_screen_even_when_nothing_changed() {
+        let mut tracker = ActivityTracker::default();
+        let idle = tracker.current_screen();
+        assert_eq!(idle.event, "agent.idle", "nothing runs: the box drops any cards it kept from another computer");
+
+        let turn = id("s", "s:1");
+        tracker.observe(&turn, "ALPHA", ActivityStatus::Working);
+        tracker.require_input(&turn, "ALPHA");
+        let screen = tracker.current_screen();
+        assert_eq!(screen.event, "agent.input_required");
+        assert_eq!(screen.extra["tasks"].as_array().map(Vec::len), Some(1));
+        assert_eq!(screen.extra["suppress_audio"], json!(true), "the box spoke when the state came");
+        assert!(tracker.observe(&turn, "ALPHA", ActivityStatus::InputRequired).is_none(), "and it is the new dedup baseline");
     }
 
     #[test]

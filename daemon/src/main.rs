@@ -455,6 +455,14 @@ async fn publish_device_message(state: &AppState, message: DeviceMessage) {
     // Ask right after connecting; the device reports its mode, firmware build and voice again.
     if matches!(message, DeviceMessage::Connected { .. } | DeviceMessage::ConnectedNetwork { .. } | DeviceMessage::ConnectedRelay { .. }) {
         send_event(state, device_command("device.hello"));
+        // Then this computer's cards, which replace any the box kept from another computer.
+        let screen = {
+            let mut tracker = state.activities.lock().await;
+            let mut screen = tracker.current_screen();
+            tracker.stamp_live_fields(&mut screen);
+            screen
+        };
+        send_event(state, screen);
     }
     let DeviceMessage::Event(event) = message else {
         return;
