@@ -3,10 +3,11 @@
 //!
 //! The C firmware runs I2S with auto_clear, so the clock never stops and zeros go out when there is
 //! no data; the ES8311 uses BCLK as its clock source, and a clock that stops and restarts tends to
-//! pop. Same here: the stream stays open and pushes zeros while idle. When the main loop stalls
-//! (writing flash, refreshing the screen) the stream has about 170 ms of headroom; a longer stall
-//! (erasing the voices partition takes several seconds) breaks the stream, after which the buffer is
-//! zeroed and it starts over.
+//! pop. Same here: the stream stays open and pushes zeros while idle. The stream has about 170 ms of
+//! headroom, and the main loop can be busy for longer than that: a LAN link's Noise handshake takes about
+//! 170 ms. So this task runs in an interrupt executor, which interrupts the main loop when the task is due.
+//! A critical section still stops it, and a long one (erasing the voices partition takes several seconds)
+//! breaks the stream, after which the buffer is zeroed and it starts over.
 
 use core::sync::atomic::{AtomicBool, Ordering};
 
@@ -38,8 +39,10 @@ pub static PLAYING: AtomicBool = AtomicBool::new(false);
 /// The main loop asks for an immediate stop: drop what is playing; the requester clears the queue.
 pub static STOP: AtomicBool = AtomicBool::new(false);
 /// Spoken replies (core's spoken_reply.rs): the main loop hands in their MP3, and this task decodes and plays
-/// them whenever no line is queued or playing, so an announcement always goes first. Both sides run on the
-/// same executor and neither holds the lock across an await, so `try_lock` always gets it. The player holds
+/// them whenever no line is queued or playing, so an announcement always goes first. Neither side holds the
+/// lock across an await. The main loop always gets it, since this task finishes its poll before the main loop
+/// goes on; this task can interrupt the main loop while it holds the lock, and then waits for its next poll
+/// rather than push silence into the reply. The player holds
 /// only empty containers here; its buffers and decoder live on the heap, and only while there is a reply.
 pub static REPLIES: Mutex<CriticalSectionRawMutex, ReplyPlayer> = Mutex::new(ReplyPlayer::new());
 
@@ -155,6 +158,22 @@ impl Cursor {
     }
 }
 
+/// The I2S transmitter and its stream buffer, on their way to the audio executor.
+pub struct Output(pub I2sTx<'static, Async>, pub DmaTxStreamBuf);
+
+// SAFETY: moved once, at boot, to the executor that then alone uses them; nothing else keeps a reference.
+unsafe impl Send for Output {}
+
+/// Starts [`audio_task`] on the executor this runs on: the task itself holds DMA state that is not `Send`, so it
+/// can't be spawned from another executor.
+#[embassy_executor::task]
+pub async fn start(output: Output) {
+    let Output(tx, buffer) = output;
+    // SAFETY: awaited directly in an Embassy task, so the context is the executor's own.
+    let spawner = unsafe { embassy_executor::Spawner::for_current_executor() }.await;
+    spawner.spawn(audio_task(tx, buffer).expect("audio task"));
+}
+
 #[embassy_executor::task]
 pub async fn audio_task(tx: I2sTx<'static, Async>, buffer: DmaTxStreamBuf) {
     let mut idle_tx = Some(tx);
@@ -207,16 +226,18 @@ pub async fn audio_task(tx: I2sTx<'static, Async>, buffer: DmaTxStreamBuf) {
                     current = Some(Cursor::new(&command));
                 }
                 PLAYING.store(current.is_some(), Ordering::Release);
-                let mut filled = 0;
-                if let Some(cursor) = current.as_mut() {
-                    filled = cursor.fill(&mut chunk);
+                let filled = if let Some(cursor) = current.as_mut() {
+                    let filled = cursor.fill(&mut chunk);
                     if cursor.remaining() == 0 {
                         current = None;
                     }
+                    filled
                 } else if let Ok(mut replies) = REPLIES.try_lock() {
                     // A reply's frames are decoded here, on this task's poll, about 25 ms of audio at a time.
-                    filled = replies.fill(&mut chunk);
-                }
+                    replies.fill(&mut chunk)
+                } else {
+                    break;
+                };
                 chunk[filled..].fill(0);
                 transfer.push(&chunk);
             }
