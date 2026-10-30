@@ -852,6 +852,12 @@ fn an_agent_needing_the_user_closes_the_menu_and_quiet_closes_it_too() {
     assert!(lines.contains(&"MENU CLOSED".to_owned()), "{lines:?}");
     assert!(lines.contains(&"AUDIO QUEUED INPUT_REQUIRED".to_owned()), "{lines:?}");
 
+    // While it waits, a change to the other cards comes as the same state again: it leaves the menu open.
+    press(&mut firmware, &mut board, Key::K1, 1100);
+    let lines = send(&mut firmware, &mut board, r#"{"version":1,"event":"agent.input_required","title":"CC:A","suppress_audio":true}"#);
+    assert!(!lines.contains(&"MENU CLOSED".to_owned()), "{lines:?}");
+    press(&mut firmware, &mut board, Key::K2, 50);
+
     press(&mut firmware, &mut board, Key::K1, 1100);
     board.advance(29_000);
     firmware.poll(&mut board);
@@ -2354,8 +2360,10 @@ mod touchscreen {
         // The page line under the cards turns it too, and down goes back.
         assert_eq!(tap(&mut firmware, &mut board, 160, 212), ["TAP 160 212", "CARDS PAGE 1/2"]);
         assert_eq!(swipe(&mut firmware, &mut board, 100, 60, 150), ["SWIPE DOWN", "CARDS PAGE 2/2"]);
-        // News starts from the first page.
-        send(&mut firmware, &mut board, &FIVE_CARDS.replace('\n', ""));
+        // Cards brought up to date keep the page; news starts from the first page.
+        send(&mut firmware, &mut board, &FIVE_CARDS.replace('\n', "").replace(r#""elapsed_s":5"#, r#""elapsed_s":9"#));
+        assert_eq!(tap(&mut firmware, &mut board, 100, 66)[1], focus("c4"));
+        send(&mut firmware, &mut board, &FIVE_CARDS.replace('\n', "").replace(r#""title":"CC:ONE","tasks_total""#, r#""title":"CX:TWO","tasks_total""#));
         assert_eq!(tap(&mut firmware, &mut board, 100, 66)[1], focus("c1"));
     }
 
