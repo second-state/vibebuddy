@@ -213,7 +213,12 @@ impl crate::App {
                 self.kk_finding(),
             ]
             .push(self.confirm_panel())
-            .push(row![big(tr("Yes, that's it", &[]), Fill::Sun, true, 15.0, Some(Message::Guide(Some(2))))])
+            .push(row![
+                big(tr("Yes, that's it", &[]), Fill::Sun, true, 15.0, Some(Message::Guide(Some(2)))),
+                big(tr("Not this one", &[]), Fill::Paper, false, 15.0, Some(Message::NotThisOne)),
+            ]
+            .spacing(10))
+            .push(self.not_this_one.then(|| note(tr("Unplug it, then plug in your box. If several devices are plugged in, korekore asks which one is yours.", &[]))))
             .spacing(12)
             .into()
         } else {

@@ -88,6 +88,8 @@ enum Message {
     OpenSettings,
     /// A page of the first-run guide, or (None) leave it for the tabs.
     Guide(Option<usize>),
+    /// The guide's box that blinked isn't the user's.
+    NotThisOne,
     WindowClosed(window::Id),
     Tab(Tab),
     NotifyLink(bool),
@@ -240,10 +242,13 @@ struct App {
     tab: Tab,
     /// The first-run guide's page while it shows in place of the tabs.
     guide: Option<usize>,
+    /// The user said the box the guide found isn't theirs: say how to find the right one.
+    not_this_one: bool,
     /// The slider's position while it is being dragged; the box's own value otherwise.
     volume: Option<u8>,
-    /// The last screen grabbed from the box, as PNG, and whether a grab is under way.
-    screenshot: Option<(Vec<u8>, image::Handle)>,
+    /// The last screen grabbed from the box, as PNG, with the local time it was grabbed, and whether a grab is under
+    /// way.
+    screenshot: Option<(Vec<u8>, image::Handle, String)>,
     screenshot_busy: bool,
     /// Installed alongside the app; read once, since only reinstalling changes them.
     voices: Vec<assets::Voice>,
@@ -354,6 +359,7 @@ impl App {
             // The korekore sidebar starts on Character, as the design does.
             tab: Tab::Sound,
             guide: None,
+            not_this_one: false,
             volume: None,
             screenshot: None,
             screenshot_busy: false,
@@ -587,6 +593,7 @@ impl App {
                 }
             }
             Message::Guide(page) => self.guide = page,
+            Message::NotThisOne => self.not_this_one = true,
             Message::Tab(tab) => {
                 self.tab = tab;
                 // Agents can be installed or set up behind the app's back; look again whenever the tab opens.
@@ -1031,12 +1038,12 @@ impl App {
             Message::Screenshot(result) => {
                 self.screenshot_busy = false;
                 match result {
-                    Ok(png) => self.screenshot = Some((png.clone(), image::Handle::from_bytes(png))),
+                    Ok(png) => self.screenshot = Some((png.clone(), image::Handle::from_bytes(png), chrono::Local::now().format("%H:%M").to_string())),
                     Err(error) => self.notice = Some(Err(error)),
                 }
             }
             Message::SaveScreenshot => {
-                if let Some((png, _)) = &self.screenshot {
+                if let Some((png, _, _)) = &self.screenshot {
                     self.notice = Some(save_screenshot(png));
                 }
             }

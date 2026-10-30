@@ -572,7 +572,7 @@ impl crate::App {
         // The box's screen as last captured, at one point per pixel in the design's 352 × 264 frame: any other scale
         // makes the pixel art uneven. Before the first capture, the box redrawn from the status.
         let screen: Element<'_, Message> = match &self.screenshot {
-            Some((_, handle)) => image(handle.clone()).filter_method(image::FilterMethod::Nearest).width(320).height(240).into(),
+            Some((_, handle, _)) => image(handle.clone()).filter_method(image::FilterMethod::Nearest).width(320).height(240).into(),
             None => view::screen(&BoxPicture::derive(self.status.as_ref()), 1.0),
         };
         let screen = container(container(screen).center_x(352).center_y(264).style(|_| container::Style {
@@ -587,7 +587,11 @@ impl crate::App {
             pill(tr("Save image", &[]), Fill::Paper, self.screenshot.is_some().then_some(Message::SaveScreenshot)),
             Space::new().width(Length::Fill),
         ]
-        .push(self.screenshot_busy.then(|| tag(tr("Refreshing…", &[]), theme::MUTED_2)))
+        .push(if self.screenshot_busy {
+            Some(tag(tr("Refreshing…", &[]), theme::MUTED_2))
+        } else {
+            self.screenshot.as_ref().map(|(_, _, captured)| tag(tr("captured %@", &[captured]), theme::MUTED_2))
+        })
         .spacing(8)
         .align_y(Alignment::Center)
         .width(358);
