@@ -2,8 +2,8 @@ import KorekoreUI
 import SwiftUI
 import VibeBuddyCore
 
-/// A Character the user made (ADR-0020), as a Character card: its look, its name, Use or Resume, and Delete. The same
-/// logic as `MadeCharacterCard`, in the korekore look; the design has no card of its own for it.
+/// A Character the user made (ADR-0020), as a Character card: its look, its name, Use or Resume, and Delete. The
+/// design has no card of its own for it.
 struct KorekoreMadeCard: View {
     @ObservedObject var model: AppModel
     let made: MadeCharacter
@@ -116,7 +116,7 @@ struct KorekoreMakingRow: View {
 }
 
 /// Making a Character: start from a preset, change its lines (occasions stay, each keeps a line), pick a voice and,
-/// optionally, bring a look; the daemon then makes the line audio. The same steps as `MakeCharacterSheet`.
+/// optionally, bring a look; the daemon then makes the line audio.
 struct KorekoreMakeSheet: View {
     @ObservedObject var model: AppModel
     @Environment(\.dismiss) private var dismiss

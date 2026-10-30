@@ -2,7 +2,7 @@
 
 korekore (これこれ, "here, here!") is VibeBuddy's new face: a kawaii, Japanese-cartoon desk cheerleader, with **your vibebuddy** kept beside the name for people who already own a box. It is built as a **new UI beside the current one**, behind a switch; the current UI is not touched (see the ground rule in the implementation plan). Why: [ADR-0020](../../adr/0020-the-box-and-the-apps-share-the-korekore-look.md).
 
-> **Since [ADR-0021](../../adr/0021-the-apps-become-korekore-and-the-user-picks-the-box-screens.md):** the apps will have only the korekore look (until Phase 2 is accepted it opens with `VIBEBUDDY_UI=korekore`), and the box's screens are the user's choice, robot by default, from one firmware image that carries both: there is no `korekore` cargo feature. Where this plan says otherwise, the ADR wins.
+> **Since [ADR-0021](../../adr/0021-the-apps-become-korekore-and-the-user-picks-the-box-screens.md):** the apps have only the korekore look (since 2026-10-30; before, it opened only with `VIBEBUDDY_UI=korekore`), and the box's screens are the user's choice, robot by default, from one firmware image that carries both: there is no `korekore` cargo feature. Where this plan says otherwise, the ADR wins.
 
 This folder is everything an implementer needs; the two links below are the same design as live pages (private: ask Frank for access).
 

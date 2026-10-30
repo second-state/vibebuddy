@@ -1,5 +1,5 @@
-//! The tray icon, as a StatusNotifierItem: Omarchy's shell, KDE and waybar all host these. The icon is the
-//! buddy's face and the menu repeats the Mac app's menu bar menu; picking an item only sends an event to
+//! The tray icon, as a StatusNotifierItem: Omarchy's shell, KDE and waybar all host these. The icon is
+//! Kore and the menu repeats the Mac app's menu bar menu; picking an item only sends an event to
 //! the app, which does the work.
 
 use std::path::PathBuf;
@@ -8,7 +8,6 @@ use futures::channel::mpsc::UnboundedSender;
 use ksni::menu::StandardItem;
 use ksni::{Icon, MenuItem, ToolTip};
 
-use crate::face;
 use crate::i18n::tr;
 use crate::status::{Icon as FaceIcon, MenuState};
 
@@ -27,10 +26,8 @@ pub enum TrayEvent {
 
 pub struct Tray {
     pub menu: MenuState,
-    /// With the korekore UI on (ADR-0021) the icon is Kore, drawn from this; None keeps the face.
-    pub kore: Option<crate::korekore::picture::BoxPicture>,
-    /// The face is drawn in the theme's text color so it reads on the bar.
-    pub color: [u8; 3],
+    /// The icon is Kore (ADR-0021), drawn from this.
+    pub kore: crate::korekore::picture::BoxPicture,
     pub events: UnboundedSender<TrayEvent>,
 }
 
@@ -44,27 +41,11 @@ impl ksni::Tray for Tray {
     }
 
     fn icon_pixmap(&self) -> Vec<Icon> {
-        if let Some(picture) = &self.kore {
-            return [1, 2]
-                .into_iter()
-                .map(|scale| {
-                    let (width, height, data) = crate::korekore::tray_icon(picture, scale);
-                    Icon { width: width as i32, height: height as i32, data }
-                })
-                .collect();
-        }
-        let [r, g, b] = self.color;
-        // A dimmed, eyes-closed face when the box or the daemon is gone, as on the Mac.
-        let (eyes_closed, alpha) = match self.menu.icon {
-            FaceIcon::Online => (false, 255),
-            FaceIcon::Offline | FaceIcon::DaemonDown => (true, 128),
-        };
         [1, 2]
             .into_iter()
-            .map(|scale| Icon {
-                width: (face::SIZE * scale) as i32,
-                height: (face::SIZE * scale) as i32,
-                data: face::argb(eyes_closed, [r, g, b, alpha], scale),
+            .map(|scale| {
+                let (width, height, data) = crate::korekore::tray_icon(&self.kore, scale);
+                Icon { width: width as i32, height: height as i32, data }
             })
             .collect()
     }

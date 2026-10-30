@@ -3,7 +3,7 @@ import SwiftUI
 import VibeBuddyCore
 
 /// The General page (canvas: "Mac · General"; the update lines and the unsupported-app banner on "App · alerts,
-/// notifications, banners"). The current General tab's logic (`GeneralView`), copied.
+/// notifications, banners").
 struct KorekoreGeneralPage: View {
     @ObservedObject var model: AppModel
     @State private var language = AppLanguage.current

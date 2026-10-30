@@ -3,8 +3,7 @@ import SwiftUI
 import VibeBuddyCore
 
 /// First-run onboarding in the korekore look (canvas: "Mac · Onboarding welcome", "Onboarding · find the box,
-/// connect, pick, Wi-Fi", and the end of onboarding on "App · alerts, notifications, banners"). The steps and what
-/// they do are the current onboarding's (`OnboardingView`), copied.
+/// connect, pick, Wi-Fi", and the end of onboarding on "App · alerts, notifications, banners").
 struct KorekoreOnboarding: View {
     @ObservedObject var model: AppModel
     let finish: () -> Void

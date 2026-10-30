@@ -3,8 +3,7 @@ import SwiftUI
 import VibeBuddyCore
 
 /// The Agents page (canvas: "Mac · Agents (sidebar)"; the write sheet, TRUST AGAIN and terminal states on "App ·
-/// Agents, Conversation, Character states"). The current Agents tab's logic (`HooksView`, `HookRow`,
-/// `TerminalAccessRow`), copied.
+/// Agents, Conversation, Character states").
 struct KorekoreAgentsPage: View {
     @ObservedObject var model: AppModel
     @State private var pendingPlan: HookInstaller.Plan?
@@ -200,4 +199,10 @@ struct KorekorePlanSheet: View {
         .frame(width: 520)
         .background(Theme.Colors.cream)
     }
+}
+
+/// A hook plan, shown in a sheet until the user confirms or cancels it.
+struct PlanBox: Identifiable {
+    let plan: HookInstaller.Plan
+    var id: String { plan.configURL.path }
 }

@@ -2,7 +2,8 @@ import AppKit
 import KorekoreUI
 import VibeBuddyCore
 
-/// Asking before flashing, in the korekore look (canvas: "CONFIRMATIONS"). `FlashConfirm`'s two questions.
+/// Asking before flashing, in the korekore look (canvas: "CONFIRMATIONS"): before an update, and before
+/// flashing over firmware that isn't ours.
 @MainActor
 enum KorekoreFlash {
     static func update(_ offer: FirmwareOffer, then flash: () -> Void) {

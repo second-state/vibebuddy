@@ -3,7 +3,7 @@ import VibeBuddyCore
 
 /// The Conversation page (canvas: "Mac · Conversation", and its states on "App · Agents, Conversation, Character
 /// states"): the last voice commands and the buddy's spoken replies, newest at the bottom. It reads and follows the
-/// history the way the current Conversation tab does (`ConversationView`), through the same four calls.
+/// history through four calls to the daemon.
 public struct KorekoreConversationPage: View {
     public struct Links {
         public var anthropicConsole: URL

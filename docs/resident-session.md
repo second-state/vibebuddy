@@ -23,7 +23,7 @@ While the tab is shown it updates by itself: it asks `GET /v1/resident` every 2 
 
 Above the conversation, while the daemon says `brain_setting`, the tab has the brain setting, "Answered by": Automatic, Codex or Claude Code (`PUT /v1/resident/brain`). Unless it is Codex, a secure field takes the user's Anthropic API key, with Save, and a link to the [Claude Console](https://platform.claude.com/) to make one; once the daemon has a key the field gives way to "Anthropic API key saved" and Remove. The key is never shown again: the daemon only says whether it has one. A line under it says the key is billed to the user's Anthropic account, that a Claude subscription can't be used, and that what they say and their Agents' task titles go to Anthropic.
 
-![The Conversation tab on the Mac, in Chinese](images/app-conversation-zh.png)
+![The Conversation page on the Mac](design/korekore/screenshots/phase-2b/mac-conversation.png)
 
 `vibebuddy` is a second binary of the daemon package (`daemon/src/bin/vibebuddy.rs`). Like every client, it only talks to the daemon's HTTP API, at `VIBEBUDDY_BIND` (default `127.0.0.1:7331`):
 
