@@ -1258,16 +1258,16 @@ mod relay {
         let key = VerifyingKey::from_bytes(&link::decode_key(&box_id).unwrap()).unwrap();
         let sig = Signature::from_bytes(&link::decode::<64>(hello["sig"].as_str().unwrap()).unwrap());
         assert!(key.verify(&signed_message("box", &box_id, "abc"), &sig).is_ok());
-        assert!(relay.report(&firmware, board.now_ms()).is_empty(), "nothing before welcome");
+        assert!(relay.report(&firmware, board.now_ms(), usize::MAX).is_empty(), "nothing before welcome");
 
         relay.message(&mut firmware, &mut board, &json!({"t": "welcome"}));
-        let reports: Vec<Value> = relay.report(&firmware, board.now_ms()).iter().map(|text| parse(text)).collect();
+        let reports: Vec<Value> = relay.report(&firmware, board.now_ms(), usize::MAX).iter().map(|text| parse(text)).collect();
         assert_eq!(reports[0], json!({"t": "paired", "computers": [{"key": COMPUTER, "name": "a"}, {"key": computer_key(), "name": "b"}]}));
         assert_eq!(reports[1], json!({"t": "linked", "via": "usb", "computer": computer_key()}), "it was just paired over the cable");
-        assert!(relay.report(&firmware, board.now_ms()).is_empty(), "only changes");
+        assert!(relay.report(&firmware, board.now_ms(), usize::MAX).is_empty(), "only changes");
 
         board.advance(USB_QUIET_MS);
-        assert_eq!(relay.report(&firmware, board.now_ms()), [r#"{"t":"unlinked"}"#]);
+        assert_eq!(relay.report(&firmware, board.now_ms(), usize::MAX), [r#"{"t":"unlinked"}"#]);
 
         let (mut sealer, _) = session(&mut relay, &mut firmware, &mut board);
         assert!(relay.has_peer());
@@ -1284,6 +1284,21 @@ mod relay {
         relay.message(&mut firmware, &mut board, &json!({"t": "unlinked", "reason": "takeover"}));
         assert!(!relay.has_peer());
         assert!(!board.relay_peer);
+    }
+
+    #[test]
+    fn a_full_queue_only_delays_the_report() {
+        // A burst of lines for the Relay computer can fill the queue just as the cable takes the box; the Relay must
+        // still hear it, or it keeps that computer linked.
+        let (mut firmware, mut board, _) = booted(blank_flash());
+        send(&mut firmware, &mut board, &format!(r#"{{"version":1,"event":"device.pair","key":"{COMPUTER}","name":"a"}}"#));
+        let mut relay = RelayBox::new();
+        relay.hello(&firmware, "abc");
+        relay.message(&mut firmware, &mut board, &json!({"t": "welcome"}));
+        assert!(relay.report(&firmware, board.now_ms(), 0).is_empty());
+        assert_eq!(relay.report(&firmware, board.now_ms(), 1).len(), 1, "the paired list first");
+        let reports: Vec<Value> = relay.report(&firmware, board.now_ms(), 1).iter().map(|text| parse(text)).collect();
+        assert_eq!(reports, [json!({"t": "linked", "via": "usb", "computer": COMPUTER})]);
     }
 
     #[test]
@@ -1313,7 +1328,7 @@ mod relay {
         for socket in ["first", "second"] {
             relay.hello(&firmware, socket);
             relay.message(&mut firmware, &mut board, &json!({"t": "welcome"}));
-            let reports: Vec<Value> = relay.report(&firmware, board.now_ms()).iter().map(|text| parse(text)).collect();
+            let reports: Vec<Value> = relay.report(&firmware, board.now_ms(), usize::MAX).iter().map(|text| parse(text)).collect();
             assert_eq!(reports[1], json!({"t": "linked", "via": "usb", "computer": COMPUTER}), "{socket}");
             relay.gone(&mut firmware, &mut board);
         }
@@ -1330,9 +1345,9 @@ mod relay {
         let mut relay = RelayBox::new();
         relay.hello(&firmware, "n");
         relay.message(&mut firmware, &mut board, &json!({"t": "welcome"}));
-        relay.report(&firmware, board.now_ms());
+        relay.report(&firmware, board.now_ms(), usize::MAX);
         board.advance(USB_QUIET_MS);
-        relay.report(&firmware, board.now_ms());
+        relay.report(&firmware, board.now_ms(), usize::MAX);
         relay.message(&mut firmware, &mut board, &json!({"t": "linked", "computer": COMPUTER}));
 
         relay.message(&mut firmware, &mut board, &json!({"t": "unlinked", "reason": "takeover"}));
@@ -1342,7 +1357,7 @@ mod relay {
 
         let other = link::encode(&[3; 32]);
         send(&mut firmware, &mut board, &format!(r#"{{"version":1,"event":"device.pair","key":"{other}","name":"b"}}"#));
-        let reports: Vec<Value> = relay.report(&firmware, board.now_ms()).iter().map(|text| parse(text)).collect();
+        let reports: Vec<Value> = relay.report(&firmware, board.now_ms(), usize::MAX).iter().map(|text| parse(text)).collect();
         assert_eq!(reports.len(), 2, "{reports:?}");
         assert_eq!(reports[0]["t"], "paired");
         assert_eq!(reports[1], json!({"t": "linked", "via": "usb", "computer": other}));
