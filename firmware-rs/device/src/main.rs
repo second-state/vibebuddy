@@ -28,6 +28,7 @@ mod storage;
 use core::sync::atomic::Ordering;
 
 use embassy_executor::Spawner;
+use esp_rtos::embassy::InterruptExecutor;
 use embassy_time::{Instant, Timer};
 use esp_backtrace as _;
 use esp_hal::clock::CpuClock;
@@ -35,6 +36,7 @@ use esp_hal::dma::{DmaTxBuf, DmaTxStreamBuf};
 use esp_hal::gpio::{Input, InputConfig, Level, Output, OutputConfig, Pull};
 use esp_hal::i2c::master::{AcknowledgeCheckFailedReason, Config as I2cConfig, Error as I2cError, I2c};
 use esp_hal::i2s::master::{Channels, DataFormat, I2s, TdmConfig};
+use esp_hal::interrupt::Priority;
 use esp_hal::lcd_cam::LcdCam;
 use esp_hal::lcd_cam::lcd::{ClockMode, Phase, Polarity};
 use esp_hal::lcd_cam::lcd::i8080::{Config as I8080Config, I8080};
@@ -512,7 +514,10 @@ async fn main(spawner: Spawner) -> ! {
     .into_async();
     let i2s_tx = i2s.i2s_tx.with_bclk(peripherals.GPIO21).with_ws(peripherals.GPIO13).with_dout(peripherals.GPIO14).build();
     let stream: DmaTxStreamBuf = dma_tx_stream_buffer!(STREAM_BYTES, STREAM_CHUNK);
-    spawner.spawn(audio::audio_task(i2s_tx, stream).expect("audio task"));
+    // At a higher priority than the main loop, which can be busy for longer than the stream's headroom (audio.rs).
+    static AUDIO_EXECUTOR: static_cell::StaticCell<InterruptExecutor<1>> = static_cell::StaticCell::new();
+    let audio_spawner = AUDIO_EXECUTOR.init(InterruptExecutor::new(peripherals.FROM_CPU_INTR1)).start(Priority::Priority1);
+    audio_spawner.spawn(audio::start(audio::Output(i2s_tx, stream)).expect("audio start task"));
     let i2s_rx = i2s.i2s_rx.with_din(peripherals.GPIO47).build();
     spawner.spawn(mic::mic_task(i2s_rx).expect("mic task"));
 
