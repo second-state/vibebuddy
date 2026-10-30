@@ -4,7 +4,7 @@ import VibeBuddyCore
 
 /// The Character page (canvas: "Mac · Character (sidebar)"; the write and Make-your-own states on "App · Device &
 /// firmware states" and "App · Agents, Conversation, Character states"). What it does is the current Character
-/// tab's (`VoicesView`, `RobotCard`, `CustomCharacterCard`, `AddressRow`), copied, in the korekore look.
+/// tab's, in the korekore look.
 struct KorekoreCharacterPage: View {
     @ObservedObject var model: AppModel
     @State private var makingOwn = false
@@ -38,7 +38,7 @@ struct KorekoreCharacterPage: View {
                         makeCharacter
                     }
                     .padding(.bottom, Theme.Sticker.sm)
-                    if makingOwn || model.status?.device.voice == CustomCharacterCard.id {
+                    if makingOwn || model.status?.device.voice == CustomCharacter.id {
                         KorekoreCustomLook(model: model).id("own")
                     }
                 }
@@ -270,7 +270,7 @@ struct KorekoreCustomLook: View {
     @State private var lender = Resources.bundledVoices.first?.id ?? ""
     @State private var problem: String?
 
-    private var inUse: Bool { model.status?.device.voice == CustomCharacterCard.id }
+    private var inUse: Bool { model.status?.device.voice == CustomCharacter.id }
 
     var body: some View {
         KCard(stroke: Theme.Stroke.bold) {
@@ -295,7 +295,7 @@ struct KorekoreCustomLook: View {
                     Button(String(localized: "Choose images…"), action: choose).kButton()
                     Button(String(localized: "Copy a prompt")) {
                         NSPasteboard.general.clearContents()
-                        NSPasteboard.general.setString(CustomCharacterCard.prompt, forType: .string)
+                        NSPasteboard.general.setString(CustomCharacter.prompt, forType: .string)
                     }
                     .kButton()
                 }
@@ -351,4 +351,11 @@ struct KorekoreCustomLook: View {
             return
         }
     }
+}
+
+/// The Character the user draws and names: its id in the daemon, and the prompt that the page copies for an image
+/// model.
+enum CustomCharacter {
+    static let id = "custom"
+    static let prompt = "Pixel art game sprite of [describe your character], chibi proportions, standing, front view, full body, centered, arms down, flat colors, thick dark outline, limited 16-color palette, plain solid white background. Then the same character in exactly the same pose with the eyes closed; with a big happy smile; with a sad face."
 }

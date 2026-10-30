@@ -91,6 +91,8 @@ struct FakeBoard {
     peer_full: bool,
     /// Restarts asked for.
     restarts: usize,
+    /// UART rates asked for with `device.baud`.
+    uart_rates: Vec<u32>,
     /// Registers of the chips on I2C, by (address, register), and what was written.
     i2c: std::collections::BTreeMap<(u8, u8), u8>,
     i2c_writes: Vec<(u8, u8, u8)>,
@@ -132,6 +134,7 @@ impl FakeBoard {
             relay_peer: false,
             peer_full: false,
             restarts: 0,
+            uart_rates: Vec::new(),
             i2c: [((0x18, 0xFD), 0x83), ((0x18, 0xFE), 0x11), ((0x18, 0x16), 0x24)].into(),
             i2c_writes: Vec::new(),
             mic_input: true,
@@ -194,6 +197,9 @@ impl Board for FakeBoard {
     }
     fn restart(&mut self) {
         self.restarts += 1;
+    }
+    fn set_uart_rate(&mut self, rate: u32) {
+        self.uart_rates.push(rate);
     }
     fn now_ms(&self) -> u32 {
         self.now.get()
@@ -1094,6 +1100,22 @@ mod lan {
         say(&mut firmware, &mut board, 1, &mut sealer, r#"{"version":1,"event":"device.wifi.scan"}"#);
         assert_eq!(board.take_lines(), ["ERROR cable_only"]);
         assert!(!firmware.take_scan_request());
+    }
+
+    #[test]
+    fn the_uart_rate_is_asked_for_over_the_cable_only_and_quietly() {
+        let (mut firmware, mut board) = paired_box();
+        assert!(send(&mut firmware, &mut board, r#"{"version":1,"event":"device.baud","rate":921600}"#).is_empty());
+        assert_eq!(board.uart_rates, [921_600]);
+        // The check only has to arrive; it isn't agent activity, so no `EVENT` line.
+        assert!(send(&mut firmware, &mut board, r#"{"version":1,"event":"device.baud.check"}"#).is_empty());
+        assert!(send(&mut firmware, &mut board, r#"{"version":1,"event":"device.baud"}"#).is_empty(), "no rate, nothing to do");
+        assert_eq!(board.uart_rates, [921_600]);
+        board.advance(USB_QUIET_MS);
+        let mut sealer = link_up(&mut firmware, &mut board, 1);
+        say(&mut firmware, &mut board, 1, &mut sealer, r#"{"version":1,"event":"device.baud","rate":921600}"#);
+        assert_eq!(board.take_lines(), ["ERROR cable_only"]);
+        assert_eq!(board.uart_rates, [921_600]);
     }
 
     #[test]

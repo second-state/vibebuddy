@@ -70,6 +70,8 @@ pub enum Reason {
     GlobalCap,
     /// The resident session on the computer isn't ready.
     NotReady,
+    /// The box is on its UART bridge, which runs too slowly for the audio.
+    SlowLink,
     /// A reason this firmware doesn't know.
     Other,
     /// The box couldn't start its microphone.
@@ -88,6 +90,7 @@ impl Reason {
             "allowance" => Self::Allowance,
             "global_cap" => Self::GlobalCap,
             "not_ready" => Self::NotReady,
+            "slow_link" => Self::SlowLink,
             _ => Self::Other,
         }
     }
@@ -101,6 +104,7 @@ impl Reason {
             Self::Allowance => b"VOICE USED UP",
             Self::GlobalCap => b"VOICE PAUSED",
             Self::NotReady => b"NOT READY",
+            Self::SlowLink => b"SLOW CABLE",
             Self::Other => b"VOICE ERROR",
             Self::NoMicrophone => b"NO MICROPHONE",
             Self::NoAnswer => b"NO ANSWER",
@@ -117,6 +121,7 @@ impl Reason {
             Self::Allowance => "Today's voice is used up.",
             Self::GlobalCap => "Voice is paused for everyone today.",
             Self::NotReady => "My session on the computer isn't ready.",
+            Self::SlowLink => "This port is too slow for voice. Use my other USB port.",
             Self::Other => "Something went wrong.",
             Self::NoMicrophone => "This box can't record.",
             Self::NoAnswer => "The computer didn't answer.",
@@ -732,11 +737,12 @@ mod tests {
         assert!(!voice.is_open());
     }
 
-    const REASONS: [(&str, &[u8], &str); 4] = [
+    const REASONS: [(&str, &[u8], &str); 5] = [
         ("signed_out", b"SIGN IN", "Sign in on the computer to talk to me."),
         ("allowance", b"VOICE USED UP", "Today's voice is used up."),
         ("global_cap", b"VOICE PAUSED", "Voice is paused for everyone today."),
         ("not_ready", b"NOT READY", "My session on the computer isn't ready."),
+        ("slow_link", b"SLOW CABLE", "This port is too slow for voice. Use my other USB port."),
     ];
 
     /// The panel's text, its rows joined again.

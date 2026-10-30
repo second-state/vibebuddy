@@ -33,17 +33,6 @@ do {
     check(status.hooks.codex != nil && status.hooks.claude == nil, "hook timestamps decode")
     check(status.hooks.opencode == nil && status.hooks.lastEvent(.codex) == status.hooks.codex, "a daemon without OpenCode and Copilot still decodes")
     check(status.operation?.kind == .voicePack && status.operation?.progress == 0.42, "operation decodes")
-    let menu = MenuState.derive(status: status, daemonAlive: true)
-    check(menu.icon == .online, "online icon")
-    check(menu.deviceLine == "Box online · firmware abc1234-dirty", "device line: \(menu.deviceLine)")
-    check(menu.modeLine == "Mode: Pomodoro", "mode line: \(menu.modeLine)")
-    check(menu.todayLine == "Today: done 3 · asks 1 · busy 1 h 23 min", "today line: \(menu.todayLine)")
-    var offline = status
-    offline.device.connected = false
-    let offlineMenu = MenuState.derive(status: offline, daemonAlive: true)
-    check(offlineMenu.icon == .offline && offlineMenu.deviceLine == "Box not found", "offline menu")
-    let down = MenuState.derive(status: nil, daemonAlive: false)
-    check(down.icon == .daemonDown && down.deviceLineIsAction, "daemon-down menu")
     check(status.config.checkUpdates == nil, "check_updates null follows the build")
     check(status.updates?.app?.version == "0.4.0" && status.updates?.lastCheck != nil, "updates decode")
     check(Firmware.updateAvailable(status.updates), "a downloaded firmware newer than the box is offered")
@@ -431,6 +420,11 @@ do {
     check(noKey.problem == .anthropicKeyMissing && noKey.brainSetting == .claude, "resident info says the Anthropic API key is missing")
     let noClaude = try StatusCoding.decoder().decode(ResidentInfo.self, from: Data(#"{"enabled":true,"problem":"claude_missing","brain_setting":"something_new"}"#.utf8))
     check(noClaude.problem == .claudeMissing && noClaude.brainSetting == nil, "resident info says Claude Code is missing; an unknown setting is nil")
+    check(claude.voiceOff == nil && claude.voiceOffNote == nil, "an older daemon says nothing about voice being off")
+    let bridge = try StatusCoding.decoder().decode(ResidentInfo.self, from: Data(#"{"enabled":true,"problem":null,"ready":true,"voice_off":"bridge_firmware"}"#.utf8))
+    check(bridge.voiceOff == "bridge_firmware" && bridge.voiceOffNote?.contains("UART bridge") == true, "resident info says the bridge's firmware can't carry voice")
+    let unknownOff = try StatusCoding.decoder().decode(ResidentInfo.self, from: Data(#"{"enabled":true,"voice_off":"something_new"}"#.utf8))
+    check(unknownOff.voiceOffNote == nil, "a reason this App doesn't know says nothing")
     let history = try StatusCoding.decoder().decode(ResidentHistory.self, from: Data(#"{"exchanges":[{"replies":["现在没有 Agent 在工作。"],"said":"现在有几个agent在工作呀"},{"replies":["a","b"],"said":"two"}],"thread_id":"t1"}"#.utf8))
     check(history.threadId == "t1" && history.exchanges.count == 2, "resident history decodes")
     check(history.exchanges.last == ResidentExchange(said: "two", replies: ["a", "b"]), "exchanges keep their order and every reply")
@@ -438,10 +432,7 @@ do {
     check(false, "resident JSON fails to decode: \(error)")
 }
 
-// 7. korekore (ADR-0021): the switch, and the sprites scaled whole times as drawn.
-check(AppUI.atLaunch(environment: [:]) == .current, "the current UI is the default")
-check(AppUI.atLaunch(environment: ["VIBEBUDDY_UI": "korekore"]) == .korekore, "VIBEBUDDY_UI=korekore asks for korekore")
-check(AppUI.atLaunch(environment: ["VIBEBUDDY_UI": "other"]) == .current, "anything else keeps the current UI")
+// 7. korekore (ADR-0021): the sprites scaled whole times as drawn.
 do {
     let kore = KorekoreSprites.koreNormal
     check(kore.width == 20 && kore.height == 18 && kore.pixels.count == 360, "Kore is 20 x 18")

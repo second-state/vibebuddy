@@ -61,7 +61,7 @@ VibeBuddy 是给 AI 编程 Agent 配的桌面宠物。它住在键盘旁一个�
    - 让盒子连上 Wi-Fi，这样不插线也能连到它；
    - 设置登录时启动。
 
-之后 VibeBuddy 住在菜单栏，随时再打开一次 App 就能调出设置：图标告诉你盒子在不在线、什么模式、今天干了多少。设置窗有五页：通用（含界面语言）、角色（小助手是谁，以及音量）、接入、设备（固件更新、截图）、高级。固件单独发布：有 App 能运行的新固件时，VibeBuddy 会自动下载，设置 → 设备会提示更新盒子，由你确认。
+之后 VibeBuddy 以 Kore 的样子住在菜单栏，随时再打开一次 App 就能调出设置。点 Kore 会弹出一个面板，告诉你盒子在不在线、什么模式、今天干了多少。设置窗左侧边栏有六页：角色（小助手是谁，以及音量）、接入、对话（语音指令）、设备（固件更新、截图）、通用（含界面语言）、高级。固件单独发布：有 App 能运行的新固件时，VibeBuddy 会自动下载，设置 → 设备会提示更新盒子，由你确认。
 
 Release 若还没签名，macOS 会拦下第一次打开，到「系统设置 → 隐私与安全性」里放行即可。
 
@@ -84,7 +84,7 @@ systemctl --user enable --now vibebuddyd && vibebuddy-hook install
 
 等 AUR 重新开放注册后，它会以 `vibebuddy-bin` 上架。想从源码编译的话，在装好 Rust 工具链的仓库里运行 `packaging/linux/install.sh`，它会编译所有程序。两种方式都一样：脚本把程序装进 `~/.local/bin`，把 `vibebuddyd` 注册成 systemd 用户服务，把 VibeBuddy App 放进启动器并设为登录时启动，再给本机有的 Claude Code 和 Codex 加上 Hook（Codex 之后需要你在 `/hooks` 里信任它们）。升级时重新运行即可。daemon 要在 `/dev/ttyACM*` 所属的组里（Arch 是 `uucp`，Debian 和 Ubuntu 是 `dialout`），不在的话脚本会提示。配置放在 `~/.config/vibebuddy`，统计放在 `~/.local/state/vibebuddy`；盒子断开 30 秒后会通过 `notify-send` 弹一条桌面通知。
 
-在 Hyprland 上，K2 会切回会话所在的终端窗口，不管它在哪个工作区；跑在 tmux 里的会话，会先把你的 tmux 客户端切到它所在的 pane。通过 SSH 的会话没有窗口可回。App 是一个托盘图标（氛围小助手的脸，点一下打开设置）加一个设置窗口，标签页和 Mac 版一样。它从 Omarchy 主题取配色和字体，切换主题时会跟着变。它只是个客户端：退出它，daemon 和盒子照常在线。设备页点「刷新」能看到盒子当前的屏幕，「保存图片」会存进你的图片文件夹。角色页列出脚本装好的角色，每个都能试听，选中的会写进盒子；Agents 页显示每个 Agent 的 hook 状态，连接、修复或移除前会先给你看要写的内容；daemon 下载好更新的固件后，设备页会提供更新（每个版本发一次通知），也能从文件刷入固件 zip，和 Mac 上一样。通用页有「登录时启动」开关。首次启动会在设置窗口里打开一个简短的引导：找到盒子（找不到时给出排查提示，出厂盒子可以刷入 VibeBuddy 固件）、挑一个角色、让盒子连上 Wi-Fi。接入 Agent 和登录时启动脚本已经做了，所以引导里没有这两步。App 运行时再次启动它，会打开设置窗口。Omarchy 把托盘图标收在状态栏箭头后面的抽屉里，所以 App 第一次运行时会把它的脸固定（Pin）到状态栏上；之后你在那里（右键那个箭头）取消固定或隐藏它，App 不会再改回来。在 Omarchy 4 上，脚本还会装上 VibeBuddy 的[顶栏插件](https://github.com/second-state/omarchy-vibebuddy-plugin)（用 pacman 包安装的话，自己运行 `omarchy plugin add https://github.com/second-state/omarchy-vibebuddy-plugin --enable`）：顶栏上显示氛围小助手的脸，点开是盒子状态、当日战绩和音量。插件在顶栏上时，App 不再显示自己的托盘图标；停用插件，托盘图标会回来。和 Mac 版一样，可以在「通用 → 语言」里改用和系统不同的语言。想让设置窗口在 Omarchy 上浮动显示，在 `~/.config/hypr/hyprland.lua` 里加一行 `o.window("^vibebuddy$", { float = true, center = true, tag = "-default-opacity", opacity = "1.0 1.0" })`：浮动、居中、不透明，大小按 App 自己要的来。用 Omarchy 自带的 `floating-window` 标签的话，窗口会被固定成 875 × 600；和所有 Hyprland 窗口一样，按住 Super 拖动就能移动它。卸载时先运行 `vibebuddy-hook uninstall`，再运行 `systemctl --user disable --now vibebuddyd`，然后删掉脚本装的文件。
+在 Hyprland 上，K2 会切回会话所在的终端窗口，不管它在哪个工作区；跑在 tmux 里的会话，会先把你的 tmux 客户端切到它所在的 pane。通过 SSH 的会话没有窗口可回。App 是一个托盘图标（Kore，点一下打开设置）加一个设置窗口，页面和 Mac 版一样，也是同样的 korekore 风格。它只是个客户端：退出它，daemon 和盒子照常在线。设备页点「刷新」能看到盒子当前的屏幕，「保存图片」会存进你的图片文件夹。角色页列出脚本装好的角色，每个都能试听，选中的会写进盒子；Agents 页显示每个 Agent 的 hook 状态，连接、修复或移除前会先给你看要写的内容；daemon 下载好更新的固件后，设备页会提供更新（每个版本发一次通知），也能从文件刷入固件 zip，和 Mac 上一样。通用页有「登录时启动」开关。首次启动会在设置窗口里打开一个简短的引导：找到盒子（找不到时给出排查提示，出厂盒子可以刷入 VibeBuddy 固件）、挑一个角色、让盒子连上 Wi-Fi。接入 Agent 和登录时启动脚本已经做了，所以引导里没有这两步。App 运行时再次启动它，会打开设置窗口。Omarchy 把托盘图标收在状态栏箭头后面的抽屉里，所以 App 第一次运行时会把它的图标固定（Pin）到状态栏上；之后你在那里（右键那个箭头）取消固定或隐藏它，App 不会再改回来。在 Omarchy 4 上，脚本还会装上 VibeBuddy 的[顶栏插件](https://github.com/second-state/omarchy-vibebuddy-plugin)（用 pacman 包安装的话，自己运行 `omarchy plugin add https://github.com/second-state/omarchy-vibebuddy-plugin --enable`）：顶栏上显示氛围小助手的脸，点开是盒子状态、当日战绩和音量。插件在顶栏上时，App 不再显示自己的托盘图标；停用插件，托盘图标会回来。和 Mac 版一样，可以在「通用 → 语言」里改用和系统不同的语言。想让设置窗口在 Omarchy 上浮动显示，在 `~/.config/hypr/hyprland.lua` 里加一行 `o.window("^vibebuddy$", { float = true, center = true, tag = "-default-opacity", opacity = "1.0 1.0" })`：浮动、居中、不透明，大小按 App 自己要的来。用 Omarchy 自带的 `floating-window` 标签的话，窗口会被固定成 875 × 600；和所有 Hyprland 窗口一样，按住 Super 拖动就能移动它。卸载时先运行 `vibebuddy-hook uninstall`，再运行 `systemctl --user disable --now vibebuddyd`，然后删掉脚本装的文件。
 
 ## 工作原理
 
@@ -262,7 +262,7 @@ cargo run -p vibebuddyd
 
 daemon 平时由 App 看管。没有 App 的开发机可以用 [`packaging/com.vibebuddy.vibebuddyd.plist`](packaging/com.vibebuddy.vibebuddyd.plist) 装成 LaunchAgent，但两者不能同时跑，会抢串口。daemon 还为 App 提供 `GET /v1/status`、SSE `/v1/status/stream`、`/v1/config`、`/v1/device/{identify,volume,choice,screenshot,voice-pack,firmware}` 与 `/v1/daemon/restart`。
 
-经盒子的 CH343 UART 桥发送时 daemon 按线速分段写：这条桥一次吞不下超过两百字节的连续数据，会把内容错位而长度不变；原生 USB 口不受影响。教训见 [`LESSONS.md`](LESSONS.md)。
+经盒子的 CH343 UART 桥发送时 daemon 按线速分段写：这条桥一次吞不下超过两百字节的连续数据，会把内容错位而长度不变；原生 USB 口不受影响。盒子报出版本后，daemon 和固件会把这条桥从 115200 提到 921600 波特，语音指令在这里也能用；固件太旧时停在 115200，这条线上语音关闭（见 docs/protocol.md 的 “Link speed on the UART bridge”）。教训见 [`LESSONS.md`](LESSONS.md)。
 
 ### 发布
 

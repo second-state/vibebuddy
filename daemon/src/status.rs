@@ -25,6 +25,11 @@ pub struct DeviceState {
     pub port: Option<String>,
     /// Connected through the UART bridge (rather than Espressif's native USB port).
     pub bridge: bool,
+    /// The bridge's rate once the daemon and the box settled it; None until then and off the bridge. Voice commands
+    /// need [`crate::serial_transport::FAST_BAUD_RATE`].
+    pub bridge_baud: Option<u32>,
+    /// The firmware answered the request to move the bridge to a faster rate; false for firmware before it.
+    pub bridge_switches: bool,
     /// Linked over the local network or the Relay rather than the cable; `port` is then the box's address.
     pub network: bool,
     /// Linked through the Relay; `port` is then the Relay's address.
@@ -114,6 +119,8 @@ impl DeviceState {
                 self.connected = true;
                 self.port = Some(port.clone());
                 self.bridge = *bridge;
+                self.bridge_baud = None;
+                self.bridge_switches = false;
                 // A newly connected port starts with unknown identity: our firmware re-reports its build, mode, voice and volume
                 // as soon as it gets hello; one that never does runs other firmware (a factory unit, or another ESP32-S3 product
                 // entirely), and the app offers to flash it. Nothing left by the previous device may pass for this one: on
@@ -154,6 +161,10 @@ impl DeviceState {
                 self.network = true;
                 self.relay = true;
             }
+            DeviceMessage::BridgeRate { baud, switches } => {
+                self.bridge_baud = Some(*baud);
+                self.bridge_switches = *switches;
+            }
             DeviceMessage::Busy { owner, reason } => self.busy = Some(Busy { owner: owner.clone(), reason: reason.clone() }),
             DeviceMessage::ForeignFirmware => {
                 // Over the bridge the port survives a reset into other firmware, so what ours reported must go too.
@@ -178,6 +189,7 @@ impl DeviceState {
             DeviceMessage::Disconnected => {
                 self.connected = false;
                 self.port = None;
+                self.bridge_baud = None;
                 self.network = false;
                 self.relay = false;
                 self.foreign_firmware = false;
@@ -384,6 +396,19 @@ mod tests {
     }
 
     #[test]
+    fn the_bridge_rate_is_kept_until_the_link_changes() {
+        let mut state = DeviceState::default();
+        state.apply(&DeviceMessage::Connected { port: "/dev/cu.x".to_owned(), bridge: true, usb_serial: None });
+        assert!(state.apply(&DeviceMessage::BridgeRate { baud: 921_600, switches: true }));
+        assert_eq!((state.bridge_baud, state.bridge_switches), (Some(921_600), true));
+        state.apply(&DeviceMessage::Connected { port: "/dev/cu.x".to_owned(), bridge: true, usb_serial: None });
+        assert_eq!((state.bridge_baud, state.bridge_switches), (None, false), "a new link settles it again");
+        state.apply(&DeviceMessage::BridgeRate { baud: 115_200, switches: false });
+        state.apply(&DeviceMessage::Disconnected);
+        assert_eq!(state.bridge_baud, None);
+    }
+
+    #[test]
     fn candidates_wait_for_a_choice_and_go_once_a_box_connects() {
         let mut state = DeviceState::default();
         let candidates = vec![
@@ -428,6 +453,8 @@ mod tests {
                 connected: true,
                 port: Some("/dev/cu.x".to_owned()),
                 bridge: true,
+                bridge_baud: None,
+                bridge_switches: false,
                 network: false,
                 relay: false,
                 busy: None,

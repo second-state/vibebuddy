@@ -176,6 +176,7 @@ impl crate::App {
         let delete: Element<'_, Message> = if self.confirm_delete_made.as_deref() == Some(made.id.as_str()) {
             column![
                 note(tr("Delete “%@”? This can't be undone.", &[&made.name])),
+                small(tr("Its lines made in its voice go with it; making it again would make them again.", &[])),
                 row![
                     Space::new().width(Length::Fill),
                     pill(tr("Cancel", &[]), Fill::Paper, Some(Message::AskDeleteMade(None))),

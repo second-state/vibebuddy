@@ -193,6 +193,19 @@ pub fn available_event(availability: Availability) -> Event {
     event
 }
 
+/// `voice.available` off for `slow_link`: the box is on its UART bridge at 115200, which can't carry the audio.
+/// Firmware that can't move the bridge to a faster rate is told to update; otherwise moving it failed.
+pub fn slow_link_event(firmware_switches: bool) -> Event {
+    let mut event = Event::named("voice.available");
+    event.extra.insert("on".to_owned(), false.into());
+    event.extra.insert("reason".to_owned(), "slow_link".into());
+    event.message = Some(
+        if firmware_switches { "This port is too slow for voice. Use my other USB port." } else { "Update my firmware, or use my other USB port, to talk to me." }
+            .to_owned(),
+    );
+    event
+}
+
 /// What the box shows when voice is off for `reason`, in `voice.available` and `voice.error` alike: English, like
 /// the rest of its screens, with when voice comes back in this computer's local time.
 pub fn refusal_message(reason: &str) -> Option<String> {

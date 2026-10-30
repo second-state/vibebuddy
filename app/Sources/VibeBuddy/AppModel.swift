@@ -2,12 +2,11 @@ import AppKit
 import Foundation
 import VibeBuddyCore
 
-/// Everything the UI shows comes from here: the status snapshot, daemon liveness, menu state, operation results.
+/// Everything the UI shows comes from here: the status snapshot, daemon liveness, operation results.
 @MainActor
 final class AppModel: ObservableObject {
     @Published private(set) var status: Status?
     @Published private(set) var daemonAlive = false
-    @Published private(set) var menu = MenuState.derive(status: nil, daemonAlive: false)
     @Published var lastError: String?
     @Published private(set) var screenshot: NSImage?
     @Published private(set) var screenshotBusy = false
@@ -42,27 +41,20 @@ final class AppModel: ObservableObject {
     private static let pendingVoiceKey = "pendingVoice"
     /// The last firmware version a notification was posted for, so each new one is announced once.
     private static let notifiedFirmwareKey = "notifiedFirmware"
-    /// The korekore UI words its notifications its own way (ADR-0021, canvas: "SYSTEM NOTIFICATIONS").
-    private static let korekore = AppUI.atLaunch() == .korekore
 
     init() {
         preview.onFinish = { [weak self] in self?.previewingVoice = nil }
         supervisor.onStateChange = { [weak self] state in
             guard let self else { return }
-            if state != .running { self.daemonAlive = false; self.status = nil; self.refreshMenu() }
+            if state != .running { self.daemonAlive = false; self.status = nil }
         }
         supervisor.onGiveUp = { [weak self] in
             guard let self else { return }
             self.daemonAlive = false
-            self.refreshMenu()
             // With "Notify me" off, not even this one shows; without a daemon there's no config, so default to on.
             if self.status?.config.notifyLink ?? true {
-                if Self.korekore {
-                    Notifier.notify(title: String(localized: "The daemon failed to start three times"),
-                                    body: String(localized: "Open korekore to restart it or export diagnostics."))
-                } else {
-                    Notifier.notify(title: "VibeBuddy", body: String(localized: "The daemon failed to start three times in a row. Click the menu bar icon to restart it."))
-                }
+                Notifier.notify(title: String(localized: "The daemon failed to start three times"),
+                                body: String(localized: "Open korekore to restart it or export diagnostics."))
             }
         }
         refreshHookStates()
@@ -78,9 +70,7 @@ final class AppModel: ObservableObject {
             // as changed and silently disabled them, and the box announced nothing from Codex for four hours. This one ignores the
             // link-notification switch: the app itself made the change, so a person has to finish the job.
             Notifier.notify(title: String(localized: "Codex hook config updated"),
-                            body: Self.korekore
-                                ? String(localized: "Trust korekore's hooks again with /hooks in Codex.")
-                                : String(localized: "VibeBuddy rewrote ~/.codex/hooks.json. Codex silently disables hooks that change: type /hooks in Codex and re-trust them so the box keeps getting Codex events."))
+                            body: String(localized: "Trust korekore's hooks again with /hooks in Codex."))
         }
         refreshHookStates()
         if managesDaemon { supervisor.start() }
@@ -105,7 +95,6 @@ final class AppModel: ObservableObject {
                 }
             } catch {
                 daemonAlive = false
-                refreshMenu()
             }
             try? await Task.sleep(nanoseconds: 1_000_000_000)
         }
@@ -118,7 +107,6 @@ final class AppModel: ObservableObject {
         }
         self.status = status
         daemonAlive = true
-        refreshMenu()
         refreshForeignFirmware()
         notifyNewFirmware(status)
         updater.follow(checks: status.updates?.enabled ?? false)
@@ -140,7 +128,6 @@ final class AppModel: ObservableObject {
     func showSample(_ status: Status) {
         self.status = status
         daemonAlive = true
-        refreshMenu()
     }
     #endif
 
@@ -156,17 +143,13 @@ final class AppModel: ObservableObject {
         if foreign != foreignFirmware { foreignFirmware = foreign }
     }
 
-    private func refreshMenu() {
-        menu = MenuState.derive(status: status, daemonAlive: daemonAlive)
-    }
-
     /// One notification per new firmware version, only while the box is there to take it and once it's downloaded.
     private func notifyNewFirmware(_ status: Status) {
         guard status.device.connected, Firmware.updateAvailable(status.updates), let offer = status.updates?.firmware,
               UserDefaults.standard.string(forKey: Self.notifiedFirmwareKey) != offer.version else { return }
         UserDefaults.standard.set(offer.version, forKey: Self.notifiedFirmwareKey)
         Notifier.notify(title: String(localized: "Box firmware \(offer.version) is available"),
-                        body: Self.korekore ? String(localized: "Update it from Settings › Device.") : String(localized: "Open Settings → Device to update the box."))
+                        body: String(localized: "Update it from Settings › Device."))
     }
 
     /// Notify once after the link has been down for 30 seconds (debounced); reset when it's plugged back in.
@@ -181,8 +164,7 @@ final class AppModel: ObservableObject {
         if !linkNotified, let since = linkLostSince, Date().timeIntervalSince(since) >= 30 {
             linkNotified = true
             Notifier.notify(title: String(localized: "Box disconnected"),
-                            body: Self.korekore ? String(localized: "The box has been gone for 30 seconds.")
-                                : String(localized: "VibeBuddy hasn't seen the box for 30 seconds. Check the USB cable."))
+                            body: String(localized: "The box has been gone for 30 seconds."))
         }
     }
 

@@ -22,13 +22,28 @@ const USB_SINGLE_SERIAL_PID: u16 = 0x55d3;
 const QUEUE_CAPACITY: usize = 64;
 /// A screenshot is 240 lines and a voice-pack write gets one receipt per block; the queue must hold a full screen.
 const DEVICE_EVENT_CAPACITY: usize = 512;
+/// The rate every link over the bridge starts at, the only one firmware older than the rate switch knows, and the
+/// ROM bootloader's.
 const BAUD_RATE: u32 = 115_200;
+/// The rate the bridge moves to once the box agrees (docs/protocol.md, "Link speed on the UART bridge"): about 92 KB/s
+/// against the 16 KB/s of a voice command's audio. The box's CH343 bridge and its UART both run it.
+pub const FAST_BAUD_RATE: u32 = 921_600;
+/// How long the box has to answer `device.baud` before it counts as firmware that can't switch, and then to confirm
+/// the new rate; the box itself gives a switch 2 seconds.
+const BAUD_ANSWER_WITHIN: Duration = Duration::from_secs(3);
+/// After moving the port to a new rate, before writing at it: the box moves as soon as its line is out.
+const BAUD_SETTLE: Duration = Duration::from_millis(20);
+/// Tries at the fast rate per boot of the box: a bridge that can't hold it stays at 115200.
+const BAUD_TRIES: u32 = 3;
 const RECONNECT_DELAY: Duration = Duration::from_millis(500);
 const CONNECT_SETTLE_DELAY: Duration = Duration::from_millis(1_500);
 /// While linked over the network, how often to look for the box on the cable.
 const CABLE_CHECK_EVERY: Duration = Duration::from_secs(2);
 /// While linked through the Relay, how often to see whether the box answers on the local network.
 const LAN_CHECK_EVERY: Duration = Duration::from_secs(30);
+/// After the box answered busy, how long before asking it again over the network. Each try costs the box a Noise
+/// handshake, about 170 ms of its main loop; tries every half second made its speaker click.
+const BUSY_RETRY: Duration = Duration::from_secs(15);
 /// The BOX's CH343 UART bridge can't swallow a whole line: push more than one or two hundred bytes at once and
 /// its buffer gets flushed, dropping 32 bytes every 384 and repeating the next 32, so the length stays right but
 /// the content shifts. A control experiment polling the FIFO directly on the device cleared the device side. Over the bridge,
@@ -68,6 +83,9 @@ pub enum DeviceMessage {
     /// Several devices could be the box and none is the one remembered, so none is connected until the user picks
     /// one; empty once that is no longer so.
     Candidates(Vec<Candidate>),
+    /// The UART bridge's rate is settled for now: [`FAST_BAUD_RATE`] carries voice commands' audio, 115200 doesn't.
+    /// `switches` says whether the firmware answered the request to move (firmware before the switch doesn't).
+    BridgeRate { baud: u32, switches: bool },
     Disconnected,
 }
 
@@ -223,6 +241,8 @@ async fn serial_worker(
     // When the Relay may be tried again, and how many tries in a row have failed.
     let mut relay_retry: Option<Instant> = None;
     let mut relay_attempts = 0_u32;
+    // When the box, which answered busy, may be asked again over the network.
+    let mut busy_retry: Option<Instant> = None;
 
     loop {
         if *suspend.borrow() {
@@ -270,8 +290,10 @@ async fn serial_worker(
             // No box on the cable: try the local network, then the Relay, if this computer is paired with a box.
             // Taken here only for the local network; the Relay takes it on its socket, even mid-wait.
             let takeover = config.takeover.load(Ordering::Relaxed);
+            let leave_alone = leave_busy_box_alone(busy_retry, Instant::now(), takeover);
             let mut busy = None;
-            if let Some(lan) = &config.lan
+            if !leave_alone
+                && let Some(lan) = &config.lan
                 && let Some((target, result)) = lan::link(lan, takeover).await
             {
                 match result {
@@ -279,12 +301,14 @@ async fn serial_worker(
                         config.takeover.store(false, Ordering::Relaxed);
                         info!(address = %target.address, "linked over the local network");
                         busy_logged = None;
+                        busy_retry = None;
                         let _ = device_event_sender.send(DeviceMessage::ConnectedNetwork { address: target.address.clone() }).await;
                         linked = true;
                         let end = run_session(
                             &mut stream,
                             &target.address,
                             false,
+                            None,
                             Firmware::Ours,
                             Some(&config),
                             None,
@@ -302,13 +326,17 @@ async fn serial_worker(
                         }
                         continue;
                     }
-                    Err(LinkError::Busy { reason, owner }) => busy = Some((owner, reason)),
+                    Err(LinkError::Busy { reason, owner }) => {
+                        busy = Some((owner, reason));
+                        busy_retry = Some(Instant::now() + BUSY_RETRY);
+                    }
                     Err(error) => debug!(?error, address = %target.address, "no local network link"),
                 }
             }
             // A box that answered busy on the local network is busy on the Relay too.
             let box_key = config.lan.as_ref().and_then(|lan| lan.box_key());
             if busy.is_none()
+                && !leave_alone
                 && config.relay_enabled.load(Ordering::Relaxed)
                 && let (Some(relay_config), Some(box_key)) = (&config.relay, box_key)
                 && !relay_config.waits_for_account()
@@ -341,6 +369,7 @@ async fn serial_worker(
                         let url = relay_config.url();
                         info!(%url, "linked through the Relay");
                         busy_logged = None;
+                        busy_retry = None;
                         relay_retry = None;
                         let linked_at = Instant::now();
                         let _ = device_event_sender.send(DeviceMessage::ConnectedRelay { url: url.clone() }).await;
@@ -349,6 +378,7 @@ async fn serial_worker(
                             &mut stream,
                             &url,
                             false,
+                            None,
                             Firmware::Ours,
                             Some(&config),
                             config.lan.as_deref(),
@@ -423,6 +453,7 @@ async fn serial_worker(
             &mut port,
             &port_name,
             paced,
+            paced.then_some(set_port_rate as RateSetter<SerialStream>),
             Firmware::Listening { since: Instant::now() },
             None,
             None,
@@ -485,6 +516,10 @@ impl Firmware {
             Self::Listening { since: now }
         } else if line.contains(BUILD_MARKER) {
             Self::Ours
+        } else if self != Self::Ours && rate_line(line).starts_with(BAUD_PREFIX) {
+            // Only our firmware says this: it went back to 115200 because what it heard was at another rate (the
+            // port reopened while it ran fast), so hello was lost. Listened to enough: ask it again now.
+            Self::Listening { since: now.checked_sub(LISTEN_FIRST).unwrap_or(now) }
         } else if self != Self::Ours && is_esp_idf_app_log(line) {
             Self::Foreign
         } else {
@@ -531,6 +566,183 @@ fn is_esp_idf_app_log(line: &str) -> bool {
         && tag != "esp_image"
 }
 
+/// The box's lines about the bridge's rate: `BAUD SWITCH <rate>` and `BAUD <rate>`.
+const BAUD_PREFIX: &str = "BAUD ";
+/// What firmware without the rate switch says to `device.baud`, as to any event it doesn't know.
+const BAUD_UNKNOWN: &str = "EVENT device.baud";
+
+/// A line as the box said it about the rate: without what came before it at the other rate. The box's last bytes at
+/// 921600, read at 115200, are not ASCII text, and they run into its `BAUD 115200` (seen on a box: `��BAUD 115200`).
+fn rate_line(line: &str) -> &str {
+    line.trim_start_matches(|c: char| !c.is_ascii_graphic()).trim_end()
+}
+
+/// Moves a link to another rate; only the serial port over the bridge has one.
+type RateSetter<P> = fn(&mut P, u32) -> std::io::Result<()>;
+
+fn set_port_rate(port: &mut SerialStream, baud: u32) -> std::io::Result<()> {
+    port.set_baud_rate(baud).map_err(std::io::Error::from)
+}
+
+/// Where the bridge's rate stands with the box (docs/protocol.md, "Link speed on the UART bridge").
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum RateStage {
+    /// Not asked since the box booted, or asked again after the fast rate failed.
+    Unasked,
+    /// `device.baud` went out; waiting for `BAUD SWITCH`.
+    Asked { since: Instant },
+    /// Both ends moved; the check went out at the new rate, waiting for `BAUD <rate>`.
+    Checking { since: Instant },
+    /// Nothing more to do until the box restarts.
+    Settled,
+}
+
+/// What the session does about the rate next.
+#[derive(Debug, PartialEq, Eq)]
+enum RateStep {
+    Write(Vec<u8>),
+    /// Move the port; frames written after it wait a moment for the box to move too.
+    SetRate(u32),
+    /// Tell the daemon: [`DeviceMessage::BridgeRate`].
+    Settled { baud: u32, switches: bool },
+}
+
+/// Moves the UART bridge to [`FAST_BAUD_RATE`] once the box is known to run our firmware, and back to 115200 when the
+/// ends may no longer agree. Firmware that can't switch, or a switch that isn't confirmed, leaves the link at 115200.
+#[derive(Debug)]
+struct BaudSwitch {
+    /// The port's rate.
+    rate: u32,
+    stage: RateStage,
+    /// Tries since the box booted.
+    tries: u32,
+    /// The firmware answered `device.baud`.
+    switches: bool,
+}
+
+impl BaudSwitch {
+    fn new() -> Self {
+        Self { rate: BAUD_RATE, stage: RateStage::Unasked, tries: 0, switches: false }
+    }
+
+    /// Frames from the daemon wait while the rate is being changed: one written at the old rate after the box moved
+    /// would arrive as noise.
+    fn holds_writes(&self) -> bool {
+        matches!(self.stage, RateStage::Asked { .. } | RateStage::Checking { .. })
+    }
+
+    fn deadline(&self) -> Option<Instant> {
+        match self.stage {
+            RateStage::Asked { since } | RateStage::Checking { since } => Some(since + BAUD_ANSWER_WITHIN),
+            RateStage::Unasked | RateStage::Settled => None,
+        }
+    }
+
+    /// The box was just found running our firmware: ask it to move, unless it has been asked enough.
+    fn on_ours(&mut self, now: Instant) -> Vec<RateStep> {
+        if self.stage != RateStage::Unasked || self.rate != BAUD_RATE || self.tries >= BAUD_TRIES {
+            return Vec::new();
+        }
+        self.tries += 1;
+        self.stage = RateStage::Asked { since: now };
+        let mut request = Event::named("device.baud");
+        request.extra.insert("rate".to_owned(), FAST_BAUD_RATE.into());
+        vec![RateStep::Write(request.to_ndjson().expect("the request always encodes"))]
+    }
+
+    /// The box restarted (its ROM banner, readable only at 115200): it may be asked again.
+    fn on_restart(&mut self) {
+        self.stage = RateStage::Unasked;
+        self.tries = 0;
+    }
+
+    /// A line from the box about the rate.
+    fn on_line(&mut self, line: &str, now: Instant) -> Vec<RateStep> {
+        let line = line.trim();
+        match self.stage {
+            RateStage::Asked { .. } if line == format!("BAUD SWITCH {FAST_BAUD_RATE}") => {
+                self.switches = true;
+                self.rate = FAST_BAUD_RATE;
+                self.stage = RateStage::Checking { since: now };
+                let check = Event::named("device.baud.check").to_ndjson().expect("the check always encodes");
+                vec![RateStep::SetRate(FAST_BAUD_RATE), RateStep::Write(check)]
+            }
+            RateStage::Asked { .. } if line == BAUD_UNKNOWN => {
+                self.stage = RateStage::Settled;
+                vec![RateStep::Settled { baud: BAUD_RATE, switches: false }]
+            }
+            RateStage::Checking { .. } if line == format!("BAUD {FAST_BAUD_RATE}") => {
+                self.stage = RateStage::Settled;
+                vec![RateStep::Settled { baud: FAST_BAUD_RATE, switches: true }]
+            }
+            // The box going back on its own, said at the fast rate before a restart.
+            _ if self.rate != BAUD_RATE && line == format!("BAUD {BAUD_RATE}") => self.back_to_slow(),
+            _ => Vec::new(),
+        }
+    }
+
+    /// What came over the bridge can't be our firmware at this rate: the box is at 115200 again (it restarted, or
+    /// gave up on the switch).
+    fn on_garbled(&mut self) -> Vec<RateStep> {
+        if self.rate == BAUD_RATE {
+            return Vec::new();
+        }
+        self.back_to_slow()
+    }
+
+    fn on_deadline(&mut self) -> Vec<RateStep> {
+        match self.stage {
+            // No answer at all: firmware that can't switch, which said nothing we knew, or the request was lost.
+            RateStage::Asked { .. } => {
+                self.stage = RateStage::Settled;
+                vec![RateStep::Settled { baud: BAUD_RATE, switches: self.switches }]
+            }
+            // Not confirmed: the box goes back by itself too.
+            RateStage::Checking { .. } => self.back_to_slow(),
+            RateStage::Unasked | RateStage::Settled => Vec::new(),
+        }
+    }
+
+    fn back_to_slow(&mut self) -> Vec<RateStep> {
+        self.rate = BAUD_RATE;
+        self.stage = RateStage::Unasked;
+        vec![RateStep::SetRate(BAUD_RATE), RateStep::Settled { baud: BAUD_RATE, switches: self.switches }]
+    }
+}
+
+/// Bytes that never come from our firmware at the rate the port runs: NUL, or bytes no UTF-8 text holds. A box at
+/// 115200 read at 921600 gives little else.
+fn garbled(bytes: &[u8]) -> bool {
+    bytes.iter().any(|&byte| byte == 0 || byte >= 0xf5)
+}
+
+/// Carries out what [`BaudSwitch`] decided.
+async fn take_rate_steps<P: AsyncWrite + Unpin>(
+    port: &mut P,
+    set_rate: Option<RateSetter<P>>,
+    steps: Vec<RateStep>,
+    paced: bool,
+    device_event_sender: &mpsc::Sender<DeviceMessage>,
+) -> std::io::Result<()> {
+    for step in steps {
+        match step {
+            // Short frames on either side of a switch: paced at 115200, which is never too fast.
+            RateStep::Write(frame) => write_frame(port, &frame, paced.then_some(BAUD_RATE)).await?,
+            RateStep::SetRate(baud) => {
+                if let Some(set_rate) = set_rate {
+                    set_rate(port, baud)?;
+                }
+                tokio::time::sleep(BAUD_SETTLE).await;
+            }
+            RateStep::Settled { baud, switches } => {
+                info!(baud, switches, "UART bridge rate settled");
+                let _ = device_event_sender.send(DeviceMessage::BridgeRate { baud, switches }).await;
+            }
+        }
+    }
+    Ok(())
+}
+
 fn hello_frame() -> Vec<u8> {
     Event::named("device.hello").to_ndjson().expect("hello always encodes")
 }
@@ -545,6 +757,7 @@ async fn run_session<P: AsyncRead + AsyncWrite + Unpin>(
     port: &mut P,
     port_name: &str,
     paced: bool,
+    set_rate: Option<RateSetter<P>>,
     mut firmware: Firmware,
     watch_cable: Option<&SerialConfig>,
     probe_lan: Option<&LanConfig>,
@@ -562,14 +775,20 @@ async fn run_session<P: AsyncRead + AsyncWrite + Unpin>(
     // Through the Relay, the local network wins when the box answers there.
     let mut lan_check = tokio::time::interval_at(Instant::now() + LAN_CHECK_EVERY, LAN_CHECK_EVERY);
     lan_check.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+    // Only the bridge has a rate to change.
+    let mut baud = BaudSwitch::new();
 
     loop {
         // Frames wait, in order, until the box is known to run our firmware; only hello may go first.
-        let next = pending.iter().position(|frame| firmware.writes(frame)).and_then(|index| pending.remove(index));
+        let next = if baud.holds_writes() {
+            None
+        } else {
+            pending.iter().position(|frame| firmware.writes(frame)).and_then(|index| pending.remove(index))
+        };
         if let Some(frame) = next {
             // A peer that never reads (e.g. firmware that isn't ours) blocks the write forever; the flasher must still get the port.
             tokio::select! {
-                result = write_frame(port, &frame, paced) => {
+                result = write_frame(port, &frame, paced.then_some(pace_rate(baud.rate))) => {
                     if let Err(error) = result {
                         pending.push_front(frame);
                         warn!(port = %port_name, %error, "link write failed, reconnecting");
@@ -591,7 +810,15 @@ async fn run_session<P: AsyncRead + AsyncWrite + Unpin>(
         }
 
         let deadline = firmware.deadline();
+        let rate_deadline = baud.deadline();
         tokio::select! {
+            () = tokio::time::sleep_until(rate_deadline.unwrap_or_else(Instant::now)), if rate_deadline.is_some() => {
+                warn!(port = %port_name, "the box didn't answer about the bridge's rate in time; staying at 115200");
+                if let Err(error) = take_rate_steps(port, set_rate, baud.on_deadline(), paced, device_event_sender).await {
+                    warn!(port = %port_name, %error, "link write failed, reconnecting");
+                    return SessionEnd::Reconnect;
+                }
+            }
             frame = receiver.recv() => {
                 match frame {
                     // Heartbeats and events for a box running other firmware are dropped, not held: they'd be stale.
@@ -642,9 +869,36 @@ async fn run_session<P: AsyncRead + AsyncWrite + Unpin>(
                         warn!(port = %port_name, "link closed, reconnecting");
                         return SessionEnd::Reconnect;
                     }
+                    Ok(count) if set_rate.is_some() && baud.rate != BAUD_RATE && garbled(&read_buffer[..count]) => {
+                        // Listened to again from the start: the box may have restarted.
+                        warn!(port = %port_name, "the bridge reads garbled at the fast rate; back to 115200");
+                        line_buffer.clear();
+                        firmware = Firmware::Listening { since: Instant::now() };
+                        if let Err(error) = take_rate_steps(port, set_rate, baud.on_garbled(), paced, device_event_sender).await {
+                            warn!(port = %port_name, %error, "link write failed, reconnecting");
+                            return SessionEnd::Reconnect;
+                        }
+                    }
                     Ok(count) => {
                         let before = firmware;
-                        process_device_bytes(&read_buffer[..count], &mut line_buffer, &mut firmware, device_event_sender);
+                        let rate_lines = process_device_bytes(&read_buffer[..count], &mut line_buffer, &mut firmware, device_event_sender);
+                        let mut steps = Vec::new();
+                        if set_rate.is_some() {
+                            for line in rate_lines {
+                                if line.contains(ROM_BANNER) {
+                                    baud.on_restart();
+                                } else {
+                                    steps.extend(baud.on_line(&line, Instant::now()));
+                                }
+                            }
+                            if firmware == Firmware::Ours && before != Firmware::Ours {
+                                steps.extend(baud.on_ours(Instant::now()));
+                            }
+                        }
+                        if let Err(error) = take_rate_steps(port, set_rate, steps, paced, device_event_sender).await {
+                            warn!(port = %port_name, %error, "link write failed, reconnecting");
+                            return SessionEnd::Reconnect;
+                        }
                         match (before, firmware) {
                             (Firmware::Foreign, Firmware::Foreign) => {}
                             (_, Firmware::Foreign) => {
@@ -680,31 +934,39 @@ async fn become_foreign(
     let _ = device_event_sender.send(DeviceMessage::ForeignFirmware).await;
 }
 
-/// Bridge ports are written in line-rate chunks; native USB ports get the whole frame at once.
-async fn write_frame<P: AsyncWrite + Unpin>(port: &mut P, frame: &[u8], paced: bool) -> std::io::Result<()> {
-    if !paced {
+/// Bridge ports are written in line-rate chunks, `pace` being the rate the port runs at; native USB ports (None) get
+/// the whole frame at once.
+async fn write_frame<P: AsyncWrite + Unpin>(port: &mut P, frame: &[u8], pace: Option<u32>) -> std::io::Result<()> {
+    let Some(baud) = pace else {
         // No flush: on a serial port it is tcdrain(), a blocking call that waits until the box has taken the bytes.
         // While the box dumps a screenshot it takes nothing, so a heartbeat's flush held this worker for two seconds;
         // nobody read the port meanwhile, the kernel stopped taking the box's output, and the box dropped the rest of
         // the frame (seen on Omarchy, 2026-10-01). The kernel queues the frame either way.
         return port.write_all(frame).await;
-    }
+    };
     for piece in frame.chunks(PACE_PIECE_BYTES) {
         port.write_all(piece).await?;
         port.flush().await?;
-        tokio::time::sleep(piece_delay(piece.len())).await;
+        tokio::time::sleep(piece_delay(piece.len(), baud)).await;
     }
     Ok(())
 }
 
-/// How long this many bytes take at 115200 baud, plus a little headroom. Flashing uses a separate
+/// How long this many bytes take at this baud rate, plus a little headroom. Flashing uses a separate
 /// synchronous serial path with the same formula.
-pub fn piece_delay(bytes: usize) -> Duration {
-    Duration::from_micros(bytes as u64 * 10 * 1_000_000 / u64::from(BAUD_RATE)) + PACE_MARGIN
+pub fn piece_delay(bytes: usize, baud: u32) -> Duration {
+    Duration::from_micros(bytes as u64 * 10 * 1_000_000 / u64::from(baud)) + PACE_MARGIN
 }
 
 /// Over the bridge, write at most this many bytes, then wait for them to clear.
 pub const PACE_PIECE_BYTES: usize = 128;
+
+/// The rate whose wire time paces writes to the bridge running at `port_rate`. On macOS, that rate. On Linux,
+/// always 115200: paced faster, at 921600 or even at 460800 wire time, writes through `cdc_acm` arrive damaged (on
+/// Omarchy, 2026-10-29: a Character pack had 170 bad lines and took 5:41, against none and 2:09 at 115200).
+fn pace_rate(port_rate: u32) -> u32 {
+    if cfg!(target_os = "macos") { port_rate } else { BAUD_RATE }
+}
 
 /// Only the BOX's UART bridge needs chunking; Espressif's native USB port has its own flow control.
 fn needs_pacing(vid: u16, pid: u16) -> bool {
@@ -818,12 +1080,15 @@ pub fn serials_equal(actual: &str, expected: &str) -> bool {
     normalize(actual) == normalize(expected)
 }
 
+/// Hands the box's whole lines on, and returns the ones the session acts on itself: the ROM banner and the lines about
+/// the bridge's rate.
 fn process_device_bytes(
     bytes: &[u8],
     line_buffer: &mut Vec<u8>,
     firmware: &mut Firmware,
     event_sender: &mpsc::Sender<DeviceMessage>,
-) {
+) -> Vec<String> {
+    let mut own = Vec::new();
     for byte in bytes {
         if *byte == b'\n' {
             let length = if line_buffer.last() == Some(&b'\r') {
@@ -831,7 +1096,15 @@ fn process_device_bytes(
             } else {
                 line_buffer.len()
             };
-            process_device_line(&line_buffer[..length], firmware, event_sender);
+            let line = &line_buffer[..length];
+            let text = String::from_utf8_lossy(line);
+            let rate = rate_line(&text);
+            if text.contains(ROM_BANNER) {
+                own.push(text.into_owned());
+            } else if rate.starts_with(BAUD_PREFIX) || rate == BAUD_UNKNOWN {
+                own.push(rate.to_owned());
+            }
+            process_device_line(line, firmware, event_sender);
             line_buffer.clear();
         } else if line_buffer.len() < 4096 {
             line_buffer.push(*byte);
@@ -840,6 +1113,7 @@ fn process_device_bytes(
             warn!("device output line exceeded 4096 bytes, dropped");
         }
     }
+    own
 }
 
 fn process_device_line(line: &[u8], firmware: &mut Firmware, event_sender: &mpsc::Sender<DeviceMessage>) {
@@ -884,12 +1158,28 @@ fn process_device_line(line: &[u8], firmware: &mut Firmware, event_sender: &mpsc
     }
 }
 
+/// Whether to leave the box alone for now: it answered busy less than [`BUSY_RETRY`] ago, and the user has not asked
+/// to take it over. The cable is still looked at all the while.
+fn leave_busy_box_alone(busy_retry: Option<Instant>, now: Instant, takeover: bool) -> bool {
+    !takeover && busy_retry.is_some_and(|at| now < at)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
     fn candidate(name: &str, serial: &str) -> PortChoice {
         PortChoice { name: name.to_owned(), paced: false, usb_serial: Some(serial.to_owned()) }
+    }
+
+    #[test]
+    fn a_busy_box_is_left_alone_until_the_retry_or_a_takeover() {
+        let now = Instant::now();
+        assert!(!leave_busy_box_alone(None, now, false), "a box that never said busy is asked");
+        let retry = Some(now + BUSY_RETRY);
+        assert!(leave_busy_box_alone(retry, now + RECONNECT_DELAY, false), "not asked again half a second later");
+        assert!(!leave_busy_box_alone(retry, now + RECONNECT_DELAY, true), "a takeover asks at once");
+        assert!(!leave_busy_box_alone(retry, now + BUSY_RETRY, false), "asked again once the wait is over");
     }
 
     #[test]
@@ -948,8 +1238,18 @@ mod tests {
     #[test]
     fn a_piece_waits_for_its_own_wire_time_plus_margin() {
         // 128 bytes × 10 bits / 115200 ≈ 11.1 ms, plus 1 ms headroom.
-        let delay = piece_delay(128);
+        let delay = piece_delay(128, BAUD_RATE);
         assert!(delay >= Duration::from_micros(12_100) && delay <= Duration::from_micros(12_200), "{delay:?}");
+        // At 921600 about 1.4 ms, plus the same headroom.
+        let delay = piece_delay(128, 921_600);
+        assert!(delay >= Duration::from_micros(2_380) && delay <= Duration::from_micros(2_400), "{delay:?}");
+    }
+
+    #[test]
+    fn only_macos_paces_at_the_fast_rate() {
+        assert_eq!(pace_rate(BAUD_RATE), BAUD_RATE);
+        let expected = if cfg!(target_os = "macos") { FAST_BAUD_RATE } else { BAUD_RATE };
+        assert_eq!(pace_rate(FAST_BAUD_RATE), expected);
     }
 
     #[test]
@@ -977,7 +1277,7 @@ mod tests {
         let (device_sender, _device_receiver) = mpsc::channel(1);
         let (suspend_sender, mut suspend) = watch::channel(false);
 
-        let session = run_session(&mut port, "test", false, Firmware::Listening { since: Instant::now() }, None, None, None, &mut pending, &mut receiver, &device_sender, &mut suspend);
+        let session = run_session(&mut port, "test", false, None, Firmware::Listening { since: Instant::now() }, None, None, None, &mut pending, &mut receiver, &device_sender, &mut suspend);
         let release = async {
             tokio::time::sleep(LISTEN_FIRST + Duration::from_millis(50)).await;
             suspend_sender.send(true).unwrap();
@@ -1025,7 +1325,7 @@ mod tests {
         frames.send(heartbeat_frame()).await.unwrap();
         let task = tokio::spawn(async move {
             let mut pending = VecDeque::new();
-            run_session(&mut port, "test", false, Firmware::Listening { since: Instant::now() }, None, None, None, &mut pending, &mut receiver, &device_sender, &mut suspend).await
+            run_session(&mut port, "test", false, None, Firmware::Listening { since: Instant::now() }, None, None, None, &mut pending, &mut receiver, &device_sender, &mut suspend).await
         });
         Session { peer, frames, device, _suspend: suspend_sender, task }
     }
@@ -1132,6 +1432,213 @@ I (911) muse: board: ALIENTEK ATK-DNESP32S3-BOX\r\n";
         assert_eq!(output.matches("device.hello").count(), 1, "asked once, never probed again: {output}");
         assert!(!output.contains("heartbeat"), "{output}");
         assert!(drain(&mut session.device).iter().any(|message| matches!(message, DeviceMessage::ForeignFirmware)));
+        session.task.abort();
+    }
+
+    fn frame_named(step: &RateStep) -> Option<String> {
+        match step {
+            RateStep::Write(frame) => serde_json::from_slice::<Event>(frame).ok().map(|event| event.event),
+            _ => None,
+        }
+    }
+
+    #[test]
+    fn the_bridge_moves_to_the_fast_rate_once_the_box_confirms_it() {
+        let now = Instant::now();
+        let mut baud = BaudSwitch::new();
+        let ask = baud.on_ours(now);
+        assert_eq!(ask.len(), 1);
+        let RateStep::Write(request) = &ask[0] else { panic!("{ask:?}") };
+        let request: Event = serde_json::from_slice(request).unwrap();
+        assert_eq!((request.event.as_str(), &request.extra["rate"]), ("device.baud", &serde_json::json!(921_600)));
+        assert!(baud.holds_writes(), "nothing else goes out while the rate changes");
+        assert!(baud.on_ours(now).is_empty(), "asked once");
+
+        let moved = baud.on_line("BAUD SWITCH 921600\r", now);
+        assert_eq!(moved[0], RateStep::SetRate(FAST_BAUD_RATE));
+        assert_eq!(frame_named(&moved[1]).as_deref(), Some("device.baud.check"));
+        assert!(baud.holds_writes());
+        assert_eq!(baud.on_line("BAUD 921600", now), [RateStep::Settled { baud: FAST_BAUD_RATE, switches: true }]);
+        assert!(!baud.holds_writes() && baud.deadline().is_none());
+    }
+
+    #[test]
+    fn firmware_without_the_switch_stays_at_115200_at_once_or_after_the_wait() {
+        let now = Instant::now();
+        let mut baud = BaudSwitch::new();
+        baud.on_ours(now);
+        // As to any event it doesn't know.
+        assert_eq!(baud.on_line("EVENT device.baud", now), [RateStep::Settled { baud: BAUD_RATE, switches: false }]);
+        assert!(!baud.holds_writes());
+
+        let mut baud = BaudSwitch::new();
+        baud.on_ours(now);
+        assert_eq!(baud.deadline(), Some(now + BAUD_ANSWER_WITHIN));
+        assert_eq!(baud.on_deadline(), [RateStep::Settled { baud: BAUD_RATE, switches: false }]);
+        assert_eq!(baud.rate, BAUD_RATE);
+        assert!(baud.on_ours(now).is_empty(), "settled until the box restarts");
+    }
+
+    #[test]
+    fn an_unconfirmed_switch_goes_back_to_115200_and_is_tried_again_after_a_restart() {
+        let now = Instant::now();
+        let mut baud = BaudSwitch::new();
+        for _ in 0..BAUD_TRIES {
+            baud.on_ours(now);
+            baud.on_line("BAUD SWITCH 921600", now);
+            assert_eq!(baud.on_deadline(), [RateStep::SetRate(BAUD_RATE), RateStep::Settled { baud: BAUD_RATE, switches: true }]);
+            assert_eq!(baud.rate, BAUD_RATE);
+        }
+        assert!(baud.on_ours(now).is_empty(), "a bridge that can't hold the rate stays at 115200");
+        baud.on_restart();
+        assert_eq!(baud.on_ours(now).len(), 1, "asked again once the box restarted");
+    }
+
+    #[test]
+    fn the_box_going_back_or_garbled_bytes_bring_the_port_back_to_115200() {
+        let now = Instant::now();
+        let mut baud = BaudSwitch::new();
+        assert!(baud.on_garbled().is_empty(), "already at 115200");
+        assert!(baud.on_line("BAUD 115200", now).is_empty());
+        baud.on_ours(now);
+        baud.on_line("BAUD SWITCH 921600", now);
+        baud.on_line("BAUD 921600", now);
+        assert_eq!(baud.on_line("BAUD 115200", now), [RateStep::SetRate(BAUD_RATE), RateStep::Settled { baud: BAUD_RATE, switches: true }]);
+        baud.on_ours(now);
+        baud.on_line("BAUD SWITCH 921600", now);
+        baud.on_line("BAUD 921600", now);
+        assert_eq!(baud.on_garbled(), [RateStep::SetRate(BAUD_RATE), RateStep::Settled { baud: BAUD_RATE, switches: true }]);
+        assert_eq!(baud.on_ours(now).len(), 1, "and asks again when the box is found again");
+    }
+
+    #[test]
+    fn only_bytes_our_firmware_never_sends_count_as_garbled() {
+        assert!(!garbled(b"DISPLAY READY BUILD abc\r\n"));
+        assert!(!garbled("WIFI SEEN 家 -40\n".as_bytes()), "UTF-8 is text");
+        assert!(garbled(&[0x00, 0x80, 0x00]));
+        assert!(garbled(&[0x41, 0xfe]));
+    }
+
+    #[test]
+    fn our_firmware_back_at_115200_is_asked_at_once() {
+        let now = Instant::now();
+        let asked = Firmware::Foreign.after_line("BAUD 115200", now);
+        assert!(asked.deadline().is_some_and(|deadline| deadline <= now), "{asked:?}");
+        assert_eq!(Firmware::Ours.after_line("BAUD 115200", now), Firmware::Ours);
+    }
+
+    #[test]
+    fn a_rate_line_after_bytes_read_at_the_other_rate_still_counts() {
+        // Seen on a box: its last bytes at 921600, read at 115200, ran into its `BAUD 115200`.
+        let (sender, _receiver) = mpsc::channel(16);
+        let mut buffer = Vec::new();
+        let mut firmware = Firmware::Asked { since: Instant::now() };
+        let rate_lines = process_device_bytes(b"\xfe\xffBAUD 115200\r\n", &mut buffer, &mut firmware, &sender);
+        assert_eq!(rate_lines, ["BAUD 115200"]);
+        assert!(firmware.deadline().is_some_and(|deadline| deadline <= Instant::now()), "asked again at once: {firmware:?}");
+        assert_eq!(rate_line("TITLE CC:UART BAUD 115200"), "TITLE CC:UART BAUD 115200", "only what is not text goes");
+    }
+
+    thread_local! {
+        /// The rates a session on the bridge set its port to.
+        static RATES: std::cell::RefCell<Vec<u32>> = const { std::cell::RefCell::new(Vec::new()) };
+    }
+
+    fn record_rate(_port: &mut tokio::io::DuplexStream, baud: u32) -> std::io::Result<()> {
+        RATES.with(|rates| rates.borrow_mut().push(baud));
+        Ok(())
+    }
+
+    /// A session on the bridge, its rate recorded, with hello and a heartbeat queued.
+    async fn on_bridge() -> Session {
+        RATES.with(|rates| rates.borrow_mut().clear());
+        let (mut port, peer) = tokio::io::duplex(8192);
+        let (frames, mut receiver) = mpsc::channel(16);
+        let (device_sender, device) = mpsc::channel(64);
+        let (suspend_sender, mut suspend) = watch::channel(false);
+        frames.send(hello_frame()).await.unwrap();
+        frames.send(heartbeat_frame()).await.unwrap();
+        let task = tokio::spawn(async move {
+            let mut pending = VecDeque::new();
+            let set_rate: RateSetter<tokio::io::DuplexStream> = record_rate;
+            run_session(&mut port, "test", true, Some(set_rate), Firmware::Listening { since: Instant::now() }, None, None, None, &mut pending, &mut receiver, &device_sender, &mut suspend).await
+        });
+        Session { peer, frames, device, _suspend: suspend_sender, task }
+    }
+
+    fn rates() -> Vec<u32> {
+        RATES.with(|rates| rates.borrow().clone())
+    }
+
+    fn bridge_rates(messages: &[DeviceMessage]) -> Vec<(u32, bool)> {
+        messages
+            .iter()
+            .filter_map(|message| match message {
+                DeviceMessage::BridgeRate { baud, switches } => Some((*baud, *switches)),
+                _ => None,
+            })
+            .collect()
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn on_the_bridge_our_firmware_is_moved_to_the_fast_rate_before_anything_else() {
+        let mut session = on_bridge().await;
+        session.peer.write_all(b"ESP-ROM:esp32s3-20210327\r\nDISPLAY READY BUILD abc 2026-10-07 09:00\r\n").await.unwrap();
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        let output = written(&mut session.peer).await;
+        assert!(output.contains("device.baud") && !output.contains("device.hello"), "the request alone: {output}");
+
+        session.peer.write_all(b"BAUD SWITCH 921600\r\n").await.unwrap();
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        assert_eq!(rates(), [FAST_BAUD_RATE]);
+        let output = written(&mut session.peer).await;
+        assert!(output.contains("device.baud.check") && !output.contains("device.hello"), "{output}");
+
+        session.peer.write_all(b"BAUD 921600\r\n").await.unwrap();
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        let output = written(&mut session.peer).await;
+        assert!(output.find("device.hello") < output.find("device.heartbeat"), "then the rest, in order: {output}");
+        assert_eq!(bridge_rates(&drain(&mut session.device)), [(FAST_BAUD_RATE, true)]);
+
+        // The box restarts and comes back at 115200: what the port reads at 921600 is noise.
+        session.peer.write_all(&[0x00, 0xf8, 0x80, 0x00]).await.unwrap();
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        assert_eq!(rates(), [FAST_BAUD_RATE, BAUD_RATE]);
+        assert_eq!(bridge_rates(&drain(&mut session.device)), [(BAUD_RATE, true)]);
+        session.frames.send(heartbeat_frame()).await.unwrap();
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        assert_eq!(written(&mut session.peer).await, "", "listening again before writing");
+        session.peer.write_all(b"DISPLAY READY BUILD abc 2026-10-07 09:00\r\n").await.unwrap();
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        assert!(written(&mut session.peer).await.contains("\"device.baud\""), "asked again");
+        session.task.abort();
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn on_the_bridge_firmware_without_the_switch_keeps_115200_and_gets_everything() {
+        let mut session = on_bridge().await;
+        session.peer.write_all(b"DISPLAY READY BUILD old 2026-09-01 09:00\r\n").await.unwrap();
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        assert!(written(&mut session.peer).await.contains("device.baud"));
+        session.peer.write_all(b"EVENT device.baud\r\n").await.unwrap();
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        let output = written(&mut session.peer).await;
+        assert!(output.contains("device.hello") && output.contains("device.heartbeat"), "{output}");
+        assert!(rates().is_empty(), "the port never moved");
+        assert_eq!(bridge_rates(&drain(&mut session.device)), [(BAUD_RATE, false)]);
+        session.task.abort();
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn on_the_bridge_a_switch_left_unconfirmed_goes_back_to_115200() {
+        let mut session = on_bridge().await;
+        session.peer.write_all(b"DISPLAY READY BUILD abc 2026-10-07 09:00\r\n").await.unwrap();
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        session.peer.write_all(b"BAUD SWITCH 921600\r\n").await.unwrap();
+        tokio::time::sleep(BAUD_ANSWER_WITHIN + Duration::from_millis(100)).await;
+        assert_eq!(rates(), [FAST_BAUD_RATE, BAUD_RATE]);
+        assert_eq!(bridge_rates(&drain(&mut session.device)), [(BAUD_RATE, true)]);
+        assert!(written(&mut session.peer).await.contains("device.heartbeat"), "held frames go out at 115200");
         session.task.abort();
     }
 

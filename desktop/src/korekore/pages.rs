@@ -442,6 +442,15 @@ impl crate::App {
             .spacing(10)
             .align_y(Alignment::Center);
         let key = choice.filter(|choice| *choice != client::BrainChoice::Codex).map(|_| self.key_card());
+        // Anything else that keeps K0 from working: the UART bridge too slow, the account.
+        let voice_off = self.resident_info.as_ref().filter(|_| self.resident_problem.is_none()).and_then(client::ResidentInfo::voice_off_note).map(|detail| {
+            card_with(
+                row![badge(&sprites::KORE_NORMAL, false, theme::INK), note(detail)].spacing(10).align_y(Alignment::Center),
+                theme::PAPER,
+                theme::KORE_PINK_TEXT,
+                theme::STROKE_BASE,
+            )
+        });
         let body: Element<'_, Message> = if let Some(problem) = &self.resident_problem {
             self.voice_needs(problem, choice)
         } else {
@@ -475,6 +484,7 @@ impl crate::App {
         };
         column![header]
             .push(key)
+            .push(voice_off)
             .push(container(body).height(Length::Fill))
             .push(text(tr("last 20 exchanges · newest at the bottom · stays on this computer", &[])).font(PIXEL).size(12).color(theme::MUTED_2))
             .spacing(14)
@@ -562,7 +572,7 @@ impl crate::App {
         // The box's screen as last captured, at one point per pixel in the design's 352 × 264 frame: any other scale
         // makes the pixel art uneven. Before the first capture, the box redrawn from the status.
         let screen: Element<'_, Message> = match &self.screenshot {
-            Some((_, handle)) => image(handle.clone()).filter_method(image::FilterMethod::Nearest).width(320).height(240).into(),
+            Some((_, handle, _)) => image(handle.clone()).filter_method(image::FilterMethod::Nearest).width(320).height(240).into(),
             None => view::screen(&BoxPicture::derive(self.status.as_ref()), 1.0),
         };
         let screen = container(container(screen).center_x(352).center_y(264).style(|_| container::Style {
@@ -577,7 +587,11 @@ impl crate::App {
             pill(tr("Save image", &[]), Fill::Paper, self.screenshot.is_some().then_some(Message::SaveScreenshot)),
             Space::new().width(Length::Fill),
         ]
-        .push(self.screenshot_busy.then(|| tag(tr("Refreshing…", &[]), theme::MUTED_2)))
+        .push(if self.screenshot_busy {
+            Some(tag(tr("Refreshing…", &[]), theme::MUTED_2))
+        } else {
+            self.screenshot.as_ref().map(|(_, _, captured)| tag(tr("captured %@", &[captured]), theme::MUTED_2))
+        })
         .spacing(8)
         .align_y(Alignment::Center)
         .width(358);

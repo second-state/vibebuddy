@@ -160,6 +160,9 @@ pub trait Board: Screen {
     fn write_stream(&mut self, line: &[u8]) {
         self.write(line);
     }
+    /// `device.baud` from the computer on the cable: say `BAUD SWITCH <rate>` on the UART and move it to that rate,
+    /// on trial ([`crate::uart_rate`]). Boards without a UART bridge ignore it.
+    fn set_uart_rate(&mut self, _rate: u32) {}
     /// Hands a spoken reply's audio to the player ([`crate::spoken_reply`]), which the speaker plays from while
     /// no announcement is playing, through the same output and at the same volume.
     fn reply_audio(&mut self, _audio: ReplyAudio) {}
@@ -1925,7 +1928,7 @@ impl Firmware {
             _ if event.starts_with("xfer.") => self.handle_transfer(board, fields, event),
             // Pairing is the computer at the other end of the cable telling the box who it is (ADR-0012).
             // Only over the cable: whoever is at the box decides who may link and which network it joins.
-            "device.pair" | "device.unpair" | "device.pairs" | "device.wifi.set" | "device.wifi.forget" | "device.wifi.scan" | "device.relay.set"
+            "device.pair" | "device.unpair" | "device.pairs" | "device.wifi.set" | "device.wifi.forget" | "device.wifi.scan" | "device.relay.set" | "device.baud"
                 if self.remote =>
             {
                 Self::write_literal(board, "ERROR cable_only\n");
@@ -1937,6 +1940,14 @@ impl Firmware {
             "device.relay.set" => self.handle_relay(board, fields),
             // The radio belongs to the device layer, which reports what it hears as `WIFI SEEN` lines.
             "device.wifi.scan" => self.scan_requested = true,
+            // The UART bridge's speed (docs/protocol.md, "Link speed on the UART bridge"). The check only has to
+            // arrive whole at the new rate, which the device layer sees; it is not agent activity.
+            "device.baud" => {
+                if let Some(rate) = number(fields, "rate").filter(|rate| *rate > 0.0) {
+                    board.set_uart_rate(rate as u32);
+                }
+            }
+            "device.baud.check" => {}
             // Microphone bring-up (docs/firmware-bringup.md): a diagnostic like the screenshot, so not agent
             // activity. Over the cable only: a recording is hundreds of lines.
             "device.mic.record" if self.remote => Self::write_literal(board, "ERROR cable_only\n"),

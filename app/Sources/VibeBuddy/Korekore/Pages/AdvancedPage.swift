@@ -2,7 +2,7 @@ import KorekoreUI
 import SwiftUI
 import VibeBuddyCore
 
-/// The Advanced page (canvas: "Mac · Advanced"). The current Advanced tab's logic (`AdvancedView`), copied.
+/// The Advanced page (canvas: "Mac · Advanced").
 struct KorekoreAdvancedPage: View {
     @ObservedObject var model: AppModel
 
