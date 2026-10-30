@@ -41,6 +41,9 @@ const CONNECT_SETTLE_DELAY: Duration = Duration::from_millis(1_500);
 const CABLE_CHECK_EVERY: Duration = Duration::from_secs(2);
 /// While linked through the Relay, how often to see whether the box answers on the local network.
 const LAN_CHECK_EVERY: Duration = Duration::from_secs(30);
+/// After the box answered busy, how long before asking it again over the network. Each try costs the box a Noise
+/// handshake, about 170 ms of its main loop; tries every half second made its speaker click.
+const BUSY_RETRY: Duration = Duration::from_secs(15);
 /// The BOX's CH343 UART bridge can't swallow a whole line: push more than one or two hundred bytes at once and
 /// its buffer gets flushed, dropping 32 bytes every 384 and repeating the next 32, so the length stays right but
 /// the content shifts. A control experiment polling the FIFO directly on the device cleared the device side. Over the bridge,
@@ -238,6 +241,8 @@ async fn serial_worker(
     // When the Relay may be tried again, and how many tries in a row have failed.
     let mut relay_retry: Option<Instant> = None;
     let mut relay_attempts = 0_u32;
+    // When the box, which answered busy, may be asked again over the network.
+    let mut busy_retry: Option<Instant> = None;
 
     loop {
         if *suspend.borrow() {
@@ -285,8 +290,10 @@ async fn serial_worker(
             // No box on the cable: try the local network, then the Relay, if this computer is paired with a box.
             // Taken here only for the local network; the Relay takes it on its socket, even mid-wait.
             let takeover = config.takeover.load(Ordering::Relaxed);
+            let leave_alone = leave_busy_box_alone(busy_retry, Instant::now(), takeover);
             let mut busy = None;
-            if let Some(lan) = &config.lan
+            if !leave_alone
+                && let Some(lan) = &config.lan
                 && let Some((target, result)) = lan::link(lan, takeover).await
             {
                 match result {
@@ -294,6 +301,7 @@ async fn serial_worker(
                         config.takeover.store(false, Ordering::Relaxed);
                         info!(address = %target.address, "linked over the local network");
                         busy_logged = None;
+                        busy_retry = None;
                         let _ = device_event_sender.send(DeviceMessage::ConnectedNetwork { address: target.address.clone() }).await;
                         linked = true;
                         let end = run_session(
@@ -318,13 +326,17 @@ async fn serial_worker(
                         }
                         continue;
                     }
-                    Err(LinkError::Busy { reason, owner }) => busy = Some((owner, reason)),
+                    Err(LinkError::Busy { reason, owner }) => {
+                        busy = Some((owner, reason));
+                        busy_retry = Some(Instant::now() + BUSY_RETRY);
+                    }
                     Err(error) => debug!(?error, address = %target.address, "no local network link"),
                 }
             }
             // A box that answered busy on the local network is busy on the Relay too.
             let box_key = config.lan.as_ref().and_then(|lan| lan.box_key());
             if busy.is_none()
+                && !leave_alone
                 && config.relay_enabled.load(Ordering::Relaxed)
                 && let (Some(relay_config), Some(box_key)) = (&config.relay, box_key)
                 && !relay_config.waits_for_account()
@@ -357,6 +369,7 @@ async fn serial_worker(
                         let url = relay_config.url();
                         info!(%url, "linked through the Relay");
                         busy_logged = None;
+                        busy_retry = None;
                         relay_retry = None;
                         let linked_at = Instant::now();
                         let _ = device_event_sender.send(DeviceMessage::ConnectedRelay { url: url.clone() }).await;
@@ -775,7 +788,7 @@ async fn run_session<P: AsyncRead + AsyncWrite + Unpin>(
         if let Some(frame) = next {
             // A peer that never reads (e.g. firmware that isn't ours) blocks the write forever; the flasher must still get the port.
             tokio::select! {
-                result = write_frame(port, &frame, paced.then_some(baud.rate)) => {
+                result = write_frame(port, &frame, paced.then_some(pace_rate(baud.rate))) => {
                     if let Err(error) = result {
                         pending.push_front(frame);
                         warn!(port = %port_name, %error, "link write failed, reconnecting");
@@ -947,6 +960,13 @@ pub fn piece_delay(bytes: usize, baud: u32) -> Duration {
 
 /// Over the bridge, write at most this many bytes, then wait for them to clear.
 pub const PACE_PIECE_BYTES: usize = 128;
+
+/// The rate whose wire time paces writes to the bridge running at `port_rate`. On macOS, that rate. On Linux,
+/// always 115200: paced faster, at 921600 or even at 460800 wire time, writes through `cdc_acm` arrive damaged (on
+/// Omarchy, 2026-10-29: a Character pack had 170 bad lines and took 5:41, against none and 2:09 at 115200).
+fn pace_rate(port_rate: u32) -> u32 {
+    if cfg!(target_os = "macos") { port_rate } else { BAUD_RATE }
+}
 
 /// Only the BOX's UART bridge needs chunking; Espressif's native USB port has its own flow control.
 fn needs_pacing(vid: u16, pid: u16) -> bool {
@@ -1138,12 +1158,28 @@ fn process_device_line(line: &[u8], firmware: &mut Firmware, event_sender: &mpsc
     }
 }
 
+/// Whether to leave the box alone for now: it answered busy less than [`BUSY_RETRY`] ago, and the user has not asked
+/// to take it over. The cable is still looked at all the while.
+fn leave_busy_box_alone(busy_retry: Option<Instant>, now: Instant, takeover: bool) -> bool {
+    !takeover && busy_retry.is_some_and(|at| now < at)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
     fn candidate(name: &str, serial: &str) -> PortChoice {
         PortChoice { name: name.to_owned(), paced: false, usb_serial: Some(serial.to_owned()) }
+    }
+
+    #[test]
+    fn a_busy_box_is_left_alone_until_the_retry_or_a_takeover() {
+        let now = Instant::now();
+        assert!(!leave_busy_box_alone(None, now, false), "a box that never said busy is asked");
+        let retry = Some(now + BUSY_RETRY);
+        assert!(leave_busy_box_alone(retry, now + RECONNECT_DELAY, false), "not asked again half a second later");
+        assert!(!leave_busy_box_alone(retry, now + RECONNECT_DELAY, true), "a takeover asks at once");
+        assert!(!leave_busy_box_alone(retry, now + BUSY_RETRY, false), "asked again once the wait is over");
     }
 
     #[test]
@@ -1207,6 +1243,13 @@ mod tests {
         // At 921600 about 1.4 ms, plus the same headroom.
         let delay = piece_delay(128, 921_600);
         assert!(delay >= Duration::from_micros(2_380) && delay <= Duration::from_micros(2_400), "{delay:?}");
+    }
+
+    #[test]
+    fn only_macos_paces_at_the_fast_rate() {
+        assert_eq!(pace_rate(BAUD_RATE), BAUD_RATE);
+        let expected = if cfg!(target_os = "macos") { FAST_BAUD_RATE } else { BAUD_RATE };
+        assert_eq!(pace_rate(FAST_BAUD_RATE), expected);
     }
 
     #[test]

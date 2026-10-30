@@ -2,8 +2,8 @@ import KorekoreUI
 import SwiftUI
 import VibeBuddyCore
 
-/// A Character the user made (ADR-0020), as a Character card: its look, its name, Use or Resume, and Delete. The same
-/// logic as `MadeCharacterCard`, in the korekore look; the design has no card of its own for it.
+/// A Character the user made (ADR-0020), as a Character card: its look, its name, Use or Resume, and Delete. The
+/// design has no card of its own for it.
 struct KorekoreMadeCard: View {
     @ObservedObject var model: AppModel
     let made: MadeCharacter
@@ -118,8 +118,7 @@ struct KorekoreMakingRow: View {
 
 /// Making a Character of the user's own: bring a look, pick a voice, and take a preset's lines to change (occasions stay,
 /// each keeps a line). With only a look, nothing is made: the drawings go to the box with the preset lending its
-/// voice and lines, as `CustomCharacterCard` does. With new lines or another voice, the daemon makes the line audio, as
-/// `MakeCharacterSheet` does.
+/// voice and lines. With new lines or another voice, the daemon makes the line audio.
 struct KorekoreMakeSheet: View {
     @ObservedObject var model: AppModel
     @Environment(\.dismiss) private var dismiss
@@ -178,7 +177,7 @@ struct KorekoreMakeSheet: View {
                                     Button(String(localized: "Choose images…")) { chooseLook() }.kButton()
                                     Button(String(localized: "Copy a prompt")) {
                                         NSPasteboard.general.clearContents()
-                                        NSPasteboard.general.setString(CustomCharacterCard.prompt, forType: .string)
+                                        NSPasteboard.general.setString(CustomCharacter.prompt, forType: .string)
                                     }
                                     .kButton()
                                     if look != nil {

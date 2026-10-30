@@ -2,8 +2,7 @@ import KorekoreUI
 import SwiftUI
 import VibeBuddyCore
 
-/// The Device page (canvas: "Mac · Device"; every other state on "App · Device & firmware states"). The current
-/// Device tab's logic (`DeviceView`, `WifiSection`, `PairedComputersSection`, `BoxChoice`), copied.
+/// The Device page (canvas: "Mac · Device"; every other state on "App · Device & firmware states").
 struct KorekoreDevicePage: View {
     @ObservedObject var model: AppModel
     @State private var captured: Date?
@@ -379,7 +378,7 @@ struct KorekoreFirmwareUnavailable: View {
 }
 
 /// The Wi-Fi network the box joins (ADR-0012). Set over the cable only; the password goes to the box and is kept
-/// nowhere else, so it is never shown again. `WifiSection`'s logic.
+/// nowhere else, so it is never shown again.
 struct KorekoreWifiCard: View {
     @ObservedObject var model: AppModel
     let device: DeviceState

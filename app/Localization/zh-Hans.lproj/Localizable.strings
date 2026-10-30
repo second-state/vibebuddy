@@ -5,9 +5,7 @@
 "daemon not responding · click to restart" = "daemon 异常 · 点击重启";
 "Box online · firmware %@" = "盒子在线 · 固件 %@";
 "Box not found" = "未找到盒子";
-"This is a %@ board, which released firmware doesn't run on, so no update is offered." = "这是一块 %@ 板子，正式发布的固件跑不了，所以不提示更新。";
 "Several devices found" = "找到多台设备";
-"Several devices are plugged in, and none of them is the box seen before. Which one is the box?" = "插着好几台设备，都不是之前连过的盒子。哪一台是盒子？";
 "This is the box" = "就是这台";
 "Choosing the box was rejected (%lld)" = "选择盒子未被接受（%lld）";
 "Only looking at %@, set by %@." = "只在 %@ 上找盒子（由 %@ 指定）。";
@@ -36,20 +34,14 @@
 "Quit" = "退出";
 
 /* Windows and alerts */
-"VibeBuddy Settings" = "VibeBuddy 设置";
-"Welcome to VibeBuddy" = "欢迎使用 VibeBuddy";
 "Found an old vibebuddyd background service" = "发现旧的 vibebuddyd 后台服务";
 "A daemon is already running on port 7331" = "7331 端口已经有 daemon 在跑";
-"VibeBuddy now manages its own daemon, and two daemons would fight over the serial port. Remove the old one and take over?" = "VibeBuddy 现在自己看管 daemon，两个 daemon 会抢串口。卸掉旧的并接管吗？";
 "Remove and take over" = "卸载并接管";
 "Later" = "稍后";
 
 /* Notifications and errors */
-"The daemon failed to start three times in a row. Click the menu bar icon to restart it." = "daemon 连续三次启动失败，点菜单栏图标重启。";
 "Codex hook config updated" = "Codex 的 Hook 配置更新了";
-"VibeBuddy rewrote ~/.codex/hooks.json. Codex silently disables hooks that change: type /hooks in Codex and re-trust them so the box keeps getting Codex events." = "VibeBuddy 改写了 ~/.codex/hooks.json。Codex 会静默停用改过的 hook，请在 Codex 里输入 /hooks 重新信任，盒子才收得到 Codex 的事。";
 "Box disconnected" = "盒子断开了";
-"VibeBuddy hasn't seen the box for 30 seconds. Check the USB cable." = "VibeBuddy 已经 30 秒没找到盒子，检查一下 USB 线。";
 "Couldn't change Launch at login: %@" = "登录时启动设置失败：%@";
 "This app has no voice pack for %@" = "App 里没有 %@ 的语音包";
 "Couldn't unzip %@" = "解不开 %@";
@@ -67,25 +59,13 @@
 "Device" = "设备";
 "Advanced" = "高级";
 "Launch at login" = "登录时启动";
-"Notify me when the box disconnects or the daemon fails" = "盒子断开或 daemon 异常时通知我";
 
 /* Settings: Sound */
 "Volume" = "音量";
-"Play a line on the box" = "在盒子上试一句";
-"Saved on the box and kept across restarts. Previews on this Mac aren't affected; to mute, long-press K2 on the box." = "存在盒子里，重启不丢。Mac 上的试听不受它影响；静音只在盒子上长按 K2。";
 "Character" = "角色";
-"Saved on the box and kept across restarts. To mute, long-press K2 on the box." = "存在盒子里，重启不丢；静音只在盒子上长按 K2。";
-"The box is speaking as “%@”. Each character has its own voice and lines. Preview one, then click Use to write it to the box — no firmware flash needed. Over the UART port this takes a few minutes; when it's done the box says a line as the new character." = "盒子现在的角色是「%@」。每个角色有自己的声音和台词。挑一个试听，点「使用」写进盒子；不用刷固件。UART 口上要写几分钟，写完盒子会用新角色说一句。";
-"Didn't finish, so the box keeps its built-in voice. Reconnect the cable and click Use again." = "没写完，盒子先用内置音色；插好线后重新点「使用」。";
 "Built-in voice (Jessica)" = "内置音色（Jessica）";
 "In use" = "已写入";
 "Use" = "使用";
-"Writing voice pack… %@" = "正在写入语音包… %@";
-"Voice pack written" = "语音包已写入";
-"Flashing firmware… %@" = "正在刷入固件… %@";
-"Firmware flashed, the box has restarted" = "固件已刷入，盒子已重启";
-"Firmware flashed, but the box didn't start it. Unplug the box and plug it back in." = "固件已刷入，但盒子没有启动新固件。请拔下盒子再插回。";
-"Don't hold K0 this time. This page will show the box as found once it starts." = "这次不要按住 K0。盒子启动后，本页会显示已找到。";
 "Failed: %@" = "失败：%@";
 
 /* Voice catalog */
@@ -105,39 +85,24 @@
 
 /* Settings: Agents */
 "Connect agents" = "接入 Agent";
-"VibeBuddy only forwards session IDs, event names and working directories — never prompts or replies." = "VibeBuddy 只转发会话标识、事件名和工作目录，不转发 prompt 与回复。";
-"This writes user-level config, so one install covers both the desktop app's sessions and the same agent running in a terminal." = "写的是用户级配置，装一次两处都算数：桌面应用里的会话，和终端里跑的同一个 Agent。";
 "Repair" = "修复";
 "Remove" = "移除";
 "Connect" = "接入";
-"%@ wasn't found on this Mac" = "这台 Mac 上没找到 %@";
-"%@ wasn't found on this computer" = "这台电脑上没找到 %@";
 "Not set up" = "未接入";
-"The config changed at %@ and no Codex event has arrived since. Codex silently disables hooks that change: type /hooks in Codex and re-trust VibeBuddy's six hooks." = "配置在 %@ 改过，之后没收到过 Codex 事件。Codex 会静默停用改过的 hook：在 Codex 里输入 /hooks，把 VibeBuddy 的六条重新信任。";
-"Last event %@" = "最近一次事件 %@";
-"Waiting for the first event… (Codex only runs this config after you trust it in /hooks)" = "等待第一次事件…（Codex 要先在 /hooks 里信任这份配置才会运行它）";
-"Waiting for the first event…" = "等待第一次事件…";
 "Will change %@" = "将改动 %@";
-"Nothing to change." = "没有需要改的地方。";
 "After writing, open /hooks in Codex to review and trust this config — the app can't do that for you." = "写入后还要在 Codex 里打开 /hooks 核对并信任这份配置，App 替不了你。";
 "Cancel" = "取消";
 "Write" = "写入";
 
 /* Settings: Device */
 "Link" = "链路";
-"Box firmware" = "盒子固件";
-"The box isn't running VibeBuddy firmware." = "盒子跑的不是 VibeBuddy 固件。";
-"Flash VibeBuddy firmware" = "刷入 VibeBuddy 固件";
 "Before retrying, hold K0 on the box and replug the cable to put it in download mode." = "重试前可以按住盒子的 K0 再插一次线，让它进入下载模式。";
-"Retry" = "重试";
 "Flash from file…" = "从文件刷入…";
 "Make the box blink" = "让盒子眨眼";
-"Box screen" = "盒子画面";
 "Refresh" = "刷新";
 "Refreshing…" = "正在刷新…";
 "Save image" = "保存图片";
 "Saved to %@" = "已保存到 %@";
-"Click Refresh to see what the box is showing" = "点「刷新」看看盒子在干什么";
 "daemon isn't running" = "daemon 没起来";
 "UART bridge" = "UART 桥";
 "native USB" = "原生 USB";
@@ -148,72 +113,42 @@
 "Flash" = "刷入";
 "The box restarts once; its voice pack and today's stats are kept. Over the UART bridge this takes a few minutes." = "盒子会重启一次，语音包和当日战绩都保留。UART 桥上大约要几分钟。";
 "Update" = "更新";
-"Flash the box with VibeBuddy?" = "把盒子刷成 VibeBuddy？";
 "The box's current firmware and data will be erased and can't be recovered. It restarts on its own when done; over the UART port this takes a few minutes." = "盒子里现有的固件和数据会被清掉，无法恢复。刷完盒子自动重启，UART 口上大约要几分钟。";
 
 /* Settings: Advanced */
 "Open logs folder" = "打开日志文件夹";
-"Running · %@" = "运行中 · %@";
 "Not running" = "未运行";
 "Restart daemon" = "重启 daemon";
 "Show daemon log" = "查看 daemon 日志";
 "Export diagnostics…" = "导出诊断…";
-"Config file: %@" = "配置文件：%@";
 
 /* Onboarding */
 "Welcome" = "欢迎";
 "Find the box" = "找设备";
 "Pick a character" = "选角色";
 "Done" = "完成";
-"Back" = "上一步";
 "Skip" = "跳过";
 "Not now" = "先不接";
 "Next" = "下一步";
-"Get started" = "开始使用";
-"VibeBuddy turns what your coding agents are doing into pictures and sounds on the box." = "VibeBuddy 把你的编程 Agent 的状态变成盒子上的画面和声音。";
-"Next: plug in the box, connect your agents, pick a character, put the box on Wi-Fi, and choose whether to launch at login. Everything can be changed or skipped." = "接下来几步：插上盒子，接入 Agent，挑一个角色，让盒子连上 Wi-Fi，决定要不要开机就启动。都能改，都能跳过。";
-"Put the box on Wi-Fi?" = "让盒子连上 Wi-Fi？";
-"Then this Mac reaches the box without the cable: over the local network, or through the VibeBuddy Relay when you're elsewhere." = "这样不插线也能连到盒子：在同一个网络里走局域网，人在别处时通过 VibeBuddy 中转。";
-"Plug in the box to set its network. You can also do it later on the Device tab in Settings." = "插上盒子才能设置它的网络。也可以以后在设置的设备页里设置。";
-"Connect the box to this Mac with a USB cable." = "把盒子用 USB 线插到这台 Mac。";
-"Flashing VibeBuddy firmware…" = "正在刷入 VibeBuddy 固件…";
 "Hold K0 on the box and replug the cable to put it in download mode, then retry." = "按住盒子的 K0 再插一次线，让它进入下载模式，然后重试。";
-"The box screen stays dark for a few minutes — don't unplug it. It restarts on its own when done, and this page will show it as found." = "盒子屏幕会黑几分钟，别拔线。刷完它自动重启，这里会变成「找到了」。";
-"Found a box (%@), but it isn't running VibeBuddy firmware." = "找到盒子（%@），但它跑的不是 VibeBuddy 固件。";
-"This erases the box's current firmware and data for good. If the native USB port doesn't find the box, use its UART port instead." = "会清掉盒子里现有的固件与数据，无法恢复。原生 USB 口找不到盒子时，改接盒子的 UART 口。";
-"Found it: %@" = "找到了：%@";
 "Make it blink" = "让它眨一下眼";
-"If the backlight flashes, that's the one." = "盒子背光闪了就是它。";
 "Not showing up? Use a cable that carries data, not just power, and click Allow if macOS asks whether to let the accessory connect." = "没出现？换一根能传数据的线（有的线只能充电），macOS 问是否允许配件连接时点「允许」。";
 "Still nothing? Hold K0 on the box while you plug in the cable, then click Allow. The box starts in download mode with a dark screen, ready to be flashed with VibeBuddy firmware." = "还是不行？按住盒子的 K0 再插线，然后点「允许」。盒子会以下载模式启动，屏幕不亮，接着刷入 VibeBuddy 固件即可。";
 "Not showing up? Use a cable that carries data, not just power." = "没出现？换一根能传数据的线（有的线只能充电）。";
 "If the daemon log on the Advanced tab says “Permission denied”, your account can't open the box's port yet: restart the computer once, then replug the box." = "如果「高级」页的 daemon 日志里有 “Permission denied”，说明你的账户还打不开盒子的串口：重启一次电脑，再重新插上盒子。";
 "Still nothing? Hold K0 on the box while you plug in the cable. The box starts in download mode with a dark screen, ready to be flashed with VibeBuddy firmware." = "还是不行？按住盒子的 K0 再插线。盒子会以下载模式启动，屏幕不亮，接着刷入 VibeBuddy 固件即可。";
-"No box yet — this updates once you plug it in." = "还没找到盒子，插上后这里会变。";
 "Starting the daemon…" = "daemon 正在启动…";
-"Connect your agents so their progress shows up on the box." = "接入 Agent：让它们的进展传到盒子上。";
-"Only session IDs, event names and working directories are forwarded. After writing Codex's config, trust it once on its /hooks page." = "只转发会话标识、事件名和工作目录。Codex 写入后要在它的 /hooks 页面信任一次。";
-"Pick a character." = "挑一个角色。";
-"The box's built-in voice speaks English (Jessica); pick a Chinese voice above to hear announcements in Chinese." = "盒子内置的是英文音色（Jessica）；想听中文播报，在上面挑一个中文音色。";
-"If you skip this, the box uses its built-in voice, Jessica (English)." = "不选就用盒子内置的英文音色 Jessica。";
-"Start VibeBuddy automatically when you log in?" = "登录时自动启动 VibeBuddy？";
-"macOS may say a background item was added — that's expected." = "系统可能会提示「已添加后台项目」，那是 macOS 的正常提示。";
-"All set." = "好了。";
-"VibeBuddy lives in the menu bar: the icon is the buddy's face, with its eyes open while the box is online. To change anything, choose Settings… from its menu, or open VibeBuddy again." = "VibeBuddy 住在菜单栏里：图标是氛围小助手的脸，盒子在线时睁着眼。想改什么，点菜单里的「设置…」，或者再打开一次 VibeBuddy。";
 
 /* Language */
 "Language" = "语言";
 "System" = "跟随系统";
-"Restart VibeBuddy to change the language?" = "重启 VibeBuddy 以切换语言？";
 "The box goes offline for a few seconds while the app restarts." = "重启期间盒子会离线几秒。";
 "Also switch the box's voice to %@ (a few minutes over the UART bridge; keep it plugged in)" = "同时把盒子的播报音色换成 %@（走 UART 桥要几分钟，期间别拔线）";
 "Also switch the box's voice to %@" = "同时把盒子的播报音色换成 %@";
 "The box isn't connected, so its character stays as it is. You can change it later on the Character tab." = "盒子没连上，这次角色不变，之后可以在「角色」页更换。";
-"Restart now" = "立即重启";
 
 /* Your own character */
 "Your own character" = "你自己的角色";
-"Draw a figure with any image tool, on a plain white background: one image, or four in the order normal, eyes closed, happy, sad. The box shows it in place of the robot, with the voice and lines of the character you pick." = "用任意画图工具画一个人物，纯白背景：一张，或者按「正常、闭眼、开心、难过」的顺序画四张。盒子会用它代替机器人，声音和台词借用你选的角色。";
 "Choose images…" = "选择图片…";
 "Copy a prompt" = "复制提示词";
 "Voice and lines from" = "声音和台词来自";
@@ -224,55 +159,36 @@
 /* Form of address */
 "What the buddy calls you" = "小助手怎么称呼你";
 "Nothing" = "不称呼";
-"Chinese" = "中文";
 "English" = "英文";
 
 /* Updates (ADR-0010) */
 "Updates" = "更新";
 "Check for updates" = "检查更新";
 "Check now" = "立即检查";
-"Off" = "已关闭";
 "Last check failed: %@" = "上次检查失败：%@";
-"VibeBuddy %@ is available" = "VibeBuddy %@ 已发布";
 "Not checked yet" = "还没检查过";
 "Up to date · checked %@" = "已是最新 · %@检查";
 "Download %@" = "下载 %@";
 "Update check was rejected (%@)" = "检查更新被拒绝（%@）";
-"This version of VibeBuddy is no longer supported. Update it to keep getting firmware for the box." = "这个版本的 VibeBuddy 已不再受支持。请更新，才能继续为盒子获取固件。";
-"Latest firmware" = "最新固件";
 "Update to %@" = "更新到 %@";
 "Update the box firmware to %@?" = "把盒子固件更新到 %@？";
 "Box firmware %@ is available" = "盒子固件 %@ 已发布";
-"Open Settings → Device to update the box." = "打开设置 → 设备即可更新盒子。";
 "The firmware hasn't been downloaded yet" = "固件还没下载好";
 "Couldn't get the firmware: %@" = "没能获取固件：%@";
 "Downloading the firmware…" = "正在下载固件…";
 "Looking for firmware…" = "正在查找固件…";
 "Check again" = "再检查一次";
-"Update checks are off, so VibeBuddy can't download firmware." = "检查更新已关闭，VibeBuddy 没法下载固件。";
-"Or download the firmware zip yourself and use Flash from file… on the Device tab:" = "也可以自己下载固件 zip，然后在设备页用「从文件刷入…」：";
 "Releases" = "发布页";
 "To upgrade, download the new release and run its install.sh again." = "升级方法：下载新版本，再运行一次它的 install.sh。";
 "Install %@…" = "安装 %@…";
-"Update checks are off (General)" = "检查更新已关闭（在通用页打开）";
-"Last check failed" = "上次检查失败";
-"None released yet" = "还没有发布";
-"The original robot, drawn by the box itself" = "原版机器人，由盒子自己绘制";
-"Terminal tabs" = "终端标签页";
-"With access to your terminal, K2 goes straight to the tab a session runs in, instead of just bringing the terminal forward. Only the terminals you run agents in need it." = "允许控制终端后，按 K2 会直接回到会话所在的标签页，而不只是把终端调到前台。只有你用来跑 agent 的终端才需要允许。";
-"Open System Settings" = "打开系统设置";
 "Allow…" = "允许…";
 "Allowed" = "已允许";
 "Not allowed yet" = "尚未允许";
-"Denied. Turn VibeBuddy back on for %@ under Privacy & Security → Automation." = "已被拒绝。请在“隐私与安全性 → 自动化”里，重新打开 VibeBuddy 对 %@ 的权限。";
-"Not checked yet: macOS only answers while %@ is running" = "尚未检查：%@ 运行时 macOS 才会给出结果";
-"Default" = "默认";
 
 /* Pairing (ADR-0012) */
 "Paired computers" = "已配对的电脑";
 "This computer" = "本机";
 "Unnamed computer" = "未命名的电脑";
-"A computer pairs with the box when it's plugged in. To forget them all, use COMPUTERS in the box's menu." = "电脑插上盒子就会自动配对。要忘记所有电脑，在盒子菜单里选 COMPUTERS。";
 "Removing the computer was rejected (%lld)" = "移除电脑被拒绝（%lld）";
 "Wi-Fi" = "Wi-Fi";
 
@@ -285,8 +201,6 @@
 "Network name" = "网络名称";
 "Password" = "密码";
 "Join" = "加入";
-"Forget network" = "忘记网络";
-"With Wi-Fi, a paired computer on the same network can drive the box without the cable." = "连上 Wi-Fi 后，同一网络里已配对的电脑不插线也能使用盒子。";
 "Setting Wi-Fi was rejected (%lld)" = "设置 Wi-Fi 被拒绝（%lld）";
 "Forgetting Wi-Fi was rejected (%lld)" = "忘记 Wi-Fi 被拒绝（%lld）";
 
@@ -297,21 +211,12 @@
 "Take over" = "接管";
 "Relay" = "中转";
 "Taking the box over was rejected (%lld)" = "接管盒子被拒绝（%lld）";
-"Reach the box through the VibeBuddy Relay when it's away from this computer" = "盒子不在本机旁边时，通过 VibeBuddy 中转连接它";
 "Nearby networks" = "附近的网络";
 "Choose…" = "选择…";
 "Scan" = "扫描";
 "Scanning for networks was rejected (%lld)" = "扫描网络被拒绝（%lld）";
-"Newer firmware is available: %@" = "有新固件：%@";
-"You can also skip this and update later on the Device tab in Settings." = "也可以先跳过，之后在设置的「设备」页更新。";
-"Downloading firmware %@…" = "正在下载固件 %@…";
-"The install script has connected your agents and set VibeBuddy to start when you log in. Next: find the box, pick a character, and put the box on Wi-Fi. Everything can be changed or skipped." = "安装脚本已经接好了你的 Agent，也设好了登录时自动启动。接下来几步：找到盒子，挑一个角色，让盒子连上 Wi-Fi。都能改，都能跳过。";
-"Connect the box to this computer with a USB cable." = "用 USB 线把盒子接到这台电脑上。";
-"Then this computer reaches the box without the cable: over the local network, or through the VibeBuddy Relay when you're elsewhere." = "这样不插线也能连到盒子：在同一个网络里走局域网，人在别处时通过 VibeBuddy 中转。";
-"VibeBuddy lives in the tray, or in Omarchy's bar: the buddy's face, with its eyes open while the box is online. To change anything, open Settings from there, or run VibeBuddy again." = "VibeBuddy 待在托盘里，或者 Omarchy 的状态栏上：图标是小伙伴的脸，盒子在线时睁着眼。想改什么设置，从那里打开设置，或者再运行一次 VibeBuddy。";
 "Couldn't join (%@). Check the network name and password, then join again." = "没能加入（%@）。检查一下网络名和密码，再加入一次。";
 "Joined · %@" = "已加入 · %@";
-"Joining… This can take up to 15 seconds." = "正在加入…最多要等 15 秒左右。";
 "The network turned the box away; the password is probably wrong. Check it, then join again." = "网络拒绝了盒子，多半是密码不对。检查一下密码，再加入一次。";
 "The box can't find this network. It only joins 2.4 GHz Wi-Fi: check the name, and that the box is in range." = "盒子找不到这个网络。它只能连 2.4 GHz 的 Wi-Fi：检查一下网络名，以及盒子是否在信号范围内。";
 "The box can't join this network's kind of security. It joins WPA2 and open networks." = "盒子不支持这个网络的加密方式，它能连 WPA2 和不加密的网络。";
@@ -322,12 +227,10 @@
 
 /* Conversation (the resident session, experimental) */
 "Conversation" = "对话";
-"Your last voice commands and the buddy's spoken replies, newest at the bottom." = "你最近的语音指令和氛围小助手的口头回复，最新的在最下面。";
 "Couldn't read the conversation" = "读不到对话";
 "The daemon isn't running. Restart it on the Advanced tab." = "daemon 没在运行，到“高级”页重启它。";
 "The buddy's session isn't available: %@" = "氛围小助手的会话现在用不了：%@";
 "Nothing said yet" = "还没说过话";
-"Hold K0 on the box and talk to the buddy. What you say and what it says back show up here." = "按住盒子上的 K0，对氛围小助手说话。你说的和它回的都会显示在这里。";
 "The daemon answered %lld" = "daemon 返回了 %lld";
 "Voice needs Codex" = "语音需要 Codex";
 "Voice commands are answered by Codex on this computer, and it isn't installed. Install the Codex CLI, then sign in with `codex login`. This tab notices within half a minute." = "语音指令由这台电脑上的 Codex 来回答，但它还没安装。先装好 Codex CLI，再用 `codex login` 登录。半分钟内这一页会自己更新。";
@@ -335,11 +238,9 @@
 "How to install the Codex CLI" = "如何安装 Codex CLI";
 "Answered by" = "由谁回答";
 "Automatic" = "自动";
-"Automatic: Codex when it's ready, else Claude Code with your API key." = "自动：Codex 能用时用 Codex，否则用 Claude Code 和你的 API 密钥。";
 "Anthropic API key" = "Anthropic API 密钥";
 "Anthropic API key saved" = "已保存 Anthropic API 密钥";
 "Save" = "保存";
-"Get an API key" = "获取 API 密钥";
 "Claude Code answers only with your own Anthropic API key, billed to your Anthropic account; a Claude subscription can't be used here. What you say and your Agents' task titles go to Anthropic." = "Claude Code 只用你自己的 Anthropic API 密钥回答，费用记在你的 Anthropic 账户上；这里不能用 Claude 订阅。你说的话和各个 Agent 的任务标题会发给 Anthropic。";
 "Voice needs Claude Code" = "语音需要 Claude Code";
 "Voice commands are answered by Claude Code on this computer, and it isn't installed. Install Claude Code; you don't need to sign in to it. This tab notices within half a minute." = "语音指令由这台电脑上的 Claude Code 来回答，但它还没安装。装好 Claude Code 即可，不用登录。半分钟内这一页会自己更新。";
@@ -559,10 +460,6 @@
 "Couldn't save your own key: %@" = "保存自己的密钥失败：%@";
 
 /* Making a Character (ADR-0020) */
-"Make a Character…" = "创建角色…";
-"Make a Character" = "创建角色";
-"Start from a character, change what it says, and pick a voice. VibeBuddy makes each line in that voice, then you can write it to the box." = "从一个角色出发，改改它说的话，再挑一个声音。VibeBuddy 会用这个声音把每句台词做出来，做好后就能写进盒子。";
-"Start from" = "基于";
 "Name" = "名字";
 "Voice" = "声音";
 "Look" = "形象";
@@ -574,7 +471,6 @@
 "Make" = "创建";
 "Couldn't read the lines of %@: %@" = "读不到%@的台词：%@";
 "Couldn't read what was asked for this Character." = "读不到这个角色当初的设置。";
-"Making “%@”… %lld of %lld" = "正在创建「%@」… %lld / %lld";
 "Making…" = "创建中…";
 "“%@” is made." = "「%@」创建好了。";
 "Write to box" = "写进盒子";

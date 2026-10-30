@@ -3,7 +3,7 @@ import SwiftUI
 import VibeBuddyCore
 
 /// The account (ADR-0018) and the user's own keys (ADR-0020), at the top of the General page: the design has no
-/// Account page or sidebar tile, so it sits with the other settings. The same logic as `AccountView`.
+/// Account page or sidebar tile, so it sits with the other settings.
 struct KorekoreAccountCard: View {
     @ObservedObject var model: AppModel
     /// The browser is open on the sign-in page; cleared when the status says signed in.

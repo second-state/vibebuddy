@@ -4,7 +4,7 @@ import VibeBuddyCore
 
 /// The Character page (canvas: "Mac · Character (sidebar)"; the write and Make-your-own states on "App · Device &
 /// firmware states" and "App · Agents, Conversation, Character states"). What it does is the current Character
-/// tab's (`VoicesView`, `RobotCard`, `CustomCharacterCard`, `AddressRow`), copied, in the korekore look.
+/// tab's, in the korekore look.
 struct KorekoreCharacterPage: View {
     @ObservedObject var model: AppModel
     @State private var makingCharacter = false
@@ -35,7 +35,7 @@ struct KorekoreCharacterPage: View {
                 .padding(.bottom, Theme.Sticker.sm)
                 // Drawings of the user's own, kept or on the box: they can change them, the Character lending its voice, or
                 // delete them.
-                if model.status?.device.voice == CustomCharacterCard.id || model.savedCustomCharacter != nil {
+                if model.status?.device.voice == CustomCharacter.id || model.savedCustomCharacter != nil {
                     KorekoreCustomLook(model: model)
                 }
             }
@@ -246,8 +246,7 @@ struct KorekoreVolumeCard: View {
     }
 }
 
-/// A Character of the user's own: their drawings as the look, a preset Character's voice and lines (ADR-0009). The
-/// same steps as `CustomCharacterCard`.
+/// A Character of the user's own: their drawings as the look, a preset Character's voice and lines (ADR-0009).
 struct KorekoreCustomLook: View {
     @ObservedObject var model: AppModel
     @State private var frames: [RGBAImage] = []
@@ -255,7 +254,7 @@ struct KorekoreCustomLook: View {
     @State private var lender = Resources.bundledVoices.first?.id ?? ""
     @State private var problem: String?
 
-    private var inUse: Bool { model.status?.device.voice == CustomCharacterCard.id }
+    private var inUse: Bool { model.status?.device.voice == CustomCharacter.id }
     /// The box already wears this look with this lender, so writing it again would only redo it.
     private var onTheBox: Bool { inUse && model.savedCustomCharacter.map { $0.look == look && $0.lender == lender } == true }
 
@@ -282,7 +281,7 @@ struct KorekoreCustomLook: View {
                     Button(String(localized: "Choose images…"), action: choose).kButton()
                     Button(String(localized: "Copy a prompt")) {
                         NSPasteboard.general.clearContents()
-                        NSPasteboard.general.setString(CustomCharacterCard.prompt, forType: .string)
+                        NSPasteboard.general.setString(CustomCharacter.prompt, forType: .string)
                     }
                     .kButton()
                 }
@@ -348,4 +347,11 @@ struct KorekoreCustomLook: View {
             return
         }
     }
+}
+
+/// The Character the user draws and names: its id in the daemon, and the prompt that the page copies for an image
+/// model.
+enum CustomCharacter {
+    static let id = "custom"
+    static let prompt = "Pixel art game sprite sheet of [describe your character]: one image, a 2 × 2 grid of the same character in exactly the same pose, with clear white space between the four. Chibi proportions, standing, front view, full body, arms down, flat colors, thick dark outline, limited 16-color palette, plain solid white background. Top left: normal. Top right: eyes closed. Bottom left: a big happy smile. Bottom right: a sad face."
 }

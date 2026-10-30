@@ -210,19 +210,6 @@ impl Operation {
     pub fn running(&self) -> bool {
         self.state == OperationState::Running
     }
-
-    /// Said in the UI language; the daemon's own (English) message only shows when something failed.
-    pub fn summary(&self) -> String {
-        let percent = format!("{:.0}%", self.progress * 100.0);
-        match (self.kind, self.state) {
-            (_, OperationState::Failed) => tr("Failed: %@", &[&self.message]),
-            (OperationKind::VoicePack, OperationState::Running) => tr("Writing voice pack… %@", &[&percent]),
-            (OperationKind::VoicePack, OperationState::Done) => tr("Voice pack written", &[]),
-            (OperationKind::Firmware, OperationState::Running) => tr("Flashing firmware… %@", &[&percent]),
-            (OperationKind::Firmware, OperationState::Done) => tr("Firmware flashed, the box has restarted", &[]),
-            (_, OperationState::Replug) => tr("Firmware flashed, but the box didn't start it. Unplug the box and plug it back in.", &[]),
-        }
-    }
 }
 
 #[derive(Clone, Debug, Default, Deserialize, PartialEq)]
@@ -517,26 +504,13 @@ mod tests {
     }
 
     #[test]
-    fn progress_reads_in_percent_and_failures_quote_the_daemon() {
-        let mut operation: Operation = serde_json::from_str(
-            r#"{"kind": "voice_pack", "state": "running", "progress": 0.426, "message": "chunk 12/40"}"#,
-        )
-        .expect("operation");
-        assert!(operation.running());
-        assert_eq!(operation.summary(), "Writing voice pack… 43%");
-        operation.state = OperationState::Failed;
-        assert_eq!(operation.summary(), "Failed: chunk 12/40");
-    }
-
-    #[test]
-    fn a_flash_waiting_for_a_replug_parses_and_says_so() {
+    fn a_flash_waiting_for_a_replug_parses() {
         // An unknown state would fail the whole status and cut the app off from the daemon.
         let operation: Operation = serde_json::from_str(
             r#"{"kind": "firmware", "state": "replug", "progress": 1.0, "message": "firmware flashed but not started, replug the box"}"#,
         )
         .expect("operation");
         assert!(!operation.running());
-        assert_eq!(operation.summary(), "Firmware flashed, but the box didn't start it. Unplug the box and plug it back in.");
     }
 
     #[test]
