@@ -1281,6 +1281,23 @@ mod relay {
     }
 
     #[test]
+    fn the_cable_wins_over_a_relay_session() {
+        let (mut firmware, mut board, _) = booted(blank_flash());
+        send(&mut firmware, &mut board, &format!(r#"{{"version":1,"event":"device.pair","key":"{}","name":"b"}}"#, computer_key()));
+        let mut relay = RelayBox::new();
+        relay.hello(&firmware, "abc");
+        relay.message(&mut firmware, &mut board, &json!({"t": "welcome"}));
+        board.advance(USB_QUIET_MS);
+        let (mut sealer, _) = session(&mut relay, &mut firmware, &mut board);
+
+        // A computer plugs in before the Relay ends the session: the Relay computer's lines no longer count.
+        send(&mut firmware, &mut board, r#"{"version":1,"event":"device.heartbeat"}"#);
+        board.take_lines();
+        say(&mut relay, &mut firmware, &mut board, &mut sealer, r#"{"version":1,"event":"task.start","title":"OTHER"}"#);
+        assert!(board.take_lines().is_empty(), "its cards stay off the screen");
+    }
+
+    #[test]
     fn every_new_socket_hears_the_local_link_again() {
         // The Relay forgets a local owner when the box's socket goes, so a box that reconnects while still on
         // the cable must claim it again.

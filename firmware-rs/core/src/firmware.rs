@@ -602,7 +602,12 @@ impl Firmware {
     }
 
     /// A line from the computer linked through the Relay; like a line over the network, never cable-only commands.
+    /// The computer on the cable has the box (ADR-0011): the Relay ends the other link once the box reports the
+    /// cable, and until then its lines are dropped, so they don't put that computer's cards back on the screen.
     pub fn relay_line<B: Board>(&mut self, board: &mut B, line: &[u8]) {
+        if self.lan.cable_in_use(board.now_ms()) {
+            return;
+        }
         self.apply_lan(board, alloc::vec![LanOutput::Line(line.to_vec())]);
     }
 
