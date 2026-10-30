@@ -2,7 +2,7 @@
 //! app's menu bar icon and settings window. It is only a client of `vibebuddyd`: systemd supervises the
 //! daemon here, so quitting the app leaves the box online.
 
-// The tray, and the face it draws, exist only on Linux; other builds are for working on the window.
+// The tray exists only on Linux; other builds are for working on the window.
 #![cfg_attr(not(target_os = "linux"), allow(dead_code))]
 
 mod agents;
@@ -10,7 +10,6 @@ mod assets;
 mod character;
 mod client;
 mod custom;
-mod face;
 mod firmware_file;
 mod i18n;
 mod making;
@@ -19,23 +18,21 @@ mod instance;
 mod korekore;
 mod preview;
 mod status;
-mod theme;
 #[cfg(target_os = "linux")]
 mod tray;
 
 use std::time::{Duration, SystemTime};
 
-use iced::widget::{button, checkbox, column, container, image, pick_list, progress_bar, radio, row, scrollable, slider, space, text, text_input, toggler};
-use iced::{Element, Font, Length, Subscription, Task, Theme, window};
+use iced::widget::image;
+use iced::{Element, Subscription, Task, Theme, window};
 
 use i18n::{UiLanguage, tr};
-use status::{Config, MenuState, Status};
+#[cfg(target_os = "linux")]
+use status::MenuState;
+use status::{Config, Status};
 
 /// How many exchanges the Conversation tab reads, as on the Mac.
 const CONVERSATION_LIMIT: usize = 20;
-
-/// Omarchy's monospace font, used when Omarchy's theme is: the window should look like the rest of the desktop.
-const OMARCHY_FONT: &str = "JetBrainsMono Nerd Font";
 
 /// Passed to the copy a language change starts: it waits for this one to quit and opens Settings where the user was.
 const RESTARTED: &str = "--restarted";
@@ -59,17 +56,11 @@ fn main() -> iced::Result {
         .title(App::title)
         .theme(App::theme)
         .subscription(App::subscription);
-    if korekore::requested() {
-        // The korekore UI's fonts, there before any window opens (ADR-0021); its own face is the default. The
-        // current UI keeps the system's, or Omarchy's.
-        for font in korekore::FONTS {
-            app = app.font(font);
-        }
-        app = app.default_font(korekore::DEFAULT_FONT);
-    } else if theme::stamp().is_some() {
-        app = app.default_font(Font::with_name(OMARCHY_FONT));
+    // The korekore UI's fonts, there before any window opens (ADR-0021); its own face is the default.
+    for font in korekore::FONTS {
+        app = app.font(font);
     }
-    app.run()
+    app.default_font(korekore::DEFAULT_FONT).run()
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -80,7 +71,6 @@ enum Tab {
     Device,
     /// Only while the daemon runs the resident session (experimental).
     Conversation,
-    Account,
     Advanced,
 }
 
@@ -94,10 +84,12 @@ enum Message {
     /// The shell's tray host went away or came back; if it stays away, the window opens instead.
     TrayHost(bool),
     TrayHostCheck,
-    ThemeTick,
+    PluginTick,
     OpenSettings,
     /// A page of the first-run guide, or (None) leave it for the tabs.
     Guide(Option<usize>),
+    /// The guide's box that blinked isn't the user's.
+    NotThisOne,
     WindowClosed(window::Id),
     Tab(Tab),
     NotifyLink(bool),
@@ -246,16 +238,17 @@ impl std::fmt::Debug for TrayHandle {
 struct App {
     /// `None` while the daemon isn't answering.
     status: Option<Status>,
-    theme: Theme,
-    theme_stamp: Option<SystemTime>,
     settings: Option<window::Id>,
     tab: Tab,
     /// The first-run guide's page while it shows in place of the tabs.
     guide: Option<usize>,
+    /// The user said the box the guide found isn't theirs: say how to find the right one.
+    not_this_one: bool,
     /// The slider's position while it is being dragged; the box's own value otherwise.
     volume: Option<u8>,
-    /// The last screen grabbed from the box, as PNG, and whether a grab is under way.
-    screenshot: Option<(Vec<u8>, image::Handle)>,
+    /// The last screen grabbed from the box, as PNG, with the local time it was grabbed, and whether a grab is under
+    /// way.
+    screenshot: Option<(Vec<u8>, image::Handle, String)>,
     screenshot_busy: bool,
     /// Installed alongside the app; read once, since only reinstalling changes them.
     voices: Vec<assets::Voice>,
@@ -335,8 +328,6 @@ struct App {
     /// VibeBuddy's Omarchy plugin is in the bar, showing the face; the tray icon would be a second one.
     #[cfg(target_os = "linux")]
     plugin: bool,
-    /// The korekore UI was asked for at launch (`VIBEBUDDY_UI=korekore`, ADR-0021); its sections are the tabs.
-    korekore: bool,
 }
 
 /// Making a Character: the preset it starts from, its lines as edited (occasions stay, each keeps a line), the voice,
@@ -364,12 +355,11 @@ impl App {
     fn boot() -> (Self, Task<Message>) {
         let app = Self {
             status: None,
-            theme: theme::load(),
-            theme_stamp: theme::stamp(),
             settings: None,
             // The korekore sidebar starts on Character, as the design does.
-            tab: if korekore::requested() { Tab::Sound } else { Tab::General },
+            tab: Tab::Sound,
             guide: None,
+            not_this_one: false,
             volume: None,
             screenshot: None,
             screenshot_busy: false,
@@ -416,7 +406,6 @@ impl App {
             tray: None,
             #[cfg(target_os = "linux")]
             plugin: plugin_in_omarchy_bar(),
-            korekore: korekore::requested(),
         };
         // The first launch shows the window, so it's clear where the app went; later ones stay in the tray, unless a
         // language change restarted the app from its window. Without a tray (macOS builds, for development) the
@@ -438,11 +427,10 @@ impl App {
         app.custom_look = custom::custom_look_file()
             .and_then(|path| std::fs::read(path).ok())
             .and_then(|look| character::look_frames(&look).map(|frames| (look, frames.iter().map(|frame| handle(frame, 2)).collect())));
-        // Debug builds only: open the korekore UI on a given section or first-run step, for checking it on a desktop
+        // Debug builds only: open the window on a given section or first-run step, for checking it on a desktop
         // without a pointer (VIBEBUDDY_KOREKORE_SECTION=device, VIBEBUDDY_KOREKORE_GUIDE=1).
         #[cfg(debug_assertions)]
-        if app.korekore
-            && let Ok(name) = std::env::var("VIBEBUDDY_KOREKORE_SECTION")
+        if let Ok(name) = std::env::var("VIBEBUDDY_KOREKORE_SECTION")
             && let Some(section) = korekore::Section::ALL.into_iter().find(|section| format!("{section:?}").eq_ignore_ascii_case(&name))
         {
             app.tab = section.tab();
@@ -452,7 +440,7 @@ impl App {
         // The install script connected the agents and set up the start at login; the guide is for what it couldn't.
         app.guide = (first && cfg!(target_os = "linux")).then_some(0);
         #[cfg(debug_assertions)]
-        if app.korekore {
+        {
             app.guide = std::env::var("VIBEBUDDY_KOREKORE_GUIDE").ok().and_then(|page| page.parse().ok()).or(app.guide);
         }
         let open = first || restarted || !cfg!(target_os = "linux");
@@ -464,8 +452,10 @@ impl App {
         "VibeBuddy".to_owned()
     }
 
+    /// The korekore pages draw their own colors; widgets without a style of their own get the light theme the
+    /// snapshots are drawn with.
     fn theme(&self, _window: window::Id) -> Theme {
-        self.theme.clone()
+        Theme::Light
     }
 
     fn subscription(&self) -> Subscription<Message> {
@@ -485,7 +475,7 @@ impl App {
         };
         Subscription::batch([
             Subscription::run(client::status_updates).map(Message::Daemon),
-            iced::time::every(Duration::from_secs(2)).map(|_| Message::ThemeTick),
+            iced::time::every(Duration::from_secs(2)).map(|_| Message::PluginTick),
             window::close_events().map(Message::WindowClosed),
             tray,
             instance,
@@ -553,7 +543,7 @@ impl App {
                     return Task::done(Message::OpenSettings);
                 }
             }
-            Message::ThemeTick => {
+            Message::PluginTick => {
                 // The plugin can be enabled or disabled while the app runs: the tray icon gives way, or comes back
                 // when the subscription starts it again.
                 #[cfg(target_os = "linux")]
@@ -566,27 +556,15 @@ impl App {
                         }
                     }
                 }
-                let stamp = theme::stamp();
-                if stamp != self.theme_stamp {
-                    self.theme_stamp = stamp;
-                    self.theme = theme::load();
-                    return self.refresh_tray();
-                }
             }
             Message::OpenSettings => {
                 if let Some(id) = self.settings {
                     return window::gain_focus(id);
                 }
-                // The same as the Mac's: room for the whole Character tab, resizable down to the old size. The
-                // korekore window is the design's 960 × 772, down to 900 × 760.
-                let (size, min_size) = if self.korekore {
-                    (iced::Size::new(960.0, 772.0), iced::Size::new(900.0, 760.0))
-                } else {
-                    (iced::Size::new(760.0, 640.0), iced::Size::new(640.0, 480.0))
-                };
+                // The design's 960 × 772, down to 900 × 760.
                 let (id, open) = window::open(window::Settings {
-                    size,
-                    min_size: Some(min_size),
+                    size: iced::Size::new(960.0, 772.0),
+                    min_size: Some(iced::Size::new(900.0, 760.0)),
                     #[cfg(target_os = "linux")]
                     platform_specific: window::settings::PlatformSpecific {
                         application_id: "vibebuddy".to_owned(),
@@ -615,6 +593,7 @@ impl App {
                 }
             }
             Message::Guide(page) => self.guide = page,
+            Message::NotThisOne => self.not_this_one = true,
             Message::Tab(tab) => {
                 self.tab = tab;
                 // Agents can be installed or set up behind the app's back; look again whenever the tab opens.
@@ -626,8 +605,9 @@ impl App {
                     self.conversation_seen = None;
                     return Task::done(Message::PollConversation);
                 }
-                // Reading the day's use costs a request to the service, so only when the tab opens; the status brings it.
-                if tab == Tab::Account && self.status.as_ref().is_some_and(|status| status.account.signed_in) {
+                // Reading the day's use costs a request to the service, so only when General, which shows the account,
+                // opens; the status brings it.
+                if tab == Tab::General && self.status.as_ref().is_some_and(|status| status.account.signed_in) {
                     return Task::perform(client::refresh_account(), |_| Message::AccountDone(Ok(())));
                 }
             }
@@ -1058,12 +1038,12 @@ impl App {
             Message::Screenshot(result) => {
                 self.screenshot_busy = false;
                 match result {
-                    Ok(png) => self.screenshot = Some((png.clone(), image::Handle::from_bytes(png))),
+                    Ok(png) => self.screenshot = Some((png.clone(), image::Handle::from_bytes(png), chrono::Local::now().format("%H:%M").to_string())),
                     Err(error) => self.notice = Some(Err(error)),
                 }
             }
             Message::SaveScreenshot => {
-                if let Some((png, _)) = &self.screenshot {
+                if let Some((png, _, _)) = &self.screenshot {
                     self.notice = Some(save_screenshot(png));
                 }
             }
@@ -1209,7 +1189,7 @@ impl App {
     /// Asks for the Characters made here, and the voices once.
     /// The korekore Character page opens the look's card below the grid; go down to it.
     fn show_custom_look(&self) -> Task<Message> {
-        if self.korekore { iced::widget::operation::snap_to_end(korekore::pages::CHARACTER_PAGE) } else { Task::none() }
+        iced::widget::operation::snap_to_end(korekore::pages::CHARACTER_PAGE)
     }
 
     fn refresh_made(&self) -> Task<Message> {
@@ -1242,13 +1222,11 @@ impl App {
         #[cfg(target_os = "linux")]
         if let Some(TrayHandle(handle)) = self.tray.clone() {
             let menu = MenuState::derive(self.status.as_ref());
-            let kore = self.korekore.then(|| korekore::picture::BoxPicture::derive(self.status.as_ref()));
-            let [r, g, b, _] = self.theme.palette().text.into_rgba8();
+            let kore = korekore::picture::BoxPicture::derive(self.status.as_ref());
             return Task::future(async move {
                 handle
                     .update(move |tray| {
                         tray.menu = menu;
-                        tray.color = [r, g, b];
                         tray.kore = kore;
                     })
                     .await;
@@ -1259,52 +1237,13 @@ impl App {
     }
 
     fn view(&self, _window: window::Id) -> Element<'_, Message> {
-        if self.korekore {
-            if let Some(page) = self.guide {
-                return self.kk_guide(page);
-            }
-            return self.korekore(korekore::Section::of(self.tab));
-        }
         if let Some(page) = self.guide {
-            return self.guide(page);
+            return self.kk_guide(page);
         }
-        let tabs = [
-            (Tab::General, tr("General", &[])),
-            (Tab::Sound, tr("Character", &[])),
-            (Tab::Agents, tr("Agents", &[])),
-            (Tab::Device, tr("Device", &[])),
-            (Tab::Conversation, tr("Conversation", &[])),
-            (Tab::Account, tr("Account", &[])),
-            (Tab::Advanced, tr("Advanced", &[])),
-        ];
-        // Voice commands are experimental (VIBEBUDDY_RESIDENT_SESSION=1): no tab while the daemon has them off.
-        let tabs = tabs.into_iter().filter(|(tab, _)| *tab != Tab::Conversation || self.resident);
-        let tab_bar = row(tabs.map(|(tab, label)| {
-            let style = if tab == self.tab { button::primary } else { button::text };
-            button(text(label)).style(style).on_press(Message::Tab(tab)).into()
-        }))
-        .spacing(4);
-        let body = match self.tab {
-            Tab::General => self.general(),
-            Tab::Sound => self.sound(),
-            Tab::Agents => self.agents(),
-            Tab::Device => self.device(),
-            Tab::Conversation => self.conversation(),
-            Tab::Account => self.account(),
-            Tab::Advanced => self.advanced(),
-        };
-        let notice = self.notice.as_ref().map(|notice| match notice {
-            Ok(message) => text(message.clone()).size(13),
-            Err(error) => text(error.clone()).size(13).style(text::danger),
-        });
-        let content = column![tab_bar, container(body).height(Length::Fill)]
-            .push(notice)
-            .spacing(16)
-            .padding(20);
-        container(content).width(Length::Fill).height(Length::Fill).into()
+        self.korekore(korekore::Section::of(self.tab))
     }
 
-    /// The korekore settings window (ADR-0021); its pages come in the next steps.
+    /// The korekore settings window (ADR-0021).
     fn korekore(&self, section: korekore::Section) -> Element<'_, Message> {
         // Voice commands are experimental: no Conversation section while the daemon has them off.
         let sections: Vec<korekore::Section> = korekore::Section::ALL
@@ -1315,1247 +1254,8 @@ impl App {
         korekore::view::settings(&picture, &sections, section, env!("CARGO_PKG_VERSION"), Message::Korekore, self.korekore_page(section))
     }
 
-    /// First run on Linux: what the install script couldn't do. It already connected the agents and set up the start
-    /// at login, so the guide is the Mac's without those pages: find the box, pick a character, put the box on Wi-Fi.
-    fn guide(&self, page: usize) -> Element<'_, Message> {
-        const LAST: usize = 4;
-        let titles = [tr("Welcome", &[]), tr("Find the box", &[]), tr("Pick a character", &[]), tr("Wi-Fi", &[]), tr("Done", &[])];
-        let steps = row(titles.into_iter().enumerate().map(|(index, title)| {
-            let title = text(title).size(13);
-            if index == page { title.into() } else { title.style(text::secondary).into() }
-        }))
-        .spacing(16);
-        let device = self.status.as_ref().map(|status| &status.device);
-        let online = device.is_some_and(|device| device.connected);
-        // No paging while flashing: once you page away, nobody is watching the progress.
-        let flashing = self.status.as_ref().and_then(|status| status.operation.as_ref()).is_some_and(|operation| {
-            operation.kind == status::OperationKind::Firmware && operation.running()
-        });
-        let body: Element<'_, Message> = match page {
-            0 => column![
-                text(tr("VibeBuddy turns what your coding agents are doing into pictures and sounds on the box.", &[])).size(18),
-                text(tr(
-                    "The install script has connected your agents and set VibeBuddy to start when you log in. Next: find the box, pick a character, and put the box on Wi-Fi. Everything can be changed or skipped.",
-                    &[]
-                )),
-            ]
-            .spacing(10)
-            .into(),
-            1 => scrollable(
-                column![text(tr("Connect the box to this computer with a USB cable.", &[])).size(18), self.box_section()]
-                    .push(online.then(|| {
-                        row![
-                            button(text(tr("Make it blink", &[]))).on_press(Message::Identify),
-                            text(tr("If the backlight flashes, that's the one.", &[])).size(13),
-                        ]
-                        .spacing(12)
-                        .align_y(iced::Alignment::Center)
-                    }))
-                    .spacing(12)
-                    .padding(iced::Padding::ZERO.right(16)),
-            )
-            .into(),
-            2 => column![text(tr("Pick a character.", &[])).size(18), self.sound()].spacing(12).into(),
-            3 => scrollable(
-                column![
-                    text(tr("Put the box on Wi-Fi?", &[])).size(18),
-                    text(tr(
-                        "Then this computer reaches the box without the cable: over the local network, or through the VibeBuddy Relay when you're elsewhere.",
-                        &[]
-                    )),
-                ]
-                .push(match self.wifi_section() {
-                    Some(wifi) if !device.is_some_and(|device| device.network) => Element::from(wifi),
-                    _ => text(tr("Plug in the box to set its network. You can also do it later on the Device tab in Settings.", &[])).size(13).into(),
-                })
-                .spacing(12)
-                    .padding(iced::Padding::ZERO.right(16)),
-            )
-            .into(),
-            _ => column![
-                text(tr("All set.", &[])).size(18),
-                text(tr(
-                    "VibeBuddy lives in the tray, or in Omarchy's bar: the buddy's face, with its eyes open while the box is online. To change anything, open Settings from there, or run VibeBuddy again.",
-                    &[]
-                )),
-            ]
-            .spacing(10)
-            .into(),
-        };
-        let buttons = row![]
-            .push((page > 0 && page < LAST).then(|| button(text(tr("Back", &[]))).style(button::secondary).on_press(Message::Guide(Some(page - 1)))))
-            .push(space::horizontal())
-            .push((page > 0 && page < LAST).then(|| {
-                button(text(tr("Skip", &[]))).style(button::secondary).on_press_maybe((!flashing).then_some(Message::Guide(Some(page + 1))))
-            }))
-            .push(if page < LAST {
-                button(text(tr("Next", &[]))).on_press_maybe((!flashing).then_some(Message::Guide(Some(page + 1))))
-            } else {
-                button(text(tr("Get started", &[]))).on_press(Message::Guide(None))
-            })
-            .spacing(8);
-        let notice = self.notice.as_ref().map(|notice| match notice {
-            Ok(message) => text(message.clone()).size(13),
-            Err(error) => text(error.clone()).size(13).style(text::danger),
-        });
-        let content = column![steps, container(body).height(Length::Fill)].push(notice).push(buttons).spacing(16).padding(20);
-        container(content).width(Length::Fill).height(Length::Fill).into()
-    }
-
     fn updates(&self) -> Option<&status::Updates> {
         self.status.as_ref()?.updates.as_ref()
-    }
-
-    fn general(&self) -> Element<'_, Message> {
-        let notify = self.status.as_ref().is_none_or(|status| status.config.notify_link);
-        let menu = MenuState::derive(self.status.as_ref());
-        let updates = self.updates();
-        let enabled = updates.is_some_and(|updates| updates.enabled);
-        let check = self
-            .status
-            .as_ref()
-            .and_then(|status| status.config.check_updates)
-            .unwrap_or(enabled);
-        let summary = match updates {
-            Some(updates) if updates.enabled => match (&updates.error, &updates.app, &updates.last_check) {
-                (Some(error), _, _) => tr("Last check failed: %@", &[error]),
-                (None, Some(app), _) => tr("VibeBuddy %@ is available", &[&app.version]),
-                (None, None, Some(checked)) => tr("Up to date · checked %@", &[&short_time(checked)]),
-                (None, None, None) => tr("Not checked yet", &[]),
-            },
-            _ => tr("Off", &[]),
-        };
-        // No self-update here: a new release is installed by rerunning its install.sh, as the README says.
-        let upgrade = updates.and_then(|updates| updates.app.as_ref()).map(|_| {
-            text(tr("To upgrade, download the new release and run its install.sh again.", &[])).size(13)
-        });
-        let unsupported = updates.filter(|updates| updates.unsupported_app).map(|_| {
-            text(tr("This version of VibeBuddy is no longer supported. Update it to keep getting firmware for the box.", &[]))
-                .style(text::warning)
-        });
-        column![]
-            .push(unsupported)
-            .push(text(menu.device_line))
-            .push(text(menu.mode_line))
-            .push(text(menu.today_line))
-            .push(space().height(8))
-            .push(toggler(self.launch_at_login).label(tr("Launch at login", &[])).on_toggle(Message::LaunchAtLogin))
-            .push(
-                toggler(notify)
-                    .label(tr("Notify me when the box disconnects or the daemon fails", &[]))
-                    .on_toggle_maybe(self.status.is_some().then_some(Message::NotifyLink)),
-            )
-            // ADR-0012: the Relay carries the box's messages through VibeBuddy's server, so it can be turned off.
-            .push(
-                toggler(self.status.as_ref().is_none_or(|status| status.config.relay))
-                    .label(tr("Reach the box through the VibeBuddy Relay when it's away from this computer", &[]))
-                    .on_toggle_maybe(self.status.is_some().then_some(Message::Relay)),
-            )
-            .push(
-                toggler(check)
-                    .label(tr("Check for updates", &[]))
-                    .on_toggle_maybe(self.status.is_some().then_some(Message::CheckUpdates)),
-            )
-            .push(
-                row![
-                    text(summary).size(13),
-                    space::horizontal(),
-                    button(text(tr("Check now", &[]))).on_press_maybe(enabled.then_some(Message::CheckForUpdatesNow)),
-                    button(text(tr("Releases", &[]))).style(button::secondary).on_press(Message::OpenReleases),
-                    button(text(tr("Report a Problem…", &[]))).style(button::secondary).on_press(Message::ReportProblem),
-                ]
-                .spacing(8)
-                .align_y(iced::Alignment::Center),
-            )
-            .push(upgrade)
-            .push(row![text("App").width(140), text(env!("CARGO_PKG_VERSION"))].spacing(12))
-            .push(space().height(8))
-            .push(
-                row![text(tr("Language", &[])), pick_list(UiLanguage::ALL, Some(self.language), Message::PickLanguage)]
-                    .spacing(12)
-                    .align_y(iced::Alignment::Center),
-            )
-            .push(self.restart_offer.as_ref().map(|offer| self.restart_prompt(offer)))
-        .spacing(8)
-        .into()
-    }
-
-    fn restart_prompt(&self, offer: &RestartOffer) -> Element<'_, Message> {
-        let device = self.status.as_ref().map(|status| &status.device);
-        let voice: Option<Element<'_, Message>> = match &offer.voice {
-            Some(voice) => {
-                let label = if device.is_some_and(|device| device.bridge) {
-                    tr("Also switch the box's voice to %@ (a few minutes over the UART bridge; keep it plugged in)", &[&voice.name])
-                } else {
-                    tr("Also switch the box's voice to %@", &[&voice.name])
-                };
-                Some(checkbox(offer.switch_voice).label(label).on_toggle(Message::SwitchVoice).into())
-            }
-            None if !device.is_some_and(|device| device.connected) => Some(
-                text(tr("The box isn't connected, so its character stays as it is. You can change it later on the Character tab.", &[]))
-                    .size(13)
-                    .into(),
-            ),
-            None => None,
-        };
-        column![text(tr("Restart VibeBuddy to change the language?", &[]))]
-            .push(voice)
-            .push(
-                row![
-                    button(text(tr("Restart now", &[]))).on_press(Message::RestartForLanguage(true)),
-                    button(text(tr("Later", &[]))).style(button::secondary).on_press(Message::RestartForLanguage(false)),
-                ]
-                .spacing(8),
-            )
-            .spacing(8)
-            .into()
-    }
-
-    fn sound(&self) -> Element<'_, Message> {
-        if let Some(form) = &self.make {
-            return self.make_form(form);
-        }
-        let box_volume = self.status.as_ref().and_then(|status| status.device.volume);
-        let level = self.volume.or(box_volume).unwrap_or(60);
-        let online = self.status.as_ref().is_some_and(|status| status.device.connected);
-        let operation = self.status.as_ref().and_then(|status| status.operation.as_ref());
-        let busy = operation.is_some_and(status::Operation::running);
-        let mut volume = slider(20..=100, level, Message::VolumeDragged).step(5u8);
-        if online && !busy {
-            volume = volume.on_release(Message::VolumeReleased);
-        }
-        let current = self.status.as_ref().and_then(|status| status.device.voice.clone());
-        let cards = self.voices.iter().zip(&self.faces).map(|(voice, face)| {
-            let in_use = current.as_deref() == Some(voice.id);
-            let action: Element<'_, Message> = if in_use {
-                text(tr("In use", &[])).style(text::success).into()
-            } else {
-                button(text(tr("Use", &[])))
-                    .on_press_maybe((online && !busy).then_some(Message::UseVoice(voice.id)))
-                    .into()
-            };
-            let card = row![self.preview_button(voice.id, busy)]
-                .push(face.clone().map(image))
-                .push(column![
-                    text(voice.name.clone()),
-                    text(voice.tag.clone()).size(13),
-                    text(voice.summary.clone()).size(13),
-                ])
-                .push(space::horizontal())
-                .push(action)
-                .spacing(12)
-                .align_y(iced::Alignment::Center);
-            character_card(card.into(), in_use)
-        });
-        let address = row![text(tr("What the buddy calls you", &[]))]
-            .extend(assets::Language::ALL.map(|language| {
-                let options: Vec<AddressChoice> = std::iter::once(AddressChoice { form: None, language })
-                    .chain(assets::FORMS_OF_ADDRESS.iter().filter(|form| form.language == language).map(|form| AddressChoice { form: Some(form.id), language }))
-                    .collect();
-                let picked = options.iter().copied().find(|choice| choice.form == self.characters.address(language));
-                let label = match language {
-                    assets::Language::Chinese => tr("Chinese", &[]),
-                    assets::Language::English => tr("English", &[]),
-                };
-                row![text(label), pick_list(options, picked, move |choice: AddressChoice| Message::PickAddress(language, choice.form))]
-                    .spacing(6)
-                    .align_y(iced::Alignment::Center)
-                    .into()
-            }))
-            .spacing(16)
-            .align_y(iced::Alignment::Center);
-        let custom_in_use = current.as_deref() == Some(CUSTOM);
-        let wears_robot = matches!(current.as_deref(), Some(ROBOT | BUILTIN));
-        // A box an older version wrote with another Character's voice on the robot still needs writing again.
-        let robot_in_use = wears_robot && self.characters.robot_lender.is_none();
-        let robot_action: Element<'_, Message> = if robot_in_use {
-            text(tr("In use", &[])).style(text::success).into()
-        } else {
-            button(text(tr("Use", &[]))).on_press_maybe((online && !busy).then_some(Message::UseRobot)).into()
-        };
-        let robot_card = row![self.preview_button(ROBOT, busy)]
-            .push(self.robot_face.clone().map(image))
-            .push(column![
-                row![text("VibeBuddy"), text(tr("Default", &[])).size(13).style(text::primary)]
-                    .spacing(6)
-                    .align_y(iced::Alignment::Center),
-                text(tr("The original robot, drawn by the box itself", &[])).size(13),
-            ]
-            .spacing(4))
-            .push(space::horizontal())
-            .push(robot_action)
-            .spacing(12)
-            .align_y(iced::Alignment::Center);
-        let lenders: Vec<Lender> = self.voices.iter().map(Lender::of).collect();
-        let custom_card = column![
-            row![text(tr("Your own character", &[]))]
-                .push(space::horizontal())
-                .push(custom_in_use.then(|| text(tr("In use", &[])).style(text::success))),
-            text(tr(
-                "Draw a figure with any image tool, on a plain white background: one image, or four in the order normal, eyes closed, happy, sad. The box shows it in place of the robot, with the voice and lines of the character you pick.",
-                &[]
-            ))
-            .size(13),
-            row![
-                button(text(tr("Choose images…", &[]))).on_press(Message::ChooseDrawings),
-                button(text(tr("Copy a prompt", &[]))).style(button::secondary).on_press(Message::CopyPrompt),
-            ]
-            .spacing(8),
-        ]
-        .push(self.custom_problem.as_ref().map(|problem| text(problem.clone()).size(13).style(text::danger)))
-        .push(self.custom_look.as_ref().map(|(_, frames)| {
-            column![
-                row(frames.iter().map(|frame| container(image(frame.clone())).style(|_: &Theme| container::Style {
-                    background: Some(iced::Color::BLACK.into()),
-                    ..container::Style::default()
-                }).into()))
-                .spacing(6),
-                row![
-                    text(tr("Voice and lines from", &[])),
-                    pick_list(lenders, self.lender, Message::PickLender),
-                    button(text(tr("Use", &[]))).on_press_maybe((online && !busy && self.lender.is_some()).then_some(Message::UseCustom)),
-                ]
-                .spacing(8)
-                .align_y(iced::Alignment::Center),
-            ]
-            .spacing(8)
-        }))
-        .spacing(8);
-        let job = self.status.as_ref().and_then(|status| status.making.as_ref());
-        let job_running = job.is_some_and(making::Making::running);
-        let made_cards = self.made.iter().map(|made| {
-            let in_use = current.as_deref() == Some(made.id.as_str());
-            let action: Element<'_, Message> = if in_use {
-                text(tr("In use", &[])).style(text::success).into()
-            } else if made.complete {
-                button(text(tr("Use", &[]))).on_press_maybe((online && !busy).then_some(Message::UseMade(made.id.clone()))).into()
-            } else if job.is_some_and(|job| job.running() && job.id == made.id) {
-                text(tr("Making…", &[])).size(13).into()
-            } else {
-                button(text(tr("Resume", &[]))).on_press_maybe((!job_running).then_some(Message::ResumeMade(made.id.clone()))).into()
-            };
-            let base = assets::voice_name(&made.base);
-            let voice = self.character_voices.iter().find(|voice| voice.id == made.voice).map_or_else(|| made.voice.clone(), |voice| voice.name.clone());
-            let detail = if made.complete {
-                tr("Made from %@ · voice: %@", &[&base, &voice])
-            } else {
-                tr("Not finished · made from %@ · voice: %@", &[&base, &voice])
-            };
-            let face = self.made_faces.iter().find(|(id, _)| *id == made.id).map(|(_, face)| image(face.clone()));
-            let deletable = !in_use && !job.is_some_and(|job| job.running() && job.id == made.id);
-            let delete: Element<'_, Message> = if self.confirm_delete_made.as_deref() == Some(made.id.as_str()) {
-                row![
-                    text(tr("Delete “%@”? This can't be undone.", &[&made.name])).size(13),
-                    button(text(tr("Delete", &[]))).style(button::danger).on_press(Message::DeleteMade(made.id.clone())),
-                    button(text(tr("Cancel", &[]))).style(button::secondary).on_press(Message::AskDeleteMade(None)),
-                ]
-                .spacing(8)
-                .align_y(iced::Alignment::Center)
-                .into()
-            } else {
-                button(text(tr("Delete…", &[]))).style(button::secondary).on_press_maybe(deletable.then(|| Message::AskDeleteMade(Some(made.id.clone())))).into()
-            };
-            let hint = in_use.then(|| text(tr("It's on the box: put another character on the box to delete this one.", &[])).size(13));
-            let card = row![]
-                .push(face)
-                .push(column![text(made.name.clone()), text(detail).size(13)].push(hint))
-                .push(space::horizontal())
-                .push(delete)
-                .push(action)
-                .spacing(12)
-                .align_y(iced::Alignment::Center);
-            character_card(card.into(), in_use)
-        });
-        let make_button = button(text(tr("Make a Character…", &[])))
-            .style(button::secondary)
-            .on_press_maybe((self.status.is_some() && !job_running).then_some(Message::MakeCharacter(true)));
-        let job_row = job.and_then(|job| self.making_row(job, online && !busy));
-        let progress = operation.filter(|operation| operation.kind == status::OperationKind::VoicePack).map(|operation| {
-            let failed = operation.state == status::OperationState::Failed;
-            column![text(operation.summary()).size(13)].push(failed.then(|| {
-                text(tr("Didn't finish, so the box keeps its built-in voice. Reconnect the cable and click Use again.", &[]))
-                    .size(13)
-            }))
-        });
-        // No pack at all is the robot too, with the lines it shipped with.
-        let using = assets::voice_name(current.as_deref().filter(|&id| id != BUILTIN).unwrap_or(ROBOT));
-        let page = column![
-            row![text(tr("Volume", &[])), volume, text(level.to_string())].spacing(12),
-            button(text(tr("Play a line on the box", &[]))).on_press_maybe((online && !busy).then_some(Message::PlayLine)),
-            text(tr("Saved on the box and kept across restarts. To mute, long-press K2 on the box.", &[])).size(13),
-            space().height(8),
-            text(tr("Character", &[])).size(18),
-            text(tr(
-                "The box is speaking as “%@”. Each character has its own voice and lines. Preview one, then click Use to write it to the box — no firmware flash needed. Over the UART port this takes a few minutes; when it's done the box says a line as the new character.",
-                &[&using]
-            ))
-            .size(13),
-            address,
-            character_card(robot_card.into(), robot_in_use),
-            column(cards).spacing(10),
-            character_card(custom_card.into(), custom_in_use),
-            column(made_cards).spacing(10),
-            make_button,
-        ]
-        .push(job_row)
-        .push(progress)
-        .spacing(12);
-        scrollable(page).into()
-    }
-
-    /// The Character being made, or the last one: its progress, why it stopped, or that it is ready for the box.
-    fn making_row(&self, job: &making::Making, can_write: bool) -> Option<Element<'_, Message>> {
-        let made = self.made.iter().find(|made| made.id == job.id);
-        if job.running() {
-            let label = tr("Making “%@”… %lld of %lld", &[&job.name, &job.done, &job.total]);
-            return Some(row![progress_bar(0.0..=1.0, job.progress()).length(200), text(label).size(13)].spacing(12).align_y(iced::Alignment::Center).into());
-        }
-        let provider = made
-            .and_then(|made| self.character_voices.iter().find(|voice| voice.id == made.voice))
-            .map_or_else(|| tr("the voice's provider", &[]), making::Voice::provider_name);
-        if let Some(why) = job.explanation(&provider) {
-            let resume = made.map(|made| button(text(tr("Resume", &[]))).on_press(Message::ResumeMade(made.id.clone())));
-            return Some(row![text(why).size(13).style(text::danger).width(Length::Fill)].push(resume).spacing(12).align_y(iced::Alignment::Center).into());
-        }
-        let current = self.status.as_ref().and_then(|status| status.device.voice.as_deref());
-        let made = made.filter(|made| made.complete && current != Some(made.id.as_str()))?;
-        Some(
-            row![
-                text(tr("“%@” is made.", &[&made.name])).size(13).style(text::success),
-                space::horizontal(),
-                button(text(tr("Write to box", &[]))).on_press_maybe(can_write.then_some(Message::UseMade(made.id.clone()))),
-            ]
-            .spacing(12)
-            .align_y(iced::Alignment::Center)
-            .into(),
-        )
-    }
-
-    /// Making a Character, in place of the Character tab: start from a preset, change its lines (occasions stay, each
-    /// keeps a line), pick a voice and, optionally, bring a look; the daemon then makes the line audio.
-    fn make_form<'a>(&'a self, form: &'a MakeForm) -> Element<'a, Message> {
-        let bases: Vec<Lender> = self.voices.iter().map(Lender::of).collect();
-        let voices = making::sorted(&self.character_voices, assets::language_of(form.base.id).map(assets::Language::code));
-        let keys = self.status.as_ref().and_then(|status| status.voice_keys.as_ref());
-        let account = self.status.as_ref().map(|status| status.account.clone()).unwrap_or_default();
-        let readiness = form.voice.as_ref().map(|voice| (making::Readiness::of(voice, keys, &account), voice.provider_name()));
-        let job_running = self.status.as_ref().and_then(|status| status.making.as_ref()).is_some_and(making::Making::running);
-        let problem = form.problem.clone().or_else(|| if form.lines.is_empty() { None } else { making::problem(&form.name, &form.lines, &form.occasions) });
-        let can_make = !form.starting && !form.lines.is_empty() && problem.is_none() && readiness.as_ref().is_some_and(|(ready, _)| ready.can_start()) && !job_running;
-        let base_face = self.voices.iter().position(|voice| voice.id == form.base.id).and_then(|index| self.faces.get(index).cloned().flatten());
-        let face = form.look.as_ref().map(|(_, face)| face.clone()).or(base_face);
-        let readiness = readiness.map(|(ready, provider)| {
-            let note = text(ready.explanation(&provider)).size(13);
-            if ready.can_start() { note.style(text::secondary) } else { note.style(text::danger) }
-        });
-        // Rows rather than a list that drops down, so each voice has ▶: the preview of the preset it comes from, when
-        // this App has it.
-        let busy = self.status.as_ref().and_then(|status| status.operation.as_ref()).is_some_and(status::Operation::running);
-        let selected = voices.iter().position(|voice| Some(voice) == form.voice.as_ref());
-        let mut voice_rows = column![].spacing(4);
-        for (index, voice) in voices.into_iter().enumerate() {
-            let preview = making::preview_of(&voice.id);
-            let preview = if preview == ROBOT { Some(ROBOT) } else { self.voices.iter().find(|shipped| shipped.id == preview).map(|shipped| shipped.id) };
-            let choice = radio(voice.to_string(), index, selected, move |_| Message::MakeVoice(voice));
-            voice_rows = voice_rows.push(row![].push(preview.map(|id| self.preview_button(id, busy))).push(choice).spacing(8).align_y(iced::Alignment::Center));
-        }
-        let mut lines = column![].spacing(6);
-        for occasion in &form.occasions {
-            lines = lines.push(text(making::occasion_name(occasion)).size(14));
-            for (index, line) in form.lines.iter().enumerate().filter(|(_, line)| &line.occasion == occasion) {
-                lines = lines.push(
-                    row![
-                        text_input("", &line.text).on_input(move |text| Message::MakeLine(index, text)),
-                        button(text("−")).style(button::secondary).on_press_maybe(making::can_remove(index, &form.lines).then_some(Message::MakeRemoveLine(index))),
-                    ]
-                    .spacing(8)
-                    .align_y(iced::Alignment::Center),
-                );
-            }
-        }
-        let look = row![text(tr("Look", &[]))]
-            .push(face.map(image))
-            .push(button(text(tr("Choose images…", &[]))).style(button::secondary).on_press(Message::MakeChooseDrawings))
-            .push(form.look.is_some().then(|| {
-                button(text(tr("Use %@'s look", &[&assets::voice_name(form.base.id)]))).style(button::secondary).on_press(Message::MakeBaseLook)
-            }))
-            .spacing(8)
-            .align_y(iced::Alignment::Center);
-        let page = column![
-            text(tr("Make a Character", &[])).size(18),
-            text(tr("Start from a character, change what it says, and pick a voice. VibeBuddy makes each line in that voice, then you can write it to the box.", &[])).size(13),
-            row![text(tr("Start from", &[])), pick_list(bases, Some(form.base), Message::MakeBase)].spacing(8).align_y(iced::Alignment::Center),
-            row![text(tr("Name", &[])), text_input(&tr("Name", &[]), &form.name).on_input(Message::MakeName).width(320)]
-                .spacing(8)
-                .align_y(iced::Alignment::Center),
-            row![text(tr("Voice", &[])), voice_rows].spacing(8),
-        ]
-        .push(readiness)
-        .push(look)
-        .push(lines)
-        .push(text(tr("{address} is where the buddy says what it calls you; each line with it is made once with each form of address.", &[])).size(13))
-        .push(problem.map(|problem| text(problem).size(13).style(text::danger)))
-        .push(
-            row![
-                space::horizontal(),
-                button(text(tr("Cancel", &[]))).style(button::secondary).on_press(Message::MakeCharacter(false)),
-                button(text(tr("Make", &[]))).on_press_maybe(can_make.then_some(Message::MakeStart)),
-            ]
-            .spacing(8),
-        )
-        .spacing(12);
-        scrollable(page).into()
-    }
-
-    /// ▶ plays a Character's lines here, ■ stops them; not while the box is being written, as on the Mac.
-    fn preview_button(&self, id: &'static str, busy: bool) -> Element<'_, Message> {
-        let playing = self.previewing.as_ref().is_some_and(|(playing, _)| playing == id);
-        button(text(if playing { "■" } else { "▶" }))
-            .style(button::secondary)
-            .on_press_maybe((!busy).then_some(Message::TogglePreview(id)))
-            .into()
-    }
-
-    fn agents(&self) -> Element<'_, Message> {
-        let hooks = self.status.as_ref().map(|status| &status.hooks);
-        let row_for = |setup: &agents::Setup| -> Element<'_, Message> {
-            let last = hooks.and_then(|hooks| match setup.agent.as_str() {
-                "claude" => hooks.claude.as_deref(),
-                "codex" => hooks.codex.as_deref(),
-                "opencode" => hooks.opencode.as_deref(),
-                "copilot" => hooks.copilot.as_deref(),
-                "pi" => hooks.pi.as_deref(),
-                _ => None,
-            });
-            // Only Codex has a trust step; the others pick up config changes in their next session.
-            let codex = (setup.agent == "codex" && setup.installed)
-                .then(|| agents::codex_trust(setup.modified.as_deref(), last));
-            let (dot, state) = if !setup.present {
-                (DOT_OFF, tr("%@ wasn't found on this computer", &[&setup.name]))
-            } else if !setup.installed {
-                (DOT_OFF, tr("Not set up", &[]))
-            } else if let Some(agents::CodexTrust::ChangedSinceLastEvent(changed)) = &codex {
-                (DOT_BAD, tr(
-                    "The config changed at %@ and no Codex event has arrived since. Codex silently disables hooks that change: type /hooks in Codex and re-trust VibeBuddy's six hooks.",
-                    &[&short_time(changed)],
-                ))
-            } else if let Some(time) = last {
-                (DOT_GOOD, tr("Last event %@", &[&short_time(time)]))
-            } else if setup.agent == "codex" {
-                (DOT_WAIT, tr("Waiting for the first event… (Codex only runs this config after you trust it in /hooks)", &[]))
-            } else {
-                (DOT_WAIT, tr("Waiting for the first event…", &[]))
-            };
-            let id = setup.agent.clone();
-            let actions: Element<'_, Message> = if setup.installed {
-                row![
-                    button(text(tr("Repair", &[]))).on_press(Message::PlanHooks(id.clone(), true)),
-                    button(text(tr("Remove", &[]))).style(button::secondary).on_press(Message::PlanHooks(id, false)),
-                ]
-                .spacing(8)
-                .into()
-            } else {
-                button(text(tr("Connect", &[]))).on_press_maybe(setup.present.then_some(Message::PlanHooks(id, true))).into()
-            };
-            container(
-                row![
-                    text("●").color(dot),
-                    column![text(setup.name.clone()), text(state).size(13)].spacing(2).width(Length::Fill),
-                    actions,
-                ]
-                .spacing(12)
-                .align_y(iced::Alignment::Center),
-            )
-            .padding(10)
-            .style(container::rounded_box)
-            .into()
-        };
-        // Before anything is written, what it would change, as the Mac's sheet shows it.
-        let plan = self.hook_plan.as_ref().map(|plan| {
-            let lines: Element<'_, Message> = if plan.lines.is_empty() {
-                text(tr("Nothing to change.", &[])).size(13).into()
-            } else {
-                scrollable(column(plan.lines.iter().map(|line| {
-                    let color = if line.starts_with('+') { DOT_GOOD } else { DOT_BAD };
-                    text(line.clone()).size(12).font(Font::MONOSPACE).color(color).into()
-                })))
-                .height(Length::Fixed(200.0))
-                .into()
-            };
-            container(
-                column![text(tr("Will change %@", &[&plan.config.display()])), lines]
-                    .push((plan.agent == "codex").then(|| {
-                        text(tr(
-                            "After writing, open /hooks in Codex to review and trust this config — the app can't do that for you.",
-                            &[],
-                        ))
-                        .size(13)
-                    }))
-                    .push(
-                        row![
-                            button(text(tr("Write", &[]))).on_press_maybe((!plan.lines.is_empty()).then_some(Message::ApplyHooks(true))),
-                            button(text(tr("Cancel", &[]))).style(button::secondary).on_press(Message::ApplyHooks(false)),
-                        ]
-                        .spacing(8),
-                    )
-                    .spacing(8),
-            )
-            .padding(10)
-            .style(container::bordered_box)
-        });
-        let page = column![
-            text(tr("Connect agents", &[])).size(18),
-            text(tr(
-                "VibeBuddy only forwards session IDs, event names and working directories — never prompts or replies.",
-                &[]
-            ))
-            .size(13),
-            text(tr(
-                "This writes user-level config, so one install covers both the desktop app's sessions and the same agent running in a terminal.",
-                &[]
-            ))
-            .size(13),
-        ]
-        .push(plan)
-        .push(column(self.agents.iter().map(row_for)).spacing(8))
-        .spacing(12);
-        scrollable(page).into()
-    }
-
-    /// Where the box is and what it runs: the link, help finding it, and firmware to flash. The Device tab and the
-    /// first-run guide's Find the box page both show it.
-    fn box_section(&self) -> iced::widget::Column<'_, Message> {
-        let device = self.status.as_ref().map(|status| &status.device);
-        let link = match device {
-            None => tr("daemon isn't running", &[]),
-            Some(device) if !device.connected && !device.candidates.is_empty() => tr("Several devices found", &[]),
-            Some(device) if !device.connected => tr("Box not found", &[]),
-            Some(device) if device.relay => tr("Relay", &[]),
-            Some(device) => {
-                let kind = match (device.network, device.bridge) {
-                    (true, _) => tr("Wi-Fi", &[]),
-                    (false, true) => tr("UART bridge", &[]),
-                    (false, false) => tr("native USB", &[]),
-                };
-                format!("{} · {kind}", device.port.as_deref().unwrap_or("?"))
-            }
-        };
-        let firmware = device.and_then(|device| device.firmware_label()).unwrap_or_else(|| "—".to_owned());
-        let online = device.is_some_and(|device| device.connected);
-        // Firmware that reports TRANSFER 1 is updated over whatever carries the link (ADR-0016); older firmware is
-        // flashed over the cable only, and over Wi-Fi or the Relay the daemon refuses it.
-        let can_flash = online && (!device.is_some_and(|device| device.network) || device.is_some_and(|device| device.transfer));
-        let updates = self.updates();
-        let offer = updates.and_then(|updates| updates.firmware.as_ref());
-        // The offered version, or why there is none: a bare dash read as "no update checks at all".
-        let latest = match (offer, updates) {
-            (Some(offer), _) => offer.version.clone(),
-            (None, None) => "—".to_owned(),
-            (None, Some(updates)) if !updates.enabled => tr("Update checks are off (General)", &[]),
-            (None, Some(updates)) if updates.error.is_some() => tr("Last check failed", &[]),
-            (None, Some(updates)) if updates.last_check.is_none() => tr("Not checked yet", &[]),
-            (None, Some(_)) => tr("None released yet", &[]),
-        };
-        let downloaded = updates.and_then(status::Updates::firmware_directory).is_some();
-        let operation = self.status.as_ref().and_then(|status| status.operation.as_ref());
-        let busy = operation.is_some_and(status::Operation::running);
-        let outdated = updates.is_some_and(status::Updates::firmware_update_available);
-        // The daemon judged the box to run other firmware: a factory box, Muse, or one held in download mode with K0.
-        let other_firmware = online && device.is_some_and(|device| device.foreign_firmware && device.firmware_build.is_none());
-        let foreign = other_firmware && downloaded;
-        // Firmware is wanted (a factory box, or a newer one exists) but isn't on disk yet: say why, and what else works.
-        let unavailable = ((other_firmware || offer.is_some_and(|offer| offer.newer_than_box)) && !downloaded).then(|| {
-            let reason = match updates {
-                Some(updates) if updates.enabled => match (&updates.error, offer) {
-                    (Some(error), _) => tr("Couldn't get the firmware: %@", &[error]),
-                    (None, Some(_)) => tr("Downloading the firmware…", &[]),
-                    (None, None) => tr("Looking for firmware…", &[]),
-                },
-                _ => tr("Update checks are off, so VibeBuddy can't download firmware.", &[]),
-            };
-            column![
-                text(reason).size(13),
-                text(tr("Or download the firmware zip yourself and use Flash from file… on the Device tab:", &[])).size(13),
-                row![
-                    button(text(tr("Check again", &[])))
-                        .on_press_maybe(updates.is_some_and(|updates| updates.enabled).then_some(Message::CheckForUpdatesNow)),
-                    button(text(tr("Releases", &[]))).style(button::secondary).on_press(Message::OpenReleases),
-                ]
-                .spacing(8),
-            ]
-            .spacing(4)
-        });
-        // Either offer asks once more before flashing, since the box restarts.
-        let confirm = |title: String, detail: String, action: String| -> Element<'_, Message> {
-            confirm_flash(title, detail, action, (!busy).then_some(Message::FlashFirmware), Message::AskFirmwareUpdate(false))
-        };
-        // A package from a file is confirmed the same way, with what it holds next to what the box runs.
-        let from_file = self.file_firmware.as_ref().map(|package| {
-            let current = device.and_then(|device| device.firmware_label()).unwrap_or_else(|| tr("unknown", &[]));
-            confirm_flash(
-                tr("Flash this firmware?", &[]),
-                tr(
-                    "Firmware package: %@\nBox now: %@\nThe box restarts once; its voice pack and today's stats are kept. Over the UART bridge this takes a few minutes.",
-                    &[&package.label(), &current],
-                ),
-                tr("Flash", &[]),
-                (online && !busy).then_some(Message::FlashFile(true)),
-                Message::FlashFile(false),
-            )
-        });
-        let update: Option<Element<'_, Message>> = match (foreign, outdated && can_flash, self.confirm_firmware) {
-            (true, _, true) => Some(confirm(
-                tr("Flash the box with VibeBuddy?", &[]),
-                tr(
-                    "The box's current firmware and data will be erased and can't be recovered. It restarts on its own when done; over the UART port this takes a few minutes.",
-                    &[],
-                ),
-                tr("Flash", &[]),
-            )),
-            (true, _, false) => Some(
-                column![
-                    text(tr("The box isn't running VibeBuddy firmware.", &[])).style(text::warning),
-                    button(text(tr("Flash VibeBuddy firmware", &[])))
-                        .on_press_maybe((!busy).then_some(Message::AskFirmwareUpdate(true))),
-                ]
-                .spacing(8)
-                .into(),
-            ),
-            (false, true, true) => Some(confirm(
-                tr("Update the box firmware to %@?", &[&latest]),
-                {
-                    let restart = tr(
-                        "The box restarts once; its voice pack and today's stats are kept. Over the UART bridge this takes a few minutes.",
-                        &[],
-                    );
-                    match offer.and_then(|offer| offer.notes(i18n::is_chinese())) {
-                        Some(notes) => format!("{notes}\n\n{restart}"),
-                        None => restart,
-                    }
-                },
-                tr("Update", &[]),
-            )),
-            (false, true, false) => Some(
-                button(text(tr("Update to %@", &[&latest])))
-                    .on_press_maybe((!busy).then_some(Message::AskFirmwareUpdate(true)))
-                    .into(),
-            ),
-            (false, false, _) => None,
-        };
-        let flashing = operation.filter(|operation| operation.kind == status::OperationKind::Firmware).map(|operation| {
-            // Firmware that updates over the link carries on from where it got to; download mode is for the rest.
-            let over_the_link = device.is_some_and(|device| device.transfer);
-            let failed = (operation.state == status::OperationState::Failed).then(|| {
-                column![]
-                    .push((!over_the_link).then(|| {
-                        text(tr("Before retrying, hold K0 on the box and replug the cable to put it in download mode.", &[])).size(13)
-                    }))
-                    .push(button(text(tr("Retry", &[]))).on_press_maybe((can_flash && downloaded).then_some(Message::FlashFirmware)))
-                    .spacing(8)
-            });
-            column![text(operation.summary()).size(13)].push(failed).spacing(8)
-        });
-        // Not while a flash waits for a replug: that row says not to hold K0 this time.
-        let replug = operation.is_some_and(|operation| operation.state == status::OperationState::Replug);
-        // A pin left set hides every other box behind "Box not found", so it is always shown.
-        let pin = device.and_then(|device| device.pin.as_ref()).map(|pin| {
-            column![
-                text(tr("Only looking at %@, set by %@.", &[&pin.value, &pin.variable])).size(13).style(text::warning),
-                text(tr("To find the box on its own again, unset %@ and restart the daemon.", &[&pin.variable])).size(13),
-            ]
-            .spacing(4)
-        });
-        // Every ESP32-S3 on native USB looks the same: with several plugged in and none of them the box seen
-        // before, the user says which one it is.
-        let candidates = device.map(|device| device.candidates.as_slice()).unwrap_or_default();
-        let choice = (!online && !candidates.is_empty()).then(|| {
-            let rows = candidates.iter().map(|candidate| {
-                let label = match &candidate.usb_serial {
-                    Some(serial) => format!("{} · {serial}", candidate.port),
-                    None => candidate.port.clone(),
-                };
-                let pick = candidate.usb_serial.clone().map(|serial| {
-                    button(text(tr("This is the box", &[]))).on_press_maybe((!busy).then_some(Message::ChooseBox(serial)))
-                });
-                row![text(label).size(13).font(Font::MONOSPACE), space::horizontal()].push(pick).spacing(12).into()
-            });
-            column![text(tr(
-                "Several devices are plugged in, and none of them is the box seen before. Which one is the box?",
-                &[]
-            ))
-            .size(13)]
-            .extend(rows)
-            .spacing(6)
-        });
-        let not_found = (self.status.is_some() && !online && !busy && !replug && candidates.is_empty() && pin.is_none()).then(|| {
-            column![
-                text(tr("Not showing up? Use a cable that carries data, not just power.", &[])).size(13),
-                text(tr(
-                    "If the daemon log on the Advanced tab says “Permission denied”, your account can't open the box's port yet: restart the computer once, then replug the box.",
-                    &[]
-                ))
-                .size(13),
-                text(tr(
-                    "Still nothing? Hold K0 on the box while you plug in the cable. The box starts in download mode with a dark screen, ready to be flashed with VibeBuddy firmware.",
-                    &[]
-                ))
-                .size(13),
-            ]
-            .spacing(4)
-        });
-        // Another computer has the box (ADR-0011): say who, and offer to take it unless it's on their cable.
-        let busy_row = device.filter(|_| !online).and_then(|device| device.busy.as_ref()).map(|busy| {
-            let owner = if busy.owner.is_empty() { tr("another computer", &[]) } else { busy.owner.clone() };
-            if busy.reason == "usb" {
-                row![text(tr("The box is plugged into %@.", &[&owner])).size(13)]
-            } else {
-                row![
-                    text(tr("The box is with %@.", &[&owner])).size(13),
-                    space::horizontal(),
-                    button(text(tr("Take over", &[]))).on_press(Message::TakeOver),
-                ]
-                .spacing(12)
-            }
-        });
-        let refusal = device.filter(|_| !online).and_then(status::Device::relay_refusal).map(|refusal| text(refusal).size(13));
-        column![row![text(tr("Link", &[])).width(140), text(link)].spacing(12)]
-            .push(busy_row)
-            .push(refusal)
-            .push(pin)
-            .push(choice)
-            .push(not_found)
-            .push(row![text(tr("Box firmware", &[])).width(140), text(firmware)].spacing(12))
-            .push(row![text(tr("Latest firmware", &[])).width(140), text(latest)].spacing(12))
-            .push(device.filter(|_| online).and_then(|device| device.unsupported_board.as_ref()).map(|board| {
-                text(tr("This is a %@ board, which released firmware doesn't run on, so no update is offered.", &[board])).size(13)
-            }))
-            .push(update)
-            .push((outdated && online && !can_flash).then(|| text(tr("Plug in the cable to update the box's firmware.", &[])).size(13)))
-            .push(unavailable)
-            .push(flashing)
-            .push(from_file)
-            .spacing(12)
-    }
-
-    fn device(&self) -> Element<'_, Message> {
-        let device = self.status.as_ref().map(|status| &status.device);
-        let online = device.is_some_and(|device| device.connected);
-        let can_flash = online && (!device.is_some_and(|device| device.network) || device.is_some_and(|device| device.transfer));
-        let busy = self.status.as_ref().and_then(|status| status.operation.as_ref()).is_some_and(status::Operation::running);
-        // The computers the box is paired with (ADR-0012). Every computer it's plugged into pairs on its own, so this
-        // one has no Remove: it would only pair again.
-        let paired = device.filter(|device| online && device.box_key.is_some()).map(|device| {
-            let rows = device.paired_computers.iter().map(|computer| {
-                let name = if computer.name.is_empty() { tr("Unnamed computer", &[]) } else { computer.name.clone() };
-                let action: Element<'_, Message> = if device.computer_key.as_ref() == Some(&computer.key) {
-                    text(tr("This computer", &[])).size(13).style(text::secondary).into()
-                } else {
-                    button(text(tr("Remove", &[])))
-                        .style(button::secondary)
-                        .on_press_maybe((!busy).then_some(Message::Unpair(computer.key.clone())))
-                        .into()
-                };
-                row![text(name).size(13), space::horizontal(), action].spacing(12).into()
-            });
-            // The box lists them over the cable only (ERROR cable_only otherwise), so the list would be empty.
-            let unlisted = device.network.then(|| text(tr("Plug in the cable to see the paired computers.", &[])).size(13));
-            column![text(tr("Paired computers", &[]))]
-                .extend(rows)
-                .push(unlisted)
-                .push(
-                    text(tr("A computer pairs with the box when it's plugged in. To forget them all, use COMPUTERS in the box's menu.", &[]))
-                        .size(13),
-                )
-                .spacing(6)
-        });
-        // The frame is dark whatever the theme, so its text is light: in a light theme the theme's own text color
-        // vanished there, and a grab in progress looked like a button that did nothing.
-        let on_frame = |label: String| text(label).size(13).color(iced::Color::from_rgb8(0xd0, 0xd0, 0xd0));
-        let screen: Element<'_, Message> = match (&self.screenshot, self.screenshot_busy) {
-            (_, true) => on_frame(tr("Refreshing…", &[])).into(),
-            // Nearest-neighbour keeps the box's pixels crisp when scaled up.
-            (Some((_, handle)), false) => image(handle.clone())
-                .filter_method(image::FilterMethod::Nearest)
-                .width(Length::Fill)
-                .into(),
-            (None, false) => on_frame(tr("Click Refresh to see what the box is showing", &[])).into(),
-        };
-        // The tab outgrew the window: it scrolls, like the Character tab.
-        scrollable(
-            self.box_section()
-                .push(self.wifi_section())
-                .push(paired)
-                .push(column![
-                    // Separately distributed firmware (VibeBuddy-firmware-*.zip on Releases) comes in here.
-                    row![
-                        button(text(tr("Flash from file…", &[])))
-                            .on_press_maybe((can_flash && !busy).then_some(Message::FlashFromFile)),
-                        button(text(tr("Make the box blink", &[])))
-                            .on_press_maybe((online && !busy).then_some(Message::Identify)),
-                    ]
-                    .spacing(8),
-                    row![
-                        text(tr("Box screen", &[])),
-                        space::horizontal(),
-                        button(text(tr("Refresh", &[])))
-                            .on_press_maybe((online && !self.screenshot_busy).then_some(Message::TakeScreenshot)),
-                        button(text(tr("Save image", &[])))
-                            .style(button::secondary)
-                            .on_press_maybe(self.screenshot.is_some().then_some(Message::SaveScreenshot)),
-                    ]
-                    .spacing(8),
-                    // A fixed height: the tab scrolls, and a scrolled column has no height left to fill.
-                    container(screen)
-                        .padding(4)
-                        .center_x(Length::Fill)
-                        .center_y(Length::Fixed(260.0))
-                        .style(|_| container::background(iced::Color::from_rgb8(0x16, 0x16, 0x16))),
-                ]
-                .spacing(12))
-                .spacing(12)
-                // Room for the scroll bar, which otherwise covers the ends of the lines.
-                .padding(iced::Padding::ZERO.right(16)),
-        )
-        .into()
-    }
-
-    /// The Wi-Fi network the box joins; None until a box that can pair is on the cable or the network.
-    fn wifi_section(&self) -> Option<iced::widget::Column<'_, Message>> {
-        let device = self.status.as_ref().map(|status| &status.device);
-        let online = device.is_some_and(|device| device.connected);
-        let busy = self.status.as_ref().and_then(|status| status.operation.as_ref()).is_some_and(status::Operation::running);
-        // The Wi-Fi network the box joins, so it can be reached without the cable (ADR-0012). Set over the cable only;
-        // the password goes to the box and is kept nowhere else, so it is never shown again.
-        device.filter(|device| online && device.box_key.is_some()).map(|device| {
-            let network = device.wifi_network.clone().unwrap_or_else(|| tr("Not set", &[]));
-            // After Join the fields fold away and this says how it's going: joining, joined, or why not.
-            let state = device.wifi_network.as_ref().map(|_| {
-                let state = match (&device.wifi_error, &device.wifi_address) {
-                    (Some(why), _) => text(wifi_failure(why)).style(text::danger),
-                    (None, Some(address)) => text(tr("Joined · %@", &[address])).style(text::success),
-                    // A wrong password takes the network 10 to 15 s to turn down.
-                    (None, None) => text(tr("Joining… This can take up to 15 seconds.", &[])),
-                };
-                row![text(tr("Status", &[])).width(140), state].spacing(12)
-            });
-            let mut wifi = column![
-                text(tr("Wi-Fi", &[])),
-                row![text(tr("Network", &[])).width(140), text(network)].spacing(12),
-            ]
-            .push(state)
-            .spacing(6);
-            let fields = device.wifi_network.is_none() || device.wifi_error.is_some() || self.wifi_editing;
-            if device.network {
-                wifi = wifi.push(text(tr("Plug in the cable to change the box's network.", &[])).size(13));
-            } else if !fields {
-                wifi = wifi.push(
-                    row![
-                        button(text(tr("Change network", &[]))).style(button::secondary).on_press(Message::ChangeWifi),
-                        button(text(tr("Forget network", &[]))).style(button::secondary).on_press_maybe((!busy).then_some(Message::ForgetWifi)),
-                    ]
-                    .spacing(8),
-                );
-            } else {
-                let valid = !self.wifi_ssid.is_empty() && self.wifi_ssid.len() <= 32 && self.wifi_password.len() <= 63;
-                // Names are case-sensitive, so the box's own scan is the way to pick one; typing stays for hidden networks.
-                let seen = device.wifi_seen.iter().take(8).map(|network| {
-                    let label = format!("{}  {} dBm", network.ssid, network.rssi);
-                    let style = if network.ssid == self.wifi_ssid { button::primary } else { button::secondary };
-                    button(text(label).size(13)).style(style).on_press(Message::WifiSsid(network.ssid.clone())).into()
-                });
-                wifi = wifi
-                    .push(
-                        row![text(tr("Nearby networks", &[])).size(13), space::horizontal(), button(text(tr("Scan", &[]))).style(button::secondary).on_press_maybe((!busy).then_some(Message::ScanWifi))]
-                            .spacing(8),
-                    )
-                    .push(column(seen).spacing(4))
-                    .push(text_input(&tr("Network name", &[]), &self.wifi_ssid).on_input(Message::WifiSsid))
-                    .push(text_input(&tr("Password", &[]), &self.wifi_password).secure(true).on_input(Message::WifiPassword))
-                    .push(
-                        row![button(text(tr("Join", &[]))).on_press_maybe((valid && !busy).then_some(Message::JoinWifi))]
-                            .push(device.wifi_network.as_ref().map(|_| {
-                                button(text(tr("Forget network", &[])))
-                                    .style(button::secondary)
-                                    .on_press_maybe((!busy).then_some(Message::ForgetWifi))
-                            }))
-                            .spacing(8),
-                    );
-            }
-            wifi.push(text(tr("With Wi-Fi, a paired computer on the same network can drive the box without the cable.", &[])).size(13))
-        })
-    }
-
-    /// The user's last voice commands and the buddy's spoken replies, newest at the bottom, as on the Mac.
-    fn conversation(&self) -> Element<'_, Message> {
-        let header = row![
-            text(tr("Your last voice commands and the buddy's spoken replies, newest at the bottom.", &[]))
-                .size(13)
-                .style(text::secondary)
-                .width(Length::Fill),
-            button(text(tr("Refresh", &[]))).on_press_maybe((!self.conversation_loading).then_some(Message::RefreshConversation)),
-        ]
-        .spacing(12)
-        .align_y(iced::Alignment::Center);
-        let placeholder = |title: String, detail: String| -> Element<'_, Message> {
-            container(column![text(title).size(16), text(detail).size(13).style(text::secondary)].spacing(6).align_x(iced::Alignment::Center))
-                .center(Length::Fill)
-                .into()
-        };
-        // A daemon older than the setting doesn't say it; then there is only Codex.
-        let choice = self.resident_info.as_ref().and_then(|info| info.brain_setting);
-        // Anything else that keeps K0 from working: the UART bridge too slow, the account.
-        let voice_off = self
-            .resident_info
-            .as_ref()
-            .filter(|_| self.resident_problem.is_none())
-            .and_then(client::ResidentInfo::voice_off_note)
-            .map(|note| text(note).size(13).style(text::warning));
-        let header = column![header].push(choice.map(|choice| self.agent_setting(choice))).push(voice_off).spacing(12);
-        // Voice needs the user's Codex, installed and logged in, or Claude Code with a key: say what's missing first.
-        if let Some(problem) = &self.resident_problem {
-            let (title, detail) = match problem {
-                client::Problem::CodexMissing => (tr("Voice needs Codex", &[]), tr("Voice commands are answered by Codex on this computer, and it isn't installed. Install the Codex CLI, then sign in with `codex login`. This tab notices within half a minute.", &[])),
-                client::Problem::CodexLoggedOut => (tr("Voice needs Codex", &[]), tr("Voice commands are answered by Codex on this computer, and it isn't signed in. Run `codex login` in a terminal and sign in. This tab notices within half a minute.", &[])),
-                client::Problem::ClaudeMissing => (tr("Voice needs Claude Code", &[]), tr("Voice commands are answered by Claude Code on this computer, and it isn't installed. Install Claude Code; you don't need to sign in to it. This tab notices within half a minute.", &[])),
-                client::Problem::AnthropicKeyMissing => (tr("Voice needs Claude Code", &[]), tr("Claude Code answers voice commands only with your own Anthropic API key. Add your key above.", &[])),
-                client::Problem::Other => (tr("Voice needs Codex", &[]), tr("The buddy's session isn't available: %@", &[&"?"])),
-            };
-            let codex_problem = matches!(problem, client::Problem::CodexMissing | client::Problem::CodexLoggedOut);
-            let or_claude = (codex_problem && choice == Some(client::BrainChoice::Auto))
-                .then(|| text(tr("Or let Claude Code answer, with your own Anthropic API key: add it above.", &[])).size(13).style(text::secondary));
-            let install = match problem {
-                client::Problem::CodexMissing => Some(button(text(tr("How to install the Codex CLI", &[]))).on_press(Message::OpenCodexInstallPage)),
-                client::Problem::ClaudeMissing => Some(button(text(tr("How to install Claude Code", &[]))).on_press(Message::OpenClaudeInstallPage)),
-                _ => None,
-            };
-            let body = container(
-                column![text(title).size(16), text(detail).size(13).style(text::secondary)]
-                    .push(or_claude)
-                    .push(install)
-                    .spacing(6)
-                    .align_x(iced::Alignment::Center),
-            )
-            .center(Length::Fill);
-            return column![header, body].spacing(12).into();
-        }
-        let body = match &self.conversation {
-            None => container(text(tr("Refreshing…", &[])).style(text::secondary)).center(Length::Fill).into(),
-            Some(Err(client::HistoryError::DaemonDown)) => placeholder(
-                tr("Couldn't read the conversation", &[]),
-                tr("The daemon isn't running. Restart it on the Advanced tab.", &[]),
-            ),
-            Some(Err(client::HistoryError::Unavailable(why))) => placeholder(
-                tr("Couldn't read the conversation", &[]),
-                tr("The buddy's session isn't available: %@", &[why]),
-            ),
-            Some(Ok(exchanges)) if exchanges.is_empty() => placeholder(
-                tr("Nothing said yet", &[]),
-                tr("Hold K0 on the box and talk to the buddy. What you say and what it says back show up here.", &[]),
-            ),
-            Some(Ok(exchanges)) => scrollable(
-                column(exchanges.iter().map(|exchange| {
-                    column![bubble(&exchange.said, true)]
-                        .extend(exchange.replies.iter().map(|reply| bubble(reply, false)))
-                        .spacing(6)
-                        .into()
-                }))
-                .spacing(10)
-                // Room for the scroll bar, which otherwise covers the ends of the lines.
-                .padding(iced::Padding::ZERO.right(16)),
-            )
-            // Opens on the newest, at the bottom.
-            .anchor_bottom()
-            .height(Length::Fill)
-            .into(),
-        };
-        column![header, body].spacing(12).into()
-    }
-
-    /// Which Agent answers, and the user's Anthropic API key for Claude Code, as on the Mac. The key is typed once
-    /// and never shown again: the daemon only says whether it has one.
-    fn agent_setting(&self, choice: client::BrainChoice) -> Element<'_, Message> {
-        let option = |label: String, option: client::BrainChoice| {
-            let style = if option == choice { button::primary } else { button::secondary };
-            button(text(label)).style(style).on_press(Message::PickBrain(option))
-        };
-        let mut setting = column![
-            row![
-                text(tr("Answered by", &[])),
-                option(tr("Automatic", &[]), client::BrainChoice::Auto),
-                option("Codex".to_owned(), client::BrainChoice::Codex),
-                option("Claude Code".to_owned(), client::BrainChoice::Claude),
-            ]
-            .spacing(8)
-            .align_y(iced::Alignment::Center)
-        ]
-        .spacing(6);
-        if choice == client::BrainChoice::Auto {
-            setting = setting.push(text(tr("Automatic: Codex when it's ready, else Claude Code with your API key.", &[])).size(12).style(text::secondary));
-        }
-        if choice != client::BrainChoice::Codex {
-            let saved = self.resident_info.as_ref().and_then(|info| info.anthropic_key_set) == Some(true);
-            let key = if saved {
-                row![
-                    text(tr("Anthropic API key saved", &[])),
-                    button(text(tr("Remove", &[]))).style(button::secondary).on_press(Message::RemoveAnthropicKey),
-                ]
-            } else {
-                let draft = self.anthropic_key_draft.trim();
-                row![
-                    text_input(&tr("Anthropic API key", &[]), &self.anthropic_key_draft)
-                        .secure(true)
-                        .on_input(Message::AnthropicKeyDraft)
-                        .on_submit(Message::SaveAnthropicKey)
-                        .width(320),
-                    button(text(tr("Save", &[]))).on_press_maybe((!draft.is_empty()).then_some(Message::SaveAnthropicKey)),
-                ]
-            };
-            setting = setting
-                .push(
-                    key.push(button(text(tr("Get an API key", &[]))).style(button::text).on_press(Message::OpenAnthropicConsole))
-                        .spacing(8)
-                        .align_y(iced::Alignment::Center),
-                )
-                .push(text(tr("Claude Code answers only with your own Anthropic API key, billed to your Anthropic account; a Claude subscription can't be used here. What you say and your Agents' task titles go to Anthropic.", &[])).size(12).style(text::secondary));
-        }
-        if let Some(error) = &self.resident_setting_error {
-            setting = setting.push(text(error.clone()).size(12).style(text::danger));
-        }
-        setting.into()
-    }
-
-    /// The Account tab: the VibeBuddy account, then the user's own keys, as on the Mac.
-    fn account(&self) -> Element<'_, Message> {
-        let keys = self.status.as_ref().and_then(|status| status.voice_keys.as_ref()).map(|keys| self.own_keys(keys));
-        column![self.vibebuddy_account()].push(keys).spacing(24).into()
-    }
-
-    /// The user's own keys for spoken replies (ADR-0020). Each is typed once and never shown again: the daemon only
-    /// says whether it has one.
-    fn own_keys(&self, keys: &status::VoiceKeys) -> Element<'_, Message> {
-        let mut section = column![
-            text(tr("Your own keys", &[])).size(16),
-            text(tr("With your own key, spoken replies in that provider's voices go straight to it, billed to your account there, and never through VibeBuddy.", &[])).size(12).style(text::secondary),
-        ]
-        .spacing(8);
-        for provider in client::KeyProvider::ALL {
-            let (name, key, refused) = match provider {
-                client::KeyProvider::ElevenLabs => ("ElevenLabs".to_owned(), &keys.elevenlabs, tr("ElevenLabs refused your own key. Replies in its voices stay silent until you set another one.", &[])),
-                client::KeyProvider::Volc => (tr("Volcano Engine", &[]), &keys.volc, tr("Volcano Engine refused your own key. Replies in its voices stay silent until you set another one.", &[])),
-            };
-            let entry = if key.set {
-                row![
-                    text(tr("Set", &[])).style(text::secondary),
-                    button(text(tr("Clear", &[]))).style(button::secondary).on_press(Message::ClearOwnKey(provider)),
-                ]
-            } else {
-                let draft = &self.own_key_drafts[provider as usize];
-                row![
-                    text_input(&tr("Your own key", &[]), draft)
-                        .secure(true)
-                        .on_input(move |draft| Message::OwnKeyDraft(provider, draft))
-                        .on_submit(Message::SaveOwnKey(provider))
-                        .width(260),
-                    button(text(tr("Save", &[]))).on_press_maybe((!draft.trim().is_empty()).then_some(Message::SaveOwnKey(provider))),
-                ]
-            };
-            section = section.push(
-                row![text(name).width(140)]
-                    .push(entry.spacing(8).align_y(iced::Alignment::Center))
-                    .push(button(text(tr("Get a key", &[]))).style(button::text).on_press(Message::OpenOwnKeyPage(provider)))
-                    .spacing(8)
-                    .align_y(iced::Alignment::Center),
-            );
-            if key.refused {
-                section = section.push(text(refused).size(12).style(text::danger));
-            }
-        }
-        section.into()
-    }
-
-    /// The VibeBuddy account (ADR-0018): the daemon keeps the session; this only opens the browser to sign in.
-    fn vibebuddy_account(&self) -> Element<'_, Message> {
-        let Some(status) = &self.status else {
-            return text(tr("The daemon isn't running. Restart it on the Advanced tab.", &[])).size(13).into();
-        };
-        let account = &status.account;
-        if !account.available {
-            return text(tr("Signing in isn't available in this version of VibeBuddy.", &[])).size(13).into();
-        }
-        if !account.signed_in {
-            let waiting = self.signing_in.then(|| text(tr("Waiting for the browser…", &[])).size(13).style(text::secondary));
-            return column![
-                text(tr("Signing in opens your browser. Voice commands need an account.", &[])).size(13),
-                button(text(tr("Sign in", &[]))).on_press(Message::SignIn),
-            ]
-            .push(waiting)
-            .spacing(12)
-            .into();
-        }
-        let who = match (&account.github_login, account.github_id) {
-            (Some(login), _) => tr("Signed in with GitHub as %@", &[login]),
-            (None, Some(id)) => tr("Signed in with GitHub (user %lld)", &[&id]),
-            (None, None) => tr("Signed in as %@", &[&account.email.as_deref().unwrap_or("—")]),
-        };
-        let actions: Element<'_, Message> = if self.confirm_delete_account {
-            confirm_flash(
-                tr("Delete your VibeBuddy account?", &[]),
-                tr("This deletes the account and everything kept about it, and signs out on every computer. It can't be undone.", &[]),
-                tr("Delete account", &[]),
-                Some(Message::DeleteAccount),
-                Message::AskDeleteAccount(false),
-            )
-        } else {
-            row![
-                button(text(tr("Sign out", &[]))).on_press(Message::SignOut),
-                button(text(tr("Delete account…", &[]))).style(button::secondary).on_press(Message::AskDeleteAccount(true)),
-            ]
-            .spacing(8)
-            .into()
-        };
-        let today = match (account.refused.as_deref(), &account.today) {
-            (Some(refused), _) => {
-                let back = status::voice_comes_back(chrono::Utc::now(), &chrono::Local);
-                let line = if refused == "global_cap" {
-                    tr("Voice is paused for everyone today. It comes back at %@.", &[&back])
-                } else {
-                    tr("Today's voice is used up. It comes back at %@.", &[&back])
-                };
-                Some(text(line).size(13).style(text::warning))
-            }
-            (None, Some(usage)) => Some(text(tr("Voice today: %lld of %lld", &[&usage.commands, &usage.commands_limit])).size(13).style(text::secondary)),
-            (None, None) => None,
-        };
-        let plan = account.plan.as_ref().map(|plan| {
-            let name = if plan.paid() { tr("Paid plan", &[]) } else { tr("Free", &[]) };
-            row![text(tr("Plan", &[])).width(140), text(name)].spacing(12)
-        });
-        let month = account.plan.as_ref().and_then(|plan| plan.month_line()).map(|line| text(line).size(13).style(text::secondary));
-        column![text(who)].push(plan).push(month).push(today).push(actions).spacing(12).into()
-    }
-
-    fn advanced(&self) -> Element<'_, Message> {
-        let daemon = match &self.status {
-            Some(status) => tr("Running · %@", &[&status.daemon.short_build()]),
-            None => tr("Not running", &[]),
-        };
-        let config = config_dir()
-            .map(|dir| dir.join("config.json").display().to_string())
-            .unwrap_or_default();
-        column![
-            row![text("daemon").width(140), text(daemon)].spacing(12),
-            button(text(tr("Restart daemon", &[]))).on_press_maybe(self.status.is_some().then_some(Message::RestartDaemon)),
-            // The daemon logs to the journal here, not a file; the folder holds the hook's log.
-            row![
-                button(text(tr("Show daemon log", &[]))).on_press(Message::ShowDaemonLog),
-                button(text(tr("Open logs folder", &[]))).style(button::secondary).on_press(Message::OpenLogsFolder),
-                button(text(tr("Export diagnostics…", &[]))).style(button::secondary).on_press(Message::ExportDiagnostics),
-            ]
-            .spacing(8),
-            text(tr("Config file: %@", &[&config])).size(13),
-        ]
-        .spacing(12)
-        .into()
     }
 
     /// Both sides' build IDs, the voice and the OS, as in the Mac app's summary.txt; also what a problem report
@@ -2653,22 +1353,6 @@ const BUILTIN: &str = "builtin";
 /// The Mac app's `CustomCharacterCard.prompt`: a start for any image model.
 const CUSTOM_PROMPT: &str = "Pixel art game sprite of [describe your character], chibi proportions, standing, front view, full body, centered, arms down, flat colors, thick dark outline, limited 16-color palette, plain solid white background. Then the same character in exactly the same pose with the eyes closed; with a big happy smile; with a sad face.";
 
-/// A look frame as an image to draw, each pixel `scale` pixels wide.
-/// The user's words on the right in the accent color, the buddy's replies on the left, as in a chat.
-fn bubble(words: &str, mine: bool) -> Element<'_, Message> {
-    let bubble = container(text(words).size(14)).padding([7, 12]).max_width(440).style(move |theme: &Theme| {
-        let palette = theme.extended_palette();
-        let pair = if mine { palette.primary.base } else { palette.background.weak };
-        container::Style {
-            background: Some(pair.color.into()),
-            text_color: Some(pair.text),
-            border: iced::border::rounded(12),
-            ..container::Style::default()
-        }
-    });
-    if mine { row![space::horizontal(), bubble] } else { row![bubble, space::horizontal()] }.into()
-}
-
 fn handle(frame: &character::Image, scale: usize) -> image::Handle {
     let (w, h) = (frame.width * scale, frame.height * scale);
     let mut pixels = vec![0u8; w * h * 4];
@@ -2679,26 +1363,6 @@ fn handle(frame: &character::Image, scale: usize) -> image::Handle {
         }
     }
     image::Handle::from_rgba(w as u32, h as u32, pixels)
-}
-
-/// A Character's card, outlined in the accent color when the box wears it.
-fn character_card(content: Element<'_, Message>, in_use: bool) -> Element<'_, Message> {
-    container(content)
-        .padding(10)
-        .width(Length::Fill)
-        .style(move |theme: &Theme| {
-            let palette = theme.extended_palette();
-            container::Style {
-                background: Some(palette.background.weak.color.into()),
-                border: iced::Border {
-                    color: if in_use { palette.primary.base.color } else { iced::Color::TRANSPARENT },
-                    width: 2.0,
-                    radius: 8.0.into(),
-                },
-                ..container::Style::default()
-            }
-        })
-        .into()
 }
 
 /// A Character that can lend voice and lines, as the picker shows it.
@@ -2734,12 +1398,6 @@ impl std::fmt::Display for AddressChoice {
         }
     }
 }
-
-/// The Agents tab's status dots: not set up, waiting for the first event, working, and Codex needing trust again.
-const DOT_OFF: iced::Color = iced::Color::from_rgb(0.55, 0.55, 0.55);
-const DOT_WAIT: iced::Color = iced::Color::from_rgb(0.95, 0.6, 0.15);
-const DOT_GOOD: iced::Color = iced::Color::from_rgb(0.3, 0.75, 0.35);
-const DOT_BAD: iced::Color = iced::Color::from_rgb(0.9, 0.3, 0.3);
 
 /// The app starts at login through an XDG autostart entry: install.sh writes one in the user's autostart folder, the
 /// pacman package one in /etc/xdg/autostart. A user entry decides when there is one; `Hidden=true` there turns a
@@ -2784,26 +1442,11 @@ fn notify_new_firmware(status: &Status) {
     let _ = std::fs::create_dir_all(marker.parent().unwrap_or(&marker));
     let _ = std::fs::write(&marker, &offer.version);
     let title = tr("Box firmware %@ is available", &[&offer.version]);
-    // The korekore UI words it its own way (canvas: "SYSTEM NOTIFICATIONS").
-    let body = if korekore::requested() { tr("Update it from Settings › Device.", &[]) } else { tr("Open Settings → Device to update the box.", &[]) };
+    // As the korekore canvas words it ("SYSTEM NOTIFICATIONS").
+    let body = tr("Update it from Settings › Device.", &[]);
     if let Err(error) = launch("notify-send", &["--app-name=VibeBuddy".as_ref(), title.as_ref(), body.as_ref()]) {
         eprintln!("vibebuddy-desktop: {error}");
     }
-}
-
-/// Asks once more before flashing, since the box restarts: a title, what will happen, and the two buttons.
-fn confirm_flash<'a>(title: String, detail: String, action: String, flash: Option<Message>, cancel: Message) -> Element<'a, Message> {
-    column![
-        text(title),
-        text(detail).size(13),
-        row![
-            button(text(action)).on_press_maybe(flash),
-            button(text(tr("Cancel", &[]))).style(button::secondary).on_press(cancel),
-        ]
-        .spacing(8),
-    ]
-    .spacing(8)
-    .into()
 }
 
 /// The daemon's XDG directories (see `daemon/src/config.rs`), where it keeps state and config and the hook its log.
@@ -2913,8 +1556,8 @@ fn run_tray() -> impl futures::Stream<Item = Message> {
 
     iced::stream::channel(16, async |mut output| {
         let (events, mut clicks) = futures::channel::mpsc::unbounded();
-        let kore = korekore::requested().then(|| korekore::picture::BoxPicture::derive(None));
-        let tray = tray::Tray { menu: MenuState::derive(None), kore, color: [255, 255, 255], events };
+        let kore = korekore::picture::BoxPicture::derive(None);
+        let tray = tray::Tray { menu: MenuState::derive(None), kore, events };
         // At login the app can start before the shell's tray host is up; ksni then registers once it appears, and
         // again after the shell restarts. The app opens the window if it doesn't (`Message::TrayHost`).
         match tray.assume_sni_available(true).spawn().await {

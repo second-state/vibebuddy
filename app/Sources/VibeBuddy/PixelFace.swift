@@ -1,6 +1,7 @@
 import AppKit
 
-/// The buddy in the menu bar: an 18-point pixel face as a template image, so it adapts to light and dark. The closed-eye version means the link is down.
+/// An 18-point pixel face as a template image, so it adapts to light and dark. `scripts/make-app-icon.swift` draws the
+/// bundle's icon from it; while the App runs, the Dock shows the korekore icon instead.
 enum PixelFace {
     static func image(eyesClosed: Bool) -> NSImage {
         let size = NSSize(width: 18, height: 18)
@@ -27,17 +28,5 @@ enum PixelFace {
         }
         image.isTemplate = true
         return image
-    }
-
-    /// The large version for onboarding and About.
-    static func largeImage() -> NSImage {
-        let base = image(eyesClosed: false)
-        base.isTemplate = false
-        let big = NSImage(size: NSSize(width: 108, height: 108))
-        big.lockFocus()
-        NSGraphicsContext.current?.imageInterpolation = .none
-        base.draw(in: NSRect(x: 0, y: 0, width: 108, height: 108))
-        big.unlockFocus()
-        return big
     }
 }

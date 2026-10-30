@@ -33,17 +33,6 @@ do {
     check(status.hooks.codex != nil && status.hooks.claude == nil, "hook timestamps decode")
     check(status.hooks.opencode == nil && status.hooks.lastEvent(.codex) == status.hooks.codex, "a daemon without OpenCode and Copilot still decodes")
     check(status.operation?.kind == .voicePack && status.operation?.progress == 0.42, "operation decodes")
-    let menu = MenuState.derive(status: status, daemonAlive: true)
-    check(menu.icon == .online, "online icon")
-    check(menu.deviceLine == "Box online · firmware abc1234-dirty", "device line: \(menu.deviceLine)")
-    check(menu.modeLine == "Mode: Pomodoro", "mode line: \(menu.modeLine)")
-    check(menu.todayLine == "Today: done 3 · asks 1 · busy 1 h 23 min", "today line: \(menu.todayLine)")
-    var offline = status
-    offline.device.connected = false
-    let offlineMenu = MenuState.derive(status: offline, daemonAlive: true)
-    check(offlineMenu.icon == .offline && offlineMenu.deviceLine == "Box not found", "offline menu")
-    let down = MenuState.derive(status: nil, daemonAlive: false)
-    check(down.icon == .daemonDown && down.deviceLineIsAction, "daemon-down menu")
     check(status.config.checkUpdates == nil, "check_updates null follows the build")
     check(status.updates?.app?.version == "0.4.0" && status.updates?.lastCheck != nil, "updates decode")
     check(Firmware.updateAvailable(status.updates), "a downloaded firmware newer than the box is offered")
@@ -442,10 +431,7 @@ do {
     check(false, "resident JSON fails to decode: \(error)")
 }
 
-// 7. korekore (ADR-0021): the switch, and the sprites scaled whole times as drawn.
-check(AppUI.atLaunch(environment: [:]) == .current, "the current UI is the default")
-check(AppUI.atLaunch(environment: ["VIBEBUDDY_UI": "korekore"]) == .korekore, "VIBEBUDDY_UI=korekore asks for korekore")
-check(AppUI.atLaunch(environment: ["VIBEBUDDY_UI": "other"]) == .current, "anything else keeps the current UI")
+// 7. korekore (ADR-0021): the sprites scaled whole times as drawn.
 do {
     let kore = KorekoreSprites.koreNormal
     check(kore.width == 20 && kore.height == 18 && kore.pixels.count == 360, "Kore is 20 x 18")

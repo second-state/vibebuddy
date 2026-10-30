@@ -1,12 +1,12 @@
 ---
-status: proposed
+status: accepted
 ---
 
 # The apps become korekore, and the user picks the box's screens
 
 [ADR-0020](0020-the-box-and-the-apps-share-the-korekore-look.md) built korekore as a second UI beside the current one, behind a hidden switch, with the box's korekore screens in a separate firmware build, and left the rest for later. Reviewing the handoff on 2026-10-23, we settled what "later" is. This ADR replaces the parts of ADR-0020 it names; the rest stands.
 
-- **The apps have one style, korekore.** There is no setting to pick the apps' style. While the korekore apps are being built (Phase 2 of [`docs/design/korekore/`](../design/korekore/README.md)) the current settings window, onboarding and menu bar stay what users get, and the korekore UI opens only with the development switch `VIBEBUDDY_UI=korekore`. Once all of Phase 2 has landed and been accepted, korekore replaces the current app UI in one step, and the old views and the docs that describe them go.
+- **The apps have one style, korekore.** There is no setting to pick the apps' style. While the korekore apps are being built (Phase 2 of [`docs/design/korekore/`](../design/korekore/README.md)) the current settings window, onboarding and menu bar stay what users get, and the korekore UI opens only with the development switch `VIBEBUDDY_UI=korekore`. Once all of Phase 2 has landed and been accepted, korekore replaces the current app UI in one step, and the old views and the docs that describe them go. Phase 2 was accepted on 2026-10-30: the switch and the old views are removed, and both apps open korekore.
 - **The user picks the box's screens** in the korekore app: the current robot screens or the korekore screens. The robot screens stay the default. (This is not a Character's look: either set of screens can show any Character.)
 - **One firmware image carries both.** Changing the box's screens is a command over the link, not a flash: no second image to release, and no update that quietly puts a box back on the other screens. The cargo feature `korekore` from ADR-0020 is dropped. The default image is no longer byte-for-byte the same as before, but the robot screens must stay pixel-for-pixel the same (`tools/compare-display.sh` and the pinned pixels in `firmware-rs/core/tests/firmware.rs`), and the image must still fit the 4 MB OTA slot.
 - **The default Character stays the robot**, with either set of screens. Kore becomes a full Character of its own (persona, voice, lines, look), using the defaults the design README gives (the Jessica voice, English with a little Japanese), in its own change.

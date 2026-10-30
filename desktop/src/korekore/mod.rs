@@ -1,8 +1,7 @@
-//! The korekore UI (ADR-0020, ADR-0021): for now its theme, pixel art and fonts, generated from docs/design/korekore
-//! by `tools/korekore-codegen.py` and `tools/korekore-fonts.py`. It opens only with `VIBEBUDDY_UI=korekore`
-//! while it is being built; the current UI stays what everyone else gets.
+//! The korekore UI (ADR-0020, ADR-0021): the app's only UI. Its theme, pixel art and fonts are generated from
+//! docs/design/korekore by `tools/korekore-codegen.py` and `tools/korekore-fonts.py`.
 
-// The views that use all this come in the next steps.
+// The generated theme and sprites hold all the design's tokens, and the views do not use each one.
 #![allow(dead_code)]
 
 mod account;
@@ -20,12 +19,7 @@ use iced::widget::image;
 
 use crate::i18n::tr;
 
-/// Whether this launch asked for the korekore UI. Read once at launch.
-pub fn requested() -> bool {
-    std::env::var("VIBEBUDDY_UI").is_ok_and(|ui| ui == "korekore")
-}
-
-/// The bundled fonts (fonts/korekore), registered with iced at start only when the korekore UI is on.
+/// The bundled fonts (fonts/korekore), registered with iced at start.
 pub const FONTS: [&[u8]; 4] = [
     include_bytes!("../../../fonts/korekore/MPLUSRounded1c-Regular.ttf"),
     include_bytes!("../../../fonts/korekore/MPLUSRounded1c-Bold.ttf"),
@@ -183,7 +177,7 @@ impl Section {
         }
     }
 
-    /// The current UI's tab this section stands for: same state, same messages.
+    /// The tab this section stands for: same state, same messages.
     pub fn tab(self) -> crate::Tab {
         match self {
             Section::Character => crate::Tab::Sound,

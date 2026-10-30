@@ -7,8 +7,7 @@ import VibeBuddyCore
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
     private let model = AppModel()
-    private var statusItem: NSStatusItem!
-    /// The korekore UI's menu bar item and panel, in place of `statusItem` (ADR-0021).
+    /// The menu bar item and its panel.
     private var korekoreItem: KorekoreStatusItem?
     private var settingsWindow: NSWindow?
     private var onboardingWindow: NSWindow?
@@ -38,8 +37,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if SingleInstance.handOffToRunningCopy() { exit(0) }
         // An installed copy with the old file name renames itself (or gives way to a new copy) and starts again.
         if BundleRename.migrateIfNeeded() { exit(0) }
-        // The korekore UI's fonts, only when it was asked for (ADR-0021): the current UI keeps the system's.
-        if AppUI.atLaunch() == .korekore { KorekoreAssets.registerFonts(in: Resources.resourcesDirectory.appendingPathComponent("fonts")) }
+        KorekoreAssets.registerFonts(in: Resources.resourcesDirectory.appendingPathComponent("fonts"))
         DistributedNotificationCenter.default().addObserver(forName: SingleInstance.showSettings, object: nil, queue: .main) { [weak self] _ in
             MainActor.assumeIsolated { self?.showMainWindow() }
         }
@@ -53,17 +51,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         source.resume()
         terminationSignal = source
 
-        if AppUI.atLaunch() == .korekore {
-            korekoreItem = KorekoreStatusItem(model: model, actions: KorekoreMenuActions(
-                settings: { [weak self] in self?.showSettings() }, checkForUpdates: { [weak self] in self?.checkForUpdates() },
-                reportProblem: { [weak self] in self?.reportProblem() }, quit: { [weak self] in self?.quit() },
-                restartDaemon: { [weak self] in self?.restartDaemon() }))
-        } else {
-            statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
-            statusItem.button?.image = PixelFace.image(eyesClosed: true)
-            statusItem.menu = NSMenu()
-            model.$menu.receive(on: RunLoop.main).sink { [weak self] menu in self?.render(menu) }.store(in: &subscriptions)
-        }
+        korekoreItem = KorekoreStatusItem(model: model, actions: KorekoreMenuActions(
+            settings: { [weak self] in self?.showSettings() }, checkForUpdates: { [weak self] in self?.checkForUpdates() },
+            reportProblem: { [weak self] in self?.reportProblem() }, quit: { [weak self] in self?.quit() },
+            restartDaemon: { [weak self] in self?.restartDaemon() }))
         model.$lastError.receive(on: RunLoop.main).compactMap { $0 }.sink { message in
             let alert = NSAlert()
             alert.messageText = "VibeBuddy"
@@ -104,7 +95,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func present(_ window: NSWindow) {
         NSApp.setActivationPolicy(.regular)
         // The Dock tile takes the bundle's icon each time it appears, so the korekore one goes on after it.
-        if AppUI.atLaunch() == .korekore { NSApp.applicationIconImage = KorekoreAppIcon.image() }
+        NSApp.applicationIconImage = KorekoreAppIcon.image()
         NSApp.activate(ignoringOtherApps: true)
         window.makeKeyAndOrderFront(nil)
     }
@@ -150,59 +141,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         return main
     }
 
-    private func render(_ state: MenuState) {
-        statusItem.button?.image = PixelFace.image(eyesClosed: state.icon != .online)
-        // Gray out when the link is down or the daemon isn't up: closed eyes plus gray means "it's not there".
-        statusItem.button?.appearsDisabled = state.icon != .online
-        let menu = NSMenu()
-        let device = NSMenuItem(title: state.deviceLine, action: state.deviceLineIsAction ? #selector(restartDaemon) : nil, keyEquivalent: "")
-        device.target = self
-        device.isEnabled = state.deviceLineIsAction
-        menu.addItem(device)
-        let mode = NSMenuItem(title: state.modeLine, action: nil, keyEquivalent: "")
-        mode.isEnabled = false
-        menu.addItem(mode)
-        let today = NSMenuItem(title: state.todayLine, action: nil, keyEquivalent: "")
-        today.isEnabled = false
-        menu.addItem(today)
-        menu.addItem(.separator())
-        let settings = NSMenuItem(title: String(localized: "Settings…"), action: #selector(showSettings), keyEquivalent: ",")
-        settings.target = self
-        menu.addItem(settings)
-        let updates = NSMenuItem(title: String(localized: "Check for Updates…"), action: #selector(checkForUpdates), keyEquivalent: "")
-        updates.target = self
-        menu.addItem(updates)
-        let report = NSMenuItem(title: String(localized: "Report a Problem…"), action: #selector(reportProblem), keyEquivalent: "")
-        report.target = self
-        menu.addItem(report)
-        menu.addItem(.separator())
-        let quit = NSMenuItem(title: String(localized: "Quit VibeBuddy (the box goes offline)"), action: #selector(quit), keyEquivalent: "q")
-        quit.target = self
-        menu.addItem(quit)
-        statusItem.menu = menu
-    }
-
     @objc private func restartDaemon() { model.restartDaemon() }
     @objc private func checkForUpdates() { model.checkForUpdates() }
     @objc private func reportProblem() { model.reportProblem() }
 
     @objc func showSettings() {
-        if settingsWindow == nil, AppUI.atLaunch() == .korekore {
-            let window = KorekoreSettingsWindow(rootView: KorekoreSettingsRoot(model: model))
-            window.center()
-            window.isReleasedWhenClosed = false
-            watchClose(window)
-            settingsWindow = window
-        }
         if settingsWindow == nil {
-            // Roomy enough for the whole Character tab at first sight, and resizable down to the old size.
-            let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 760, height: 640), styleMask: [.titled, .closable, .miniaturizable, .resizable], backing: .buffered, defer: false)
-            window.title = String(localized: "VibeBuddy Settings")
-            let hosting = NSHostingView(rootView: SettingsView(model: model))
-            // Only the minimum comes from SwiftUI; otherwise the view's ideal size would pin the window.
-            hosting.sizingOptions = [.minSize]
-            window.contentView = hosting
-            window.contentMinSize = NSSize(width: 640, height: 480)
+            let window = KorekoreSettingsWindow(rootView: KorekoreSettingsRoot(model: model))
             window.center()
             window.isReleasedWhenClosed = false
             watchClose(window)
@@ -212,20 +157,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func showOnboarding() {
-        if onboardingWindow == nil, AppUI.atLaunch() == .korekore {
-            let window = KorekoreSettingsWindow.onboarding(rootView: KorekoreOnboarding(model: model, finish: { [weak self] in
-                UserDefaults.standard.set(true, forKey: "onboardingDone")
-                self?.onboardingWindow?.close()
-            }))
-            window.center()
-            window.isReleasedWhenClosed = false
-            watchClose(window)
-            onboardingWindow = window
-        }
         if onboardingWindow == nil {
-            let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 560, height: 540), styleMask: [.titled, .closable], backing: .buffered, defer: false)
-            window.title = String(localized: "Welcome to VibeBuddy")
-            window.contentView = NSHostingView(rootView: OnboardingView(model: model, finish: { [weak self] in
+            let window = KorekoreSettingsWindow.onboarding(rootView: KorekoreOnboarding(model: model, finish: { [weak self] in
                 UserDefaults.standard.set(true, forKey: "onboardingDone")
                 self?.onboardingWindow?.close()
             }))
@@ -344,19 +277,8 @@ enum LegacyLaunchAgent {
         let occupied = await portOccupied()
         guard hasPlist || occupied else { return }
         let title = hasPlist ? String(localized: "Found an old vibebuddyd background service") : String(localized: "A daemon is already running on port 7331")
-        let takeOver: Bool
-        if AppUI.atLaunch() == .korekore {
-            takeOver = KorekoreAlert.run(title: title, message: String(localized: "korekore can remove it and take over, so the two don't fight over the box."),
+        let takeOver = KorekoreAlert.run(title: title, message: String(localized: "korekore can remove it and take over, so the two don't fight over the box."),
                                          buttons: [String(localized: "Remove and take over"), String(localized: "Later")]).button == 0
-        } else {
-            let alert = NSAlert()
-            alert.messageText = title
-            alert.informativeText = String(localized: "VibeBuddy now manages its own daemon, and two daemons would fight over the serial port. Remove the old one and take over?")
-            alert.addButton(withTitle: String(localized: "Remove and take over"))
-            alert.addButton(withTitle: String(localized: "Later"))
-            NSApp.activate(ignoringOtherApps: true)
-            takeOver = alert.runModal() == .alertFirstButtonReturn
-        }
         if takeOver {
             let bootout = Process()
             bootout.executableURL = URL(fileURLWithPath: "/bin/launchctl")

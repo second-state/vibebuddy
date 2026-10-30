@@ -50,14 +50,3 @@ public struct PixelSprite: Sendable {
         return PixelSprite(width: width, height: height, palette: palette, pixels: pixels)
     }
 }
-
-/// Which settings window, onboarding and menu bar the app shows (ADR-0021). The korekore UI opens only with
-/// `VIBEBUDDY_UI=korekore` while it is being built; read once at launch.
-public enum AppUI: Equatable, Sendable {
-    case current
-    case korekore
-
-    public static func atLaunch(environment: [String: String] = ProcessInfo.processInfo.environment) -> AppUI {
-        environment["VIBEBUDDY_UI"] == "korekore" ? .korekore : .current
-    }
-}
