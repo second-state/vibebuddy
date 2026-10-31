@@ -877,6 +877,12 @@ fn an_agent_needing_the_user_closes_the_menu_and_quiet_closes_it_too() {
     assert!(lines.contains(&"MENU CLOSED".to_owned()), "{lines:?}");
     assert!(lines.contains(&"AUDIO QUEUED INPUT_REQUIRED".to_owned()), "{lines:?}");
 
+    // While it waits, a change to the other cards comes as the same state again: it leaves the menu open.
+    press(&mut firmware, &mut board, Key::K1, 1100);
+    let lines = send(&mut firmware, &mut board, r#"{"version":1,"event":"agent.input_required","title":"CC:A","suppress_audio":true}"#);
+    assert!(!lines.contains(&"MENU CLOSED".to_owned()), "{lines:?}");
+    press(&mut firmware, &mut board, Key::K2, 50);
+
     press(&mut firmware, &mut board, Key::K1, 1100);
     board.advance(29_000);
     firmware.poll(&mut board);
@@ -1277,16 +1283,16 @@ mod relay {
         let key = VerifyingKey::from_bytes(&link::decode_key(&box_id).unwrap()).unwrap();
         let sig = Signature::from_bytes(&link::decode::<64>(hello["sig"].as_str().unwrap()).unwrap());
         assert!(key.verify(&signed_message("box", &box_id, "abc"), &sig).is_ok());
-        assert!(relay.report(&firmware, board.now_ms()).is_empty(), "nothing before welcome");
+        assert!(relay.report(&firmware, board.now_ms(), usize::MAX).is_empty(), "nothing before welcome");
 
         relay.message(&mut firmware, &mut board, &json!({"t": "welcome"}));
-        let reports: Vec<Value> = relay.report(&firmware, board.now_ms()).iter().map(|text| parse(text)).collect();
+        let reports: Vec<Value> = relay.report(&firmware, board.now_ms(), usize::MAX).iter().map(|text| parse(text)).collect();
         assert_eq!(reports[0], json!({"t": "paired", "computers": [{"key": COMPUTER, "name": "a"}, {"key": computer_key(), "name": "b"}]}));
         assert_eq!(reports[1], json!({"t": "linked", "via": "usb", "computer": computer_key()}), "it was just paired over the cable");
-        assert!(relay.report(&firmware, board.now_ms()).is_empty(), "only changes");
+        assert!(relay.report(&firmware, board.now_ms(), usize::MAX).is_empty(), "only changes");
 
         board.advance(USB_QUIET_MS);
-        assert_eq!(relay.report(&firmware, board.now_ms()), [r#"{"t":"unlinked"}"#]);
+        assert_eq!(relay.report(&firmware, board.now_ms(), usize::MAX), [r#"{"t":"unlinked"}"#]);
 
         let (mut sealer, _) = session(&mut relay, &mut firmware, &mut board);
         assert!(relay.has_peer());
@@ -1303,6 +1309,21 @@ mod relay {
         relay.message(&mut firmware, &mut board, &json!({"t": "unlinked", "reason": "takeover"}));
         assert!(!relay.has_peer());
         assert!(!board.relay_peer);
+    }
+
+    #[test]
+    fn a_full_queue_only_delays_the_report() {
+        // A burst of lines for the Relay computer can fill the queue just as the cable takes the box; the Relay must
+        // still hear it, or it keeps that computer linked.
+        let (mut firmware, mut board, _) = booted(blank_flash());
+        send(&mut firmware, &mut board, &format!(r#"{{"version":1,"event":"device.pair","key":"{COMPUTER}","name":"a"}}"#));
+        let mut relay = RelayBox::new();
+        relay.hello(&firmware, "abc");
+        relay.message(&mut firmware, &mut board, &json!({"t": "welcome"}));
+        assert!(relay.report(&firmware, board.now_ms(), 0).is_empty());
+        assert_eq!(relay.report(&firmware, board.now_ms(), 1).len(), 1, "the paired list first");
+        let reports: Vec<Value> = relay.report(&firmware, board.now_ms(), 1).iter().map(|text| parse(text)).collect();
+        assert_eq!(reports, [json!({"t": "linked", "via": "usb", "computer": COMPUTER})]);
     }
 
     #[test]
@@ -1332,7 +1353,7 @@ mod relay {
         for socket in ["first", "second"] {
             relay.hello(&firmware, socket);
             relay.message(&mut firmware, &mut board, &json!({"t": "welcome"}));
-            let reports: Vec<Value> = relay.report(&firmware, board.now_ms()).iter().map(|text| parse(text)).collect();
+            let reports: Vec<Value> = relay.report(&firmware, board.now_ms(), usize::MAX).iter().map(|text| parse(text)).collect();
             assert_eq!(reports[1], json!({"t": "linked", "via": "usb", "computer": COMPUTER}), "{socket}");
             relay.gone(&mut firmware, &mut board);
         }
@@ -1349,9 +1370,9 @@ mod relay {
         let mut relay = RelayBox::new();
         relay.hello(&firmware, "n");
         relay.message(&mut firmware, &mut board, &json!({"t": "welcome"}));
-        relay.report(&firmware, board.now_ms());
+        relay.report(&firmware, board.now_ms(), usize::MAX);
         board.advance(USB_QUIET_MS);
-        relay.report(&firmware, board.now_ms());
+        relay.report(&firmware, board.now_ms(), usize::MAX);
         relay.message(&mut firmware, &mut board, &json!({"t": "linked", "computer": COMPUTER}));
 
         relay.message(&mut firmware, &mut board, &json!({"t": "unlinked", "reason": "takeover"}));
@@ -1361,7 +1382,7 @@ mod relay {
 
         let other = link::encode(&[3; 32]);
         send(&mut firmware, &mut board, &format!(r#"{{"version":1,"event":"device.pair","key":"{other}","name":"b"}}"#));
-        let reports: Vec<Value> = relay.report(&firmware, board.now_ms()).iter().map(|text| parse(text)).collect();
+        let reports: Vec<Value> = relay.report(&firmware, board.now_ms(), usize::MAX).iter().map(|text| parse(text)).collect();
         assert_eq!(reports.len(), 2, "{reports:?}");
         assert_eq!(reports[0]["t"], "paired");
         assert_eq!(reports[1], json!({"t": "linked", "via": "usb", "computer": other}));
@@ -2379,8 +2400,10 @@ mod touchscreen {
         // The page line under the cards turns it too, and down goes back.
         assert_eq!(tap(&mut firmware, &mut board, 160, 212), ["TAP 160 212", "CARDS PAGE 1/2"]);
         assert_eq!(swipe(&mut firmware, &mut board, 100, 60, 150), ["SWIPE DOWN", "CARDS PAGE 2/2"]);
-        // News starts from the first page.
-        send(&mut firmware, &mut board, &FIVE_CARDS.replace('\n', ""));
+        // Cards brought up to date keep the page; news starts from the first page.
+        send(&mut firmware, &mut board, &FIVE_CARDS.replace('\n', "").replace(r#""elapsed_s":5"#, r#""elapsed_s":9"#));
+        assert_eq!(tap(&mut firmware, &mut board, 100, 66)[1], focus("c4"));
+        send(&mut firmware, &mut board, &FIVE_CARDS.replace('\n', "").replace(r#""title":"CC:ONE","tasks_total""#, r#""title":"CX:TWO","tasks_total""#));
         assert_eq!(tap(&mut firmware, &mut board, 100, 66)[1], focus("c1"));
     }
 

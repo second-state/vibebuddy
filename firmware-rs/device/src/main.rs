@@ -222,7 +222,7 @@ impl Board for DeviceBoard {
         if let Some(lines) = &mut self.relay_peer {
             lines.lines(
                 bytes,
-                |_| relay::OUT.free_capacity() > 0,
+                |_| relay::OUT.free_capacity() > relay::CONTROL_ROOM,
                 |line| {
                     let _ = relay::OUT.try_send((relay::current_socket(), relay_box::data(line)));
                 },
@@ -645,7 +645,7 @@ async fn main(spawner: Spawner) -> ! {
                 }
             }
         }
-        for message in relay_box.report(&firmware, board.now_ms()) {
+        for message in relay_box.report(&firmware, board.now_ms(), relay::OUT.free_capacity()) {
             let _ = relay::OUT.try_send((relay::current_socket(), message));
         }
         if firmware.take_scan_request() {

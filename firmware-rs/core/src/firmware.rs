@@ -1794,7 +1794,7 @@ impl Firmware {
         }
 
         let talking = self.voice.is_open();
-        if matches!(state, State::InputRequired | State::Failed) {
+        if matches!(state, State::InputRequired | State::Failed) && !self.display.shows(state, title.map(str::as_bytes)) {
             if talking {
                 self.close_menu(board);
             } else {
