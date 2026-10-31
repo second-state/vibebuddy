@@ -41,16 +41,29 @@ The daemon sends the token as `Authorization: Bearer <token>` and keeps it in `c
 - `GET /v1/account` answers
 
   ```json
-  {"id":"…","email":null,"github_id":60097,"created_at":"2026-10-23T08:44:49.885Z","plan":{"name":"free"},"today":{"day":"2026-10-23","commands":1,"replies":1},"limits":{"commands":20,"replies":20}}
+  {"id":"…","email":null,"github_id":60097,"created_at":"2026-10-23T08:44:49.885Z","plan":{"name":"free"},"today":{"day":"2026-10-23","commands":0},"limits":{"commands":0}}
   ```
 
-  An account has an `email` or a `github_id`, never both. `plan` is `{"name":"free"}` or `{"name":"paid","period_end":"…","characters":12300,"characters_limit":100000}` (ADR-0020), where `characters` counts the billing period's spoken replies against the monthly allowance. `today` counts voice in the current UTC day, and `limits` is the daily allowance of the account's plan.
+  An account has an `email` or a `github_id`, never both. `plan` is `{"name":"free"}` or `{"name":"paid","period_end":"…","characters":12300,"characters_limit":100000}` (ADR-0020), where `characters` counts the billing period's spoken replies against the monthly allowance. `today` counts commands in the current UTC day, and `limits` is the daily allowance of the account's plan (0 on Free).
 - `POST /v1/sign-out` revokes this session only: 204.
 - `DELETE /v1/account` deletes the account with all its sessions and usage: 204.
 
 ## Voice
 
 Both calls need `Authorization: Bearer <session>` and answer 401 without a valid one. Only daemons call them: the box's audio reaches the daemon over the link, however the box is linked (ADR-0018).
+
+### The voice key
+
+```text
+POST /v1/account/voice-key
+Authorization: Bearer <session>
+```
+
+It answers `{"key":"gw-…","url":"https://…","model":"oraki/asr"}`: the account's Token Station key, the same for every computer on it. The daemon recognizes voice commands with it at Token Station directly (ADR-0020): `POST {url}/v1/audio/transcriptions` with `Authorization: Bearer {key}` and a multipart body of `file` (a WAV with a filename such as `turn.wav`), `model` and an optional `language`; the answer is `{"text":"…"}`. The key is allowed only `model`. The daemon keeps it in `config_dir()`, mode 0600, and asks again when it has none.
+
+When Token Station refuses the key with `revoked_api_key`, `invalid_api_key` or `expired_api_key`, the daemon asks with the body `{"invalid":true}`. If Token Station no longer takes the key, the service replaces it; if it still does (another computer already replaced it), the call returns the current key. Two computers asking at once get the same new key.
+
+The credit is the account's, not the key's. The first call gives the account a one-time gift; on the Paid plan, reading the account adds credit for each billing period. When the credit is used up, Token Station answers `account_credit_exhausted` (402 or 429, by its build; go by `error.code`). The call gets 404 when the service has no Token Station, and 502 `{"reason":"unavailable"}` when Token Station fails.
 
 ### Recognizing a voice command
 
@@ -79,17 +92,29 @@ POST /v1/voice/speak
 {"text":"…","voice":"elevenlabs:<voice_id>","for":"character"}
 ```
 
-A line for a Character the user is making (ADR-0020). It streams back `audio/pcm;rate=16000`: 16 kHz mono 16-bit little-endian PCM, which the daemon trims, normalizes and packs as ADPCM. Only the Paid plan gets it; on Free the call gets `403 {"reason":"plan"}`. It counts its characters only against the monthly allowance, never the daily replies; past it the call gets `429 {"reason":"monthly"}` until the next period. A synthesis failure is 502: lines never come in another voice.
+A line for a Character the user is making (ADR-0020). It streams back `audio/pcm;rate=16000`: 16 kHz mono 16-bit little-endian PCM, which the daemon trims, normalizes and packs as ADPCM. Only the Paid plan gets it; on Free the call gets `403 {"reason":"plan"}`. It counts its characters against the monthly allowance, as spoken replies do; past it the call gets `429 {"reason":"monthly"}` until the next period. A synthesis failure is 502: lines never come in another voice.
 
-### The daily allowance
+### The Paid plan and its allowances
 
-Each recognition counts one command and each spoken reply one reply, against the account's UTC day. On Free that is 20 commands and 20 replies; on the Paid plan, 100 commands, and spoken replies count their characters against the monthly allowance first (ADR-0020). The reply that crosses the monthly allowance still passes; after it, replies count against Free's daily replies until the period ends. The service sets the numbers. A use is counted once the request is found valid. Past either limit the call gets
+Recognition and speech are for the Paid plan only (ADR-0020). On Free, every call gets
+
+```text
+403 {"reason":"plan"}
+```
+
+On the Paid plan, each recognition counts one command against the account's UTC day: 100 a day. Past it the call gets
 
 ```text
 429 {"reason":"allowance"}
 ```
 
-until 00:00 UTC. `GET /v1/account` shows where the day stands.
+until 00:00 UTC. Each spoken reply counts its characters against the monthly allowance. The reply that crosses it still passes; after it the call gets
+
+```text
+429 {"reason":"monthly"}
+```
+
+until the next billing period. The service sets the numbers. A use is counted once the request is found valid, so a bad request gets 400 even on Free. `GET /v1/account` shows where the day and the period stand.
 
 When voice as a whole reaches its daily spending cap, every call gets
 

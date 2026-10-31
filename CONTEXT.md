@@ -55,15 +55,15 @@ A person's identity with VibeBuddy's online services, needed only for features t
 _Avoid_: user (the person, not their account), box account, device registration, login (the act of signing in)
 
 **Daily allowance (每日额度)**:
-How many voice commands and spoken replies one account may have in a day. Every account has one; the Paid plan's commands allowance is larger. Past it, voice stops for that account until the next day; nothing else about the box changes.
+How many voice commands an account on the Paid plan may have recognized through `vibebuddy-api` in a day. The daemon now recognizes through Token Station, with credit instead (ADR-0020), so this applies only to computers that still call `vibebuddy-api`.
 _Avoid_: quota, credits, plan, limit (on its own)
 
 **Paid plan (付费版)**:
-The one thing VibeBuddy sells: a monthly subscription on an account, paid through Stripe on the website. It opens the Relay and gives the monthly allowance. An account without it is on Free (免费版), which keeps everything over USB and the local network. When the plan ends, the account goes back to Free, and nothing the user has made is taken away.
+The one thing VibeBuddy sells: a monthly subscription on an account, paid through Stripe on the website. It opens the Relay, gives spoken replies in our voices, the monthly allowance, and recognition credit each period. An account without it is on Free (免费版), which keeps everything over USB and the local network, voice commands with a one-time gift of recognition credit, and the user's own keys for everything else. When the plan ends, the account goes back to Free, and nothing the user has made is taken away.
 _Avoid_: subscription (Stripe's word), Pro, premium, membership, VIP, credits
 
 **Monthly allowance (每月额度)**:
-How many characters of our voices an account on the Paid plan may have spoken in one billing period, by spoken replies and by making Characters. Past it, the daily allowance applies until the next period. Speech made with the user's own key never counts.
+How many characters of our voices an account on the Paid plan may have spoken in one billing period, by spoken replies and by making Characters. Past it, our voices stop for that account until the next period. Speech made with the user's own key never counts.
 _Avoid_: credits, quota, tokens, balance
 
 **Own key (自己的密钥)**:
