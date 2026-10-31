@@ -412,6 +412,25 @@ final class AppModel: ObservableObject {
         writePack(data, address: form)
     }
 
+    /// Tries a voice in the user's own account and, when it speaks, keeps it and plays what it said.
+    func addOwnVoice(provider: String, voice: String, name: String, text: String) async throws -> CharacterVoice {
+        let (added, wav) = try await client.addOwnVoice(provider: provider, voice: voice, name: name, text: text)
+        characterVoices.removeAll { $0.id == added.id }
+        characterVoices.append(added)
+        preview.play(wav: wav, as: added.id)
+        previewingVoice = preview.playingVoice
+        return added
+    }
+
+    func deleteOwnVoice(_ id: String) async {
+        do {
+            try await client.deleteOwnVoice(id)
+            characterVoices.removeAll { $0.id == id }
+        } catch {
+            lastError = String(localized: "Couldn't remove the voice: \(error.localizedDescription)")
+        }
+    }
+
     func togglePreview(_ id: String) {
         guard let pack = Resources.voicePack(id) else { lastError = String(localized: "This app has no voice pack for \(id)"); return }
         preview.toggle(pack: pack)

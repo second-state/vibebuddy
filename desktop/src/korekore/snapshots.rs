@@ -142,6 +142,7 @@ fn draw_the_korekore_pages() {
             look: None,
             problem: None,
             starting: false,
+            own: None,
         });
         let element: Element<'_, Message> = app.view(iced::window::Id::unique());
         save("page-make", (954.0, 766.0), element);

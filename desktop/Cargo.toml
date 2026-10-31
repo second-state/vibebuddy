@@ -10,6 +10,8 @@ name = "vibebuddy-desktop"
 path = "src/main.rs"
 
 [dependencies]
+# The line a voice of the user's own said when tried comes back base64.
+base64 = "0.22"
 # Comparing the time a hook config was written with the last event, for the Codex trust hint.
 chrono.workspace = true
 futures = "0.3"

@@ -45,6 +45,35 @@ final class VoicePreview {
         player.play()
     }
 
+    /// Plays a line a voice of the user's own said when tried: a 16 kHz mono 16-bit WAV.
+    func play(wav: Data, as id: String) {
+        stop()
+        guard wav.count > 44 else { return }
+        let pcm = wav.dropFirst(44)
+        let format = AVAudioFormat(commonFormat: .pcmFormatInt16, sampleRate: 16_000, channels: 1, interleaved: true)!
+        let frames = AVAudioFrameCount(pcm.count / 2)
+        guard let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: frames) else { return }
+        buffer.frameLength = frames
+        pcm.withUnsafeBytes { raw in
+            buffer.int16ChannelData![0].update(from: raw.bindMemory(to: Int16.self).baseAddress!, count: Int(frames))
+        }
+        engine.connect(player, to: engine.mainMixerNode, format: format)
+        do {
+            try engine.start()
+        } catch {
+            return
+        }
+        playingVoice = id
+        player.scheduleBuffer(buffer, at: nil, options: []) { [weak self] in
+            Task { @MainActor in
+                guard let self, self.playingVoice == id else { return }
+                self.playingVoice = nil
+                self.onFinish?()
+            }
+        }
+        player.play()
+    }
+
     func stop() {
         player.stop()
         engine.stop()

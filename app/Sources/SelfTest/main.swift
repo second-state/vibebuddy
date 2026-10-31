@@ -105,6 +105,10 @@ do {
     let voices = try StatusCoding.decoder().decode([CharacterVoice].self, from: Data(#"[{"id":"ada","provider":"elevenlabs","voice":"tcSs","language":"en","gender":"female","name":"Ada"},{"id":"wanwanxiaohe","provider":"volc","voice":"zh_f","language":"zh","gender":"female","name":"Xiaohe"}]"#.utf8))
     check(CharacterVoice.sorted(voices, preferring: .zh).map(\.id) == ["wanwanxiaohe", "ada"], "voices in the base's language first")
     check(voices[1].providerName == "Volcano Engine" && voices[0].providerName == "ElevenLabs", "providers named")
+    check(voices.allSatisfy { !$0.own }, "a voice without own is ours")
+    let withOwn = try StatusCoding.decoder().decode([CharacterVoice].self, from: Data(#"[{"id":"own-1a2b3c4d","provider":"volc","voice":"S_me","language":"","gender":"","name":"Me","own":true},{"id":"ada","provider":"elevenlabs","voice":"tcSs","language":"en","gender":"female","name":"Ada","own":false}]"#.utf8))
+    check(withOwn[0].own && withOwn[0].voiceLanguage == nil, "a voice of the user's own decodes, with no language")
+    check(CharacterVoice.sorted(withOwn, preferring: nil).map(\.id) == ["ada", "own-1a2b3c4d"], "the user's own voices come after ours, whatever the language")
     let request = CharacterRequest(id: nil, name: "Owl", base: "ada", voice: "luna", lines: [CharacterLine(occasion: "done", text: "Done.")])
     let sent = String(decoding: try JSONEncoder().encode(request), as: UTF8.self)
     check(!sent.contains("\"id\"") && sent.contains(#""occasion":"done""#), "a new Character is sent without an id: \(sent)")
@@ -383,6 +387,9 @@ check(MakingReadiness.of(eleven, keys: ownEleven, account: nil) == .ownKey, "an 
 check(MakingReadiness.of(volc, keys: ownEleven, account: signedIn) == .paidPlan, "a refused key doesn't count: VibeBuddy's voices, on the Paid plan")
 check(MakingReadiness.of(volc, keys: nil, account: AccountStatus(available: true, signedIn: false)) == .signIn, "signed out and no key")
 check(MakingReadiness.of(eleven, keys: nil, account: nil) == .ownKeyOnly && !MakingReadiness.ownKeyOnly.canStart, "no service and no key")
+let mine = CharacterVoice(id: "own-1a2b3c4d", provider: "volc", voice: "S_me", language: "", gender: "", name: "Me", own: true)
+check(MakingReadiness.of(mine, keys: ownEleven, account: signedIn) == .ownKeyOnly, "a voice of the user's own needs their own key, not the Paid plan")
+check(MakingReadiness.of(mine, keys: VoiceKeysStatus(elevenlabs: .init(set: false), volc: .init(set: true)), account: nil) == .ownKey, "and their own key is enough")
 let madePools: [[(audio: Data, samples: Int)]] = [[(Data([1, 2]), 4), (Data([3]), 2)], [(Data([4]), 2)], []]
 if let pack = VoicePack.build(id: "night-owl-1a2b3c4d", pools: madePools, look: nil),
    let variant = VoicePack.build(id: "night-owl-1a2b3c4d", pools: [[(Data([9, 9]), 3)], [], []], look: nil),

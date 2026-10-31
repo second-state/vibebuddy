@@ -530,6 +530,22 @@
 "This voice and the lines are in different languages, so the lines may sound wrong." = "这个声音和台词的语言不一样，念出来可能会很怪。";
 "Delete your own character? This can't be undone." = "删除你自己的角色？删除后无法恢复。";
 "The box goes back to %@." = "盒子会换回 %@。";
+
+/* A voice of the user's own, in making a Character */
+"Your own voice…" = "你自己的声音…";
+"A voice you cloned or designed in your own ElevenLabs or Volcano Engine account. Paste its ID: VibeBuddy tries it with your own key by saying the first line, and keeps it for next time." = "你在自己的 ElevenLabs 或火山引擎账号里克隆或设计的声音。粘贴它的 ID：VibeBuddy 会用你自己的 key 说第一句台词来试听，并记住它供下次使用。";
+"Voice ID" = "Voice ID";
+"Speaker ID" = "音色 ID";
+"Try" = "试听";
+"Trying…" = "试听中…";
+"Yours" = "你的";
+"Forget this voice on this computer; it stays in your account" = "在这台电脑上忘掉这个声音；它仍留在你的账号里";
+"All done!" = "搞定了！";
+"Couldn't use that voice: %@" = "用不了这个声音：%@";
+"Couldn't remove the voice: %@" = "删不掉这个声音：%@";
+"Pick a voice…" = "选一个声音…";
+"Couldn't list the voices of your ElevenLabs key, so paste a voice id: %@" = "列不出你这个 ElevenLabs key 的声音，请粘贴 voice ID：%@";
+"%@ · stock" = "%@ · 自带";
 "The box is on its UART bridge, and its firmware can't carry voice there. Update the firmware, or plug the cable into the box's native USB port." = "盒子接在 UART 桥上，它现在的固件没法在这条线上传语音。更新固件，或把线改插到盒子的原生 USB 口。";
 "The box is on its UART bridge, which didn't hold the speed voice needs. Plug the cable into the box's native USB port, or plug it in again to try once more." = "盒子接在 UART 桥上，这条线没跑到语音需要的速度。把线改插到盒子的原生 USB 口，或重新插一次再试。";
 "Voice needs this computer signed in to VibeBuddy." = "语音要先在这台电脑上登录 VibeBuddy。";

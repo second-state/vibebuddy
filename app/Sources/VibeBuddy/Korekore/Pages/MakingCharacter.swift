@@ -141,6 +141,16 @@ struct KorekoreMakeSheet: View {
     @State private var look: Data?
     @State private var problem: String?
     @State private var starting = false
+    /// Adding a voice of the user's own: the form is open, what is in it, and why trying it failed.
+    @State private var addingOwn = false
+    @State private var ownProvider = "elevenlabs"
+    @State private var ownVoiceID = ""
+    @State private var ownName = ""
+    @State private var trying = false
+    @State private var ownProblem: String?
+    /// The voices of the own ElevenLabs key, to pick from; nil until listed, or when they couldn't be (`listProblem`).
+    @State private var elevenVoices: [ProviderVoice]?
+    @State private var listProblem: String?
 
     private var baseName: String { VoiceCatalogEntry.all.first { $0.id == base }?.name ?? base }
     private var chosenVoice: CharacterVoice? { model.characterVoice(voice) }
@@ -197,8 +207,11 @@ struct KorekoreMakeSheet: View {
                             if index > 0 { KDivider() }
                             voiceRow(option)
                         }
+                        KDivider()
+                        ownVoiceRow
                     }
-                    if let chosenVoice, chosenVoice.voiceLanguage != VoiceCatalogEntry.language(ofVoice: base) {
+                    // A voice of the user's own has no language of its own: it says the lines as they are written.
+                    if let chosenVoice, !chosenVoice.own, chosenVoice.voiceLanguage != VoiceCatalogEntry.language(ofVoice: base) {
                         KNote(String(localized: "This voice and the lines are in different languages, so the lines may sound wrong."), color: Theme.Colors.waitText)
                     }
                     if !lookOnly, let readiness, let chosenVoice {
@@ -272,6 +285,7 @@ struct KorekoreMakeSheet: View {
                         .frame(width: 16, height: 16)
                     Text(verbatim: option.name).font(.rounded(14))
                     KTag(option.providerName)
+                    if option.own { KTag(String(localized: "Yours"), color: Theme.Colors.korePinkText) }
                     if option.id == base && edited == original {
                         KTag(String(localized: "Free · already made"), color: Theme.Colors.doneText)
                     }
@@ -281,6 +295,16 @@ struct KorekoreMakeSheet: View {
             .buttonStyle(.plain)
             .accessibilityAddTraits(chosen ? .isSelected : [])
             Spacer()
+            if option.own {
+                Button(String(localized: "Remove")) {
+                    Task {
+                        await model.deleteOwnVoice(option.id)
+                        if voice == option.id, model.characterVoice(option.id) == nil { voice = base }
+                    }
+                }
+                .kButton()
+                .help(String(localized: "Forget this voice on this computer; it stays in your account"))
+            }
             if Resources.voicePack(option.previewID) != nil {
                 let playing = model.previewingVoice == option.previewID
                 Button { model.togglePreview(option.previewID) } label: {
@@ -293,6 +317,83 @@ struct KorekoreMakeSheet: View {
         }
         .padding(.vertical, 8)
         .padding(.horizontal, 12)
+    }
+
+    /// The last voice row: a voice cloned or designed in the user's own account, tried with their own key on the first
+    /// line before it is kept.
+    private var ownVoiceRow: some View {
+        let providerName = ownProvider == "volc" ? String(localized: "Volcano Engine") : "ElevenLabs"
+        let key = ownProvider == "volc" ? model.status?.voiceKeys?.volc : model.status?.voiceKeys?.elevenlabs
+        let hasKey = key?.set == true
+        return VStack(alignment: .leading, spacing: 10) {
+            if addingOwn {
+                KNote(String(localized: "A voice you cloned or designed in your own ElevenLabs or Volcano Engine account. Paste its ID: VibeBuddy tries it with your own key by saying the first line, and keeps it for next time."))
+                HStack(spacing: 8) {
+                    KMenu(selection: ownProvider, options: [("elevenlabs", "ElevenLabs"), ("volc", String(localized: "Volcano Engine"))]) {
+                        ownProvider = $0
+                        ownVoiceID = ""
+                    }
+                    // ElevenLabs lists the key's voices, so the id needn't be looked up; Volcano Engine can't with a key alone.
+                    if ownProvider == "elevenlabs", let elevenVoices, !elevenVoices.isEmpty {
+                        KMenu(selection: ownVoiceID, options: [("", String(localized: "Pick a voice…"))] + elevenVoices.map { ($0.voice, $0.label) }) { picked in
+                            ownVoiceID = picked
+                            if let voice = elevenVoices.first(where: { $0.voice == picked }) { ownName = voice.name }
+                        }
+                    } else {
+                        KField(ownProvider == "volc" ? String(localized: "Speaker ID") : String(localized: "Voice ID"), text: $ownVoiceID)
+                    }
+                    KField(String(localized: "Name"), text: $ownName).frame(width: 140)
+                }
+                if ownProvider == "elevenlabs", hasKey, let listProblem {
+                    KNote(String(localized: "Couldn't list the voices of your ElevenLabs key, so paste a voice id: \(listProblem)"), color: Theme.Colors.waitText)
+                }
+                if !hasKey {
+                    KNote(MakingReadiness.ownKeyOnly.explanation(provider: providerName), color: Theme.Colors.korePinkText)
+                }
+                if let ownProblem {
+                    KTag(ownProblem, color: Theme.Colors.korePinkText)
+                }
+                HStack(spacing: 8) {
+                    Spacer()
+                    Button(String(localized: "Cancel")) { addingOwn = false; ownProblem = nil }.kButton()
+                    Button(trying ? String(localized: "Trying…") : String(localized: "Try")) { tryOwnVoice() }
+                        .kButton(.sun)
+                        .disabled(trying || !hasKey || ownVoiceID.trimmingCharacters(in: .whitespaces).isEmpty
+                            || ownName.trimmingCharacters(in: .whitespaces).isEmpty)
+                }
+            } else {
+                Button(String(localized: "Your own voice…")) { addingOwn = true }.kButton()
+            }
+        }
+        .padding(.vertical, 8)
+        .padding(.horizontal, 12)
+        .task(id: "\(addingOwn) \(ownProvider) \(hasKey)") {
+            guard addingOwn, ownProvider == "elevenlabs", hasKey, elevenVoices == nil else { return }
+            do {
+                elevenVoices = try await model.client.elevenLabsVoices()
+                listProblem = nil
+            } catch {
+                listProblem = error.localizedDescription
+            }
+        }
+    }
+
+    private func tryOwnVoice() {
+        trying = true
+        ownProblem = nil
+        let text = edited.first?.text ?? String(localized: "All done!")
+        Task {
+            do {
+                let added = try await model.addOwnVoice(provider: ownProvider, voice: ownVoiceID, name: ownName, text: text)
+                voice = added.id
+                addingOwn = false
+                ownVoiceID = ""
+                ownName = ""
+            } catch {
+                ownProblem = String(localized: "Couldn't use that voice: \(error.localizedDescription)")
+            }
+            trying = false
+        }
     }
 
     /// A preset's voice takes that preset's lines too, while the user hasn't changed any: its own voice with its own

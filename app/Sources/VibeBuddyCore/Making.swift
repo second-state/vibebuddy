@@ -3,7 +3,8 @@ import Foundation
 /// Making a Character (ADR-0020, docs/characters.md): the user starts from a preset, edits its lines and picks a voice;
 /// the daemon makes the line audio (`POST /v1/characters`), and the App packs it with a look.
 
-/// A voice a made Character can speak with: a row of characters/voices.tsv, from `GET /v1/voices`.
+/// A voice a made Character can speak with, from `GET /v1/voices`: a row of characters/voices.tsv, or one in the
+/// user's own account (`own`), which only their own key speaks and which has no language of its own.
 public struct CharacterVoice: Codable, Equatable, Identifiable, Sendable {
     public var id: String
     /// `elevenlabs` or `volc`.
@@ -12,8 +13,19 @@ public struct CharacterVoice: Codable, Equatable, Identifiable, Sendable {
     public var language: String
     public var gender: String
     public var name: String
-    public init(id: String, provider: String, voice: String, language: String, gender: String, name: String) {
-        self.id = id; self.provider = provider; self.voice = voice; self.language = language; self.gender = gender; self.name = name
+    public var own: Bool
+    public init(id: String, provider: String, voice: String, language: String, gender: String, name: String, own: Bool = false) {
+        self.id = id; self.provider = provider; self.voice = voice; self.language = language; self.gender = gender; self.name = name; self.own = own
+    }
+
+    private enum CodingKeys: String, CodingKey { case id, provider, voice, language, gender, name, own }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.init(id: try container.decode(String.self, forKey: .id), provider: try container.decode(String.self, forKey: .provider),
+                  voice: try container.decode(String.self, forKey: .voice), language: try container.decode(String.self, forKey: .language),
+                  gender: try container.decode(String.self, forKey: .gender), name: try container.decode(String.self, forKey: .name),
+                  own: try container.decodeIfPresent(Bool.self, forKey: .own) ?? false)
     }
 
     public var voiceLanguage: VoiceLanguage? { VoiceLanguage(rawValue: language) }
@@ -27,10 +39,23 @@ public struct CharacterVoice: Codable, Equatable, Identifiable, Sendable {
         provider == "volc" ? String(localized: "Volcano Engine") : "ElevenLabs"
     }
 
-    /// Voices in `language` first, the daemon's order otherwise kept.
+    /// Voices in `language` first, then the rest of ours, then the user's own; the daemon's order otherwise kept.
     public static func sorted(_ voices: [CharacterVoice], preferring language: VoiceLanguage?) -> [CharacterVoice] {
-        voices.filter { $0.voiceLanguage == language } + voices.filter { $0.voiceLanguage != language }
+        let ours = voices.filter { !$0.own }
+        return ours.filter { $0.voiceLanguage == language } + ours.filter { $0.voiceLanguage != language } + voices.filter(\.own)
     }
+}
+
+/// A voice the user's own ElevenLabs key can speak, from `GET /v1/voices/elevenlabs`: picked rather than its id pasted.
+public struct ProviderVoice: Codable, Equatable, Sendable {
+    public var voice: String
+    public var name: String
+    /// `premade` for ElevenLabs' stock voices; `cloned`, `generated` or `professional` for the account's own.
+    public var category: String
+    public init(voice: String, name: String, category: String) { self.voice = voice; self.name = name; self.category = category }
+
+    /// As the menu lists it: the account's own by name, ElevenLabs' stock ones marked.
+    public var label: String { category == "premade" ? String(localized: "\(name) · stock") : name }
 }
 
 public struct CharacterLine: Codable, Equatable, Sendable {
@@ -121,6 +146,8 @@ public enum MakingReadiness: Equatable, Sendable {
     public static func of(_ voice: CharacterVoice, keys: VoiceKeysStatus?, account: AccountStatus?) -> MakingReadiness {
         let key = voice.provider == "volc" ? keys?.volc : keys?.elevenlabs
         if let key, key.set, !key.refused { return .ownKey }
+        // A voice in the user's own account: VibeBuddy's voice service can't speak it.
+        if voice.own { return .ownKeyOnly }
         if account?.signedIn == true { return .paidPlan }
         return account?.available == true ? .signIn : .ownKeyOnly
     }
