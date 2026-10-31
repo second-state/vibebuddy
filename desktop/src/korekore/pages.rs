@@ -7,14 +7,14 @@ use iced::{Alignment, Border, Element, Length, Padding};
 
 use super::Section;
 use super::controls::{
-    Fill, PIXEL, badge, bar, bold, card, card_with, divider, field, heading, note, picker, pill, pill_sized, regular, rows, semibold,
+    Fill, pixel, badge, bar, bold, card, card_with, divider, field, heading, note, picker, pill, pill_sized, regular, rows, semibold,
     setting, small, sprite, switch, tag,
 };
 use super::picture::BoxPicture;
 use super::{sprites, theme, view};
 use crate::i18n::{UiLanguage, tr};
 use crate::status::{self, OperationKind, OperationState};
-use crate::{AddressChoice, BUILTIN, CUSTOM, Lender, Message, ROBOT, agents, assets, client, config_dir, short_time, wifi_failure};
+use crate::{AddressChoice, BUILTIN, BoxScreens, CUSTOM, Lender, Message, ROBOT, agents, assets, client, config_dir, short_time, wifi_failure};
 
 /// Leaves room for the scroll bar and the cards' shadows.
 pub(super) fn page<'a>(content: impl Into<Element<'a, Message>>) -> Element<'a, Message> {
@@ -77,7 +77,7 @@ impl crate::App {
         }
         let volume_row = row![
             column![
-                row![text(tr("Volume", &[])).font(bold()).size(13), Space::new().width(Length::Fill), text(level.to_string()).font(PIXEL).size(13)],
+                row![text(tr("Volume", &[])).font(bold()).size(13), Space::new().width(Length::Fill), text(level.to_string()).font(pixel(13.0).0).size(pixel(13.0).1)],
                 volume,
             ]
             .spacing(6)
@@ -87,29 +87,27 @@ impl crate::App {
         .spacing(14)
         .align_y(Alignment::Center)
         .padding(Padding::from([10, 14]));
-        let address = row![text(tr("What the buddy calls you", &[])).font(semibold()).size(13).color(theme::INK).width(Length::Fill)]
-            .extend(assets::Language::ALL.map(|language| {
-                let options: Vec<AddressChoice> = std::iter::once(AddressChoice { form: None, language })
-                    .chain(
-                        assets::FORMS_OF_ADDRESS
-                            .iter()
-                            .filter(|form| form.language == language)
-                            .map(|form| AddressChoice { form: Some(form.id), language }),
-                    )
-                    .collect();
-                let picked = options.iter().copied().find(|choice| choice.form == self.characters.address(language));
-                picker(options, picked, move |choice: AddressChoice| Message::PickAddress(language, choice.form))
-            }))
+        // Only the language the box's Character speaks: the robot says no one's name.
+        let address = self.box_language().map(|language| {
+            let options: Vec<AddressChoice> = std::iter::once(AddressChoice { form: None, language })
+                .chain(assets::FORMS_OF_ADDRESS.iter().filter(|form| form.language == language).map(|form| AddressChoice { form: Some(form.id), language }))
+                .collect();
+            let picked = options.iter().copied().find(|choice| choice.form == self.characters.address(language));
+            row![
+                text(tr("What the buddy calls you", &[])).font(semibold()).size(13).color(theme::INK).width(Length::Fill),
+                picker(options, picked, move |choice: AddressChoice| Message::PickAddress(language, choice.form)),
+            ]
             .spacing(10)
             .align_y(Alignment::Center)
-            .padding(Padding::from([8, 14]));
+            .padding(Padding::from([8, 14]))
+        });
         let current = self.status.as_ref().and_then(|status| status.device.voice.clone());
         let wears_robot = matches!(current.as_deref(), Some(ROBOT | BUILTIN));
         let robot_in_use = wears_robot && self.characters.robot_lender.is_none();
         let mut cards: Vec<Element<'_, Message>> = vec![self.kore_card()];
         cards.push(self.character_card(
             "VibeBuddy".to_owned(),
-            tr("The original robot, drawn by the box itself", &[]),
+            tr("The original robot", &[]),
             self.robot_face.clone(),
             robot_in_use,
             Some(ROBOT),
@@ -129,7 +127,6 @@ impl crate::App {
         for made in &self.made {
             cards.push(self.kk_made_card(made, job));
         }
-        cards.push(self.make_your_own());
         cards.push(self.kk_make_character());
         let mut grid = column![].spacing(12);
         let mut cards = cards.into_iter().peekable();
@@ -165,7 +162,7 @@ impl crate::App {
         });
         let custom = (self.custom_look.is_some() || self.custom_problem.is_some() || current.as_deref() == Some(CUSTOM))
             .then(|| self.custom_look_card(current.as_deref() == Some(CUSTOM)));
-        let content = column![rows([volume_row.into(), address.into()])]
+        let content = column![rows(std::iter::once(volume_row.into()).chain(address.map(Into::into)))]
             .push(progress)
             .push(job.and_then(|job| self.kk_making_row(job)))
             .push(grid)
@@ -210,7 +207,9 @@ impl crate::App {
                 .into()
         };
         let stage_content: Element<'_, Message> = match face {
-            Some(face) => image(face).filter_method(image::FilterMethod::Nearest).into(),
+            // The robot's face (55 × 54) at the same 1.5 × as a look.
+            Some(face) if preview == Some(ROBOT) => image(face).filter_method(image::FilterMethod::Nearest).width(82.5).height(81).into(),
+            Some(face) => figure(face).into(),
             None => Space::new().into(),
         };
         let content = column![
@@ -223,14 +222,12 @@ impl crate::App {
         card_with(content, theme::PAPER, outline, stroke).padding(9).into()
     }
 
-    fn make_your_own(&self) -> Element<'_, Message> {
-        dashed(tr("Make your own look", &[]), tr("1–4 images, made pixel here", &[]), Some(Message::ChooseDrawings))
-    }
-
     fn custom_look_card(&self, in_use: bool) -> Element<'_, Message> {
         let online = self.online();
         let busy = self.busy();
         let lenders: Vec<Lender> = self.voices.iter().map(Lender::of).collect();
+        // The box already wears this look with this lender, so writing it again would only redo it.
+        let on_the_box = in_use && self.custom_look_written && self.characters.custom_lender.as_deref() == self.lender.map(|lender| lender.id);
         let frames = self.custom_look.as_ref().map(|(_, frames)| {
             container(row(frames.iter().map(|frame| image(frame.clone()).filter_method(image::FilterMethod::Nearest).into())).spacing(14))
                 .center_x(Length::Fill)
@@ -245,10 +242,10 @@ impl crate::App {
             column![
                 row![note(tr("Voice and lines from", &[])), Space::new().width(Length::Fill), picker(lenders, self.lender, Message::PickLender)]
                     .align_y(Alignment::Center),
-                row![
-                    Space::new().width(Length::Fill),
-                    pill(tr("Use this look", &[]), Fill::Pink, (online && !busy && self.lender.is_some()).then_some(Message::UseCustom))
-                ],
+                row![]
+                    .push((self.characters.custom_lender.is_some() && !self.confirm_delete_custom).then(|| pill(tr("Delete…", &[]), Fill::Paper, Some(Message::AskDeleteCustom(true)))))
+                    .push(Space::new().width(Length::Fill))
+                    .push(pill(tr("Use this look", &[]), Fill::Pink, (online && !busy && self.lender.is_some() && !on_the_box).then_some(Message::UseCustom))),
             ]
             .spacing(8)
         });
@@ -258,12 +255,20 @@ impl crate::App {
                     .push(in_use.then(|| tag(tr("In use", &[]), theme::KORE_PINK_TEXT))),
             ]
             .push(frames)
-            .push(note(tr(
-                "Draw a figure with any image tool, on a plain white background: one image, or four in the order normal, eyes closed, happy, sad. The box shows it in place of the robot, with the voice and lines of the character you pick.",
-                &[],
-            )))
+            .push(note(tr("One PNG or JPEG image: the figure four times in a 2 × 2 grid, on a plain white or transparent background. Top left normal, top right eyes closed, bottom left happy, bottom right sad. Any size: VibeBuddy cuts out each figure and makes it 48 × 64 pixels in 15 colors. No drawing yet? Copy a prompt into an image tool, such as ChatGPT or Gemini, with your character in place of the brackets.", &[])))
             .push(row![pill(tr("Choose images…", &[]), Fill::Paper, Some(Message::ChooseDrawings)), pill(tr("Copy a prompt", &[]), Fill::Paper, Some(Message::CopyPrompt))].spacing(8))
             .push(pick)
+            .push(self.confirm_delete_custom.then(|| {
+                let lender = self.characters.custom_lender.as_deref().map(assets::voice_name).unwrap_or_default();
+                column![note(tr("Delete your own character? This can't be undone.", &[]))]
+                    .push(in_use.then(|| note(tr("The box goes back to %@.", &[&lender]))))
+                    .push(row![
+                        Space::new().width(Length::Fill),
+                        pill(tr("Cancel", &[]), Fill::Paper, Some(Message::AskDeleteCustom(false))),
+                        pill(tr("Delete", &[]), Fill::Pink, Some(Message::DeleteCustom)),
+                    ].spacing(6))
+                    .spacing(6)
+            }))
             .push(self.custom_problem.as_ref().map(|problem| tag(problem, theme::KORE_PINK_TEXT)))
             .spacing(10),
             theme::PAPER,
@@ -343,8 +348,14 @@ impl crate::App {
         } else {
             Space::new().into()
         };
+        // The agents' marks are drawn for the box's dark screen, so each sits on a dark tile here too.
+        let tile = container(sprite(icon, 2)).padding(4).style(|_| container::Style {
+            background: Some(theme::BOX_CARD.into()),
+            border: Border { radius: 8.0.into(), ..Border::default() },
+            ..container::Style::default()
+        });
         row![
-            sprite(icon, 3),
+            tile,
             column![
                 text(setup.name.clone()).font(bold()).size(15).color(theme::INK),
                 row![tag(state, color), small(detail)].spacing(8),
@@ -374,7 +385,7 @@ impl crate::App {
                         } else {
                             theme::BOX_TEXT_MUTED
                         };
-                        text(line.clone()).font(PIXEL).size(12).color(color).into()
+                        text(line.clone()).font(pixel(12.0).0).size(pixel(12.0).1).color(color).into()
                     })))
                     .height(Length::Fixed(160.0)),
                 )
@@ -416,7 +427,7 @@ impl crate::App {
         let chip = |label: String, tile: Option<&'static super::Sprite>, option: client::BrainChoice| -> Element<'_, Message> {
             let on = choice == Some(option);
             let (background, foreground) = if on { (theme::INK, theme::CREAM) } else { (theme::PAPER, theme::INK) };
-            button(row![].push(tile.map(|tile| sprite(tile, 2))).push(text(label).font(bold()).size(13)).spacing(6).align_y(Alignment::Center))
+            button(row![].push(tile.map(|tile| sprite(tile, 1))).push(text(label).font(bold()).size(13)).spacing(6).align_y(Alignment::Center))
                 .padding(if tile.is_some() { Padding { top: 3.0, right: 12.0, bottom: 3.0, left: 4.0 } } else { Padding::from([4, 12]) })
                 .on_press(Message::PickBrain(option))
                 .style(move |_, _| button::Style {
@@ -469,7 +480,14 @@ impl crate::App {
                 Some(Ok(exchanges)) => card(
                     scrollable(
                         column(exchanges.iter().map(|exchange| {
-                            column![mine(&exchange.said)].extend(exchange.replies.iter().map(|reply| buddy(reply))).spacing(8).into()
+                            column![]
+                                .push(exchange.at.map(|at| {
+                                    container(text(when(at, chrono::Local::now())).font(pixel(12.0).0).size(pixel(12.0).1).color(theme::MUTED_2)).center_x(Length::Fill)
+                                }))
+                                .push(mine(&exchange.said))
+                                .extend(exchange.replies.iter().map(|reply| buddy(reply)))
+                                .spacing(8)
+                                .into()
                         }))
                         .spacing(12)
                         .padding(Padding::ZERO.right(14)),
@@ -486,7 +504,7 @@ impl crate::App {
             .push(key)
             .push(voice_off)
             .push(container(body).height(Length::Fill))
-            .push(text(tr("last 20 exchanges · newest at the bottom · stays on this computer", &[])).font(PIXEL).size(12).color(theme::MUTED_2))
+            .push(text(tr("last 20 exchanges · newest at the bottom · stays on this computer", &[])).font(pixel(12.0).0).size(pixel(12.0).1).color(theme::MUTED_2))
             .spacing(14)
             .height(Length::Fill)
             .into()
@@ -542,7 +560,7 @@ impl crate::App {
         card(
             column![
                 row![
-                    sprite(if claude { &sprites::ICON_CC } else { &sprites::ICON_CX }, 3),
+                    sprite(if claude { &sprites::ICON_CC } else { &sprites::ICON_CX }, 2),
                     heading(if claude { tr("Voice needs Claude Code", &[]) } else { tr("Voice needs Codex", &[]) }),
                 ]
                 .spacing(10)
@@ -608,20 +626,34 @@ impl crate::App {
         let version = device.and_then(|device| device.firmware_version.clone()).or_else(|| device.and_then(|device| device.firmware_label())).unwrap_or_else(|| "—".to_owned());
         let firmware: Element<'_, Message> = match offer {
             Some(offer) if outdated => row![
-                text(format!("{version} ")).font(PIXEL).size(13).color(theme::INK),
+                text(format!("{version} ")).font(pixel(13.0).0).size(pixel(13.0).1).color(theme::INK),
                 tag(tr("· %@ available", &[&offer.version]), theme::WAIT_TEXT)
             ]
             .into(),
             _ if online && (offer.is_some() || updates.is_some_and(|updates| updates.last_check.is_some())) => {
-                row![text(format!("{version} ")).font(PIXEL).size(13).color(theme::INK), tag(tr("· up to date", &[]), theme::DONE_TEXT)].into()
+                row![text(format!("{version} ")).font(pixel(13.0).0).size(pixel(13.0).1).color(theme::INK), tag(tr("· up to date", &[]), theme::DONE_TEXT)].into()
             }
-            _ => text(version).font(PIXEL).size(13).color(theme::INK).into(),
+            _ => text(version).font(pixel(13.0).0).size(pixel(13.0).1).color(theme::INK).into(),
+        };
+        // Which set of screens the box draws (ADR-0021), as the box last said; firmware that predates the choice says nothing.
+        // Without a way to grey out the picker, the value shows as text while it can't be changed.
+        let screens: Element<'_, Message> = match device.and_then(|device| device.screens.as_deref()) {
+            None if online => note(tr("Update the box's firmware to choose its screens.", &[])),
+            screens => {
+                let current = screens.and_then(BoxScreens::of);
+                let value: Element<'_, Message> = match current {
+                    Some(current) if online && !busy => picker(BoxScreens::ALL.to_vec(), Some(current), Message::SetScreens),
+                    _ => text(current.map_or_else(|| "—".to_owned(), |current| current.to_string())).font(pixel(13.0).0).size(pixel(13.0).1).color(theme::INK).into(),
+                };
+                row![small(tr("Box screens", &[])), Space::new().width(Length::Fill), value].align_y(Alignment::Center).into()
+            }
         };
         let the_box = card(
             column![
                 heading(tr("The box", &[])),
-                column![small(tr("Link", &[])), text(link).font(PIXEL).size(13).color(theme::INK)].spacing(2),
+                column![small(tr("Link", &[])), text(link).font(pixel(13.0).0).size(pixel(13.0).1).color(theme::INK)].spacing(2),
                 column![small(tr("Firmware", &[])), firmware].spacing(2),
+                screens,
             ]
             .push(device.filter(|device| !device.connected).and_then(status::Device::relay_refusal).map(|why| text(why).font(regular()).size(12).color(theme::KORE_PINK_TEXT)))
             .push(Space::new().height(Length::Fill))
@@ -695,7 +727,7 @@ impl crate::App {
                     None => candidate.port.clone(),
                 };
                 let pick = candidate.usb_serial.clone().map(|serial| pill(tr("This is the box", &[]), Fill::Sun, (!busy).then_some(Message::ChooseBox(serial))));
-                column![divider(), row![text(label).font(PIXEL).size(12).color(theme::INK).width(Length::Fill)].push(pick).align_y(Alignment::Center)]
+                column![divider(), row![text(label).font(pixel(12.0).0).size(pixel(12.0).1).color(theme::INK).width(Length::Fill)].push(pick).align_y(Alignment::Center)]
                     .spacing(8)
                     .into()
             });
@@ -1074,16 +1106,16 @@ impl crate::App {
         let running = self.status.is_some();
         let state: Element<'_, Message> = match &self.status {
             Some(status) => row![
-                text(tr("Running", &[]).to_uppercase()).font(PIXEL).size(16).color(theme::MINT),
-                text(format!(" · {}", status.daemon.short_build())).font(PIXEL).size(16).color(theme::CREAM),
+                text(tr("Running", &[]).to_uppercase()).font(pixel(16.0).0).size(pixel(16.0).1).color(theme::MINT),
+                text(format!(" · {}", status.daemon.short_build())).font(pixel(16.0).0).size(pixel(16.0).1).color(theme::CREAM),
             ]
             .into(),
-            None => text(tr("Not running", &[]).to_uppercase()).font(PIXEL).size(16).color(theme::PEACH).into(),
+            None => text(tr("Not running", &[]).to_uppercase()).font(pixel(16.0).0).size(pixel(16.0).1).color(theme::PEACH).into(),
         };
         let daemon = card_with(
             row![
                 sprite(if running { &sprites::KORE_WORKING } else { &sprites::KORE_SAD }, 3),
-                column![text("DAEMON").font(PIXEL).size(13).color(theme::BOX_TEXT_MUTED), state, text("127.0.0.1:7331").font(PIXEL).size(12).color(theme::BOX_TEXT_MUTED)]
+                column![text("DAEMON").font(pixel(13.0).0).size(pixel(13.0).1).color(theme::BOX_TEXT_MUTED), state, text("127.0.0.1:7331").font(pixel(12.0).0).size(pixel(12.0).1).color(theme::BOX_TEXT_MUTED)]
                     .spacing(4)
                     .width(Length::Fill),
                 button(text(tr("Restart daemon", &[])).font(bold()).size(13))
@@ -1128,7 +1160,7 @@ impl crate::App {
                     ),
                 ]
                 .spacing(14),
-                container(column![small(tr("Config file", &[])), text(config).font(PIXEL).size(13).color(theme::INK)].spacing(2))
+                container(column![small(tr("Config file", &[])), text(config).font(pixel(13.0).0).size(pixel(13.0).1).color(theme::INK)].spacing(2))
                     .padding(Padding::from([10, 14]))
                     .width(Length::Fill)
                     .style(|_| container::Style {
@@ -1147,7 +1179,7 @@ pub(super) fn dashed<'a>(title: String, detail: String, on_press: Option<Message
     button(
         container(
             column![
-                text("+").font(PIXEL).size(32).color(theme::KORE_PINK_TEXT),
+                text("+").font(pixel(32.0).0).size(pixel(32.0).1).color(theme::KORE_PINK_TEXT),
                 text(title).font(bold()).size(14).color(theme::INK),
                 small(detail),
             ]
@@ -1198,6 +1230,19 @@ fn link<'a>(label: String, on_press: Message) -> Element<'a, Message> {
     button(text(label).font(regular()).size(13).color(theme::KORE_PINK_TEXT)).padding(0).on_press(on_press).style(|_, _| button::Style::default()).into()
 }
 
+/// When an exchange was said: the time for today, the day and the time before that.
+fn when(at: chrono::DateTime<chrono::Utc>, now: chrono::DateTime<chrono::Local>) -> String {
+    let at = at.with_timezone(&chrono::Local);
+    let format = if at.date_naive() == now.date_naive() {
+        "%H:%M"
+    } else if crate::i18n::is_chinese() {
+        "%-m月%-d日 %H:%M"
+    } else {
+        "%-d %b %H:%M"
+    };
+    at.format(format).to_string()
+}
+
 /// Your words: right, in an Ink bubble.
 fn mine(words: &str) -> Element<'_, Message> {
     container(
@@ -1235,4 +1280,10 @@ fn buddy(words: &str) -> Element<'_, Message> {
     .spacing(8)
     .align_y(Alignment::End)
     .into()
+}
+
+/// A look frame as a Character card shows it: 1.5 × (72 × 96, the design's figure on a 104 px stage), each look pixel
+/// three screen pixels on a 2× display.
+pub(super) fn figure(face: image::Handle) -> iced::widget::Image {
+    image(face).filter_method(image::FilterMethod::Nearest).width(72).height(96)
 }

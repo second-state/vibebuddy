@@ -93,10 +93,13 @@ public enum ResidentProblem: Equatable, Decodable {
 public struct ResidentExchange: Decodable, Equatable {
     public var said: String
     public var replies: [String]
+    /// When it was said; nil from a daemon or thread that doesn't say.
+    public var at: Date?
 
-    public init(said: String, replies: [String]) {
+    public init(said: String, replies: [String], at: Date? = nil) {
         self.said = said
         self.replies = replies
+        self.at = at
     }
 }
 

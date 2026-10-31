@@ -118,6 +118,26 @@ impl<'a> Canvas<'a> {
         }
     }
 
+    /// Mixes `color` into the pixel at (x, y) by `alpha` sixteenths (0 leaves it, 15 replaces it); the korekore
+    /// screens draw anti-aliased type this way.
+    pub fn blend(&mut self, x: i32, y: i32, color: u16, alpha: u8) {
+        if alpha == 0 || !(0..WIDTH).contains(&x) || !(0..HEIGHT).contains(&y) {
+            return;
+        }
+        let at = ((y * WIDTH + x) * 2) as usize;
+        let mixed = if alpha >= 15 {
+            color
+        } else {
+            let under = u16::from_be_bytes([self.bytes[at], self.bytes[at + 1]]);
+            let mix = |shift: u32, mask: u16| {
+                let (top, bottom) = (u32::from((color >> shift) & mask), u32::from((under >> shift) & mask));
+                ((top * u32::from(alpha) + bottom * (15 - u32::from(alpha)) + 7) / 15) as u16 & mask
+            };
+            mix(11, 0x1f) << 11 | mix(5, 0x3f) << 5 | mix(0, 0x1f)
+        };
+        self.bytes[at..at + 2].copy_from_slice(&mixed.to_be_bytes());
+    }
+
     /// A three-pixel-thick Bresenham line.
     pub fn draw_line(&mut self, mut x0: i32, mut y0: i32, x1: i32, y1: i32, color: u16) {
         let delta_x = (x1 - x0).abs();

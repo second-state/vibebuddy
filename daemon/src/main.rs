@@ -765,6 +765,7 @@ fn app(state: AppState) -> Router {
         .route("/v1/config", get(get_config).put(put_config))
         .route("/v1/device/identify", post(post_identify))
         .route("/v1/device/volume", post(post_volume))
+        .route("/v1/device/screens", post(post_screens))
         .route("/v1/device/unpair", post(post_unpair))
         .route("/v1/device/takeover", post(post_takeover))
         .route("/v1/device/wifi", post(post_wifi))
@@ -1015,6 +1016,31 @@ async fn post_volume(
     if request.preview {
         event.extra.insert("preview".to_owned(), true.into());
     }
+    post_event(State(state), Json(event)).await
+}
+
+/// The sets of screens the box can draw (ADR-0021).
+const SCREEN_STYLES: [&str; 2] = ["robot", "korekore"];
+
+#[derive(serde::Deserialize)]
+struct ScreensRequest {
+    style: String,
+}
+
+/// Choose which set of screens the box draws. The box stores the choice and answers with a `SCREENS` line, and the status
+/// screens follow it.
+async fn post_screens(
+    State(state): State<AppState>,
+    Json(request): Json<ScreensRequest>,
+) -> (StatusCode, Json<ApiResponse>) {
+    if !SCREEN_STYLES.contains(&request.style.as_str()) {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(ApiResponse { accepted: false, message: format!("style must be one of {}", SCREEN_STYLES.join(", ")) }),
+        );
+    }
+    let mut event = device_command("device.screens");
+    event.extra.insert("style".to_owned(), request.style.into());
     post_event(State(state), Json(event)).await
 }
 
@@ -2713,6 +2739,27 @@ mod tests {
         let transport = Arc::new(RecordingTransport::default());
         let request = VolumeRequest { level: 10, preview: false };
         let (status, Json(response)) = post_volume(State(test_state(transport.clone())), Json(request)).await;
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+        assert!(!response.accepted);
+        assert!(transport.events().is_empty());
+    }
+
+    #[tokio::test]
+    async fn choosing_the_screens_sends_the_style_to_the_device() {
+        let transport = Arc::new(RecordingTransport::default());
+        let request = ScreensRequest { style: "korekore".to_owned() };
+        let (status, _) = post_screens(State(test_state(transport.clone())), Json(request)).await;
+        assert_eq!(status, StatusCode::ACCEPTED);
+        let event = &transport.events()[0];
+        assert_eq!(event.event, "device.screens");
+        assert_eq!(event.extra["style"], "korekore");
+    }
+
+    #[tokio::test]
+    async fn an_unknown_screen_style_is_refused_before_reaching_the_device() {
+        let transport = Arc::new(RecordingTransport::default());
+        let request = ScreensRequest { style: "Robot".to_owned() };
+        let (status, Json(response)) = post_screens(State(test_state(transport.clone())), Json(request)).await;
         assert_eq!(status, StatusCode::BAD_REQUEST);
         assert!(!response.accepted);
         assert!(transport.events().is_empty());

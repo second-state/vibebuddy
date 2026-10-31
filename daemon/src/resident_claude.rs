@@ -26,6 +26,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use axum::extract::State;
+use chrono::DateTime;
 use axum::http::{HeaderMap, StatusCode};
 use axum::response::IntoResponse;
 use serde::{Deserialize, Serialize};
@@ -606,7 +607,8 @@ fn exchanges_of(transcript: &str) -> Vec<Exchange> {
                 _ => String::new(),
             };
             if !said.is_empty() {
-                exchanges.push(Exchange { said, replies: Vec::new() });
+                let at = entry["timestamp"].as_str().and_then(|time| DateTime::parse_from_rfc3339(time).ok()).map(|time| time.to_utc());
+                exchanges.push(Exchange { said, replies: Vec::new(), at });
             }
         } else if let (Some(exchange), Some(blocks)) = (exchanges.last_mut(), content.as_array()) {
             exchange.replies.extend(
@@ -1172,6 +1174,7 @@ pub(crate) mod tests {
             entry.to_string()
         };
         let speak = |text: &str| json!({"type": "tool_use", "name": "mcp__vibebuddy__speak", "input": {"text": text}});
+        let at = |time: &str| DateTime::parse_from_rfc3339(time).unwrap().to_utc();
         let transcript = [
             // Written out of order, as Claude Code does.
             line("2026-10-14T07:00:02Z", json!({"type": "assistant", "message": {"content": [speak("One task."), speak("It's fine.")]}})),
@@ -1195,8 +1198,12 @@ pub(crate) mod tests {
         assert_eq!(
             exchanges_of(&transcript),
             [
-                Exchange { said: "what's up?".to_owned(), replies: vec!["One task.".to_owned(), "It's fine.".to_owned()] },
-                Exchange { said: "and now?".to_owned(), replies: vec!["Still one.".to_owned()] },
+                Exchange {
+                    said: "what's up?".to_owned(),
+                    replies: vec!["One task.".to_owned(), "It's fine.".to_owned()],
+                    at: Some(at("2026-10-14T07:00:01Z")),
+                },
+                Exchange { said: "and now?".to_owned(), replies: vec!["Still one.".to_owned()], at: Some(at("2026-10-14T07:01:00Z")) },
             ]
         );
 
@@ -1207,7 +1214,10 @@ pub(crate) mod tests {
         let project = dir.join("resident-claude/projects/-state-resident");
         std::fs::create_dir_all(&project).unwrap();
         std::fs::write(project.join("abc.jsonl"), &transcript).unwrap();
-        assert_eq!(brain.history(1), [Exchange { said: "and now?".to_owned(), replies: vec!["Still one.".to_owned()] }]);
+        assert_eq!(
+            brain.history(1),
+            [Exchange { said: "and now?".to_owned(), replies: vec!["Still one.".to_owned()], at: Some(at("2026-10-14T07:01:00Z")) }]
+        );
         let _ = std::fs::remove_dir_all(dir);
     }
 

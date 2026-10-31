@@ -7,49 +7,41 @@ import VibeBuddyCore
 /// tab's, in the korekore look.
 struct KorekoreCharacterPage: View {
     @ObservedObject var model: AppModel
-    @State private var makingOwn = false
-    /// Bumped by Make your own look, so the page scrolls down to the card it opens below the grid.
-    @State private var showOwn = 0
     @State private var makingCharacter = false
 
     private var connected: Bool { model.status?.device.connected ?? false }
 
     var body: some View {
-        ScrollViewReader { proxy in
-            ScrollView {
-                VStack(alignment: .leading, spacing: 14) {
-                    KorekoreVolumeCard(model: model)
-                    if let operation = model.operation, operation.kind == .voicePack {
-                        writeProgress(operation)
-                    }
-                    if let making = model.status?.making {
-                        KorekoreMakingRow(model: model, making: making)
-                    }
-                    LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 12, alignment: .top), count: 3), spacing: 12) {
-                        koreCard
-                        robotCard
-                        ForEach(Resources.bundledVoices) { entry in
-                            voiceCard(entry)
-                        }
-                        ForEach(model.madeCharacters) { made in
-                            KorekoreMadeCard(model: model, made: made)
-                        }
-                        makeYourOwn
-                        makeCharacter
-                    }
-                    .padding(.bottom, Theme.Sticker.sm)
-                    if makingOwn || model.status?.device.voice == CustomCharacter.id {
-                        KorekoreCustomLook(model: model).id("own")
-                    }
+        ScrollView {
+            VStack(alignment: .leading, spacing: 14) {
+                KorekoreVolumeCard(model: model)
+                if let operation = model.operation, operation.kind == .voicePack {
+                    writeProgress(operation)
                 }
-                .padding(.bottom, 8)
+                if let making = model.status?.making {
+                    KorekoreMakingRow(model: model, making: making)
+                }
+                LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 12, alignment: .top), count: 3), spacing: 12) {
+                    koreCard
+                    robotCard
+                    ForEach(Resources.bundledVoices) { entry in
+                        voiceCard(entry)
+                    }
+                    ForEach(model.madeCharacters) { made in
+                        KorekoreMadeCard(model: model, made: made)
+                    }
+                    makeYourOwn
+                }
+                .padding(.bottom, Theme.Sticker.sm)
+                // Drawings of the user's own, kept or on the box: they can change them, the Character lending its voice, or
+                // delete them.
+                if model.status?.device.voice == CustomCharacter.id || model.savedCustomCharacter != nil {
+                    KorekoreCustomLook(model: model)
+                }
             }
-            .scrollIndicators(.never)
-            .onChange(of: showOwn) {
-                // After the card is laid out, or there is nothing to scroll to yet.
-                DispatchQueue.main.async { withAnimation { proxy.scrollTo("own", anchor: .top) } }
-            }
+            .padding(.bottom, 8)
         }
+        .scrollIndicators(.never)
         .onAppear { model.refreshMadeCharacters() }
         .sheet(isPresented: $makingCharacter) { KorekoreMakeSheet(model: model) }
     }
@@ -145,10 +137,10 @@ struct KorekoreCharacterPage: View {
     }
 
     private var robotCard: some View {
-        card(name: "VibeBuddy", summary: String(localized: "The original robot, drawn by the box itself"),
+        card(name: "VibeBuddy", summary: String(localized: "The original robot"),
              inUse: model.wearsRobot && !model.robotBorrowsVoice, previewID: AppModel.robotID, use: model.writeRobot) {
             if let face = Resources.robotFace {
-                Image(nsImage: face).interpolation(.none).padding(.bottom, 8)
+                Image(nsImage: LookImages.figure(face)).interpolation(.none).padding(.bottom, 8)
             }
         }
     }
@@ -157,27 +149,19 @@ struct KorekoreCharacterPage: View {
         card(name: entry.name, summary: entry.summary, inUse: model.status?.device.voice == entry.id,
              previewID: entry.id, use: { model.writeVoice(entry.id) }) {
             if let frame = Resources.voicePack(entry.id)?.look.flatMap(LookBuilder.frames(of:))?.first {
-                Image(nsImage: LookImages.image(frame, scale: 1)).interpolation(.none).padding(.bottom, 2)
+                Image(nsImage: LookImages.figure(frame)).interpolation(.none).padding(.bottom, 2)
             }
         }
     }
 
+    /// One way in to a Character of the user's own: their drawings, their lines, a voice they pick. Drawings alone go
+    /// straight to the box; new lines or another voice are made first (KorekoreMakeSheet).
     private var makeYourOwn: some View {
-        Button {
-            makingOwn = true
-            showOwn += 1
-        } label: {
-            dashed(String(localized: "Make your own look"), String(localized: "1–4 images, made pixel here"))
-        }
-        .buttonStyle(.plain)
-    }
-
-    private var makeCharacter: some View {
         Button { makingCharacter = true } label: {
-            dashed(String(localized: "Make a Character"), String(localized: "Its own lines, in a voice you pick"))
+            dashed(String(localized: "Make your own"), String(localized: "Your drawings, your lines, a voice you pick"))
         }
         .buttonStyle(.plain)
-        .disabled(model.status == nil || model.status?.making?.running == true)
+        .disabled(model.status == nil)
     }
 
     /// The dashed card that starts something new.
@@ -236,20 +220,21 @@ struct KorekoreVolumeCard: View {
             .padding(.vertical, 10)
             .padding(.horizontal, 14)
             .disabled(!connected || model.operationRunning)
-            KDivider()
-            HStack(spacing: 10) {
-                Text("What the buddy calls you").font(.rounded(13, weight: 700))
-                Spacer()
-                ForEach([VoiceLanguage.zh, .en], id: \.self) { language in
+            // Only the language the box's Character speaks: the robot says no one's name.
+            if let language = model.boxLanguage {
+                KDivider()
+                HStack(spacing: 10) {
+                    Text("What the buddy calls you").font(.rounded(13, weight: 700))
+                    Spacer()
                     KMenu(selection: model.formOfAddress(language) ?? "",
                           options: [("", String(localized: "Nothing"))] + FormOfAddress.all.filter { $0.language == language }.map { ($0.id, $0.words) }) {
                         model.setFormOfAddress($0.isEmpty ? nil : $0, for: language)
                     }
                     .disabled(model.operationRunning)
                 }
+                .padding(.vertical, 8)
+                .padding(.horizontal, 14)
             }
-            .padding(.vertical, 8)
-            .padding(.horizontal, 14)
         }
         .onAppear(perform: sync)
         .onChange(of: model.status?.device.volume) { sync() }
@@ -261,8 +246,7 @@ struct KorekoreVolumeCard: View {
     }
 }
 
-/// A Character of the user's own: their drawings as the look, a preset Character's voice and lines (ADR-0009). The
-/// same steps as `CustomCharacterCard`.
+/// A Character of the user's own: their drawings as the look, a preset Character's voice and lines (ADR-0009).
 struct KorekoreCustomLook: View {
     @ObservedObject var model: AppModel
     @State private var frames: [RGBAImage] = []
@@ -271,6 +255,8 @@ struct KorekoreCustomLook: View {
     @State private var problem: String?
 
     private var inUse: Bool { model.status?.device.voice == CustomCharacter.id }
+    /// The box already wears this look with this lender, so writing it again would only redo it.
+    private var onTheBox: Bool { inUse && model.savedCustomCharacter.map { $0.look == look && $0.lender == lender } == true }
 
     var body: some View {
         KCard(stroke: Theme.Stroke.bold) {
@@ -290,7 +276,7 @@ struct KorekoreCustomLook: View {
                 .background(Theme.Colors.boxCard, in: RoundedRectangle(cornerRadius: 12))
                 .overlay(RoundedRectangle(cornerRadius: 12)
                     .strokeBorder(Theme.Colors.ink, style: StrokeStyle(lineWidth: Theme.Stroke.base, dash: [6, 4])))
-                KNote(String(localized: "Draw a figure with any image tool, on a plain white background: one image, or four in the order normal, eyes closed, happy, sad. The box shows it in place of the robot, with the voice and lines of the character you pick."))
+                KNote(String(localized: "One PNG or JPEG image: the figure four times in a 2 × 2 grid, on a plain white or transparent background. Top left normal, top right eyes closed, bottom left happy, bottom right sad. Any size: VibeBuddy cuts out each figure and makes it 48 × 64 pixels in 15 colors. No drawing yet? Copy a prompt into an image tool, such as ChatGPT or Gemini, with your character in place of the brackets."))
                 HStack {
                     Button(String(localized: "Choose images…"), action: choose).kButton()
                     Button(String(localized: "Copy a prompt")) {
@@ -306,9 +292,12 @@ struct KorekoreCustomLook: View {
                         KMenu(selection: lender, options: Resources.bundledVoices.map { ($0.id, $0.name) }) { lender = $0 }
                     }
                     HStack {
+                        if model.savedCustomCharacter != nil {
+                            Button(String(localized: "Delete…"), action: confirmDelete).kButton()
+                        }
                         Spacer()
                         Button(String(localized: "Use this look"), action: use).kButton(.pink)
-                            .disabled(model.operationRunning || !(model.status?.device.connected ?? false))
+                            .disabled(model.operationRunning || !(model.status?.device.connected ?? false) || onTheBox)
                     }
                 }
                 if let problem {
@@ -325,23 +314,30 @@ struct KorekoreCustomLook: View {
     }
 
     private func choose() {
-        let panel = NSOpenPanel()
-        panel.allowsMultipleSelection = true
-        panel.allowedContentTypes = [.png, .jpeg]
-        guard panel.runModal() == .OK else { return }
-        let urls = panel.urls.sorted { $0.lastPathComponent.localizedStandardCompare($1.lastPathComponent) == .orderedAscending }
-        let images = urls.compactMap(LookImages.load)
-        guard images.count == urls.count, (1...4).contains(images.count) else {
-            problem = String(localized: "Pick one to four PNG or JPEG images.")
-            return
+        LookImages.chooseLook { result in
+            switch result {
+            case .success(let built):
+                look = built
+                frames = LookBuilder.frames(of: built) ?? []
+                problem = nil
+            case .failure(let failure):
+                problem = failure.message
+            case nil:
+                break
+            }
         }
-        do {
-            let built = try LookBuilder.build(images)
-            look = built
-            frames = LookBuilder.frames(of: built) ?? []
+    }
+
+    private func confirmDelete() {
+        let lenderName = VoiceCatalogEntry.all.first { $0.id == model.savedCustomCharacter?.lender }?.name ?? lender
+        KorekoreAlert.ask(title: String(localized: "Delete your own character? This can't be undone."),
+                          message: inUse ? String(localized: "The box goes back to \(lenderName).") : nil,
+                          buttons: [String(localized: "Delete"), String(localized: "Cancel")], warning: true) { answer in
+            guard answer.button == 0 else { return }
+            model.deleteCustomCharacter()
+            look = nil
+            frames = []
             problem = nil
-        } catch {
-            problem = String(localized: "No figure found: use a plain white or transparent background.")
         }
     }
 
@@ -357,5 +353,5 @@ struct KorekoreCustomLook: View {
 /// model.
 enum CustomCharacter {
     static let id = "custom"
-    static let prompt = "Pixel art game sprite of [describe your character], chibi proportions, standing, front view, full body, centered, arms down, flat colors, thick dark outline, limited 16-color palette, plain solid white background. Then the same character in exactly the same pose with the eyes closed; with a big happy smile; with a sad face."
+    static let prompt = "Pixel art game sprite sheet of [describe your character]: one image, a 2 × 2 grid of the same character in exactly the same pose, with clear white space between the four. Chibi proportions, standing, front view, full body, arms down, flat colors, thick dark outline, limited 16-color palette, plain solid white background. Top left: normal. Top right: eyes closed. Bottom left: a big happy smile. Bottom right: a sad face."
 }

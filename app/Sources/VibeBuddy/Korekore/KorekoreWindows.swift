@@ -59,6 +59,7 @@ final class KorekoreStatusItem {
     private let actions: KorekoreMenuActions
     private var panel: NSPanel?
     private var outsideClicks: Any?
+    private var insideClicks: Any?
     private var subscriptions: Set<AnyCancellable> = []
 
     init(model: AppModel, actions: KorekoreMenuActions) {
@@ -97,9 +98,22 @@ final class KorekoreStatusItem {
         panel.orderFrontRegardless()
         self.panel = panel
         statusItem.button?.highlight(true)
-        // Like a menu: a click anywhere else closes it.
+        // Like a menu: a click anywhere else closes it. The global monitor sees only other apps' clicks, so clicks in
+        // this app's own windows (Settings) need a local one; a click on the item itself is left to `toggle`.
         outsideClicks = NSEvent.addGlobalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown]) { [weak self] _ in
             MainActor.assumeIsolated { self?.close() }
+        }
+        insideClicks = NSEvent.addLocalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown, .keyDown]) { [weak self] event in
+            let escape = event.type == .keyDown && event.keyCode == 53
+            guard escape || event.type != .keyDown else { return event }
+            let window = event.window
+            let closed = MainActor.assumeIsolated { () -> Bool in
+                guard let self, let panel = self.panel, escape || (window !== panel && window !== self.statusItem.button?.window) else { return false }
+                self.close()
+                return true
+            }
+            // Esc is the panel's; a click still goes where it was aimed.
+            return escape && closed ? nil : event
         }
     }
 
@@ -108,7 +122,9 @@ final class KorekoreStatusItem {
         panel = nil
         statusItem.button?.highlight(false)
         if let outsideClicks { NSEvent.removeMonitor(outsideClicks) }
+        if let insideClicks { NSEvent.removeMonitor(insideClicks) }
         outsideClicks = nil
+        insideClicks = nil
     }
 }
 

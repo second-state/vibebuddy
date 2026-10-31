@@ -45,9 +45,18 @@ fn kore_is_drawn_as_designed() {
 
 #[test]
 fn tiles_have_cut_corners() {
-    let tile = &sprites::ICON_CC;
+    let tile = &sprites::ICON_API;
     assert_eq!((tile.width, tile.height), (12, 12));
     assert_eq!(tile.pixel(0, 0), None);
     assert_eq!(tile.pixel(1, 0), Some(theme::INK));
-    assert_eq!(tile.pixel(2, 1), Some(theme::AGENT_CC));
+    assert_eq!(tile.pixel(2, 1), Some(theme::AGENT_API));
+}
+
+/// The agents' own icons are the robot screens' marks (agent_icon/pixels.rs), 16 × 16: Claude Code's spark.
+#[test]
+fn agent_icons_are_the_agents_marks() {
+    let icon = &sprites::ICON_CC;
+    assert_eq!((icon.width, icon.height), (16, 16));
+    assert_eq!(icon.pixel(0, 0), None);
+    assert_eq!(icon.pixel(4, 0), Some(0xDBAA));
 }

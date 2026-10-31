@@ -38,7 +38,7 @@ pub struct Look {
 }
 
 /// RGB565 to the gray of the same brightness, for a lost link.
-fn gray(color: u16) -> u16 {
+pub(crate) fn gray(color: u16) -> u16 {
     let red = (color >> 11) as u32 * 255 / 31;
     let green = ((color >> 5) & 0x3F) as u32 * 255 / 63;
     let blue = (color & 0x1F) as u32 * 255 / 31;
@@ -76,6 +76,12 @@ impl Look {
     /// Draws a frame with its top-left corner at (left, top) on screen, at 2×. `mirror` flips it
     /// left to right; `gray` draws it in grays.
     pub fn draw(&self, canvas: &mut Canvas, frame: Frame, left: i32, top: i32, mirror: bool, gray_out: bool) {
+        self.draw_scaled(canvas, frame, left, top, SCALE, mirror, gray_out);
+    }
+
+    /// `draw` at another whole-number scale; the korekore screens draw a look at 1× or 2×.
+    #[allow(clippy::too_many_arguments, reason = "draw's arguments and the scale")]
+    pub fn draw_scaled(&self, canvas: &mut Canvas, frame: Frame, left: i32, top: i32, scale: i32, mirror: bool, gray_out: bool) {
         for y in 0..HEIGHT {
             for x in 0..WIDTH {
                 let index = self.index(frame, if mirror { WIDTH - 1 - x } else { x }, y);
@@ -84,7 +90,7 @@ impl Look {
                 }
                 let color = self.palette[index as usize];
                 let color = if gray_out { gray(color) } else { color };
-                canvas.fill_rect(left + x * SCALE, top + y * SCALE, SCALE, SCALE, color);
+                canvas.fill_rect(left + x * scale, top + y * scale, scale, scale, color);
             }
         }
     }

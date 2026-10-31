@@ -15,7 +15,7 @@ enum KorekoreSnapshots {
      "device":{"connected":true,"port":"/dev/cu.usbmodem8301","bridge":false,"mode":"duty","firmware_version":"0.5.0",
        "firmware_build":"cc16829","voice":"mei","volume":50,"box_key":"k","computer_key":"me","paired":true,
        "paired_computers":[{"key":"me","name":"Michael's Mac Studio"},{"key":"t","name":"ThinkPad · Omarchy"}],
-       "wifi_network":"ByteTrade","wifi_address":"192.168.1.160","transfer":true},
+       "wifi_network":"ByteTrade","wifi_address":"192.168.1.160","transfer":true,"screens":"korekore"},
      "today":{"done":7,"asks":3,"busy_seconds":15120},
      "hooks":{"codex":"2026-10-21T16:40:00+08:00","claude":"2026-10-21T17:03:00+08:00"},
      "config":{"notify_link":true,"check_updates":true,"relay":false},
@@ -32,10 +32,11 @@ enum KorekoreSnapshots {
     /// The canvas's sample exchanges; the daemon's history is never read here, since it is the user's own.
     static let conversation = [
         ResidentExchange(said: "Quick check: what time is it, and how many agents are working?",
-                         replies: ["It's 10:09 a.m. in Singapore. Three agents are working."]),
-        ResidentExchange(said: "新加坡明天天气怎么样", replies: ["明天上午多云转晴，最高约三十四度；午后可能有雷阵雨，出门记得带伞。"]),
+                         replies: ["It's 10:09 a.m. in Singapore. Three agents are working."], at: .now.addingTimeInterval(-86_400)),
+        ResidentExchange(said: "新加坡明天天气怎么样", replies: ["明天上午多云转晴，最高约三十四度；午后可能有雷阵雨，出门记得带伞。"],
+                         at: .now.addingTimeInterval(-3_600)),
         ResidentExchange(said: "我现在那几个 session 工作怎么样",
-                         replies: ["两个：XFactor 的 GitHub Actions 正在跑，上次是失败；Qing 的 Claude Code 在等你回复。"]),
+                         replies: ["两个：XFactor 的 GitHub Actions 正在跑，上次是失败；Qing 的 Claude Code 在等你回复。"], at: .now.addingTimeInterval(-600)),
     ]
 
     /// Draws a window off screen, system buttons included, and saves it.

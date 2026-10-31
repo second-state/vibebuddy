@@ -120,14 +120,14 @@ struct KorekoreGeneralPage: View {
         } else if !(device?.connected ?? false) {
             note += "\n" + String(localized: "The box isn't connected, so its character stays as it is. You can change it later on the Character tab.")
         }
-        let answer = KorekoreAlert.run(title: String(localized: "Restart korekore to change the language?"), message: note,
-                                       buttons: [String(localized: "Restart"), String(localized: "Not now")], checkbox: checkbox)
-        let restart = answer.button == 0
-        let voice = answer.checked ? voiceSwitch?.id : nil
-        if restart {
-            model.restart(writingVoice: voice)
-        } else if let voice {
-            model.writeVoice(voice)
+        KorekoreAlert.ask(title: String(localized: "Restart korekore to change the language?"), message: note,
+                          buttons: [String(localized: "Restart"), String(localized: "Not now")], checkbox: checkbox) { [model, voiceSwitch] answer in
+            let voice = answer.checked ? voiceSwitch?.id : nil
+            if answer.button == 0 {
+                model.restart(writingVoice: voice)
+            } else if let voice {
+                model.writeVoice(voice)
+            }
         }
     }
 }

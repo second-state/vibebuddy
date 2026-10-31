@@ -22,6 +22,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
 
+use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use tokio::io::{AsyncRead, AsyncWrite};
@@ -199,6 +200,9 @@ pub struct Answer {
 pub struct Exchange {
     pub said: String,
     pub replies: Vec<String>,
+    /// When it was said; None when the thread doesn't say.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub at: Option<DateTime<Utc>>,
 }
 
 /// How the app-server is reached: the real `codex` child, or an in-memory fake in tests.
@@ -1262,7 +1266,8 @@ fn exchange_of(turn: &Value) -> Option<Exchange> {
         .filter(|item| item["type"] == "dynamicToolCall" && item["tool"] == "speak")
         .filter_map(|item| item.pointer("/arguments/text").and_then(Value::as_str).map(str::to_owned))
         .collect();
-    (!said.is_empty()).then_some(Exchange { said, replies })
+    let at = turn.get("startedAt").and_then(Value::as_i64).and_then(|seconds| DateTime::from_timestamp(seconds, 0));
+    (!said.is_empty()).then_some(Exchange { said, replies, at })
 }
 
 fn load(path: &Path) -> Saved {
@@ -1354,7 +1359,7 @@ pub(crate) mod tests {
                     }
                     "thread/resume" => json!({"thread": {"id": message["params"]["threadId"]}}),
                     "thread/turns/list" => json!({"data": [
-                        {"id": "turn-2", "items": [
+                        {"id": "turn-2", "startedAt": 1_761_700_000, "items": [
                             {"type": "userMessage", "id": "a", "content": [{"type": "text", "text": "and now?"}]},
                             {"type": "dynamicToolCall", "id": "b", "tool": "list_activities", "arguments": {}},
                             {"type": "dynamicToolCall", "id": "c", "tool": "speak", "arguments": {"text": "Still one."}},
@@ -1851,7 +1856,7 @@ pub(crate) mod tests {
         ]});
         assert_eq!(
             exchange_of(&turn),
-            Some(Exchange { said: "what's up?".to_owned(), replies: vec!["All quiet.".to_owned()] })
+            Some(Exchange { said: "what's up?".to_owned(), replies: vec!["All quiet.".to_owned()], at: None })
         );
     }
 
@@ -1867,8 +1872,8 @@ pub(crate) mod tests {
         assert_eq!(
             history,
             [
-                Exchange { said: "what's up?".to_owned(), replies: vec!["One task.".to_owned(), "It's fine.".to_owned()] },
-                Exchange { said: "and now?".to_owned(), replies: vec!["Still one.".to_owned()] },
+                Exchange { said: "what's up?".to_owned(), replies: vec!["One task.".to_owned(), "It's fine.".to_owned()], at: None },
+                Exchange { said: "and now?".to_owned(), replies: vec!["Still one.".to_owned()], at: DateTime::from_timestamp(1_761_700_000, 0) },
             ]
         );
         let list = script.lock().unwrap().received.last().unwrap()["params"].clone();

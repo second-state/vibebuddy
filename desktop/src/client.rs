@@ -72,6 +72,11 @@ pub async fn set_volume(level: u8, preview: bool) -> Result<(), String> {
     post("/v1/device/volume", Some(serde_json::json!({ "level": level, "preview": preview }))).await
 }
 
+/// `style` is `robot` or `korekore`; the box reports a SCREENS line once it has stored it, and the status follows.
+pub async fn set_screens(style: &'static str) -> Result<(), String> {
+    post("/v1/device/screens", Some(serde_json::json!({ "style": style }))).await
+}
+
 /// The daemon accepts the pack and writes it in the background; progress arrives in the status stream.
 /// `lender` (the Character lending a custom one its voice, persona and lines) and `address` (the form of address
 /// its lines carry) aren't in the pack; the daemon keeps them for the buddy's spoken replies.
@@ -359,6 +364,9 @@ pub async fn resident_info() -> Result<ResidentInfo, HistoryError> {
 pub struct Exchange {
     pub said: String,
     pub replies: Vec<String>,
+    /// When it was said; None from a daemon or thread that doesn't say.
+    #[serde(default)]
+    pub at: Option<chrono::DateTime<chrono::Utc>>,
 }
 
 #[derive(Clone, Debug)]
