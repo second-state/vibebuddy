@@ -1018,12 +1018,15 @@ impl crate::App {
         });
         // No self-update here: a new release is installed by rerunning its install.sh, as the README says.
         let upgrade = updates.and_then(|updates| updates.app.as_ref()).map(|_| note(tr("To upgrade, download the new release and run its install.sh again.", &[])));
-        let settings = rows([
+        let mut settings = vec![
             setting(tr("Language", &[]), picker(UiLanguage::ALL.to_vec(), Some(self.language), Message::PickLanguage)),
             setting(tr("Launch at login", &[]), switch(self.launch_at_login, Some(Message::LaunchAtLogin(!self.launch_at_login)))),
             setting(tr("Tell me when the box disconnects or the daemon fails", &[]), switch(notify, have_status.then_some(Message::NotifyLink(!notify)))),
-            setting(tr("Reach the box through the Relay when it's away from this computer", &[]), switch(relay, have_status.then_some(Message::Relay(!relay)))),
-        ]);
+        ];
+        if status::Plan::SHOWN {
+            settings.push(setting(tr("Reach the box through the Relay when it's away from this computer", &[]), switch(relay, have_status.then_some(Message::Relay(!relay)))));
+        }
+        let settings = rows(settings);
         let updates_card = rows([
             setting(tr("Check for updates", &[]), switch(check, have_status.then_some(Message::CheckUpdates(!check)))),
             row![container(line).width(Length::Fill), pill(tr("Releases", &[]), Fill::Paper, Some(Message::OpenReleases)), pill(tr("Check now", &[]), Fill::Paper, enabled.then_some(Message::CheckForUpdatesNow))]

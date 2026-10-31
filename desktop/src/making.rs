@@ -5,7 +5,7 @@
 use serde::{Deserialize, Serialize};
 
 use crate::i18n::tr;
-use crate::status::{Account, VoiceKeys};
+use crate::status::{Account, Plan, VoiceKeys};
 
 /// A voice a made Character can speak with, from `GET /v1/voices`: a row of characters/voices.tsv, or one in the
 /// user's own account (`own`), which only their own key speaks and which has no language of its own.
@@ -130,6 +130,7 @@ impl Making {
             return None;
         }
         Some(match self.reason.as_deref() {
+            Some("plan") if !Plan::SHOWN => tr("Set your own key for %@ on the Account tab first.", &[&provider]),
             Some("plan") => tr("Making a Character with VibeBuddy's voices needs the Paid plan, or your own key for %@.", &[&provider]),
             Some("monthly") => tr("This month's Characters on the Paid plan are used up. The lines made so far are kept: resume next month, or with your own key for %@.", &[&provider]),
             Some("global_cap") => tr("VibeBuddy's voices are paused for today. The lines made so far are kept: resume tomorrow.", &[]),
@@ -160,8 +161,9 @@ impl Readiness {
         let key = keys.map(|keys| if voice.provider == "volc" { &keys.volc } else { &keys.elevenlabs });
         if key.is_some_and(|key| key.set && !key.refused) {
             Readiness::OwnKey
-        } else if voice.own {
-            // A voice in the user's own account: VibeBuddy's voice service can't speak it.
+        } else if voice.own || !Plan::SHOWN {
+            // A voice in the user's own account: VibeBuddy's voice service can't speak it. Nor, while the Paid plan
+            // is hidden, any voice.
             Readiness::OwnKeyOnly
         } else if account.signed_in {
             Readiness::PaidPlan
@@ -312,8 +314,9 @@ mod tests {
         let signed_in = Account { available: true, signed_in: true, ..Account::default() };
         let signed_out = Account { available: true, ..Account::default() };
         assert_eq!(Readiness::of(&voice("elevenlabs"), Some(&keys), &Account::default()), Readiness::OwnKey);
-        assert_eq!(Readiness::of(&voice("volc"), Some(&keys), &signed_in), Readiness::PaidPlan, "a refused key doesn't count");
-        assert_eq!(Readiness::of(&voice("volc"), None, &signed_out), Readiness::SignIn);
+        let (paid_plan, sign_in) = if Plan::SHOWN { (Readiness::PaidPlan, Readiness::SignIn) } else { (Readiness::OwnKeyOnly, Readiness::OwnKeyOnly) };
+        assert_eq!(Readiness::of(&voice("volc"), Some(&keys), &signed_in), paid_plan, "a refused key doesn't count");
+        assert_eq!(Readiness::of(&voice("volc"), None, &signed_out), sign_in);
         assert_eq!(Readiness::of(&voice("volc"), None, &Account::default()), Readiness::OwnKeyOnly);
         assert!(!Readiness::SignIn.can_start() && Readiness::PaidPlan.can_start());
         // A voice of the user's own: only their own key speaks it, whatever the plan.

@@ -114,6 +114,9 @@ public struct AccountPlan: Codable, Equatable {
         self.name = name; self.periodEnd = periodEnd; self.characters = characters; self.charactersLimit = charactersLimit
     }
     public var paid: Bool { name == "paid" }
+    /// Whether the App shows the Paid plan. Off until the plan is on sale (2026-10-28): the plan row, the Relay switch
+    /// and its refusals, and making a Character with VibeBuddy's voices are hidden. The daemon doesn't change.
+    public static let shown = false
 }
 
 public struct AccountUsage: Codable, Equatable {

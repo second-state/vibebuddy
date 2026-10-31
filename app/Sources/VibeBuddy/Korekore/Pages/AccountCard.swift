@@ -63,7 +63,7 @@ struct KorekoreAccountCard: View {
             Button(String(localized: "Sign out")) { signOut() }.kButton()
             Button(String(localized: "Delete account…")) { confirmDelete() }.kButton()
         }
-        if let plan = account.plan {
+        if AccountPlan.shown, let plan = account.plan {
             KDivider()
             row {
                 Text("Plan").font(.rounded(14))

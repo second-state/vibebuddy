@@ -37,12 +37,14 @@ struct KorekoreGeneralPage: View {
                                 isOn: Binding(get: { model.status?.config.notifyLink ?? true }, set: { model.setNotifyLink($0) }))
                             .disabled(model.status == nil)
                     }
-                    KDivider()
                     // ADR-0012: the Relay carries the box's messages through VibeBuddy's server, so it can be turned off.
-                    KRow(String(localized: "Reach the box through the Relay when it's away from this Mac")) {
-                        KToggle(String(localized: "Reach the box through the Relay when it's away from this Mac"),
-                                isOn: Binding(get: { model.status?.config.relay ?? true }, set: { model.setRelay($0) }))
-                            .disabled(model.status == nil)
+                    if AccountPlan.shown {
+                        KDivider()
+                        KRow(String(localized: "Reach the box through the Relay when it's away from this Mac")) {
+                            KToggle(String(localized: "Reach the box through the Relay when it's away from this Mac"),
+                                    isOn: Binding(get: { model.status?.config.relay ?? true }, set: { model.setRelay($0) }))
+                                .disabled(model.status == nil)
+                        }
                     }
                 }
                 Text("Updates").font(.rounded(15)).padding(.leading, 4)
