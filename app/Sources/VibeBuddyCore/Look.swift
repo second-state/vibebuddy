@@ -33,20 +33,45 @@ public enum LookBuilder {
         case tooManyImages
     }
 
-    /// One image per frame, in the order normal, eyes closed, happy, sad. Fewer than four reuse the
-    /// normal one for the frames that are missing.
+    /// One figure per frame, in the order normal, eyes closed, happy, sad. An image can hold one figure or a sheet
+    /// of them side by side (image tools often draw the four in one image), read left to right, top to bottom.
+    /// Fewer than four reuse the normal one for the frames that are missing; more than four keep the first four.
     public static func build(_ images: [RGBAImage]) throws -> Data {
         guard !images.isEmpty else { throw Failure.empty }
         guard images.count <= 4 else { throw Failure.tooManyImages }
-        let figures = images.map { cutOut($0) }
-        let frames = (0..<4).map { figures[$0 < figures.count ? $0 : 0] }
-        guard let normalBox = boundingBox(frames[0]) else { throw Failure.empty }
-        let scale = Double(figureHeight) / Double(normalBox.maxY - normalBox.minY)
-        let cells = try frames.map { figure -> [(UInt8, UInt8, UInt8)?] in
-            guard let box = boundingBox(figure) else { throw Failure.empty }
-            return cell(figure, box: box, scale: scale)
+        let figures = try images.flatMap { image -> [(Figure, Box)] in
+            let figure = cutOut(image)
+            guard let whole = boundingBox(figure) else { throw Failure.empty }
+            return figureBoxes(figure, within: whole).map { (figure, $0) }
         }
-        return encode(cells)
+        let frames = (0..<4).map { figures[$0 < figures.count ? $0 : 0] }
+        let scale = Double(figureHeight) / Double(frames[0].1.maxY - frames[0].1.minY)
+        return encode(frames.map { cell($0.0, box: $0.1, scale: scale) })
+    }
+
+    /// The figures in an image: split along blank rows, then each band along blank columns, wherever the gap is
+    /// wide enough not to be a gap inside one figure. A split that leaves a part less than half the tallest one's
+    /// height (a loose sparkle, a tail tip) is no sheet: the whole is one figure.
+    static func figureBoxes(_ figure: Figure, within whole: Box) -> [Box] {
+        let w = figure.image.width
+        let gap = max(2, max(whole.maxX - whole.minX, whole.maxY - whole.minY) / 40)
+        /// Runs of used positions in lo..<hi, joined across gaps narrower than `gap`.
+        func runs(_ lo: Int, _ hi: Int, used: (Int) -> Bool) -> [(Int, Int)] {
+            var out: [(Int, Int)] = []
+            for at in lo..<hi where used(at) {
+                if let last = out.last, at - last.1 < gap { out[out.count - 1].1 = at + 1 } else { out.append((at, at + 1)) }
+            }
+            return out
+        }
+        var parts: [Box] = []
+        for band in runs(whole.minY, whole.maxY, used: { y in (whole.minX..<whole.maxX).contains { figure.opaque[y * w + $0] } }) {
+            for column in runs(whole.minX, whole.maxX, used: { x in (band.0..<band.1).contains { figure.opaque[$0 * w + x] } }) {
+                let rows = runs(band.0, band.1) { y in (column.0..<column.1).contains { figure.opaque[y * w + $0] } }
+                parts.append(Box(minX: column.0, minY: rows.first!.0, maxX: column.1, maxY: rows.last!.1))
+            }
+        }
+        let tallest = parts.map { $0.maxY - $0.minY }.max() ?? 0
+        return parts.count > 1 && parts.allSatisfy({ ($0.maxY - $0.minY) * 2 >= tallest }) ? parts : [whole]
     }
 
     /// Opaque means alpha of at least 128 in an image that has transparency. An image without any

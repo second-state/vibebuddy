@@ -66,7 +66,7 @@ const SAMPLE: &str = r#"{"daemon":{"build":"0.5.0 cc16829","revision":"firmware-
  "device":{"connected":true,"port":"/dev/ttyACM0","mode":"duty","firmware_version":"0.5.0","firmware_build":"cc16829",
    "voice":"robot","volume":50,"box_key":"k","computer_key":"me",
    "paired_computers":[{"key":"me","name":"ThinkPad · Omarchy"},{"key":"m","name":"Michael's Mac Studio"}],
-   "wifi_network":"ByteTrade","wifi_address":"192.168.1.160","transfer":true},
+   "wifi_network":"ByteTrade","wifi_address":"192.168.1.160","transfer":true,"screens":"korekore"},
  "today":{"done":7,"asks":3,"busy_seconds":15120},
  "hooks":{"codex":"2026-10-21T16:40:00+08:00","claude":"2026-10-21T17:03:00+08:00"},
  "config":{"notify_link":true,"check_updates":true,"relay":false},
@@ -91,8 +91,9 @@ fn draw_the_korekore_pages() {
         client::Exchange {
             said: "Quick check: what time is it, and how many agents are working?".to_owned(),
             replies: vec!["It's 10:09 a.m. in Singapore. Three agents are working.".to_owned()],
+            at: Some(chrono::Utc::now() - chrono::Duration::days(1)),
         },
-        client::Exchange { said: "新加坡明天天气怎么样".to_owned(), replies: vec!["明天上午多云转晴，最高约三十四度；午后可能有雷阵雨，出门记得带伞。".to_owned()] },
+        client::Exchange { said: "新加坡明天天气怎么样".to_owned(), replies: vec!["明天上午多云转晴，最高约三十四度；午后可能有雷阵雨，出门记得带伞。".to_owned()], at: Some(chrono::Utc::now()) },
     ]));
     let setup = |agent: &str, name: &str, present: bool, installed: bool| agents::Setup {
         agent: agent.to_owned(),
@@ -136,10 +137,12 @@ fn draw_the_korekore_pages() {
             name: "Night owl".to_owned(),
             voice: None,
             lines: vec![crate::making::Line { occasion: "done".to_owned(), text: "All done, {address}.".to_owned() }],
+            original: Vec::new(),
             occasions: vec!["done".to_owned()],
             look: None,
             problem: None,
             starting: false,
+            own: None,
         });
         let element: Element<'_, Message> = app.view(iced::window::Id::unique());
         save("page-make", (954.0, 766.0), element);

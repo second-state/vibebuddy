@@ -485,6 +485,31 @@ fn the_tally_and_volume_survive_a_reboot() {
     assert_eq!(board.codec_volume, Some(80));
 }
 
+#[test]
+fn the_box_screens_switch_and_survive_a_reboot() {
+    let (mut firmware, mut board, _) = booted(blank_flash());
+    let at = |board: &FakeBoard, x: usize, y: usize| {
+        let index = (y * 320 + x) * 2;
+        u16::from_be_bytes([board.frame[index], board.frame[index + 1]])
+    };
+    // A spot left of Kore in korekore's side panel; the robot's screens have their background there.
+    let robot = at(&board, 4, 150);
+    assert_eq!(send(&mut firmware, &mut board, r#"{"version":1,"event":"device.screens","style":"korekore"}"#), ["SCREENS KOREKORE"]);
+    // korekore's side panel is box-card.
+    assert_eq!(at(&board, 4, 150), vibebuddy_firmware_core::korekore::theme::BOX_CARD);
+    assert_ne!(at(&board, 4, 150), robot);
+    assert_eq!(send(&mut firmware, &mut board, r#"{"version":1,"event":"device.screens","style":"retro"}"#), ["SCREENS ERROR", "SCREENS KOREKORE"]);
+    assert_eq!(send(&mut firmware, &mut board, r#"{"version":1,"event":"device.screens"}"#), ["SCREENS KOREKORE"]);
+
+    let flash = board.flash;
+    let (mut firmware, mut board, _) = booted(flash);
+    assert_eq!(at(&board, 4, 150), vibebuddy_firmware_core::korekore::theme::BOX_CARD);
+    let lines = send(&mut firmware, &mut board, r#"{"version":1,"event":"device.hello"}"#);
+    assert!(lines.contains(&"SCREENS KOREKORE".to_owned()), "{lines:?}");
+    assert_eq!(send(&mut firmware, &mut board, r#"{"version":1,"event":"device.screens","style":"robot"}"#), ["SCREENS ROBOT"]);
+    assert_eq!(at(&board, 4, 150), robot);
+}
+
 fn encode_base64(bytes: &[u8]) -> String {
     const ALPHABET: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
     let mut out = String::new();
@@ -583,7 +608,7 @@ fn echo_reports_length_and_crc() {
 fn hello_repeats_the_static_state() {
     let (mut firmware, mut board, _) = booted(blank_flash());
     let lines = send(&mut firmware, &mut board, r#"{"version":1,"event":"device.hello"}"#);
-    assert_eq!(lines, ["DISPLAY READY BUILD abc1234 2026-09-26 10:00", "FIRMWARE VERSION 1.2.3", "TRANSFER 1", "LINK NOISE", BOX_KEY, RELAY_URL, "MODE DUTY", "VOICES builtin", "VOLUME 65", "TOUCH NONE"]);
+    assert_eq!(lines, ["DISPLAY READY BUILD abc1234 2026-09-26 10:00", "FIRMWARE VERSION 1.2.3", "TRANSFER 1", "LINK NOISE", BOX_KEY, RELAY_URL, "MODE DUTY", "VOICES builtin", "VOLUME 65", "SCREENS ROBOT", "TOUCH NONE"]);
 }
 
 #[test]
@@ -1278,6 +1303,23 @@ mod relay {
         relay.message(&mut firmware, &mut board, &json!({"t": "unlinked", "reason": "takeover"}));
         assert!(!relay.has_peer());
         assert!(!board.relay_peer);
+    }
+
+    #[test]
+    fn the_cable_wins_over_a_relay_session() {
+        let (mut firmware, mut board, _) = booted(blank_flash());
+        send(&mut firmware, &mut board, &format!(r#"{{"version":1,"event":"device.pair","key":"{}","name":"b"}}"#, computer_key()));
+        let mut relay = RelayBox::new();
+        relay.hello(&firmware, "abc");
+        relay.message(&mut firmware, &mut board, &json!({"t": "welcome"}));
+        board.advance(USB_QUIET_MS);
+        let (mut sealer, _) = session(&mut relay, &mut firmware, &mut board);
+
+        // A computer plugs in before the Relay ends the session: the Relay computer's lines no longer count.
+        send(&mut firmware, &mut board, r#"{"version":1,"event":"device.heartbeat"}"#);
+        board.take_lines();
+        say(&mut relay, &mut firmware, &mut board, &mut sealer, r#"{"version":1,"event":"task.start","title":"OTHER"}"#);
+        assert!(board.take_lines().is_empty(), "its cards stay off the screen");
     }
 
     #[test]

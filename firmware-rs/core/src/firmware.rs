@@ -14,7 +14,7 @@ use vibebuddy_protocol::{Event, ProtocolError, VERSION};
 use crate::audio::{ES8311_ADDRESS, Occasion, SAMPLE_RATE, Sound, clamp_volume, VOLUME_DEFAULT};
 use crate::mic;
 use crate::buttons::{ButtonEvent, Buttons, Levels};
-use crate::display::{Display, LinkPath, MAX_STATS, MAX_TASKS, Mode, Panel, PanelKind, SNAPSHOT_LINE_BYTES, Scene, Screen, Snapshot, State, Target, TaskInput, Tone};
+use crate::display::{Display, LinkPath, MAX_STATS, MAX_TASKS, Mode, Panel, PanelKind, SNAPSHOT_LINE_BYTES, Scene, Screen, Screens, Snapshot, State, Target, TaskInput, Tone};
 use crate::leisure::{Leisure, Tier};
 use crate::menu::{self, Action as MenuAction, ComputersRow, Context as MenuContext, Menu, Row, View};
 use crate::pomodoro::{Phase, Pomodoro, Run, Transition};
@@ -463,12 +463,14 @@ impl Firmware {
         let now = board.now_ms();
         // Restore yesterday's record too: whether the day changed is only known once a heartbeat brings the date.
         let settings_region = find_partition(board.flash(), "nvs");
+        let mut screens = Screens::Robot;
         let loaded = settings_region.map(|region| SettingsStore::open(board.flash(), region));
         match loaded {
             Some(Ok((store, found))) => {
                 let tally = found.map(|settings| settings.tally).unwrap_or_default();
                 if let Some(settings) = found {
                     self.volume = clamp_volume(settings.volume);
+                    screens = settings.screens;
                 }
                 self.pomodoro.restore_tally(tally);
                 self.settings = Some(store);
@@ -480,6 +482,9 @@ impl Firmware {
         self.load_link(board);
 
         let display_ok = board.init_display() && self.display.start(board, &scene!(self, now)).is_ok();
+        if display_ok {
+            self.display.set_screens(board, &scene!(self, now), screens);
+        }
         if display_ok {
             Self::write_value_line(board, "DISPLAY READY BUILD ", &self.build);
         } else {
@@ -602,7 +607,12 @@ impl Firmware {
     }
 
     /// A line from the computer linked through the Relay; like a line over the network, never cable-only commands.
+    /// The computer on the cable has the box (ADR-0011): the Relay ends the other link once the box reports the
+    /// cable, and until then its lines are dropped, so they don't put that computer's cards back on the screen.
     pub fn relay_line<B: Board>(&mut self, board: &mut B, line: &[u8]) {
+        if self.lan.cable_in_use(board.now_ms()) {
+            return;
+        }
         self.apply_lan(board, alloc::vec![LanOutput::Line(line.to_vec())]);
     }
 
@@ -936,8 +946,29 @@ impl Firmware {
         board.write(line.as_bytes());
     }
 
+    /// Which screens the box draws (ADR-0021): reported after a change, and on hello.
+    fn announce_screens<B: Board>(&self, board: &mut B) {
+        Self::write_value_line(board, "SCREENS ", self.display.screens().name());
+    }
+
+    /// Draws, saves and reports the screens the app picked. An unknown style changes nothing.
+    fn set_screens<B: Board>(&mut self, board: &mut B, style: Option<&str>, now: u32) {
+        if let Some(style) = style {
+            match Screens::parse(style) {
+                Some(screens) => {
+                    self.display.set_screens(board, &scene!(self, now), screens);
+                    if !self.save_settings(board) {
+                        Self::write_literal(board, "SCREENS SAVE ERROR\n");
+                    }
+                }
+                None => Self::write_literal(board, "SCREENS ERROR\n"),
+            }
+        }
+        self.announce_screens(board);
+    }
+
     fn save_settings<B: Board>(&mut self, board: &mut B) -> bool {
-        let settings = Settings { tally: self.pomodoro.tally(), volume: self.volume };
+        let settings = Settings { tally: self.pomodoro.tally(), volume: self.volume, screens: self.display.screens() };
         match self.settings.as_mut() {
             Some(store) => store.save(board.flash(), &settings).is_ok(),
             None => false,
@@ -1916,6 +1947,8 @@ impl Firmware {
                     self.announce(board, Occasion::Done);
                 }
             }
+            // Which screens the box draws, robot or korekore (ADR-0021); without a style it is just a query.
+            "device.screens" => self.set_screens(board, string(fields, "style"), now),
             // Voice commands (docs/protocol.md): the computer offers them, then answers each turn.
             "voice.available" => {
                 let on = fields.get("on") == Some(&Value::Bool(true));
@@ -2251,6 +2284,7 @@ impl Firmware {
         Self::write_value_line(board, "MODE ", self.display.mode().name().as_bytes());
         Self::write_value_line(board, "VOICES ", self.voices.current_id().as_bytes());
         self.announce_volume(board);
+        self.announce_screens(board);
         self.announce_touch(board);
     }
 

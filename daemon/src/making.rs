@@ -3,7 +3,8 @@
 //!
 //! `POST /v1/characters` starts one job at a time on its own thread. Each line is synthesized as 16 kHz PCM: with the
 //! user's own key for the voice's provider, from that provider; otherwise from the voice service with `"for":"character"`
-//! and the account's session, which only the Paid plan gets. Then, as `tools/make-character.sh` does with ffmpeg, it is
+//! and the account's session, which only the Paid plan gets. A voice of the user's own ([`crate::own_voices`]) is in
+//! their account, so only their own key speaks it, and its lines take the base preset's language. Then, as `tools/make-character.sh` does with ffmpeg, it is
 //! trimmed of leading and trailing silence and normalized to a -1 dBFS peak. Everything lands in
 //! `config_dir()/characters/<id>/`, laid out as `make-character.sh` lays out `characters/<id>/`:
 //!
@@ -30,6 +31,7 @@ use vibebuddy_firmware_core::adpcm::Encoder;
 use vibebuddy_firmware_core::audio::Occasion;
 
 use crate::account::Account;
+use crate::own_voices::{OwnVoice, OwnVoices};
 use crate::synthesis::{ELEVENLABS_MODEL, MAX_TEXT, VOLC_RESOURCE_ID};
 use crate::voice_keys::{Provider, VoiceKeys};
 
@@ -42,17 +44,42 @@ const MAX_LINES: usize = (1008 - 128) / 8;
 const MAX_AUDIO: u64 = 2 * 1024 * 1024;
 const SAMPLE_RATE: u32 = 16_000;
 
-/// A voice a made Character can speak with, a row of `characters/voices.tsv`.
+/// A voice a made Character can speak with: a row of `characters/voices.tsv`, or one of the user's own.
 #[derive(Clone, Debug, PartialEq, Serialize)]
 pub struct Voice {
     pub id: String,
     pub provider: String,
     /// The provider's id for it.
     pub voice: String,
+    /// Empty for one of the user's own, which speaks the base preset's language.
     pub language: String,
     pub gender: String,
     pub name: String,
+    /// In the user's own account: only their own key speaks it.
+    pub own: bool,
+    /// The Volcano Engine resource one of the user's own answered on; None for ours, which use [`VOLC_RESOURCE_ID`].
+    #[serde(skip)]
+    pub resource: Option<String>,
 }
+
+impl From<&OwnVoice> for Voice {
+    fn from(own: &OwnVoice) -> Self {
+        Self {
+            id: own.id.clone(),
+            provider: own.provider.clone(),
+            voice: own.voice.clone(),
+            language: String::new(),
+            gender: String::new(),
+            name: own.name.clone(),
+            own: true,
+            resource: own.resource.clone(),
+        }
+    }
+}
+
+/// The Volcano Engine resources a speaker of the user's own may be on, tried in this order: cloned with 2.0 or 1.0,
+/// then Doubao's own 2.0 and 1.0 voices. A speaker id doesn't say which.
+const VOLC_RESOURCES: [&str; 4] = ["seed-icl-2.0", "seed-icl-1.0", "seed-tts-2.0", VOLC_RESOURCE_ID];
 
 pub fn voices() -> Vec<Voice> {
     rows(VOICES)
@@ -64,10 +91,17 @@ pub fn voices() -> Vec<Voice> {
                 language: language.to_owned(),
                 gender: gender.to_owned(),
                 name: name.to_owned(),
+                own: false,
+                resource: None,
             }),
             _ => None,
         })
         .collect()
+}
+
+/// The language a preset speaks, from its voice in `voices.tsv`.
+fn preset_language(id: &str) -> String {
+    voices().into_iter().find(|voice| voice.id == id).map(|voice| voice.language).unwrap_or_default()
 }
 
 /// Each preset's lines (`characters/<id>/lines.tsv`), which a made Character starts from in the App.
@@ -140,7 +174,7 @@ pub struct Request {
     pub name: String,
     /// The preset it started from.
     pub base: String,
-    /// An id from `characters/voices.tsv`.
+    /// An id from `characters/voices.tsv`, or of one of the user's own voices.
     pub voice: String,
     pub lines: Vec<Line>,
 }
@@ -209,15 +243,58 @@ pub struct MadeCharacter {
 
 /// Where the Characters made here are, for [`voice_of`]; set once at start, never in tests.
 pub static DIR: std::sync::OnceLock<PathBuf> = std::sync::OnceLock::new();
+/// The user's own voices and keys, for [`voice_of`]; set once at start, never in tests.
+pub static OWN: std::sync::OnceLock<(Arc<OwnVoices>, Arc<VoiceKeys>)> = std::sync::OnceLock::new();
 
-/// The voice service's name (`<provider>:<voice>`) for the voice of `id`, a Character made in `dir`.
+/// The voice service's name (`<provider>:<voice>`) for the voice of `id`, a Character made in `dir`. One of the user's
+/// own voices is `<provider>:<voice>` while their own key for it is set and not refused (a Volcano Engine one
+/// `volc:<speaker>#<resource>`), else the base preset's voice: the service can't speak a voice in someone's account.
 pub fn voice_of(dir: &Path, id: &str) -> Option<String> {
+    voice_with(dir, id, OWN.get().map(|(voices, keys)| (voices.as_ref(), keys.as_ref())))
+}
+
+fn voice_with(dir: &Path, id: &str, own: Option<(&OwnVoices, &VoiceKeys)>) -> Option<String> {
     if !valid_id(id) {
         return None;
     }
     let manifest: Request = serde_json::from_str(&std::fs::read_to_string(dir.join(id).join(MANIFEST)).ok()?).ok()?;
-    let voice = voices().into_iter().find(|voice| voice.id == manifest.voice)?;
-    Some(format!("{}:{}", voice.provider, voice.voice))
+    if let Some(voice) = voices().into_iter().find(|voice| voice.id == manifest.voice) {
+        return Some(format!("{}:{}", voice.provider, voice.voice));
+    }
+    let usable = own.and_then(|(voices, keys)| {
+        let voice = voices.get(&manifest.voice)?;
+        let provider = Provider::named(&voice.provider)?;
+        let status = keys.status();
+        let key = if provider == Provider::ElevenLabs { status.elevenlabs } else { status.volc };
+        (key.set && !key.refused).then(|| match voice.resource {
+            Some(resource) => format!("{}:{}#{resource}", voice.provider, voice.voice),
+            None => format!("{}:{}", voice.provider, voice.voice),
+        })
+    });
+    Some(usable.unwrap_or_else(|| crate::synthesis::voice_for(Some(&manifest.base))))
+}
+
+/// A voice the user's own ElevenLabs key can speak, from that account's voice library: its id, name and kind
+/// (`premade`, `cloned`, `generated`, `professional`).
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+pub struct ProviderVoice {
+    #[serde(rename(deserialize = "voice_id"))]
+    pub voice: String,
+    pub name: String,
+    #[serde(default)]
+    pub category: String,
+}
+
+/// Why one of the user's own voices can't be kept or forgotten.
+#[derive(Debug, PartialEq)]
+pub enum OwnVoiceError {
+    Invalid(String),
+    /// The provider didn't speak it; the message says what it answered.
+    Provider(String),
+    /// Characters made here speak with it.
+    InUse(Vec<String>),
+    NotFound,
+    Io(String),
 }
 
 /// Why a job can't start.
@@ -265,6 +342,7 @@ pub struct Maker {
     service: Option<String>,
     account: Arc<Account>,
     keys: Arc<VoiceKeys>,
+    own: Arc<OwnVoices>,
     /// The providers' base URLs; others only in tests.
     elevenlabs_url: String,
     volc_url: String,
@@ -273,12 +351,13 @@ pub struct Maker {
 }
 
 impl Maker {
-    pub fn new(dir: Option<PathBuf>, service: Option<String>, account: Arc<Account>, keys: Arc<VoiceKeys>) -> Self {
+    pub fn new(dir: Option<PathBuf>, service: Option<String>, account: Arc<Account>, keys: Arc<VoiceKeys>, own: Arc<OwnVoices>) -> Self {
         Self {
             dir,
             service,
             account,
             keys,
+            own,
             elevenlabs_url: crate::synthesis::ELEVENLABS_URL.to_owned(),
             volc_url: crate::synthesis::VOLC_URL.to_owned(),
             status: Mutex::new(None),
@@ -315,6 +394,91 @@ impl Maker {
                 status.reason = Some("internal");
                 status.error = Some("making the Character stopped unexpectedly".to_owned());
             });
+        }
+    }
+
+    /// The voices a made Character can speak with: ours, then the user's own.
+    pub fn voices(&self) -> Vec<Voice> {
+        voices().into_iter().chain(self.own.list().iter().map(Voice::from)).collect()
+    }
+
+    /// Tries a voice in the user's own account with their own key, saying `text`; keeps it when the provider speaks
+    /// it, and answers it with what was said, as 16 kHz PCM.
+    pub fn add_own(&self, provider: &str, voice: &str, name: &str, text: &str) -> Result<(Voice, Vec<i16>), OwnVoiceError> {
+        let invalid = |message: String| OwnVoiceError::Invalid(message);
+        let named = Provider::named(provider).ok_or_else(|| invalid(format!("{provider} is not a provider: elevenlabs or volc")))?;
+        let (voice, name, text) = (voice.trim(), name.trim(), without_address(text.trim()));
+        if voice.is_empty() || voice.len() > 128 || voice.contains(char::is_whitespace) || voice.contains('#') {
+            return Err(invalid("a voice id is 1 to 128 characters, with no spaces".to_owned()));
+        }
+        if name.is_empty() || name.chars().count() > 64 {
+            return Err(invalid("a name must be 1 to 64 characters".to_owned()));
+        }
+        if text.is_empty() || text.encode_utf16().count() > MAX_TEXT {
+            return Err(invalid(format!("the line to try must be 1 to {MAX_TEXT} characters")));
+        }
+        let key = self.keys.key(named).ok_or_else(|| invalid(format!("no own key for {provider}")))?;
+        let resources: &[&str] = if named == Provider::Volc { &VOLC_RESOURCES } else { &[""] };
+        let mut first_error = None;
+        for resource in resources {
+            let resource = Some(*resource).filter(|resource| !resource.is_empty());
+            match self.call(named, voice, &key, &text, resource) {
+                Ok(bytes) => {
+                    self.keys.refused(named, false);
+                    let samples = trim_and_normalize(&pcm(&bytes)).ok_or_else(|| OwnVoiceError::Provider("the line came back silent".to_owned()))?;
+                    let kept = self.own.add(provider, voice, name, resource.map(str::to_owned)).map_err(|error| OwnVoiceError::Io(error.to_string()))?;
+                    info!(provider, resource, "kept a voice of the user's own");
+                    return Ok((Voice::from(&kept), samples));
+                }
+                Err((status, message)) => {
+                    // Only ElevenLabs says outright that the key is wrong; Volcano Engine's 403 may be a resource not opened.
+                    if named == Provider::ElevenLabs && status == Some(401) {
+                        self.keys.refused(named, true);
+                    }
+                    first_error.get_or_insert(message);
+                }
+            }
+        }
+        Err(OwnVoiceError::Provider(first_error.unwrap_or_default()))
+    }
+
+    /// The voices in the account of the user's own ElevenLabs key, to pick one from rather than paste its id: the
+    /// key may belong to an account the user never signs in to. A key without the voices permission is answered
+    /// with what ElevenLabs said, and is not marked refused, since it still speaks.
+    pub fn elevenlabs_voices(&self) -> Result<Vec<ProviderVoice>, OwnVoiceError> {
+        #[derive(Deserialize)]
+        struct Library {
+            voices: Vec<ProviderVoice>,
+        }
+        let key = self.keys.key(Provider::ElevenLabs).ok_or_else(|| OwnVoiceError::Invalid("no own key for elevenlabs".to_owned()))?;
+        let url = format!("{}/v1/voices", self.elevenlabs_url);
+        let mut response = agent()
+            .get(&url)
+            .header("xi-api-key", &key)
+            .call()
+            .map_err(|error| OwnVoiceError::Provider(format!("calling ElevenLabs: {error}")))?;
+        let status = response.status().as_u16();
+        let body = response.body_mut().with_config().limit(MAX_AUDIO).read_to_string().unwrap_or_default();
+        if status != 200 {
+            return Err(OwnVoiceError::Provider(format!("ElevenLabs answered {status}: {}", body.trim().chars().take(200).collect::<String>())));
+        }
+        let library: Library = serde_json::from_str(&body).map_err(|error| OwnVoiceError::Provider(format!("reading ElevenLabs' voices: {error}")))?;
+        let mut voices = library.voices;
+        // The account's own voices first, then ElevenLabs' stock ones, each by name.
+        voices.sort_by_key(|voice| (voice.category == "premade", voice.name.to_lowercase()));
+        Ok(voices)
+    }
+
+    /// Forgets one of the user's own voices; not while a Character made here speaks with it.
+    pub fn remove_own(&self, id: &str) -> Result<(), OwnVoiceError> {
+        let using: Vec<String> = self.list().into_iter().filter(|made| made.voice == id).map(|made| made.name).collect();
+        if !using.is_empty() {
+            return Err(OwnVoiceError::InUse(using));
+        }
+        match self.own.remove(id) {
+            Ok(true) => Ok(()),
+            Ok(false) => Err(OwnVoiceError::NotFound),
+            Err(error) => Err(OwnVoiceError::Io(error.to_string())),
         }
     }
 
@@ -361,7 +525,7 @@ impl Maker {
     /// Checks the request, settles the Character's id and marks the job as making.
     pub(crate) fn begin(&self, request: &Request) -> Result<(String, Voice), StartError> {
         let dir = self.dir.as_ref().ok_or_else(|| StartError::Unavailable("no config directory".to_owned()))?;
-        let voice = check(request).map_err(StartError::Invalid)?;
+        let voice = check(request, &self.voices()).map_err(StartError::Invalid)?;
         let id = match &request.id {
             Some(id) if valid_id(id) && dir.join(id).join(MANIFEST).is_file() => id.clone(),
             Some(id) => return Err(StartError::Invalid(format!("{id} is not a Character made here"))),
@@ -411,7 +575,8 @@ impl Maker {
         let _ = std::fs::remove_file(dir.join("pack.bin"));
         let _ = std::fs::remove_dir_all(dir.join("address"));
 
-        let forms = forms(&voice.language);
+        let language = if voice.own { preset_language(&request.base) } else { voice.language.clone() };
+        let forms = forms(&language);
         let pieces = pieces(&request.lines, &forms);
         let made = pieces.iter().filter(|piece| dir.join(&piece.path).is_file()).count();
         self.report(|status| (status.done, status.total) = (made, pieces.len()));
@@ -444,13 +609,32 @@ impl Maker {
     fn synthesize(&self, voice: &Voice, text: &str) -> Result<Vec<i16>, Stop> {
         let provider = Provider::named(&voice.provider).ok_or_else(|| format!("{} is not a provider", voice.provider))?;
         let bytes = match self.keys.key(provider) {
-            Some(key) => self.own(provider, &voice.voice, &key, text)?,
+            Some(key) => self.own(provider, &voice.voice, &key, text, voice.resource.as_deref())?,
+            None if voice.own => return Err(Stop::because("own_key", format!("{} is in your own {} account: set your own key for it", voice.name, voice.provider))),
             None => self.service(&format!("{}:{}", voice.provider, voice.voice), text)?,
         };
         Ok(pcm(&bytes))
     }
 
-    fn own(&self, provider: Provider, voice: &str, key: &str, text: &str) -> Result<Vec<u8>, Stop> {
+    /// A line from the provider with the user's own key; a 401 or 403 marks the key refused.
+    fn own(&self, provider: Provider, voice: &str, key: &str, text: &str, resource: Option<&str>) -> Result<Vec<u8>, Stop> {
+        let name = if provider == Provider::ElevenLabs { "ElevenLabs" } else { "Volcano Engine" };
+        match self.call(provider, voice, key, text, resource) {
+            Ok(audio) => {
+                self.keys.refused(provider, false);
+                Ok(audio)
+            }
+            Err((Some(status @ (401 | 403)), _)) => {
+                self.keys.refused(provider, true);
+                Err(Stop::because("own_key", format!("{name} refused your own key ({status})")))
+            }
+            Err((_, message)) => Err(message.into()),
+        }
+    }
+
+    /// One line from the provider as 16 kHz PCM, on `resource` for Volcano Engine (ours when None); on failure, the
+    /// status it answered, if it answered, and what went wrong.
+    fn call(&self, provider: Provider, voice: &str, key: &str, text: &str, resource: Option<&str>) -> Result<Vec<u8>, (Option<u16>, String)> {
         let agent = agent();
         let (name, request) = match provider {
             Provider::ElevenLabs => {
@@ -466,31 +650,27 @@ impl Maker {
                 let request = agent
                     .post(&self.volc_url)
                     .header("X-Api-Key", key)
-                    .header("X-Api-Resource-Id", VOLC_RESOURCE_ID)
-                    .header("X-Api-Request-Id", &crate::synthesis::request_id()?)
+                    .header("X-Api-Resource-Id", resource.unwrap_or(VOLC_RESOURCE_ID))
+                    .header("X-Api-Request-Id", &crate::synthesis::request_id().map_err(|error| (None, error))?)
                     .header("Content-Type", "application/json");
                 ("Volcano Engine", request.send(body.to_string().as_bytes()))
             }
         };
-        let mut response = request.map_err(|error| format!("calling {name}: {error}"))?;
+        let mut response = request.map_err(|error| (None, format!("calling {name}: {error}")))?;
         let status = response.status().as_u16();
-        if matches!(status, 401 | 403) {
-            self.keys.refused(provider, true);
-            return Err(Stop::because("own_key", format!("{name} refused your own key ({status})")));
-        }
         if status != 200 {
             let answer = response.body_mut().with_config().limit(1024).read_to_string().unwrap_or_default();
-            return Err(format!("{name} answered {status}: {}", answer.trim().chars().take(200).collect::<String>()).into());
+            return Err((Some(status), format!("{name} answered {status}: {}", answer.trim().chars().take(200).collect::<String>())));
         }
-        self.keys.refused(provider, false);
         match provider {
-            Provider::ElevenLabs => read_all(&mut response, name),
+            Provider::ElevenLabs => read_all(&mut response, name).map_err(|stop| (None, stop.message)),
             Provider::Volc => {
                 let mut audio = Vec::new();
                 crate::synthesis::read_volc(response.into_body().into_reader(), &mut |piece| {
                     audio.extend_from_slice(piece);
                     true
-                })?;
+                })
+                .map_err(|error| (None, error))?;
                 Ok(audio)
             }
         }
@@ -534,8 +714,8 @@ fn read_all(response: &mut ureq::http::Response<ureq::Body>, from: &str) -> Resu
     Ok(response.body_mut().with_config().limit(MAX_AUDIO).read_to_vec().map_err(|error| format!("reading audio from {from}: {error}"))?)
 }
 
-/// The voice, if the request can be made.
-fn check(request: &Request) -> Result<Voice, String> {
+/// The voice, of `voices`, if the request can be made.
+fn check(request: &Request, voices: &[Voice]) -> Result<Voice, String> {
     let name = request.name.trim();
     if name.is_empty() || name.chars().count() > 64 {
         return Err("a name must be 1 to 64 characters".to_owned());
@@ -543,7 +723,7 @@ fn check(request: &Request) -> Result<Voice, String> {
     if !crate::synthesis::VOICE_FILES.iter().any(|(id, _)| *id == request.base) {
         return Err(format!("{} is not a preset Character", request.base));
     }
-    let voice = voices().into_iter().find(|voice| voice.id == request.voice).ok_or_else(|| format!("{} is not in voices.tsv", request.voice))?;
+    let voice = voices.iter().find(|voice| voice.id == request.voice).cloned().ok_or_else(|| format!("{} is not in voices.tsv or your own voices", request.voice))?;
     if request.lines.is_empty() || request.lines.len() > MAX_LINES {
         return Err(format!("a Character has 1 to {MAX_LINES} lines"));
     }
@@ -619,6 +799,26 @@ fn pools(audio: &Path) -> Vec<Vec<Vec<i16>>> {
                 .collect()
         })
         .collect()
+}
+
+/// 16 kHz mono samples as a WAV file, for the App to play a voice tried.
+pub fn wav(samples: &[i16]) -> Vec<u8> {
+    let data = (samples.len() * 2) as u32;
+    let mut out = Vec::with_capacity(44 + data as usize);
+    out.extend_from_slice(b"RIFF");
+    out.extend_from_slice(&(36 + data).to_le_bytes());
+    out.extend_from_slice(b"WAVEfmt ");
+    out.extend_from_slice(&16u32.to_le_bytes());
+    out.extend_from_slice(&1u16.to_le_bytes());
+    out.extend_from_slice(&1u16.to_le_bytes());
+    out.extend_from_slice(&SAMPLE_RATE.to_le_bytes());
+    out.extend_from_slice(&(SAMPLE_RATE * 2).to_le_bytes());
+    out.extend_from_slice(&2u16.to_le_bytes());
+    out.extend_from_slice(&16u16.to_le_bytes());
+    out.extend_from_slice(b"data");
+    out.extend_from_slice(&data.to_le_bytes());
+    out.extend(samples.iter().flat_map(|sample| sample.to_le_bytes()));
+    out
 }
 
 /// 16-bit little-endian PCM as samples.
@@ -745,7 +945,7 @@ mod tests {
         let account = Arc::new(crate::account::signed_in_for_tests(&scratch.join("account"), "tok_session"));
         let own = Arc::new(VoiceKeys::new(Some(&scratch)));
         own.set(&keys.iter().map(|(provider, key)| (*provider, Some((*key).to_owned()))).collect::<Vec<_>>()).unwrap();
-        let mut maker = Maker::new(Some(scratch.join("characters")), service, account, own);
+        let mut maker = Maker::new(Some(scratch.join("characters")), service, account, own, Arc::new(OwnVoices::new(Some(&scratch))));
         (maker.elevenlabs_url, maker.volc_url) = (elevenlabs.to_owned(), volc.to_owned());
         (maker, scratch)
     }
@@ -826,7 +1026,7 @@ mod tests {
         }
         assert!(all.iter().all(|voice| Provider::named(&voice.provider).is_some() && ["en", "zh"].contains(&voice.language.as_str())));
         let ok = request("luna", vec![line("done", "Done.")]);
-        assert_eq!(check(&ok).map(|voice| voice.voice), Ok("ggx46gxUmdtruayPIL8q".to_owned()));
+        assert_eq!(check(&ok, &voices()).map(|voice| voice.voice), Ok("ggx46gxUmdtruayPIL8q".to_owned()));
         for (bad, why) in [
             (request("elevenlabs:ggx46gxUmdtruayPIL8q", ok.lines.clone()), "not in voices.tsv"),
             (Request { base: "robot".to_owned(), ..ok.clone() }, "not a preset"),
@@ -834,7 +1034,7 @@ mod tests {
             (request("luna", vec![line("done", "Two\nrows")]), "one row"),
             (request("luna", vec![]), "1 to 110 lines"),
         ] {
-            assert!(check(&bad).unwrap_err().contains(why), "{why}");
+            assert!(check(&bad, &voices()).unwrap_err().contains(why), "{why}");
         }
     }
 
@@ -845,7 +1045,7 @@ mod tests {
             assert_eq!(lines.len(), 55, "{id}");
             assert!(lines.iter().any(|line| line.text.contains("{address}")), "{id}");
             let voice = voices().into_iter().find(|voice| voice.id == *id).unwrap();
-            assert_eq!(check(&Request { id: None, name: "Copy".to_owned(), base: (*id).to_owned(), voice: voice.id, lines }).err(), None, "{id}");
+            assert_eq!(check(&Request { id: None, name: "Copy".to_owned(), base: (*id).to_owned(), voice: voice.id, lines }, &voices()).err(), None, "{id}");
         }
         assert_eq!(preset_lines("ada").unwrap()[0], line("input_required", "Hey {address}, it's waiting on you."));
         assert_eq!(preset_lines("robot"), None);
@@ -1006,6 +1206,127 @@ mod tests {
         assert!(matches!(maker.begin(&request), Err(StartError::Invalid(_))));
         assert!(new_id("小何").unwrap().starts_with("character-"));
         assert_eq!(new_id("A very long name for a Character indeed").unwrap().len(), 31);
+        let _ = std::fs::remove_dir_all(scratch);
+    }
+
+    /// Volcano Engine's answer: the line in two objects, then done.
+    fn volc_objects() -> String {
+        format!(
+            r#"{{"code":0,"data":"{}"}}{{"code":0,"data":"{}"}}{{"code":20000000,"message":"ok"}}"#,
+            base64::engine::general_purpose::STANDARD.encode(&spoken()[..2000]),
+            base64::engine::general_purpose::STANDARD.encode(&spoken()[2000..])
+        )
+    }
+
+    #[test]
+    fn a_volc_voice_of_the_users_own_is_tried_on_each_resource_until_one_speaks_it_and_kept_with_it() {
+        let objects = volc_objects();
+        let (volc, requests) = serve(move |_, request| {
+            if request.to_ascii_lowercase().contains("x-api-resource-id: seed-icl-2.0") {
+                answer("403 Forbidden", "application/json", br#"{"code":45000030,"message":"resource not granted"}"#)
+            } else {
+                answer("200 OK", "application/json", objects.as_bytes())
+            }
+        });
+        let (maker, scratch) = maker("own-volc", Some("http://127.0.0.1:9".to_owned()), &[(Provider::Volc, "volc_own")], "http://127.0.0.1:9", &volc);
+
+        let (voice, samples) = maker.add_own("volc", " S_me ", "My voice", "All done, {address}.").unwrap();
+        assert!(voice.own && voice.id.starts_with("own-") && voice.language.is_empty());
+        assert_eq!((voice.voice.as_str(), voice.resource.as_deref()), ("S_me", Some("seed-icl-1.0")));
+        assert!(samples.len() > 1590 && samples.len() < 1600, "{}", samples.len());
+        let sent = requests.lock().unwrap().clone();
+        assert_eq!(sent.len(), 2, "2.0 refused, 1.0 spoke it");
+        assert!(sent[1].to_ascii_lowercase().contains("x-api-resource-id: seed-icl-1.0") && sent[1].contains(r#""speaker":"S_me""#));
+        assert_eq!(text_of(&sent[1]), "All done.");
+        assert!(!maker.keys.status().volc.refused, "a resource not opened is not a refused key");
+        assert!(maker.voices().iter().any(|listed| listed.id == voice.id), "listed after ours");
+
+        // Made with it: the user's own key on the resource it answered on, in the base preset's language.
+        let made = run(&maker, &request(&voice.id, vec![line("done", "Done, {address}.")]));
+        assert_eq!(made.state, "done", "{made:?}");
+        let sent = requests.lock().unwrap().clone();
+        assert!(sent[2..].iter().all(|request| request.to_ascii_lowercase().contains("x-api-resource-id: seed-icl-1.0")));
+        let dir = scratch.join("characters").join(&made.id);
+        assert!(dir.join("address").join("boss.bin").is_file(), "Ada's English forms of address");
+        assert!(!dir.join("address").join("ge.bin").exists());
+        let _ = std::fs::remove_dir_all(scratch);
+    }
+
+    #[test]
+    fn a_voice_of_the_users_own_needs_their_key_and_is_never_sent_to_the_service() {
+        let (eleven, requests) = serve(|_, _| answer("401 Unauthorized", "application/json", br#"{"detail":"invalid key"}"#));
+        let (maker, scratch) = maker("own-no-key", Some("http://127.0.0.1:9".to_owned()), &[], &eleven, "http://127.0.0.1:9");
+        assert!(matches!(maker.add_own("elevenlabs", "abc", "Me", "Hi."), Err(OwnVoiceError::Invalid(why)) if why.contains("no own key")));
+        for bad in [("eleven", "abc", "Me"), ("elevenlabs", "a b", "Me"), ("elevenlabs", "a#b", "Me"), ("elevenlabs", "abc", " ")] {
+            assert!(matches!(maker.add_own(bad.0, bad.1, bad.2, "Hi."), Err(OwnVoiceError::Invalid(_))), "{bad:?}");
+        }
+
+        maker.keys.set(&[(Provider::ElevenLabs, Some("sk_wrong".to_owned()))]).unwrap();
+        assert!(matches!(maker.add_own("elevenlabs", "abc", "Me", "Hi."), Err(OwnVoiceError::Provider(why)) if why.contains("401")));
+        assert!(maker.keys.status().elevenlabs.refused);
+        assert!(maker.own.list().is_empty(), "nothing kept that didn't speak");
+        assert_eq!(requests.lock().unwrap().len(), 1);
+
+        // A Character in a voice of the user's own, after the key is gone: it stops, and the service is never asked.
+        let own = maker.own.add("elevenlabs", "abc", "Me", None).unwrap();
+        maker.keys.set(&[(Provider::ElevenLabs, None)]).unwrap();
+        let stopped = run(&maker, &request(&own.id, vec![line("done", "Done.")]));
+        assert_eq!((stopped.state, stopped.reason), ("failed", Some("own_key")), "{stopped:?}");
+        let _ = std::fs::remove_dir_all(scratch);
+    }
+
+    #[test]
+    fn a_character_in_a_voice_of_the_users_own_replies_in_it_while_their_key_works_else_in_its_presets() {
+        let (maker, scratch) = maker("own-reply", None, &[(Provider::Volc, "volc_own")], "http://127.0.0.1:9", "http://127.0.0.1:9");
+        let own = maker.own.add("volc", "S_me", "Me", Some("seed-icl-2.0".to_owned())).unwrap();
+        let dir = scratch.join("characters");
+        std::fs::create_dir_all(dir.join("mine-00000001")).unwrap();
+        let manifest = Request { id: None, name: "Mine".to_owned(), base: "ada".to_owned(), voice: own.id.clone(), lines: vec![line("done", "Done.")] };
+        std::fs::write(dir.join("mine-00000001").join(MANIFEST), serde_json::to_string(&manifest).unwrap()).unwrap();
+        let reply = |maker: &Maker| voice_with(&dir, "mine-00000001", Some((&maker.own, &maker.keys)));
+
+        assert_eq!(reply(&maker).as_deref(), Some("volc:S_me#seed-icl-2.0"));
+        maker.keys.refused(Provider::Volc, true);
+        assert_eq!(reply(&maker), Some(crate::synthesis::voice_for(Some("ada"))));
+        maker.keys.set(&[(Provider::Volc, None)]).unwrap();
+        assert_eq!(reply(&maker), Some(crate::synthesis::voice_for(Some("ada"))));
+
+        // Not forgotten while a Character speaks with it.
+        assert_eq!(maker.remove_own(&own.id), Err(OwnVoiceError::InUse(vec!["Mine".to_owned()])));
+        std::fs::remove_dir_all(dir.join("mine-00000001")).unwrap();
+        assert_eq!(maker.remove_own(&own.id), Ok(()));
+        assert_eq!(maker.remove_own(&own.id), Err(OwnVoiceError::NotFound));
+        let _ = std::fs::remove_dir_all(scratch);
+    }
+
+    #[test]
+    fn a_tried_line_is_a_16_khz_wav() {
+        let wav = wav(&[1, -1]);
+        assert_eq!(&wav[..4], b"RIFF");
+        assert_eq!(&wav[24..28], &16_000u32.to_le_bytes());
+        assert_eq!(wav.len(), 48);
+    }
+
+    #[test]
+    fn the_own_elevenlabs_keys_voices_are_listed_its_own_first_and_a_missing_permission_is_said() {
+        let library = br#"{"voices":[{"voice_id":"p1","name":"Rachel","category":"premade","labels":{}},{"voice_id":"c1","name":"me","category":"cloned"}]}"#;
+        let (eleven, requests) = serve(move |number, _| {
+            if number == 0 {
+                answer("200 OK", "application/json", library)
+            } else {
+                answer("401 Unauthorized", "application/json", br#"{"detail":{"status":"missing_permissions","message":"voices_read"}}"#)
+            }
+        });
+        let (maker, scratch) = maker("own-eleven-list", None, &[(Provider::ElevenLabs, "sk_own")], &eleven, "http://127.0.0.1:9");
+        let voices = maker.elevenlabs_voices().unwrap();
+        assert_eq!(voices.iter().map(|voice| voice.voice.as_str()).collect::<Vec<_>>(), ["c1", "p1"]);
+        assert_eq!((voices[0].name.as_str(), voices[0].category.as_str()), ("me", "cloned"));
+        let sent = requests.lock().unwrap()[0].clone();
+        assert!(sent.starts_with("GET /v1/voices HTTP/1.1\r\n") && sent.to_ascii_lowercase().contains("xi-api-key: sk_own"), "{sent}");
+        assert!(matches!(maker.elevenlabs_voices(), Err(OwnVoiceError::Provider(why)) if why.contains("missing_permissions")));
+        assert!(!maker.keys.status().elevenlabs.refused, "a key without the voices permission still speaks");
+        maker.keys.set(&[(Provider::ElevenLabs, None)]).unwrap();
+        assert!(matches!(maker.elevenlabs_voices(), Err(OwnVoiceError::Invalid(_))));
         let _ = std::fs::remove_dir_all(scratch);
     }
 }

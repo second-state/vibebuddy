@@ -78,9 +78,25 @@ fn decode(bytes: &[u8], samples: usize) -> Vec<u8> {
             input.push(predictor);
         }
     }
+    upsample(&input)
+}
+
+/// A line the user's own voice said when tried: a 16 kHz mono 16-bit WAV, as 24 kHz stereo PCM. None for anything
+/// else.
+pub fn wav(wav: &[u8]) -> Option<Vec<u8>> {
+    if wav.len() < 44 || &wav[..4] != b"RIFF" || &wav[8..12] != b"WAVE" || u32_at(wav, 24) != 16_000 || u16_at(wav, 22) != 1 {
+        return None;
+    }
+    let input: Vec<i32> = wav.get(44..)?.as_chunks::<2>().0.iter().map(|pair| i32::from(i16::from_le_bytes(*pair))).collect();
+    Some(upsample(&input))
+}
+
+/// 16 kHz mono samples as 24 kHz stereo 16-bit PCM, by linear interpolation, as the box plays a line.
+fn upsample(input: &[i32]) -> Vec<u8> {
     if input.is_empty() {
         return Vec::new();
     }
+    let samples = input.len();
     let outputs = (samples * 3).div_ceil(2);
     let mut pcm = Vec::with_capacity(outputs * 4);
     for k in 0..outputs {
@@ -171,6 +187,14 @@ mod tests {
                 preset => assert!(pcm(&std::fs::read(repo.join(format!("characters/{preset}/pack.bin"))).unwrap()).is_some(), "{id}"),
             }
         }
+    }
+
+    #[test]
+    fn a_tried_line_plays_at_the_preview_rate() {
+        let mut wav = b"RIFF\0\0\0\0WAVEfmt \x10\0\0\0\x01\0\x01\0\x80\x3e\0\0\0\x7d\0\0\x02\0\x10\0data\x08\0\0\0".to_vec();
+        wav.extend([1i16, 2, 3, 4].iter().flat_map(|sample| sample.to_le_bytes()));
+        assert_eq!(super::wav(&wav).map(|pcm| pcm.len()), Some(6 * 4));
+        assert_eq!(super::wav(b"RIFF....WAVE"), None);
     }
 
     #[test]

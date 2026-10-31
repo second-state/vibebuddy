@@ -9,6 +9,20 @@ use iced::{Alignment, Background, Border, Color, Element, Font, Length, Padding,
 use super::theme::{self, typography};
 
 pub const PIXEL: Font = typography::BOX_TEXT.font;
+/// Fusion Pixel 12 px (fonts/korekore), the small pixel type.
+const PIXEL_SMALL: Font = Font { family: iced::font::Family::Name("Fusion Pixel 12px Prop latin"), ..Font::DEFAULT };
+
+/// Pixel type at a size, as the Mac's `Font.pixel` does it: a pixel font is clean only at its own size or a whole
+/// multiple, so below 15 px it is Fusion Pixel at 12, then DotGothic16 at 16, and at 32 from 24 px.
+pub fn pixel(size: f32) -> (Font, f32) {
+    if size < 15.0 {
+        (PIXEL_SMALL, 12.0)
+    } else if size < 24.0 {
+        (PIXEL, 16.0)
+    } else {
+        (PIXEL, 32.0)
+    }
+}
 
 pub fn rounded(weight: iced::font::Weight) -> Font {
     Font { family: iced::font::Family::Name("Rounded Mplus 1c"), weight, ..Font::DEFAULT }
@@ -135,7 +149,7 @@ pub fn switch<'a, M: Clone + 'a>(on: bool, toggle: Option<M>) -> Element<'a, M> 
 
 /// A state in pixel type, in a readable shade of its colour, no background: WATCHING, NOT FOUND, UP TO DATE.
 pub fn tag<'a, M: 'a>(label: impl Display, color: Color) -> Element<'a, M> {
-    text(label.to_string().to_uppercase()).font(PIXEL).size(12).color(color).into()
+    text(label.to_string().to_uppercase()).font(pixel(12.0).0).size(pixel(12.0).1).color(color).into()
 }
 
 /// Progress: a 12 px pill track in cream with a 2 px ink outline, filled in the given colour.
@@ -193,7 +207,7 @@ where
 
 /// A text field: DotGothic16 14 px in a white box with a 2 px ink outline, radius 10.
 pub fn field<'a, M: Clone + 'a>(placeholder: &str, value: &str) -> text_input::TextInput<'a, M> {
-    text_input(placeholder, value).font(PIXEL).size(14).padding(Padding::from([6, 10])).style(|_, _| text_input::Style {
+    text_input(placeholder, value).font(pixel(14.0).0).size(pixel(14.0).1).padding(Padding::from([6, 10])).style(|_, _| text_input::Style {
         background: theme::PAPER.into(),
         border: Border { color: theme::INK, width: theme::STROKE_BASE, radius: theme::RADIUS_SM.into() },
         icon: theme::INK,

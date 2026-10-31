@@ -280,21 +280,53 @@ fn rgb565([r, g, b]: [u8; 3]) -> u16 {
     ((r as u16 >> 3) << 11) | ((g as u16 >> 2) << 5) | (b as u16 >> 3)
 }
 
-/// One to four drawings (normal, eyes closed, happy, sad; missing ones reuse the normal one) as a look.
-/// None when no figure can be found in one of them.
+/// The figures in an image: split along blank rows, then each band along blank columns, wherever the gap is wide
+/// enough not to be a gap inside one figure. A split that leaves a part less than half the tallest one's height (a
+/// loose sparkle, a tail tip) is no sheet: the whole is one figure.
+fn figure_boxes(image: &Image, opaque: &[bool], whole: (usize, usize, usize, usize)) -> Vec<(usize, usize, usize, usize)> {
+    let w = image.width;
+    let (left, top, right, bottom) = whole;
+    let gap = ((right - left).max(bottom - top) / 40).max(2);
+    // Runs of used positions in lo..hi, joined across gaps narrower than `gap`.
+    let runs = |lo: usize, hi: usize, used: &dyn Fn(usize) -> bool| {
+        let mut out: Vec<(usize, usize)> = Vec::new();
+        for at in (lo..hi).filter(|&at| used(at)) {
+            match out.last_mut() {
+                Some(last) if at - last.1 < gap => last.1 = at + 1,
+                _ => out.push((at, at + 1)),
+            }
+        }
+        out
+    };
+    let mut parts = Vec::new();
+    for (band_top, band_bottom) in runs(top, bottom, &|y| (left..right).any(|x| opaque[y * w + x])) {
+        for (column_left, column_right) in runs(left, right, &|x| (band_top..band_bottom).any(|y| opaque[y * w + x])) {
+            let rows = runs(band_top, band_bottom, &|y| (column_left..column_right).any(|x| opaque[y * w + x]));
+            parts.push((column_left, rows[0].0, column_right, rows[rows.len() - 1].1));
+        }
+    }
+    let tallest = parts.iter().map(|part| part.3 - part.1).max().unwrap_or(0);
+    if parts.len() > 1 && parts.iter().all(|part| (part.3 - part.1) * 2 >= tallest) { parts } else { vec![whole] }
+}
+
+/// One figure per frame, in the order normal, eyes closed, happy, sad. An image can hold one figure or a sheet of
+/// them side by side (image tools often draw the four in one image), read left to right, top to bottom. Fewer than
+/// four reuse the normal one for the frames that are missing; more than four keep the first four. One to four
+/// images; None when no figure can be found in one of them.
 pub fn build_look(images: &[Image]) -> Option<Vec<u8>> {
     if images.is_empty() || images.len() > 4 {
         return None;
     }
     let masks: Vec<Vec<bool>> = images.iter().map(opaque_mask).collect();
-    let frames: Vec<usize> = (0..4).map(|frame| if frame < images.len() { frame } else { 0 }).collect();
-    let (_, top, _, bottom) = bounding_box(&images[0], &masks[0])?;
-    let scale = FIGURE_HEIGHT as f64 / (bottom - top) as f64;
-    let mut cells = Vec::new();
-    for &index in &frames {
-        let figure = bounding_box(&images[index], &masks[index])?;
-        cells.push(cell(&images[index], &masks[index], figure, scale));
+    let mut figures = Vec::new();
+    for (index, (image, mask)) in images.iter().zip(&masks).enumerate() {
+        let whole = bounding_box(image, mask)?;
+        figures.extend(figure_boxes(image, mask, whole).into_iter().map(|figure| (index, figure)));
     }
+    let frames: Vec<(usize, (usize, usize, usize, usize))> = (0..4).map(|frame| figures[if frame < figures.len() { frame } else { 0 }]).collect();
+    let (_, top, _, bottom) = frames[0].1;
+    let scale = FIGURE_HEIGHT as f64 / (bottom - top) as f64;
+    let cells: Vec<Vec<Option<[u8; 3]>>> = frames.iter().map(|&(index, figure)| cell(&images[index], &masks[index], figure, scale)).collect();
     let opaque: Vec<[u8; 3]> = cells.iter().flatten().filter_map(|pixel| *pixel).collect();
     let colors = palette(&opaque, LOOK_COLORS - 1);
     let nearest = |color: [u8; 3]| {
@@ -401,6 +433,61 @@ mod tests {
         assert_eq!(alpha(24, 3), 0, "60 tall in a 64-tall cell: the top rows are empty");
         assert_eq!(alpha(24, 63), 255, "bottom-aligned");
         assert_eq!(frames[3], frames[0], "a single drawing stands in for all four");
+    }
+
+    /// A white 200 × 200 image with solid blocks: left, top, width, height, color.
+    fn sheet(blocks: &[(usize, usize, usize, usize, [u8; 3])]) -> Image {
+        let mut pixels = vec![255u8; 200 * 200 * 4];
+        for &(left, top, width, height, rgb) in blocks {
+            for y in top..top + height {
+                for x in left..left + width {
+                    pixels[(y * 200 + x) * 4..][..3].copy_from_slice(&rgb);
+                }
+            }
+        }
+        Image { width: 200, height: 200, pixels }
+    }
+
+    #[test]
+    fn a_sheet_of_four_becomes_the_four_frames_in_reading_order() {
+        let four = sheet(&[
+            (40, 20, 20, 60, [250, 20, 20]),
+            (140, 20, 20, 60, [20, 200, 20]),
+            (40, 120, 20, 60, [20, 20, 250]),
+            (140, 120, 20, 60, [250, 220, 20]),
+        ]);
+        let frames = look_frames(&build_look(&[four]).unwrap()).unwrap();
+        let middle = |frame: usize| &frames[frame].pixels[(40 * LOOK_WIDTH + 24) * 4..][..4];
+        assert!(middle(0)[0] > 200 && middle(1)[1] > 150 && middle(2)[2] > 200 && middle(3)[0] > 200 && middle(3)[1] > 150);
+        let alpha = |y: usize| frames[0].pixels[(y * LOOK_WIDTH + 24) * 4 + 3];
+        assert_eq!((alpha(3), alpha(4)), (0, 255), "each figure of a sheet is drawn full height");
+    }
+
+    #[test]
+    fn a_loose_speck_doesnt_make_a_sheet() {
+        let look = build_look(&[sheet(&[(40, 20, 20, 160, [250, 20, 20]), (150, 30, 4, 4, [250, 20, 20])])]).unwrap();
+        let frames = look_frames(&look).unwrap();
+        assert_eq!(frames[1], frames[0]);
+    }
+
+    /// The user's own sheets: VIBEBUDDY_SHEET=a.png,b.png cargo test -p vibebuddy-desktop sheet_from_files -- --ignored
+    #[test]
+    #[ignore]
+    fn sheet_from_files() {
+        let images: Vec<Image> = std::env::var("VIBEBUDDY_SHEET").unwrap().split(',').map(|path| {
+            let decoded = image::open(path).unwrap().to_rgba8();
+            Image { width: decoded.width() as usize, height: decoded.height() as usize, pixels: decoded.into_raw() }
+        }).collect();
+        let masks: Vec<Vec<bool>> = images.iter().map(opaque_mask).collect();
+        for (image, mask) in images.iter().zip(&masks) {
+            println!("{:?}", figure_boxes(image, mask, bounding_box(image, mask).unwrap()));
+        }
+        let frames = look_frames(&build_look(&images).unwrap()).unwrap();
+        for (index, frame) in frames.iter().enumerate() {
+            let out = format!("{}/../target/sheet-frame-{index}.png", env!("CARGO_MANIFEST_DIR"));
+            image::RgbaImage::from_raw(LOOK_WIDTH as u32, LOOK_HEIGHT as u32, frame.pixels.clone()).unwrap().save(&out).unwrap();
+            println!("wrote {out}");
+        }
     }
 
     #[test]

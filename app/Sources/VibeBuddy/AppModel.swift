@@ -180,6 +180,8 @@ final class AppModel: ObservableObject {
         run { try await self.client.setVolume(level, preview: preview) }
     }
 
+    func setScreens(_ style: String) { run { try await self.client.setScreens(style) } }
+
     func chooseBox(usbSerial: String) { run { try await self.client.chooseBox(usbSerial: usbSerial) } }
 
     func unpair(key: String) { run { try await self.client.unpair(key: key) } }
@@ -248,6 +250,16 @@ final class AppModel: ObservableObject {
         guard let pack = Resources.voicePack(id) else { lastError = String(localized: "This app has no voice pack for \(id)"); return }
         let address = VoiceCatalogEntry.language(ofVoice: id).flatMap(formOfAddress)
         run { try await self.client.writeVoicePack(self.addressed(pack, id: id).data, address: address) }
+    }
+
+    /// The language of the Character the box wears, the one whose form of address it says; nil for the robot, an
+    /// unknown Character or no box.
+    var boxLanguage: VoiceLanguage? {
+        guard let current = status?.device.voice, current != "builtin" else { return nil }
+        if let language = VoiceCatalogEntry.language(ofVoice: current) { return language }
+        if let made = madeCharacters.first(where: { $0.id == current }), made.complete { return language(of: made) }
+        if current == "custom", let saved = savedCustomCharacter { return VoiceCatalogEntry.language(ofVoice: saved.lender) }
+        return nil
     }
 
     /// The form of address picked for a language; nil for none.
@@ -327,6 +339,15 @@ final class AppModel: ObservableObject {
         return true
     }
 
+    /// Forgets the user's own Character. A box wearing it goes back to the Character that lent it voice and lines.
+    func deleteCustomCharacter() {
+        let lender = savedCustomCharacter?.lender
+        try? FileManager.default.removeItem(at: Self.customLookURL)
+        UserDefaults.standard.removeObject(forKey: Self.customLenderKey)
+        objectWillChange.send()
+        if status?.device.voice == CustomCharacter.id, let lender { writeVoice(lender) }
+    }
+
     // MARK: Making a Character
 
     /// The language a made Character speaks: its voice's, else its base preset's.
@@ -389,6 +410,25 @@ final class AppModel: ObservableObject {
             return
         }
         writePack(data, address: form)
+    }
+
+    /// Tries a voice in the user's own account and, when it speaks, keeps it and plays what it said.
+    func addOwnVoice(provider: String, voice: String, name: String, text: String) async throws -> CharacterVoice {
+        let (added, wav) = try await client.addOwnVoice(provider: provider, voice: voice, name: name, text: text)
+        characterVoices.removeAll { $0.id == added.id }
+        characterVoices.append(added)
+        preview.play(wav: wav, as: added.id)
+        previewingVoice = preview.playingVoice
+        return added
+    }
+
+    func deleteOwnVoice(_ id: String) async {
+        do {
+            try await client.deleteOwnVoice(id)
+            characterVoices.removeAll { $0.id == id }
+        } catch {
+            lastError = String(localized: "Couldn't remove the voice: \(error.localizedDescription)")
+        }
     }
 
     func togglePreview(_ id: String) {

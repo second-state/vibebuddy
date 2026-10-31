@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """Generate the korekore theme and pixel art as code for the Mac app, the Linux app and the firmware.
 
-The design lives in docs/design/korekore/ (tokens.json and pixel/*.json, see its README); this turns it into:
+The design lives in docs/design/korekore/ (tokens.json and pixel/*.json, see its README), except the agents' icons,
+which are the robot screens' (firmware-rs/core/src/agent_icon/pixels.rs); this turns them into:
   - app/Sources/KorekoreUI/KorekoreTheme.swift               colours, type styles and metrics for SwiftUI
   - app/Sources/VibeBuddyCore/Korekore/KorekoreSprites.swift  the sprites as palette-indexed pixels
   - desktop/src/korekore/theme.rs                             the same theme for iced
@@ -130,6 +131,32 @@ def sprite(name, rows, palette):
     return {"name": name, "width": len(rows[0]), "height": len(rows), "palette": colours, "pixels": pixels}
 
 
+# The agents' marks as the robot screens' task cards draw them (firmware-rs/core/src/agent_icon/pixels.rs, from
+# tools/make-agent-icons.py): the design's 12 × 12 tiles didn't say whose agent it was at a glance, these do.
+VENDOR_ICONS = {"CLAUDE": "icon-cc", "CODEX": "icon-cx", "OPENCODE": "icon-oc", "COPILOT": "icon-gh", "PI": "icon-pi", "CI": "icon-ci"}
+
+
+def vendor_icons():
+    text = (ROOT / "firmware-rs/core/src/agent_icon/pixels.rs").read_text()
+    out = {}
+    for constant, body in re.findall(r"pub const (\w+): \[u16; 256\] = \[(.*?)\];", text, re.S):
+        if constant not in VENDOR_ICONS:
+            continue
+        colours, pixels = [], []
+        for value in (int(word, 16) for word in re.findall(r"0x[0-9A-Fa-f]{4}", body)):
+            if value == 0:
+                pixels.append(0)
+                continue
+            rgb = ((value >> 11) * 255 // 31) << 16 | (((value >> 5) & 0x3F) * 255 // 63) << 8 | (value & 0x1F) * 255 // 31
+            if rgb not in colours:
+                colours.append(rgb)
+            pixels.append(colours.index(rgb) + 1)
+        name = VENDOR_ICONS[constant]
+        out[name] = {"name": name, "width": 16, "height": 16, "palette": colours, "pixels": pixels}
+    assert len(out) == len(VENDOR_ICONS), "pixels.rs is missing an agent"
+    return out
+
+
 def sprites(tokens):
     """All sprites, each tagged with whether the firmware carries it."""
     color = {name: rgb for name, rgb, _ in colors(tokens)}
@@ -138,9 +165,14 @@ def sprites(tokens):
     for expression, rows in kore["expressions"].items():
         out.append((sprite(f"kore-{expression}", rows, kore["palette"]), True))
     icons = load("pixel/icons.json")
+    vendor = vendor_icons()
     for key, icon in icons["icons"].items():
+        name = f"icon-{key.replace('_', '-')}"
+        if name in vendor:
+            out.append((vendor[name], True))
+            continue
         palette = {"o": icons["ink"], "x": icons["ink"], "w": "#FFFFFF", "g": icon["tile"]}
-        out.append((sprite(f"icon-{key.replace('_', '-')}", icon["tile12"], palette), True))
+        out.append((sprite(name, icon["tile12"], palette), True))
     tag = load("pixel/pixel-tag-font.json")
     # One colour, which the renderers may tint: kore-pink-text small, kore-pink-tag large (tokens.json).
     pink = "#%06X" % color["kore-pink-text"]

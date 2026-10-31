@@ -57,6 +57,13 @@ struct DaemonClient {
         guard code == 202 else { throw DaemonError(message: DaemonClient.message(in: data) ?? String(localized: "Volume change was rejected (\(code))")) }
     }
 
+    /// `style` is `robot` or `korekore`; the box reports a SCREENS line once it has stored it, which is when the status follows.
+    func setScreens(_ style: String) async throws {
+        let body = try JSONSerialization.data(withJSONObject: ["style": style])
+        let (code, data) = try await post("/v1/device/screens", body: body, contentType: "application/json")
+        guard code == 202 else { throw DaemonError(message: DaemonClient.message(in: data) ?? String(localized: "Changing the box screens was rejected (\(code))")) }
+    }
+
     /// The daemon remembers the choice and connects to that device on its next look around.
     func chooseBox(usbSerial: String) async throws {
         let body = try JSONSerialization.data(withJSONObject: ["usb_serial": usbSerial])
@@ -191,6 +198,33 @@ struct DaemonClient {
         let (code, data) = try await post("/v1/characters", body: body, contentType: "application/json")
         guard code == 202 else { throw DaemonError(message: DaemonClient.message(in: data) ?? String(localized: "The daemon answered \(code)")) }
         return try StatusCoding.decoder().decode(MakingStatus.self, from: data)
+    }
+
+    /// Tries a voice in the user's own account with their own key, saying `text`; the daemon keeps it when the provider
+    /// speaks it. Answers the voice and what it said, as a 16 kHz WAV.
+    func addOwnVoice(provider: String, voice: String, name: String, text: String) async throws -> (CharacterVoice, Data) {
+        struct Answer: Decodable { let voice: CharacterVoice; let audio: String }
+        let body = try JSONSerialization.data(withJSONObject: ["provider": provider, "voice": voice, "name": name, "text": text])
+        var request = request("/v1/voices", method: "POST", body: body, contentType: "application/json")
+        // Volcano Engine may be tried on four resources, each a whole line.
+        request.timeoutInterval = 120
+        let (data, response) = try await URLSession.shared.data(for: request)
+        let code = (response as? HTTPURLResponse)?.statusCode ?? 0
+        guard code == 200 else { throw DaemonError(message: DaemonClient.message(in: data) ?? String(localized: "The daemon answered \(code)")) }
+        let answer = try StatusCoding.decoder().decode(Answer.self, from: data)
+        return (answer.voice, Data(base64Encoded: answer.audio) ?? Data())
+    }
+
+    /// The voices in the account of the user's own ElevenLabs key, its own first.
+    func elevenLabsVoices() async throws -> [ProviderVoice] {
+        try await get("/v1/voices/elevenlabs")
+    }
+
+    /// Forgets one of the user's own voices; the daemon refuses while a Character made here speaks with it.
+    func deleteOwnVoice(_ id: String) async throws {
+        let (data, response) = try await URLSession.shared.data(for: request("/v1/voices/\(id)", method: "DELETE"))
+        let code = (response as? HTTPURLResponse)?.statusCode ?? 0
+        guard code == 200 else { throw DaemonError(message: DaemonClient.message(in: data) ?? String(localized: "The daemon answered \(code)")) }
     }
 
     /// Deletes a Character made here; the daemon refuses while it is being made.

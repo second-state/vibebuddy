@@ -243,6 +243,8 @@ pub struct Device {
     pub firmware_version: Option<String>,
     pub voice: Option<String>,
     pub volume: Option<u8>,
+    /// Which set of screens the box draws, `robot` or `korekore` (ADR-0021); None from firmware that predates the choice.
+    pub screens: Option<String>,
     /// Linked over the local network or the Relay; `port` is then the box's or the Relay's address.
     pub network: bool,
     pub relay: bool,
@@ -455,10 +457,17 @@ mod tests {
     }"#;
 
     #[test]
+    fn the_box_screens_parse() {
+        let device: Device = serde_json::from_str(r#"{"connected": true, "port": null, "bridge": false, "screens": "korekore"}"#).expect("device");
+        assert_eq!(device.screens.as_deref(), Some("korekore"));
+    }
+
+    #[test]
     fn a_live_snapshot_parses() {
         let status: Status = serde_json::from_str(LIVE).expect("status");
         assert!(status.device.connected);
         assert_eq!(status.device.volume, Some(40));
+        assert_eq!(status.device.screens, None, "firmware that predates the choice says nothing");
         assert_eq!(status.today.busy_seconds, 2217);
         assert!(status.config.notify_link);
     }

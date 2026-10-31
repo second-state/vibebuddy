@@ -20,7 +20,7 @@ struct KorekoreMadeCard: View {
                 ZStack(alignment: .bottom) {
                     Color.clear
                     if let frame = model.look(of: made).flatMap(LookBuilder.frames(of:))?.first {
-                        Image(nsImage: LookImages.image(frame, scale: 1)).interpolation(.none).padding(.bottom, 2)
+                        Image(nsImage: LookImages.figure(frame)).interpolation(.none).padding(.bottom, 2)
                     }
                 }
                 .frame(maxWidth: .infinity)
@@ -63,10 +63,11 @@ struct KorekoreMadeCard: View {
     }
 
     private func confirmDelete() {
-        let answer = KorekoreAlert.run(title: String(localized: "Delete “\(made.name)”? This can't be undone."),
-                                       message: String(localized: "Its lines made in its voice go with it; making it again would make them again."),
-                                       buttons: [String(localized: "Delete"), String(localized: "Cancel")], warning: true)
-        if answer.button == 0 { model.deleteMadeCharacter(made) }
+        KorekoreAlert.ask(title: String(localized: "Delete “\(made.name)”? This can't be undone."),
+                          message: String(localized: "Its lines made in its voice go with it; making it again would make them again."),
+                          buttons: [String(localized: "Delete"), String(localized: "Cancel")], warning: true) { [model, made] answer in
+            if answer.button == 0 { model.deleteMadeCharacter(made) }
+        }
     }
 }
 
@@ -115,8 +116,9 @@ struct KorekoreMakingRow: View {
     }
 }
 
-/// Making a Character: start from a preset, change its lines (occasions stay, each keeps a line), pick a voice and,
-/// optionally, bring a look; the daemon then makes the line audio.
+/// Making a Character of the user's own: bring a look, pick a voice, and take a preset's lines to change (occasions stay,
+/// each keeps a line). With only a look, nothing is made: the drawings go to the box with the preset lending its
+/// voice and lines. With new lines or another voice, the daemon makes the line audio.
 struct KorekoreMakeSheet: View {
     @ObservedObject var model: AppModel
     @Environment(\.dismiss) private var dismiss
@@ -131,61 +133,96 @@ struct KorekoreMakeSheet: View {
     @State private var name = ""
     @State private var voice = ""
     @State private var lines: [Draft] = []
+    /// The preset's lines as they came, to tell whether any changed.
+    @State private var original: [CharacterLine] = []
     /// The preset's occasions, in its order.
     @State private var occasions: [String] = []
     /// The user's own look; nil wears the base's.
     @State private var look: Data?
     @State private var problem: String?
     @State private var starting = false
+    /// Adding a voice of the user's own: the form is open, what is in it, and why trying it failed.
+    @State private var addingOwn = false
+    @State private var ownProvider = "elevenlabs"
+    @State private var ownVoiceID = ""
+    @State private var ownName = ""
+    @State private var trying = false
+    @State private var ownProblem: String?
+    /// The voices of the own ElevenLabs key, to pick from; nil until listed, or when they couldn't be (`listProblem`).
+    @State private var elevenVoices: [ProviderVoice]?
+    @State private var listProblem: String?
 
     private var baseName: String { VoiceCatalogEntry.all.first { $0.id == base }?.name ?? base }
     private var chosenVoice: CharacterVoice? { model.characterVoice(voice) }
     private var edited: [CharacterLine] { lines.map { CharacterLine(occasion: $0.occasion, text: $0.text) } }
     private var draftProblem: String? { lines.isEmpty ? nil : CharacterDraft.problem(name: name, lines: edited, occasions: occasions) }
+    /// Only the look is new: nothing to make, the preset lends its voice and lines.
+    private var lookOnly: Bool { look != nil && edited == original && voice == base }
     private var readiness: MakingReadiness? {
         chosenVoice.map { MakingReadiness.of($0, keys: model.status?.voiceKeys, account: model.status?.account) }
     }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text("Make a Character").font(.rounded(18))
-            KNote(String(localized: "Start from a character, change what it says, and pick a voice. VibeBuddy makes each line in that voice, then you can write it to the box."))
+            Text("Make your own").font(.rounded(18))
+            KNote(String(localized: "Bring your own drawings, pick a voice and say what it says. A character's own voice with its lines as they are is free: they are already made. Any other voice, or lines you change, VibeBuddy makes in that voice, which needs the Paid plan or your own key."))
             ScrollView {
                 VStack(alignment: .leading, spacing: 14) {
                     KRows {
-                        KRow(String(localized: "Start from")) {
-                            KMenu(selection: base, options: Resources.bundledVoices.map { ($0.id, $0.name) }) { base = $0 }
-                        }
-                        KDivider()
                         KRow(String(localized: "Name")) {
                             KField(String(localized: "Name"), text: $name).frame(width: 240)
                         }
-                        KDivider()
-                        KRow(String(localized: "Look")) {
-                            HStack(spacing: 8) {
-                                if let frame = (look ?? Resources.voicePack(base)?.look).flatMap(LookBuilder.frames(of:))?.first {
-                                    Image(nsImage: LookImages.image(frame, scale: 1)).interpolation(.none)
-                                        .padding(4)
-                                        .background(Theme.Colors.boxCard, in: RoundedRectangle(cornerRadius: Theme.Radius.sm))
-                                }
-                                Button(String(localized: "Choose images…")) { chooseLook() }.kButton()
-                                if look != nil {
-                                    Button(String(localized: "Use \(baseName)'s look")) { look = nil }.kButton()
+                    }
+                    KHeading(String(localized: "Look"))
+                    KRows {
+                        HStack(alignment: .top, spacing: 14) {
+                            if let frame = (look ?? Resources.voicePack(base)?.look).flatMap(LookBuilder.frames(of:))?.first {
+                                Image(nsImage: LookImages.image(frame, scale: 1)).interpolation(.none)
+                                    .padding(4)
+                                    .background(Theme.Colors.boxCard, in: RoundedRectangle(cornerRadius: Theme.Radius.sm))
+                            }
+                            VStack(alignment: .leading, spacing: 10) {
+                                KNote(String(localized: "One PNG or JPEG image: the figure four times in a 2 × 2 grid, on a plain white or transparent background. Top left normal, top right eyes closed, bottom left happy, bottom right sad. Any size: VibeBuddy cuts out each figure and makes it 48 × 64 pixels in 15 colors. No drawing yet? Copy a prompt into an image tool, such as ChatGPT or Gemini, with your character in place of the brackets."))
+                                HStack(spacing: 8) {
+                                    Button(String(localized: "Choose images…")) { chooseLook() }.kButton()
+                                    Button(String(localized: "Copy a prompt")) {
+                                        NSPasteboard.general.clearContents()
+                                        NSPasteboard.general.setString(CustomCharacter.prompt, forType: .string)
+                                    }
+                                    .kButton()
+                                    if look != nil {
+                                        Button(String(localized: "Use \(baseName)'s look")) { look = nil }.kButton()
+                                    }
                                 }
                             }
                         }
+                        .padding(.vertical, 12)
+                        .padding(.horizontal, 12)
                     }
                     KHeading(String(localized: "Voice"))
                     KRows {
-                        let options = CharacterVoice.sorted(model.characterVoices, preferring: VoiceCatalogEntry.language(ofVoice: base))
+                        // In one order whatever the lines: the voice comes first, so the lines don't move it.
+                        let options = model.characterVoices
                         ForEach(Array(options.enumerated()), id: \.element.id) { index, option in
                             if index > 0 { KDivider() }
                             voiceRow(option)
                         }
+                        KDivider()
+                        ownVoiceRow
                     }
-                    if let readiness, let chosenVoice {
+                    // A voice of the user's own has no language of its own: it says the lines as they are written.
+                    if let chosenVoice, !chosenVoice.own, chosenVoice.voiceLanguage != VoiceCatalogEntry.language(ofVoice: base) {
+                        KNote(String(localized: "This voice and the lines are in different languages, so the lines may sound wrong."), color: Theme.Colors.waitText)
+                    }
+                    if !lookOnly, let readiness, let chosenVoice {
                         KNote(readiness.explanation(provider: chosenVoice.providerName),
                               color: readiness.canStart ? Theme.Colors.muted : Theme.Colors.korePinkText)
+                    }
+                    KHeading(String(localized: "Lines"))
+                    KRows {
+                        KRow(String(localized: "Lines from")) {
+                            KMenu(selection: base, options: Resources.bundledVoices.map { ($0.id, $0.name) }) { base = $0 }
+                        }
                     }
                     ForEach(occasions, id: \.self) { occasion in
                         KHeading(CharacterOccasion.name(occasion))
@@ -210,15 +247,21 @@ struct KorekoreMakeSheet: View {
                 .padding(.bottom, Theme.Sticker.sm + 4)
             }
             .scrollIndicators(.never)
-            if let shown = problem ?? draftProblem {
+            if let shown = problem ?? (lookOnly ? nil : draftProblem) {
                 KTag(shown, color: Theme.Colors.korePinkText)
             }
             HStack {
                 Spacer()
                 Button(String(localized: "Cancel")) { dismiss() }.kButton().keyboardShortcut(.cancelAction)
-                Button(String(localized: "Make")) { make() }.kButton(.sun)
-                    .keyboardShortcut(.defaultAction)
-                    .disabled(starting || lines.isEmpty || draftProblem != nil || !(readiness?.canStart ?? false) || model.status?.making?.running == true)
+                if lookOnly {
+                    Button(String(localized: "Use this look")) { useLook() }.kButton(.pink)
+                        .keyboardShortcut(.defaultAction)
+                        .disabled(model.operationRunning || !(model.status?.device.connected ?? false))
+                } else {
+                    Button(String(localized: "Make")) { make() }.kButton(.sun)
+                        .keyboardShortcut(.defaultAction)
+                        .disabled(starting || lines.isEmpty || draftProblem != nil || !(readiness?.canStart ?? false) || model.status?.making?.running == true)
+                }
             }
         }
         .foregroundStyle(Theme.Colors.ink)
@@ -234,7 +277,7 @@ struct KorekoreMakeSheet: View {
     private func voiceRow(_ option: CharacterVoice) -> some View {
         let chosen = voice == option.id
         return HStack(spacing: 10) {
-            Button { voice = option.id } label: {
+            Button { pick(option) } label: {
                 HStack(spacing: 8) {
                     Circle()
                         .fill(chosen ? Theme.Colors.korePink : Theme.Colors.paper)
@@ -242,12 +285,26 @@ struct KorekoreMakeSheet: View {
                         .frame(width: 16, height: 16)
                     Text(verbatim: option.name).font(.rounded(14))
                     KTag(option.providerName)
+                    if option.own { KTag(String(localized: "Yours"), color: Theme.Colors.korePinkText) }
+                    if option.id == base && edited == original {
+                        KTag(String(localized: "Free · already made"), color: Theme.Colors.doneText)
+                    }
                 }
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
             .accessibilityAddTraits(chosen ? .isSelected : [])
             Spacer()
+            if option.own {
+                Button(String(localized: "Remove")) {
+                    Task {
+                        await model.deleteOwnVoice(option.id)
+                        if voice == option.id, model.characterVoice(option.id) == nil { voice = base }
+                    }
+                }
+                .kButton()
+                .help(String(localized: "Forget this voice on this computer; it stays in your account"))
+            }
             if Resources.voicePack(option.previewID) != nil {
                 let playing = model.previewingVoice == option.previewID
                 Button { model.togglePreview(option.previewID) } label: {
@@ -262,36 +319,135 @@ struct KorekoreMakeSheet: View {
         .padding(.horizontal, 12)
     }
 
+    /// The last voice row: a voice cloned or designed in the user's own account, tried with their own key on the first
+    /// line before it is kept.
+    private var ownVoiceRow: some View {
+        let providerName = ownProvider == "volc" ? String(localized: "Volcano Engine") : "ElevenLabs"
+        let key = ownProvider == "volc" ? model.status?.voiceKeys?.volc : model.status?.voiceKeys?.elevenlabs
+        let hasKey = key?.set == true
+        return VStack(alignment: .leading, spacing: 10) {
+            if addingOwn {
+                KNote(String(localized: "A voice you cloned or designed in your own ElevenLabs or Volcano Engine account. Paste its ID: VibeBuddy tries it with your own key by saying the first line, and keeps it for next time."))
+                HStack(spacing: 8) {
+                    KMenu(selection: ownProvider, options: [("elevenlabs", "ElevenLabs"), ("volc", String(localized: "Volcano Engine"))]) {
+                        ownProvider = $0
+                        ownVoiceID = ""
+                    }
+                    // ElevenLabs lists the key's voices, so the id needn't be looked up; Volcano Engine can't with a key alone.
+                    if ownProvider == "elevenlabs", let elevenVoices, !elevenVoices.isEmpty {
+                        KMenu(selection: ownVoiceID, options: [("", String(localized: "Pick a voice…"))] + elevenVoices.map { ($0.voice, $0.label) }) { picked in
+                            ownVoiceID = picked
+                            if let voice = elevenVoices.first(where: { $0.voice == picked }) { ownName = voice.name }
+                        }
+                    } else {
+                        KField(ownProvider == "volc" ? String(localized: "Speaker ID") : String(localized: "Voice ID"), text: $ownVoiceID)
+                    }
+                    KField(String(localized: "Name"), text: $ownName).frame(width: 140)
+                }
+                if ownProvider == "elevenlabs", hasKey, let listProblem {
+                    KNote(String(localized: "Couldn't list the voices of your ElevenLabs key, so paste a voice id: \(listProblem)"), color: Theme.Colors.waitText)
+                }
+                if !hasKey {
+                    KNote(MakingReadiness.ownKeyOnly.explanation(provider: providerName), color: Theme.Colors.korePinkText)
+                }
+                if let ownProblem {
+                    KTag(ownProblem, color: Theme.Colors.korePinkText)
+                }
+                HStack(spacing: 8) {
+                    Spacer()
+                    Button(String(localized: "Cancel")) { addingOwn = false; ownProblem = nil }.kButton()
+                    Button(trying ? String(localized: "Trying…") : String(localized: "Try")) { tryOwnVoice() }
+                        .kButton(.sun)
+                        .disabled(trying || !hasKey || ownVoiceID.trimmingCharacters(in: .whitespaces).isEmpty
+                            || ownName.trimmingCharacters(in: .whitespaces).isEmpty)
+                }
+            } else {
+                Button(String(localized: "Your own voice…")) { addingOwn = true }.kButton()
+            }
+        }
+        .padding(.vertical, 8)
+        .padding(.horizontal, 12)
+        .task(id: "\(addingOwn) \(ownProvider) \(hasKey)") {
+            guard addingOwn, ownProvider == "elevenlabs", hasKey, elevenVoices == nil else { return }
+            do {
+                elevenVoices = try await model.client.elevenLabsVoices()
+                listProblem = nil
+            } catch {
+                listProblem = error.localizedDescription
+            }
+        }
+    }
+
+    private func tryOwnVoice() {
+        trying = true
+        ownProblem = nil
+        let text = edited.first?.text ?? String(localized: "All done!")
+        Task {
+            do {
+                let added = try await model.addOwnVoice(provider: ownProvider, voice: ownVoiceID, name: ownName, text: text)
+                voice = added.id
+                addingOwn = false
+                ownVoiceID = ""
+                ownName = ""
+            } catch {
+                ownProblem = String(localized: "Couldn't use that voice: \(error.localizedDescription)")
+            }
+            trying = false
+        }
+    }
+
+    /// A preset's voice takes that preset's lines too, while the user hasn't changed any: its own voice with its own
+    /// lines, which are already made.
+    private func pick(_ option: CharacterVoice) {
+        voice = option.id
+        if edited == original, Resources.bundledVoices.contains(where: { $0.id == option.id }) {
+            base = option.id
+        }
+    }
+
     private func text(of id: UUID) -> Binding<String> {
         Binding(get: { lines.first { $0.id == id }?.text ?? "" },
                 set: { new in if let index = lines.firstIndex(where: { $0.id == id }) { lines[index].text = new } })
     }
 
-    /// The base's lines, in its voice; picking another base starts over.
+    /// The base's lines; picking another base starts them over. The voice starts as the base's and stays as the user picks it.
     private func load() async {
-        voice = base
+        if voice.isEmpty { voice = base }
         do {
             let fetched = try await model.client.presetLines(base)
             lines = fetched.map { Draft(occasion: $0.occasion, text: $0.text) }
+            original = fetched
             occasions = fetched.reduce(into: []) { seen, line in if !seen.contains(line.occasion) { seen.append(line.occasion) } }
             problem = nil
         } catch {
             lines = []
+            original = []
             occasions = []
             problem = String(localized: "Couldn't read the lines of \(baseName): \(error.localizedDescription)")
         }
     }
 
     private func chooseLook() {
-        switch LookImages.chooseLook() {
-        case .success(let built):
-            look = built
-            problem = nil
-        case .failure(let failure):
-            problem = failure.message
-        case nil:
-            break
+        LookImages.chooseLook { result in
+            switch result {
+            case .success(let built):
+                look = built
+                problem = nil
+            case .failure(let failure):
+                problem = failure.message
+            case nil:
+                break
+            }
         }
+    }
+
+    /// The drawings go to the box as the user's own Character, the preset lending its voice and lines.
+    private func useLook() {
+        guard let look, model.writeCustomCharacter(look: look, lender: base) else {
+            problem = String(localized: "That character can't lend its voice; pick another.")
+            return
+        }
+        dismiss()
     }
 
     private func make() {

@@ -7,7 +7,8 @@ use serde::{Deserialize, Serialize};
 use crate::i18n::tr;
 use crate::status::{Account, Plan, VoiceKeys};
 
-/// A voice a made Character can speak with: a row of characters/voices.tsv, from `GET /v1/voices`.
+/// A voice a made Character can speak with, from `GET /v1/voices`: a row of characters/voices.tsv, or one in the
+/// user's own account (`own`), which only their own key speaks and which has no language of its own.
 #[derive(Clone, Debug, Default, Deserialize, PartialEq, Eq)]
 #[serde(default)]
 pub struct Voice {
@@ -16,6 +17,7 @@ pub struct Voice {
     pub provider: String,
     pub language: String,
     pub name: String,
+    pub own: bool,
 }
 
 impl Voice {
@@ -37,11 +39,30 @@ pub fn preview_of(id: &str) -> &str {
     if id == "jessica" { "robot" } else { id }
 }
 
-/// Voices in `language` first, the daemon's order otherwise kept.
+/// Voices in `language` first, then the rest of ours, then the user's own; the daemon's order otherwise kept.
 pub fn sorted(voices: &[Voice], language: Option<&str>) -> Vec<Voice> {
-    let (mut first, rest): (Vec<Voice>, Vec<Voice>) = voices.iter().cloned().partition(|voice| Some(voice.language.as_str()) == language);
+    let (own, ours): (Vec<Voice>, Vec<Voice>) = voices.iter().cloned().partition(|voice| voice.own);
+    let (mut first, rest): (Vec<Voice>, Vec<Voice>) = ours.into_iter().partition(|voice| Some(voice.language.as_str()) == language);
     first.extend(rest);
+    first.extend(own);
     first
+}
+
+/// A voice the user's own ElevenLabs key can speak, from `GET /v1/voices/elevenlabs`: picked rather than its id pasted.
+#[derive(Clone, Debug, Default, Deserialize, PartialEq, Eq)]
+#[serde(default)]
+pub struct ProviderVoice {
+    pub voice: String,
+    pub name: String,
+    /// `premade` for ElevenLabs' stock voices; `cloned`, `generated` or `professional` for the account's own.
+    pub category: String,
+}
+
+impl std::fmt::Display for ProviderVoice {
+    /// As the menu lists it: the account's own by name, ElevenLabs' stock ones marked.
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        if self.category == "premade" { write!(f, "{}", tr("%@ · stock", &[&self.name])) } else { write!(f, "{}", self.name) }
+    }
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
@@ -140,7 +161,9 @@ impl Readiness {
         let key = keys.map(|keys| if voice.provider == "volc" { &keys.volc } else { &keys.elevenlabs });
         if key.is_some_and(|key| key.set && !key.refused) {
             Readiness::OwnKey
-        } else if !Plan::SHOWN {
+        } else if voice.own || !Plan::SHOWN {
+            // A voice in the user's own account: VibeBuddy's voice service can't speak it. Nor, while the Paid plan
+            // is hidden, any voice.
             Readiness::OwnKeyOnly
         } else if account.signed_in {
             Readiness::PaidPlan
@@ -286,7 +309,7 @@ mod tests {
 
     #[test]
     fn without_an_own_key_for_its_provider_a_voice_needs_the_paid_plan() {
-        let voice = |provider: &str| Voice { id: "v".to_owned(), provider: provider.to_owned(), language: "en".to_owned(), name: "V".to_owned() };
+        let voice = |provider: &str| Voice { id: "v".to_owned(), provider: provider.to_owned(), language: "en".to_owned(), name: "V".to_owned(), own: false };
         let keys = VoiceKeys { elevenlabs: VoiceKey { set: true, refused: false }, volc: VoiceKey { set: true, refused: true } };
         let signed_in = Account { available: true, signed_in: true, ..Account::default() };
         let signed_out = Account { available: true, ..Account::default() };
@@ -296,6 +319,20 @@ mod tests {
         assert_eq!(Readiness::of(&voice("volc"), None, &signed_out), sign_in);
         assert_eq!(Readiness::of(&voice("volc"), None, &Account::default()), Readiness::OwnKeyOnly);
         assert!(!Readiness::SignIn.can_start() && Readiness::PaidPlan.can_start());
+        // A voice of the user's own: only their own key speaks it, whatever the plan.
+        let own = Voice { own: true, ..voice("volc") };
+        let signed_in = Account { available: true, signed_in: true, ..Account::default() };
+        assert_eq!(Readiness::of(&own, None, &signed_in), Readiness::OwnKeyOnly);
+    }
+
+    #[test]
+    fn a_voice_of_the_users_own_reads_and_comes_after_ours() {
+        let voices: Vec<Voice> = serde_json::from_str(r#"[{"id":"own-1a2b3c4d","provider":"volc","voice":"S_me","language":"","gender":"","name":"Me","own":true},{"id":"ada","provider":"elevenlabs","voice":"t","language":"en","gender":"female","name":"Ada"}]"#).unwrap();
+        assert!(voices[0].own && !voices[1].own, "a voice without own is ours");
+        assert_eq!(sorted(&voices, None).iter().map(|voice| voice.id.as_str()).collect::<Vec<_>>(), ["ada", "own-1a2b3c4d"]);
+        let library: Vec<ProviderVoice> = serde_json::from_str(r#"[{"voice":"c1","name":"me","category":"cloned"},{"voice":"p1","name":"Rachel","category":"premade"}]"#).unwrap();
+        assert_eq!(library[0].to_string(), "me");
+        assert!(library[1].to_string().starts_with("Rachel"), "a stock voice keeps its name");
     }
 
     #[test]

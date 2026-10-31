@@ -20,11 +20,12 @@ use iced::widget::image;
 use crate::i18n::tr;
 
 /// The bundled fonts (fonts/korekore), registered with iced at start.
-pub const FONTS: [&[u8]; 4] = [
+pub const FONTS: [&[u8]; 5] = [
     include_bytes!("../../../fonts/korekore/MPLUSRounded1c-Regular.ttf"),
     include_bytes!("../../../fonts/korekore/MPLUSRounded1c-Bold.ttf"),
     include_bytes!("../../../fonts/korekore/MPLUSRounded1c-ExtraBold.ttf"),
     include_bytes!("../../../fonts/korekore/DotGothic16-Regular.ttf"),
+    include_bytes!("../../../fonts/korekore/FusionPixel12-Regular.ttf"),
 ];
 
 /// Text that names no font: M PLUS Rounded 1c, regular.

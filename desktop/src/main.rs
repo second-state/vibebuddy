@@ -106,6 +106,8 @@ enum Message {
     VolumeDragged(u8),
     VolumeReleased,
     PlayLine,
+    /// Which set of screens the box draws (ADR-0021).
+    SetScreens(BoxScreens),
     /// The user says which of several devices is the box, by its USB serial number.
     ChooseBox(String),
     /// Forget another computer on the box, by its key.
@@ -135,12 +137,27 @@ enum Message {
     MakeLines(&'static str, Result<Vec<making::Line>, String>),
     MakeName(String),
     MakeVoice(making::Voice),
+    /// The korekore sheet's pick: a preset's voice takes that preset's lines too, while none has changed.
+    MakeVoiceAndLines(making::Voice),
+    /// The form for a voice of the user's own: open or closed, its provider, voice id and name.
+    MakeOwnOpen(bool),
+    MakeOwnProvider(OwnProvider),
+    MakeOwnVoice(String),
+    MakeOwnName(String),
+    MakeOwnPick(making::ProviderVoice),
+    ElevenVoices(Result<Vec<making::ProviderVoice>, String>),
+    MakeOwnTry,
+    MakeOwnTried(Result<(making::Voice, Vec<u8>), String>),
+    RemoveOwnVoice(String),
+    OwnVoiceRemoved(String, Result<(), String>),
     MakeLine(usize, String),
     MakeRemoveLine(usize),
     MakeChooseDrawings,
     MakeDrawings(Result<Option<Vec<character::Image>>, String>),
     /// Wear the base's look again rather than the user's.
     MakeBaseLook,
+    /// The form has only a new look: it goes to the box as the user's own Character, the preset lending its voice.
+    MakeUseLook,
     MakeStart,
     /// The daemon took the job, from the form or a Resume, or didn't.
     MakeStarted(Result<making::Making, String>),
@@ -153,6 +170,9 @@ enum Message {
     ResumeMade(String),
     /// Ask to delete a made Character (by id), or (None) don't; deleting waits for a second click.
     AskDeleteMade(Option<String>),
+    /// Asking before forgetting the user's own Character, or not.
+    AskDeleteCustom(bool),
+    DeleteCustom,
     DeleteMade(String),
     MadeDeleted(Result<(), String>),
     AskFirmwareUpdate(bool),
@@ -258,6 +278,8 @@ struct App {
     characters: custom::Settings,
     /// The user's own Character on the card: its look, its four frames to show, and who lends it voice and lines.
     custom_look: Option<(Vec<u8>, Vec<image::Handle>)>,
+    /// `custom_look` is the look last written (with `characters.custom_lender`), not one just chosen.
+    custom_look_written: bool,
     lender: Option<Lender>,
     custom_problem: Option<String>,
     /// The robot's face for its card.
@@ -271,6 +293,7 @@ struct App {
     make: Option<MakeForm>,
     /// The made Character waiting for a second click to be deleted, since it can't be undone.
     confirm_delete_made: Option<String>,
+    confirm_delete_custom: bool,
     /// The firmware update waits for a second click, since the box restarts.
     confirm_firmware: bool,
     /// A firmware zip picked with Flash from file…, waiting for the user to confirm.
@@ -337,12 +360,61 @@ struct MakeForm {
     name: String,
     voice: Option<making::Voice>,
     lines: Vec<making::Line>,
+    /// The preset's lines as they came, to tell whether any changed.
+    original: Vec<making::Line>,
     /// The preset's occasions, in its order.
     occasions: Vec<String>,
     /// The user's own look and its face; None wears the base's.
     look: Option<(Vec<u8>, image::Handle)>,
     problem: Option<String>,
     starting: bool,
+    /// Adding a voice of the user's own: None while the form is closed.
+    own: Option<OwnVoiceForm>,
+}
+
+/// A voice of the user's own being added: where it is, the name to keep it under, and why trying it failed.
+#[derive(Debug, Default)]
+struct OwnVoiceForm {
+    provider: OwnProvider,
+    voice: String,
+    name: String,
+    trying: bool,
+    problem: Option<String>,
+    /// The voices of the own ElevenLabs key, to pick from, or why they couldn't be listed; None until asked.
+    listed: Option<Result<Vec<making::ProviderVoice>, String>>,
+}
+
+/// The providers a voice of the user's own can be in, for the form's picker.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+enum OwnProvider {
+    #[default]
+    ElevenLabs,
+    Volc,
+}
+
+impl OwnProvider {
+    fn id(self) -> &'static str {
+        match self {
+            OwnProvider::ElevenLabs => "elevenlabs",
+            OwnProvider::Volc => "volc",
+        }
+    }
+}
+
+impl std::fmt::Display for OwnProvider {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            OwnProvider::ElevenLabs => write!(f, "ElevenLabs"),
+            OwnProvider::Volc => write!(f, "{}", tr("Volcano Engine", &[])),
+        }
+    }
+}
+
+impl MakeForm {
+    /// Only the look is new: nothing to make, the preset lends its voice and lines.
+    fn look_only(&self) -> bool {
+        self.look.is_some() && self.lines == self.original && self.voice.as_ref().is_none_or(|voice| voice.id == self.base.id)
+    }
 }
 
 struct RestartOffer {
@@ -367,6 +439,7 @@ impl App {
             faces: Vec::new(),
             characters: custom::Settings::load(),
             custom_look: None,
+            custom_look_written: false,
             lender: None,
             custom_problem: None,
             robot_face: None,
@@ -375,6 +448,7 @@ impl App {
             character_voices: Vec::new(),
             make: None,
             confirm_delete_made: None,
+            confirm_delete_custom: false,
             confirm_firmware: false,
             file_firmware: None,
             wifi_ssid: String::new(),
@@ -427,6 +501,7 @@ impl App {
         app.custom_look = custom::custom_look_file()
             .and_then(|path| std::fs::read(path).ok())
             .and_then(|look| character::look_frames(&look).map(|frames| (look, frames.iter().map(|frame| handle(frame, 2)).collect())));
+        app.custom_look_written = app.custom_look.is_some();
         // Debug builds only: open the window on a given section or first-run step, for checking it on a desktop
         // without a pointer (VIBEBUDDY_KOREKORE_SECTION=device, VIBEBUDDY_KOREKORE_GUIDE=1).
         #[cfg(debug_assertions)]
@@ -780,6 +855,7 @@ impl App {
                 let level = self.volume.or_else(|| self.status.as_ref()?.device.volume).unwrap_or(60);
                 return Task::perform(client::set_volume(level, true), Message::Done);
             }
+            Message::SetScreens(screens) => return Task::perform(client::set_screens(screens.0), Message::Done),
             Message::ChooseBox(usb_serial) => return Task::perform(client::choose_box(usb_serial), Message::Done),
             Message::Unpair(key) => return Task::perform(client::unpair(key), Message::Done),
             Message::TakeOver => return Task::perform(client::take_over(), Message::Done),
@@ -827,6 +903,7 @@ impl App {
                     Some(look) => {
                         let frames = character::look_frames(&look).unwrap_or_default();
                         self.custom_look = Some((look, frames.iter().map(|frame| handle(frame, 2)).collect()));
+                        self.custom_look_written = false;
                         self.custom_problem = None;
                     }
                     None => self.custom_problem = Some(tr("No figure found: use a plain white or transparent background.", &[])),
@@ -851,6 +928,7 @@ impl App {
                 }
                 self.characters.custom_lender = Some(lender.id.to_owned());
                 self.characters.save();
+                self.custom_look_written = true;
                 let form = assets::language_of(lender.id).and_then(|language| self.characters.address(language)).map(str::to_owned);
                 let write = async move {
                     let pack = assets::read_character(lender.id, form.as_deref()).await?.with_look(look, CUSTOM);
@@ -868,16 +946,18 @@ impl App {
                     name: String::new(),
                     voice: None,
                     lines: Vec::new(),
+                    original: Vec::new(),
                     occasions: Vec::new(),
                     look: None,
                     problem: None,
                     starting: false,
+                    own: None,
                 });
                 return Task::batch([Task::done(Message::MakeBase(base)), self.refresh_made()]);
             }
             Message::MakeBase(base) => {
                 let Some(form) = &mut self.make else { return Task::none() };
-                (form.base, form.lines, form.occasions, form.voice) = (base, Vec::new(), Vec::new(), None);
+                (form.base, form.lines, form.occasions) = (base, Vec::new(), Vec::new());
                 return Task::perform(client::preset_lines(base.id), move |lines| Message::MakeLines(base.id, lines));
             }
             Message::MakeLines(base, lines) => {
@@ -890,13 +970,16 @@ impl App {
                             }
                             seen
                         });
+                        form.original = lines.clone();
                         form.lines = lines;
                         form.problem = None;
                     }
                     Err(error) => form.problem = Some(tr("Couldn't read the lines of %@: %@", &[&assets::voice_name(base), &error])),
                 }
-                // The preset's own voice to begin with: voices.tsv has each preset's under its id.
-                form.voice = self.character_voices.iter().find(|voice| voice.id == base).cloned();
+                // The preset's own voice to begin with (voices.tsv has each preset's under its id); one the user picked stays.
+                if form.voice.is_none() {
+                    form.voice = self.character_voices.iter().find(|voice| voice.id == base).cloned();
+                }
             }
             Message::MakeName(name) => {
                 if let Some(form) = &mut self.make {
@@ -908,6 +991,99 @@ impl App {
                     form.voice = Some(voice);
                 }
             }
+            Message::MakeVoiceAndLines(voice) => {
+                let Some(form) = &mut self.make else { return Task::none() };
+                let preset = self.voices.iter().find(|shipped| shipped.id == voice.id).map(Lender::of);
+                let follow = form.lines == form.original && preset.is_some_and(|preset| preset != form.base);
+                form.voice = Some(voice);
+                if let Some(preset) = preset.filter(|_| follow) {
+                    return Task::done(Message::MakeBase(preset));
+                }
+            }
+            Message::MakeOwnOpen(open) => {
+                if let Some(form) = &mut self.make {
+                    form.own = open.then(OwnVoiceForm::default);
+                }
+                // ElevenLabs lists the key's voices, so the id needn't be looked up; Volcano Engine can't with a key alone.
+                if open {
+                    return Task::perform(client::elevenlabs_voices(), Message::ElevenVoices);
+                }
+            }
+            Message::MakeOwnProvider(provider) => {
+                if let Some(own) = self.make.as_mut().and_then(|form| form.own.as_mut()) {
+                    own.provider = provider;
+                    own.voice.clear();
+                    if provider == OwnProvider::ElevenLabs && !matches!(own.listed, Some(Ok(_))) {
+                        return Task::perform(client::elevenlabs_voices(), Message::ElevenVoices);
+                    }
+                }
+            }
+            Message::MakeOwnPick(picked) => {
+                if let Some(own) = self.make.as_mut().and_then(|form| form.own.as_mut()) {
+                    own.voice = picked.voice;
+                    own.name = picked.name;
+                }
+            }
+            Message::ElevenVoices(listed) => {
+                if let Some(own) = self.make.as_mut().and_then(|form| form.own.as_mut()) {
+                    own.listed = Some(listed);
+                }
+            }
+            Message::MakeOwnVoice(voice) => {
+                if let Some(own) = self.make.as_mut().and_then(|form| form.own.as_mut()) {
+                    own.voice = voice;
+                }
+            }
+            Message::MakeOwnName(name) => {
+                if let Some(own) = self.make.as_mut().and_then(|form| form.own.as_mut()) {
+                    own.name = name;
+                }
+            }
+            Message::MakeOwnTry => {
+                let Some(form) = &mut self.make else { return Task::none() };
+                // The first line, as the box would say it, is what the voice is tried with.
+                let text = form.lines.first().map(|line| line.text.clone()).unwrap_or_else(|| tr("All done!", &[]));
+                let Some(own) = form.own.as_mut().filter(|own| !own.trying) else { return Task::none() };
+                own.trying = true;
+                own.problem = None;
+                let tried = client::add_own_voice(own.provider.id().to_owned(), own.voice.trim().to_owned(), own.name.trim().to_owned(), text);
+                return Task::perform(tried, Message::MakeOwnTried);
+            }
+            Message::MakeOwnTried(result) => {
+                let Some(form) = &mut self.make else { return Task::none() };
+                match result {
+                    Ok((voice, audio)) => {
+                        self.character_voices.retain(|kept| kept.id != voice.id);
+                        self.character_voices.push(voice.clone());
+                        form.voice = Some(voice.clone());
+                        form.own = None;
+                        // What it said plays at once, as a preview does.
+                        if let Some((_, stop)) = self.previewing.take() {
+                            stop.notify_one();
+                        }
+                        let Some(pcm) = preview::wav(&audio) else { return Task::none() };
+                        let stop = std::sync::Arc::new(tokio::sync::Notify::new());
+                        self.previewing = Some((voice.id.clone(), stop.clone()));
+                        return Task::perform(preview::play(pcm, stop), move |result| Message::PreviewDone(voice.id.clone(), result));
+                    }
+                    Err(error) => {
+                        if let Some(own) = form.own.as_mut() {
+                            own.trying = false;
+                            own.problem = Some(tr("Couldn't use that voice: %@", &[&error]));
+                        }
+                    }
+                }
+            }
+            Message::RemoveOwnVoice(id) => return Task::perform(client::delete_own_voice(id.clone()), move |result| Message::OwnVoiceRemoved(id.clone(), result)),
+            Message::OwnVoiceRemoved(id, result) => match result {
+                Ok(()) => {
+                    self.character_voices.retain(|voice| voice.id != id);
+                    if let Some(form) = self.make.as_mut().filter(|form| form.voice.as_ref().is_some_and(|voice| voice.id == id)) {
+                        form.voice = self.character_voices.iter().find(|voice| voice.id == form.base.id).cloned();
+                    }
+                }
+                Err(error) => self.notice = Some(Err(tr("Couldn't remove the voice: %@", &[&error]))),
+            },
             Message::MakeLine(index, text) => {
                 if let Some(line) = self.make.as_mut().and_then(|form| form.lines.get_mut(index)) {
                     line.text = text;
@@ -933,6 +1109,16 @@ impl App {
                     },
                     Err(error) => form.problem = Some(error),
                 }
+            }
+            Message::MakeUseLook => {
+                let Some(form) = self.make.take() else { return Task::none() };
+                let Some((look, _)) = form.look else { return Task::none() };
+                let frames = character::look_frames(&look).unwrap_or_default();
+                self.custom_look = Some((look, frames.iter().map(|frame| handle(frame, 2)).collect()));
+                self.custom_look_written = false;
+                self.custom_problem = None;
+                self.lender = Some(form.base);
+                return Task::done(Message::UseCustom);
             }
             Message::MakeBaseLook => {
                 if let Some(form) = &mut self.make {
@@ -1002,6 +1188,23 @@ impl App {
                 return Task::perform(write, Message::Done);
             }
             Message::AskDeleteMade(id) => self.confirm_delete_made = id,
+            Message::AskDeleteCustom(asking) => self.confirm_delete_custom = asking,
+            // A box wearing it goes back to the Character that lent it voice and lines.
+            Message::DeleteCustom => {
+                self.confirm_delete_custom = false;
+                if let Some(path) = custom::custom_look_file() {
+                    let _ = std::fs::remove_file(path);
+                }
+                self.custom_look = None;
+                self.custom_look_written = false;
+                self.custom_problem = None;
+                let lender = self.characters.custom_lender.take().and_then(|id| self.voices.iter().find(|voice| voice.id == id).map(|voice| voice.id));
+                self.characters.save();
+                let current = self.status.as_ref().and_then(|status| status.device.voice.clone());
+                if let Some(lender) = lender.filter(|_| current.as_deref() == Some(CUSTOM)) {
+                    return Task::done(Message::UseVoice(lender));
+                }
+            }
             Message::DeleteMade(id) => {
                 self.confirm_delete_made = None;
                 return Task::perform(client::delete_character(id), Message::MadeDeleted);
@@ -1218,6 +1421,22 @@ impl App {
         }
     }
 
+    /// The language of the Character the box wears, the one whose form of address it says; None for the robot, an
+    /// unknown Character or no box.
+    fn box_language(&self) -> Option<assets::Language> {
+        let current = self.status.as_ref()?.device.voice.as_deref()?;
+        if let Some(language) = assets::language_of(current) {
+            return Some(language);
+        }
+        if let Some(made) = self.made.iter().find(|made| made.complete && made.id == current) {
+            return self.made_language(made);
+        }
+        if current == CUSTOM {
+            return self.characters.custom_lender.as_deref().and_then(assets::language_of);
+        }
+        None
+    }
+
     fn refresh_tray(&self) -> Task<Message> {
         #[cfg(target_os = "linux")]
         if let Some(TrayHandle(handle)) = self.tray.clone() {
@@ -1350,8 +1569,8 @@ const CUSTOM: &str = "custom";
 const ROBOT: &str = "robot";
 const BUILTIN: &str = "builtin";
 
-/// The Mac app's `CustomCharacterCard.prompt`: a start for any image model.
-const CUSTOM_PROMPT: &str = "Pixel art game sprite of [describe your character], chibi proportions, standing, front view, full body, centered, arms down, flat colors, thick dark outline, limited 16-color palette, plain solid white background. Then the same character in exactly the same pose with the eyes closed; with a big happy smile; with a sad face.";
+/// The Mac app's `CustomCharacter.prompt`: a start for any image model.
+const CUSTOM_PROMPT: &str = "Pixel art game sprite sheet of [describe your character]: one image, a 2 × 2 grid of the same character in exactly the same pose, with clear white space between the four. Chibi proportions, standing, front view, full body, arms down, flat colors, thick dark outline, limited 16-color palette, plain solid white background. Top left: normal. Top right: eyes closed. Bottom left: a big happy smile. Bottom right: a sad face.";
 
 fn handle(frame: &character::Image, scale: usize) -> image::Handle {
     let (w, h) = (frame.width * scale, frame.height * scale);
@@ -1380,6 +1599,27 @@ impl Lender {
 impl std::fmt::Display for Lender {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str(&assets::voice_name(self.id))
+    }
+}
+
+/// One entry of the box screens picker: `robot` or `korekore` (ADR-0021).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct BoxScreens(&'static str);
+
+impl BoxScreens {
+    const ALL: [BoxScreens; 2] = [BoxScreens("robot"), BoxScreens("korekore")];
+
+    fn of(style: &str) -> Option<BoxScreens> {
+        Self::ALL.into_iter().find(|screens| screens.0 == style)
+    }
+}
+
+impl std::fmt::Display for BoxScreens {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self.0 {
+            "robot" => f.write_str(&tr("Robot", &[])),
+            other => f.write_str(other),
+        }
     }
 }
 

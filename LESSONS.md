@@ -346,3 +346,9 @@ Count received data by the descriptors' lengths, never by the buffer's size, and
 The daemon fix went wrong twice. The box's `xfer.ack` said only which offset it wanted next, so "the same offset again" could mean a lost chunk, a copy the box already had, or an answer from before the link moved. A rule that guessed sent about 6500 chunks for 980 over the Relay, and a FakeBox that answered at once, with no answers in flight, never showed it. The fix was to have the answer carry what it answers (a `round` the box returns).
 
 Before you build retransmission on acknowledgements, make sure each answer says which send it belongs to. Test with answers that come late, twice, or from before a reconnect, not only with a peer that answers each message at once.
+
+## A modal loop started inside a SwiftUI action gets no clicks
+
+The korekore confirmation (`KorekoreAlert`) hung the Mac App on its first use: neither button nor Esc did anything, and the main window wouldn't close. My first fix guessed at the cause (a borderless panel can't become key) and shipped without a test, so the App hung again. A `sample` of the stuck App then showed the real cause: `runModal` ran inside SwiftUI's button dispatch (`UpdateGroup.dispatchActions`), and SwiftUI holds the sheet's own SwiftUI events until that action returns. `NSAlert` doesn't hang the same way because its buttons are AppKit.
+
+When a Mac App hangs, `sample <pid>` it before you guess. For a UI fix you can't click yourself, reproduce it first in a throwaway executable that posts the clicks in-process (`NSApp.postEvent` needs no Accessibility permission), see the old code fail, then see the fix pass. Start a modal SwiftUI sheet from a run loop block after the action returns (`KorekoreAlert.ask`), never from inside the action.

@@ -376,13 +376,13 @@ struct KorekoreOnboarding: View {
                     pickCard(name: "VibeBuddy", blurb: String(localized: "The original robot"), stage: Theme.Colors.boxCard,
                              inUse: model.wearsRobot && !model.robotBorrowsVoice, comingSoon: false,
                              action: { writing = "VibeBuddy"; model.writeRobot() }) {
-                        if let face = Resources.robotFace { Image(nsImage: face).interpolation(.none) }
+                        if let face = Resources.robotFace { Image(nsImage: LookImages.figure(face)).interpolation(.none) }
                     }
                     ForEach(Resources.bundledVoices) { entry in
                         pickCard(name: entry.name, blurb: entry.tag, stage: Theme.Colors.boxCard, inUse: model.status?.device.voice == entry.id,
                                  comingSoon: false, action: { writing = entry.name; model.writeVoice(entry.id) }) {
                             if let frame = Resources.voicePack(entry.id)?.look.flatMap(LookBuilder.frames(of:))?.first {
-                                Image(nsImage: LookImages.image(frame, scale: 1)).interpolation(.none)
+                                Image(nsImage: LookImages.figure(frame)).interpolation(.none)
                             }
                         }
                     }
