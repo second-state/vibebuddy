@@ -11,6 +11,8 @@ static size_t ring_head, ring_count;
 static int16_t partial[AUDIO_MAX_FRAME_SAMPLES];
 static size_t partial_count;
 static bool active, stopping, begun, discontinuity;
+static bool stop_pending;
+static uint32_t stop_requested_at;
 
 static size_t base64_encode(const uint8_t *input, size_t length, char *output)
 {
@@ -38,13 +40,31 @@ bool audio_start(uint32_t new_rate, uint32_t new_duration_ms, uint32_t now)
     rate = new_rate; duration_ms = new_duration_ms; started_at = now;
     next_sequence = 0; overrun_count = 0; raw_slots = 0; ring_head = 0; ring_count = 0; partial_count = 0;
     stopping = false; begun = false; discontinuity = false; active = true;
+    stop_pending = false;
     AUDIO_UNLOCK();
     return true;
 }
 
 void audio_stop(void)
 {
-    AUDIO_LOCK(); if (active) stopping = true; AUDIO_UNLOCK();
+    AUDIO_LOCK(); if (active) stopping = true; stop_pending = false; AUDIO_UNLOCK();
+}
+
+bool audio_request_stop(uint32_t now)
+{
+    AUDIO_LOCK();
+    bool request = active && !stop_pending;
+    if (request) { stop_pending = true; stop_requested_at = now; }
+    AUDIO_UNLOCK();
+    return request;
+}
+
+bool audio_stop_expired(uint32_t now)
+{
+    AUDIO_LOCK();
+    bool expired = active && stop_pending && (uint32_t)(now - stop_requested_at) >= 2000;
+    AUDIO_UNLOCK();
+    return expired;
 }
 
 bool audio_active(void)

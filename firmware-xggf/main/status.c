@@ -4,7 +4,12 @@
 #include <stdio.h>
 #include <string.h>
 
-void status_init(status_model *m) { memset(m, 0, sizeof(*m)); }
+void status_init(status_model *m)
+{
+    memset(m, 0, sizeof(*m));
+    m->brightness = 8;
+    button_actions_init(&m->button_actions);
+}
 
 bool status_event(status_model *m, const char *event, uint32_t now)
 {
@@ -26,6 +31,7 @@ bool status_event(status_model *m, const char *event, uint32_t now)
     else return false;
     m->state = next; m->linked = true; m->host_seen = true; m->last_message_ms = now;
     m->view = STATUS_VIEW_AGENT; m->mute_notice = false;
+    button_actions_external_reset(&m->button_actions);
     m->done_pending = next == STATUS_DONE; m->done_at_ms = now;
     m->audio_active = false; m->audio_session = false;
     return true;
@@ -64,6 +70,7 @@ void status_identify(status_model *m, uint32_t now)
     m->identify_at_ms = now;
     m->view = STATUS_VIEW_AGENT;
     m->mute_notice = false;
+    button_actions_external_reset(&m->button_actions);
     m->audio_active = false;
     m->audio_session = false;
 }
@@ -76,10 +83,11 @@ void status_toggle_mute(status_model *m, uint32_t now)
     m->mute_notice_at_ms = now;
 }
 
-void status_set_recording(status_model *m, bool recording)
+button_transition status_set_recording(status_model *m, bool recording)
 {
-    m->recording = recording;
+    button_transition result = button_actions_set_recording(&m->button_actions, recording);
     if (recording) { m->audio_session = false; m->audio_active = false; }
+    return result;
 }
 
 void status_audio_start(status_model *m)
@@ -110,6 +118,12 @@ void status_sensors(status_model *m, bool rtc_valid, unsigned hour, unsigned min
 
 void status_network(status_model *m, bool configured, bool online)
 { m->network_link = !configured ? STATUS_LINK_UNSET : online ? STATUS_LINK_OK : STATUS_LINK_ERROR; }
+
+void status_link_update(status_model *m, const link_status_info *info)
+{ m->link_info = *info; }
+
+void status_transport_update(status_model *m, bool usb)
+{ m->transport = usb ? STATUS_TRANSPORT_USB : STATUS_TRANSPORT_LAN; }
 
 static void pixel(uint8_t *f, unsigned x, unsigned y, const uint8_t *c)
 { panel_set_pixel(f, x, y, c[0], c[1], c[2]); }
@@ -157,6 +171,18 @@ static void button_dots(uint8_t *f, const status_model *m)
         }
 }
 
+static void button_feedback(uint8_t *f, const status_model *m)
+{
+    static const uint8_t purple[] = {8,0,8}, dark[] = {0,0,0};
+    button_dots(f, m);
+    if (m->long_mask) {
+        for (unsigned y = 0; y < XGGF_FONT_HEIGHT; ++y)
+            for (unsigned x = 13; x < 60; ++x) pixel(f, x, y, dark);
+        text(f, "LONG", purple);
+        button_dots(f, m);
+    }
+}
+
 void status_render(const status_model *m, uint32_t now, uint8_t *f)
 {
     static const uint8_t gray[] = {3,3,3}, cyan[] = {0,6,8}, amber[] = {8,4,0},
@@ -165,14 +191,54 @@ void status_render(const status_model *m, uint32_t now, uint8_t *f)
     indicator(f, m);
     /* A steady 2x2 red dot in the top-right corner marks active voice recording in every
        view; the corner beside the bar stays clear of the button dots and label text. */
-    if (m->recording) for (unsigned x = 61; x <= 62; ++x) { pixel(f,x,0,red); pixel(f,x,1,red); }
-    if (m->recording) {
+    if (m->button_actions.recording) for (unsigned x = 61; x <= 62; ++x) { pixel(f,x,0,red); pixel(f,x,1,red); }
+    if (m->button_actions.recording) {
         for (unsigned x = 2; x <= 8; ++x) { pixel(f,x,0,red); pixel(f,x,7,red); }
         for (unsigned y = 1; y < 7; ++y) { pixel(f,1,y,red); pixel(f,9,y,red); }
         pixel(f,3,2,red); pixel(f,7,2,red); pixel(f,5,5,red);
         if ((now / 500) % 2) pixel(f,12,1,red);
         text(f,"REC",red);
-        button_dots(f, m);
+        button_feedback(f, m);
+        return;
+    }
+    if (m->button_actions.mode != BUTTON_UI_HOME) {
+        const char *label = "LINK";
+        char value[16];
+        if (m->button_actions.mode == BUTTON_UI_LINK) {
+            switch (m->button_actions.link_page % 4) {
+                case 0:
+                    label = !m->linked ? "OFFLINE" : m->transport == STATUS_TRANSPORT_USB ? "LINK USB" : "LINK LAN";
+                    break;
+                case 1:
+                    switch (m->link_info.wifi_state) {
+                        case LINK_WIFI_NOT_SET: label = "NOT SET"; break;
+                        case LINK_WIFI_CONNECTING: label = "JOINING"; break;
+                        case LINK_WIFI_JOINED: label = m->link_info.ssid; break;
+                        case LINK_WIFI_FAILED: label = "WIFI FAIL"; break;
+                        case LINK_WIFI_DISCONNECTED: label = "WIFI DOWN"; break;
+                    }
+                    break;
+                case 2: label = m->link_info.ip[0] ? m->link_info.ip : "NO IP"; break;
+                case 3:
+                    snprintf(value, sizeof(value), "PAIRS %u", m->link_info.paired_count);
+                    label = value;
+                    break;
+            }
+        } else switch (m->button_actions.row) {
+            case BUTTON_MENU_MIC: label = m->audio_session ? "MIC ON" : "MIC OFF"; break;
+            case BUTTON_MENU_LINK: label = "LINK"; break;
+            case BUTTON_MENU_BRIGHTNESS:
+                snprintf(value, sizeof(value), "BRIGHT %u", m->brightness); label = value; break;
+            case BUTTON_MENU_IDENTIFY: label = "IDENTIFY"; break;
+            case BUTTON_MENU_MUTE: label = m->muted ? "MUTE ON" : "MUTE OFF"; break;
+            case BUTTON_MENU_CLOSE: label = "CLOSE"; break;
+            case BUTTON_MENU_ROW_COUNT: break;
+        }
+        for (unsigned x = 2; x <= 8; ++x) { pixel(f,x,0,cyan); pixel(f,x,7,cyan); }
+        for (unsigned y = 1; y < 7; ++y) { pixel(f,1,y,cyan); pixel(f,9,y,cyan); }
+        pixel(f,3,2,cyan); pixel(f,7,2,cyan);
+        text(f,label,cyan);
+        button_feedback(f, m);
         return;
     }
     if (m->audio_session) {
@@ -186,7 +252,7 @@ void status_render(const status_model *m, uint32_t now, uint8_t *f)
             for (unsigned x = 13 + bar * 5; x < 16 + bar * 5; ++x)
                 for (unsigned y = 8 - height; y < 8; ++y) pixel(f,x,y,color);
         }
-        button_dots(f, m);
+        button_feedback(f, m);
         return;
     }
     const uint8_t *color = gray; const char *label = "OFFLINE"; char sensor_label[32];
@@ -236,5 +302,5 @@ void status_render(const status_model *m, uint32_t now, uint8_t *f)
     }
     if (m->view == STATUS_VIEW_AGENT && m->linked && m->state == STATUS_WORKING && (now / 400) % 2) pixel(f,5,3,color);
     text(f,label,color);
-    button_dots(f, m);
+    button_feedback(f, m);
 }

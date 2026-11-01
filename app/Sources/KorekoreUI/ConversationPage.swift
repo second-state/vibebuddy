@@ -24,7 +24,7 @@ public struct KorekoreConversationPage: View {
     let links: Links
     /// The Character the box wears, at 1×, beside each reply; nil shows Kore.
     let avatar: NSImage?
-    /// Whether the attached device is the experimental XGGF, which has no K0 to hold; its empty state says so.
+    /// Whether the attached device is the experimental XGGF, which does not support voice commands; its empty state says so.
     let xggfExperimental: Bool
 
     public static let limit = 20

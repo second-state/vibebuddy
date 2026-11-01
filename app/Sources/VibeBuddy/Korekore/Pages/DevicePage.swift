@@ -124,6 +124,12 @@ struct KorekoreDevicePage: View {
         }
         // The XGGF recorder in the korekore look, offered only when this computer granted audio.
         if connected, device?.unsupportedBoard == "xggf-64x8" {
+            KCard {
+                VStack(alignment: .leading, spacing: 8) {
+                    KHeading(String(localized: "XGGF buttons"))
+                    XGGFButtonGuide()
+                }
+            }
             if device?.audioCapture == true {
                 KCard {
                     VStack(alignment: .leading, spacing: 8) {

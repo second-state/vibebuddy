@@ -124,5 +124,33 @@ int main(int argc, char **argv)
     status_tick(&m, 15000);
     emit(argv[1], "link-host-error", &m, 15000);
 
+    status_init(&m);
+    button_actions_handle(&m.button_actions, BUTTON_K1_LONG, 0);
+    emit(argv[1], "menu-mic", &m, 0);
+    button_actions_handle(&m.button_actions, BUTTON_K1_SHORT, 1);
+    emit(argv[1], "menu-link-row", &m, 1);
+    link_status_info info = { .wifi_state = LINK_WIFI_JOINED, .ssid = "Cafe WiFi", .ip = "192.168.1.20", .paired_count = 2 };
+    status_link_update(&m, &info);
+    status_event(&m, "device.heartbeat", 2);
+    status_transport_update(&m, true);
+    button_actions_handle(&m.button_actions, BUTTON_K0_SHORT, 2);
+    emit(argv[1], "menu-link-usb", &m, 2);
+    button_actions_handle(&m.button_actions, BUTTON_K1_SHORT, 3);
+    emit(argv[1], "menu-wifi", &m, 3);
+    button_actions_handle(&m.button_actions, BUTTON_K1_SHORT, 4);
+    emit(argv[1], "menu-ip", &m, 4);
+    button_actions_handle(&m.button_actions, BUTTON_K1_SHORT, 5);
+    emit(argv[1], "menu-pairs", &m, 5);
+    button_actions_handle(&m.button_actions, BUTTON_K2_SHORT, 6);
+    button_actions_handle(&m.button_actions, BUTTON_K1_SHORT, 7);
+    m.brightness = 2;
+    emit(argv[1], "menu-brightness", &m, 7);
+
+    status_init(&m);
+    pressed[0] = pressed[2] = false; long_fired[0] = long_fired[2] = false;
+    pressed[1] = true; long_fired[1] = true;
+    status_buttons(&m, pressed, long_fired);
+    emit(argv[1], "k1-long", &m, 1000);
+
     return 0;
 }

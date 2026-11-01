@@ -90,9 +90,15 @@ impl AudioIngestor {
         Ok(())
     }
 
-    pub fn stop(&mut self) {
+    pub fn stop(&mut self) -> bool {
         if let Some(session) = self.session.as_mut() {
+            if session.allow_short {
+                return false;
+            }
             session.allow_short = true;
+            true
+        } else {
+            false
         }
     }
 

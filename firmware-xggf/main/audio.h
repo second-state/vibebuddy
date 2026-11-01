@@ -16,6 +16,8 @@ typedef bool (*audio_line_handler)(void *context, const char *line);
 
 bool audio_start(uint32_t rate, uint32_t duration_ms, uint32_t now);
 void audio_stop(void);
+bool audio_request_stop(uint32_t now);
+bool audio_stop_expired(uint32_t now);
 bool audio_active(void);
 uint32_t audio_overruns(void);
 size_t audio_push(const int32_t *samples, size_t count, uint32_t now);

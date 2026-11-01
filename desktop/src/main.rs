@@ -2421,6 +2421,7 @@ impl App {
         scrollable(
             self.box_section()
                 .push(self.wifi_section())
+                .push(self.xggf_button_guide())
                 .push(self.audio_section())
                 .push(paired)
                 .push(column![
@@ -2520,6 +2521,21 @@ impl App {
                     );
             }
             wifi.push(text(tr("With Wi-Fi, a paired computer on the same network can drive the box without the cable.", &[])).size(13))
+        })
+    }
+
+    fn xggf_button_guide(&self) -> Option<iced::widget::Column<'_, Message>> {
+        let device = self.status.as_ref().map(|status| &status.device);
+        let board = device.filter(|device| device.connected).and_then(|device| device.unsupported_board.as_deref());
+        (board == Some("xggf-64x8")).then(|| {
+            column![
+                text(tr("XGGF buttons", &[])),
+                text(tr("Left/K0: microphone or stop recording; hold to identify.", &[])).size(13),
+                text(tr("Middle/K1: cycle pages; hold for the menu.", &[])).size(13),
+                text(tr("Right/K2: open the Agent source; hold to mute.", &[])).size(13),
+                text(tr("Hold until the panel shows LONG for long actions.", &[])).size(13),
+            ]
+            .spacing(6)
         })
     }
 

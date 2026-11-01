@@ -110,8 +110,31 @@ static void delivery_retries_from_the_ring(void)
     assert(!audio_active() && line_count == 4 && frame_count == 1);
 }
 
+static void stop_requests(void)
+{
+    reset();
+    assert(!audio_request_stop(0));
+    assert(audio_start(8000, 10000, 100));
+    assert(audio_request_stop(100));
+    assert(!audio_request_stop(101));
+    assert(!audio_stop_expired(2099));
+    assert(audio_stop_expired(2100));
+    audio_stop();
+    assert(!audio_stop_expired(2100));
+    audio_tick(2100, collect, NULL);
+    assert(!audio_active() && !audio_request_stop(2101));
+
+    reset();
+    uint32_t started = UINT32_MAX - 100;
+    assert(audio_start(8000, 10000, started));
+    assert(audio_request_stop(started));
+    assert(!audio_stop_expired(started + 1999));
+    assert(audio_stop_expired(started + 2000));
+    audio_stop();
+}
+
 int main(void)
 {
-    fidelity(); continuous(); sixteen_kilohertz_and_overruns(); delivery_retries_from_the_ring();
+    fidelity(); continuous(); sixteen_kilohertz_and_overruns(); delivery_retries_from_the_ring(); stop_requests();
     return 0;
 }

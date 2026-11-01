@@ -18,6 +18,7 @@
 #include "buzzer.h"
 #include "microphone.h"
 #include "panel.h"
+#include "settings.h"
 #include "status.h"
 #include "wifi_link.h"
 
@@ -132,39 +133,180 @@ static void probe_sensors(void)
     i2c_driver_delete(I2C_NUM_0);
 }
 
-static void button_action(status_model *model, button_event event, uint32_t now)
+static void toggle_microphone(status_model *model, uint32_t now)
+{
+    if (audio_active()) {
+        puts("MIC BUSY"); wifi_link_report("MIC BUSY");
+    } else if (model->audio_session) {
+        microphone_stop(); status_audio_stop(model);
+        puts("MIC DONE"); wifi_link_report("MIC DONE");
+    } else {
+        status_audio_start(model); microphone_probe(now);
+    }
+}
+
+static void identify(status_model *model, uint32_t now)
+{
+    status_identify(model, now);
+    if (!model->muted) buzzer_identify(now);
+}
+
+static void toggle_mute(status_model *model, uint32_t now)
+{
+    status_toggle_mute(model, now);
+    puts(model->muted ? "MUTE ON" : "MUTE OFF");
+    wifi_link_report(model->muted ? "MUTE ON" : "MUTE OFF");
+}
+
+static const char *button_ui_mode_name(button_ui_mode mode)
+{
+    static const char *const names[] = { "HOME", "MENU", "LINK" };
+    return (unsigned)mode < sizeof(names) / sizeof(names[0]) ? names[mode] : "UNKNOWN";
+}
+
+static const char *button_menu_row_name(button_menu_row row)
+{
+    static const char *const names[] = { "MIC", "LINK", "BRIGHTNESS", "IDENTIFY", "MUTE", "CLOSE" };
+    return (unsigned)row < sizeof(names) / sizeof(names[0]) ? names[row] : "UNKNOWN";
+}
+
+static void report_button_transition(const button_transition *transition)
+{
+    char report[160];
+    snprintf(report, sizeof(report), "BUTTON TRANSITION %s FROM %s/%s/%u/REC%u TO %s/%s/%u/REC%u",
+        button_action_name(transition->action),
+        button_ui_mode_name(transition->from.mode), button_menu_row_name(transition->from.row),
+        transition->from.link_page, transition->from.recording,
+        button_ui_mode_name(transition->to.mode), button_menu_row_name(transition->to.row),
+        transition->to.link_page, transition->to.recording);
+    puts(report);
+    wifi_link_report(report);
+}
+
+static void report_menu(const status_model *model)
+{
+    static const char *rows[] = { "MIC", "LINK", "BRIGHTNESS", "IDENTIFY", "MUTE", "CLOSE" };
+    const button_actions_state *state = &model->button_actions;
+    char report[40];
+    if (state->mode == BUTTON_UI_HOME) snprintf(report, sizeof(report), "MENU CLOSED");
+    else if (state->mode == BUTTON_UI_LINK) snprintf(report, sizeof(report), "MENU LINK %u", state->link_page);
+    else snprintf(report, sizeof(report), "MENU ROW %s", rows[state->row]);
+    puts(report); wifi_link_report(report);
+}
+
+static void run_button_action(status_model *model, button_action action, uint32_t now)
+{
+    switch (action) {
+        case BUTTON_ACTION_MIC_TOGGLE: toggle_microphone(model, now); break;
+        case BUTTON_ACTION_RECORDING_STOP:
+            if (audio_request_stop(now)) {
+                const char *request = "{\"version\":1,\"event\":\"audio.stop.request\"}";
+                puts(request);
+                wifi_link_report(request);
+            }
+            break;
+        case BUTTON_ACTION_IDENTIFY: identify(model, now); break;
+        case BUTTON_ACTION_VIEW_NEXT: status_next_view(model); break;
+        case BUTTON_ACTION_SOURCE_OPEN: {
+            const char *request = "{\"version\":1,\"event\":\"button\",\"button\":\"K2\",\"action\":\"press\"}";
+            puts(request);
+            wifi_link_report(request);
+            break;
+        }
+        case BUTTON_ACTION_MUTE_TOGGLE: toggle_mute(model, now); break;
+        case BUTTON_ACTION_BRIGHTNESS_NEXT:
+            if (!settings_cycle_brightness()) puts("UI SAVE ERROR");
+            model->brightness = panel_brightness();
+            break;
+        case BUTTON_ACTION_MENU_OPEN: status_home(model); break;
+        case BUTTON_ACTION_NONE:
+        case BUTTON_ACTION_MENU_NEXT_ROW:
+        case BUTTON_ACTION_MENU_CLOSE:
+        case BUTTON_ACTION_LINK_OPEN:
+        case BUTTON_ACTION_LINK_NEXT_PAGE:
+        case BUTTON_ACTION_LINK_BACK:
+        case BUTTON_ACTION_IGNORED_LONG_PRESS:
+        case BUTTON_ACTION_MENU_TIMEOUT:
+        case BUTTON_ACTION_EXTERNAL_RESET:
+        case BUTTON_ACTION_RECORDING_STARTED:
+        case BUTTON_ACTION_RECORDING_FINISHED:
+            break;
+    }
+}
+
+static void handle_button_event(status_model *model, button_event event, uint32_t now)
 {
     char report[48];
     snprintf(report, sizeof(report), "BUTTON %s", button_event_name(event));
     puts(report); wifi_link_report(report);
-    switch (event) {
-        case BUTTON_K0_SHORT:
-            if (audio_active()) {
-                puts("MIC BUSY"); wifi_link_report("MIC BUSY");
-            } else if (model->audio_session) {
-                microphone_stop(); status_audio_stop(model);
-                puts("MIC DONE"); wifi_link_report("MIC DONE");
-            } else {
-                status_audio_start(model); microphone_probe(now);
-            }
-            break;
-        case BUTTON_K0_LONG:
-            status_identify(model, now);
-            if (!model->muted) buzzer_identify(now);
-            break;
-        case BUTTON_K1_SHORT: status_next_view(model); break;
-        case BUTTON_K1_LONG: status_home(model); break;
-        case BUTTON_K2_SHORT:
-            puts("{\"version\":1,\"event\":\"button\",\"button\":\"K2\",\"action\":\"press\"}");
-            wifi_link_report("{\"version\":1,\"event\":\"button\",\"button\":\"K2\",\"action\":\"press\"}");
-            break;
-        case BUTTON_K2_LONG:
-            status_toggle_mute(model, now);
-            puts(model->muted ? "MUTE ON" : "MUTE OFF");
-            wifi_link_report(model->muted ? "MUTE ON" : "MUTE OFF");
-            break;
-    }
+    button_transition result = button_actions_handle(&model->button_actions, event, now);
+    report_button_transition(&result);
+    run_button_action(model, result.action, now);
+    if (result.from.mode != BUTTON_UI_HOME || result.to.mode != BUTTON_UI_HOME ||
+        result.action == BUTTON_ACTION_MENU_OPEN) report_menu(model);
 }
+
+#if defined(XGGF_BUTTON_AUTOPILOT)
+static void report_autopilot_transition(const button_transition *result)
+{
+    printf("BUTTON TEST ACTION %s FROM %s/%s/%u/REC%u TO %s/%s/%u/REC%u\n",
+        button_action_name(result->action),
+        button_ui_mode_name(result->from.mode), button_menu_row_name(result->from.row),
+        result->from.link_page, result->from.recording,
+        button_ui_mode_name(result->to.mode), button_menu_row_name(result->to.row),
+        result->to.link_page, result->to.recording);
+}
+
+static bool button_autopilot_command(status_model *model, const cJSON *root, const char *event)
+{
+    if (!strcmp(event, "device.test.buttons.reset")) {
+        button_actions_init(&model->button_actions);
+        puts("BUTTON TEST RESET HOME/MIC/0/REC0");
+        return true;
+    }
+    if (!strcmp(event, "device.test.buttons.external_reset")) {
+        button_transition result = button_actions_external_reset(&model->button_actions);
+        report_autopilot_transition(&result);
+        return true;
+    }
+    if (!strcmp(event, "device.test.buttons.recording")) {
+        const cJSON *active = cJSON_GetObjectItemCaseSensitive(root, "active");
+        if (!cJSON_IsBool(active)) { puts("BUTTON TEST ERROR recording requires boolean active"); return true; }
+        button_transition result = button_actions_set_recording(&model->button_actions,
+                                                               cJSON_IsTrue(active));
+        report_autopilot_transition(&result);
+        return true;
+    }
+    if (!strcmp(event, "device.test.buttons.tick")) {
+        const cJSON *advance = cJSON_GetObjectItemCaseSensitive(root, "advance_ms");
+        if (!cJSON_IsNumber(advance) || advance->valuedouble < 0 || advance->valuedouble > UINT32_MAX) {
+            puts("BUTTON TEST ERROR tick requires bounded advance_ms");
+            return true;
+        }
+        uint32_t now = model->button_actions.last_activity_ms + (uint32_t)advance->valuedouble;
+        button_transition result = button_actions_tick(&model->button_actions, now);
+        report_autopilot_transition(&result);
+        return true;
+    }
+    if (!strcmp(event, "device.test.buttons.gesture")) {
+        const cJSON *gesture = cJSON_GetObjectItemCaseSensitive(root, "gesture");
+        if (!cJSON_IsString(gesture) || !gesture->valuestring) {
+            puts("BUTTON TEST ERROR gesture requires string");
+            return true;
+        }
+        for (int candidate = BUTTON_K0_SHORT; candidate <= BUTTON_K2_LONG; ++candidate) {
+            button_event button = (button_event)candidate;
+            if (strcmp(gesture->valuestring, button_event_name(button))) continue;
+            button_transition result = button_actions_handle(&model->button_actions, button, now_ms());
+            report_autopilot_transition(&result);
+            return true;
+        }
+        puts("BUTTON TEST ERROR unknown gesture");
+        return true;
+    }
+    return false;
+}
+#endif
 
 static void receive_line(void *context, char *input, bool usb)
 {
@@ -175,6 +317,13 @@ static void receive_line(void *context, char *input, bool usb)
     const cJSON *version = cJSON_GetObjectItemCaseSensitive(root, "version");
     const cJSON *event = cJSON_GetObjectItemCaseSensitive(root, "event");
     if (cJSON_IsNumber(version) && version->valuedouble == 1 && cJSON_IsString(event) && event->valuestring) {
+#if defined(XGGF_BUTTON_AUTOPILOT)
+        if (usb && button_autopilot_command(model, root, event->valuestring)) {
+            cJSON_Delete(root);
+            return;
+        }
+#endif
+        status_transport_update(model, usb);
         bool hello = strcmp(event->valuestring, "device.hello") == 0;
         if (usb) wifi_link_usb_activity();
         bool handled = usb && wifi_link_usb_event(event->valuestring, root);
@@ -189,14 +338,30 @@ static void receive_line(void *context, char *input, bool usb)
             }
             audio_armed_from_usb = usb;
             audio_hold_deadline = now_ms() + (uint32_t)duration->valuedouble + AUDIO_HOLD_MARGIN_MS;
-            status_set_recording(model, true);
+            button_transition recording_started = status_set_recording(model, true);
+            report_button_transition(&recording_started);
         }
-        if (!handled && strcmp(event->valuestring, "device.audio.stop") == 0) { audio_stop(); handled = true; }
+        if (!handled && strcmp(event->valuestring, "device.audio.stop") == 0) {
+            audio_stop(); handled = true;
+        }
         if (!handled && strcmp(event->valuestring, "device.mic") == 0) {
             if (audio_active()) { puts("MIC BUSY"); wifi_link_report("MIC BUSY"); cJSON_Delete(root); return; }
             status_audio_start(model); microphone_probe(now_ms()); handled = true;
         }
-        if (!handled) handled = status_event(model, event->valuestring, now_ms());
+        if (!handled) {
+            button_actions_state before = model->button_actions;
+            handled = status_event(model, event->valuestring, now_ms());
+            if (handled && (before.mode != model->button_actions.mode ||
+                            before.row != model->button_actions.row ||
+                            before.link_page != model->button_actions.link_page)) {
+                button_transition reset = {
+                    .action = BUTTON_ACTION_EXTERNAL_RESET,
+                    .from = before,
+                    .to = model->button_actions,
+                };
+                report_button_transition(&reset);
+            }
+        }
         if (handled && strcmp(event->valuestring, "device.identify") == 0 && !model->muted) buzzer_identify(now_ms());
         if (handled && !hello && strcmp(event->valuestring, "device.heartbeat") != 0) {
             char report[96]; snprintf(report, sizeof(report), "STATE %.80s", event->valuestring);
@@ -251,6 +416,8 @@ void app_main(void)
     status_sensors(&model, rtc_valid, rtc_hour, rtc_minute, environment_valid, temperature_tenths, humidity_tenths, now_ms());
     uint32_t sensors_at = now_ms();
     if (wifi_link_init()) announce(); else puts("WIFI UNAVAILABLE");
+    settings_init();
+    model.brightness = panel_brightness();
     uint32_t diagnostics_at = now_ms(), panel_us = 0;
     size_t used = 0; bool dropping = false;
     for (;;) {
@@ -275,10 +442,14 @@ void app_main(void)
             unsigned event_count = buttons_update(&buttons, levels, now, events);
             for (unsigned i = 0; i < 3; ++i) long_fired[i] = buttons.key[i].long_fired;
             status_buttons(&model, levels, long_fired);
-            for (unsigned i = 0; i < event_count; ++i) button_action(&model, events[i], now);
+            for (unsigned i = 0; i < event_count; ++i) handle_button_event(&model, events[i], now);
         }
         buzzer_tick(now);
         if (audio_active()) {
+            if (audio_stop_expired(now)) {
+                audio_stop();
+                puts("AUDIO STOP TIMEOUT"); wifi_link_report("AUDIO STOP TIMEOUT");
+            }
             int32_t raw[512];
             for (unsigned read = 0; read < 16; ++read) {
                 size_t count = microphone_read(raw, 512);
@@ -287,7 +458,11 @@ void app_main(void)
             }
             if (audio_armed_from_usb || now >= audio_hold_deadline || !wifi_link_audio_hold())
                 audio_tick(now, audio_output, NULL);
-            if (!audio_active()) { status_set_recording(&model, false); microphone_set_rate(8000); }
+            if (!audio_active()) {
+                button_transition recording_finished = status_set_recording(&model, false);
+                report_button_transition(&recording_finished);
+                microphone_set_rate(8000);
+            }
         } else {
             if (!model.audio_session) microphone_stop();
             microphone_tick(now);
@@ -297,11 +472,18 @@ void app_main(void)
         }
         wifi_link_tick(receive_line, &model);
         status_network(&model, wifi_link_configured(), wifi_link_online());
+        link_status_info link_info = wifi_link_get_status();
+        status_link_update(&model, &link_info);
         if ((uint32_t)(now - sensors_at) >= 60000) {
             probe_sensors();
             status_sensors(&model, rtc_valid, rtc_hour, rtc_minute, environment_valid, temperature_tenths, humidity_tenths, now_ms());
             sensors_at = now_ms();
             now = sensors_at;
+        }
+        button_transition button_timeout = button_actions_tick(&model.button_actions, now);
+        if (button_timeout.action != BUTTON_ACTION_NONE) {
+            report_button_transition(&button_timeout);
+            report_menu(&model);
         }
         status_tick(&model, now);
         status_render(&model, now, frame);

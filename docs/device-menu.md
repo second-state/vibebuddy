@@ -120,6 +120,12 @@ The daemon sends up to six cards, three a page, those waiting for input first (#
 - **Volume and mute stay where they are.** The menu changes the same values as the app and K2 long. A volume change from the menu prints the `VOLUME <n>` line `device.volume` already uses, so the daemon's status, and the app's slider, follow; mute keeps its `MUTE ON` / `OFF` lines and stays device-only, as [`app.md`](app.md) says.
 - **Nothing moves to the box that belongs to the Mac.** Connecting agents, the voice library, firmware updates, launch at login and notifications all stay in the app: they need the Mac's files, network or system settings. The box holds one voice pack at a time, so there's nothing to choose between on it. The menu is about making the box's own controls visible, not about replacing the app.
 
+## XGGF 64×8 variant
+
+The experimental XGGF uses the same K1-long-open, K1-next, K0-activate and K2-close convention, with a 30-second timeout and K2 long always toggling mute. Its rows are MIC, LINK, BRIGHTNESS, IDENTIFY, MUTE and CLOSE. All Agent events close this menu, recording keeps priority over its contents, and the compact panel shows per-key dots while held and LONG at the one-second threshold.
+
+LINK is read-only: transport from the last valid protocol line (USB, LAN or offline after the normal link timeout), Wi-Fi state/SSID, IPv4 and paired-computer count. It has no unpair, new-identity or forget-network action. BRIGHTNESS cycles 2, 4, 6 and 8 and persists in `xggf_ui`; the main box has no brightness row because its backlight is on/off. K0 stops an active speech recording before doing any menu or visualizer action. XGGF has no Pomodoro, Leisure, Character, Relay, stock-clock or voice-command menu behavior.
+
 ## Voice commands
 
 Status: built 2026-10-13, not yet tried on a box; experimental, off until the computer offers it (ADR-0017, [`protocol.md`](protocol.md), "Voice commands (experimental)"). The screens are rendered by the firmware on the Mac: `cargo run -p vibebuddy-firmware-core --example voice_preview -- <directory>`.

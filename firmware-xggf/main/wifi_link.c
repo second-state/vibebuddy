@@ -54,6 +54,7 @@ static esp_netif_t *station;
 static uint32_t last_connect_attempt;
 static uint32_t last_ip;
 static bool wifi_connected, connecting_report, connected_report, disconnected_report, disconnect_was_connected;
+static link_wifi_state wifi_state;
 static bool scan_pending, scan_report;
 static unsigned disconnect_reason;
 static uint32_t last_wifi_down_ms;
@@ -217,6 +218,21 @@ bool wifi_link_online(void)
     return station && esp_netif_get_ip_info(station, &ip) == ESP_OK && ip.ip.addr != 0;
 }
 
+link_status_info wifi_link_get_status(void)
+{
+    link_status_info result = {0};
+    memcpy(result.ssid, ssid, sizeof(result.ssid));
+    result.paired_count = pair_count;
+    result.lan_active = peer && client >= 0;
+    esp_netif_ip_info_t ip;
+    if (station && esp_netif_get_ip_info(station, &ip) == ESP_OK && ip.ip.addr != 0) {
+        wifi_state = LINK_WIFI_JOINED;
+        snprintf(result.ip, sizeof(result.ip), IPSTR, IP2STR(&ip.ip));
+    } else if (!ssid[0]) wifi_state = LINK_WIFI_NOT_SET;
+    result.wifi_state = wifi_state;
+    return result;
+}
+
 /* Whether a recording armed over the network should wait for its peer instead of emitting frames
  * nowhere: Wi-Fi is associated and configured, but no encrypted peer is connected right now. */
 bool wifi_link_audio_hold(void)
@@ -340,12 +356,15 @@ static void wifi_event(void *arg, esp_event_base_t base, int32_t id, void *data)
     (void)arg;
     if (base != WIFI_EVENT) return;
     if (id == WIFI_EVENT_STA_START) {
+        wifi_state = ssid[0] ? LINK_WIFI_CONNECTING : LINK_WIFI_NOT_SET;
         connecting_report = ssid[0]; esp_wifi_connect(); last_connect_attempt = milliseconds();
     } else if (id == WIFI_EVENT_STA_CONNECTED) {
+        wifi_state = LINK_WIFI_CONNECTING;
         wifi_connected = true; connected_report = true;
     } else if (id == WIFI_EVENT_STA_DISCONNECTED) {
         const wifi_event_sta_disconnected_t *event = data;
         disconnect_was_connected = wifi_connected; wifi_connected = false;
+        wifi_state = !ssid[0] ? LINK_WIFI_NOT_SET : disconnect_was_connected ? LINK_WIFI_DISCONNECTED : LINK_WIFI_FAILED;
         disconnect_reason = event ? event->reason : 0; disconnected_report = true;
         last_wifi_down_ms = milliseconds();
         ++diagnostics.wifi_disconnects; diagnostics.last_wifi_reason = disconnect_reason;
@@ -477,7 +496,7 @@ bool wifi_link_usb_event(const char *event, const cJSON *root)
         const char *name = string_field(root, "ssid"), *pass = string_field(root, "password");
         if (!name || !pass || !name[0] || strlen(name) > 32 || strlen(pass) > 63) { puts("WIFI INVALID"); return true; }
         if (nvs_set_str(store, "ssid", name) != ESP_OK || nvs_set_str(store, "password", pass) != ESP_OK || nvs_commit(store) != ESP_OK) { puts("LINK SAVE ERROR"); return true; }
-        strcpy(ssid, name); strcpy(password, pass);
+        strcpy(ssid, name); strcpy(password, pass); wifi_state = LINK_WIFI_CONNECTING;
         wifi_config_t wifi = {0}; memcpy(wifi.sta.ssid, ssid, strlen(ssid)); memcpy(wifi.sta.password, password, strlen(password));
         esp_wifi_disconnect(); esp_wifi_set_config(WIFI_IF_STA, &wifi); esp_wifi_connect(); last_connect_attempt = milliseconds();
         printf("WIFI NETWORK %s\nWIFI CONNECTING %s\n", ssid, ssid); return true;
@@ -487,7 +506,7 @@ bool wifi_link_usb_event(const char *event, const cJSON *root)
         if ((a != ESP_OK && a != ESP_ERR_NVS_NOT_FOUND) || (b != ESP_OK && b != ESP_ERR_NVS_NOT_FOUND) || nvs_commit(store) != ESP_OK) {
             puts("LINK SAVE ERROR"); return true;
         }
-        ssid[0] = 0; password[0] = 0;
+        ssid[0] = 0; password[0] = 0; wifi_state = LINK_WIFI_NOT_SET;
         esp_wifi_disconnect(); puts("WIFI FORGOTTEN"); return true;
     }
     return false;

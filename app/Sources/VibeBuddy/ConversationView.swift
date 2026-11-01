@@ -12,7 +12,7 @@ struct ConversationView: View {
     let setBrain: (ResidentBrainChoice) async throws -> ResidentInfo
     /// Stores the user's Anthropic API key, or removes it with nil; the daemon answers with its info.
     let setKey: (String?) async throws -> ResidentInfo
-    /// Whether the attached device is the experimental XGGF, which has no K0 to hold; its empty state says so.
+    /// Whether the attached device is the experimental XGGF, which does not support voice commands; its empty state says so.
     let xggfExperimental: Bool
 
     static let limit = 20

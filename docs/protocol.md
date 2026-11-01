@@ -112,7 +112,7 @@ Pairing and Wi-Fi provisioning remain USB-only. `device.pair`, `device.pairs`, `
 
 The XGGF line parser accepts at most 4608 bytes excluding LF. Its current subset does not return the general protocol's `ERROR input_too_large`, `ERROR unsupported_version` or `EVENT <name>` responses: malformed JSON, invalid envelope fields, unsupported versions, unknown events and overlong lines are silently dropped (an overlong line is discarded through its next LF). Do not infer successful handling from transport delivery. The device emits `STATE <event>` for handled status/control events except hello and heartbeat; commands handled in the USB provisioning dispatcher use their own diagnostics. This is a documented board-specific limitation, not a change to the general v1 contract.
 
-The XGGF emits diagnostic text including `BOARD`, `DISPLAY READY BUILD`, `FIRMWARE VERSION`, `MODE`, `BOX KEY`, `LINK NOISE`, Wi-Fi connection/failure/address lines, `WIFI SEEN`, `PAIR*` / `PAIRED` / `UNPAIRED`, `BUTTON`, `MIC`, `SENSOR`, `AUDIO ERROR`, `STATE`, `DIAG`, and per-recording `LINK DIAG`. These are not JSON events. USB exposes the full diagnostic stream; the established paired link forwards only selected reports, so diagnostics such as sensor readings, microphone amplitude samples and Wi-Fi scan results are cable-only. Audio payload is carried in `AUDIO FRAME` lines only while a daemon recording is armed, over USB or the established encrypted local-network link.
+The XGGF emits diagnostic text including `BOARD`, `DISPLAY READY BUILD`, `FIRMWARE VERSION`, `MODE`, `BOX KEY`, `LINK NOISE`, Wi-Fi connection/failure/address lines, `WIFI SEEN`, `PAIR*` / `PAIRED` / `UNPAIRED`, `BUTTON`, `MENU`, `MUTE`, `MIC`, `SENSOR`, `AUDIO ERROR`, `AUDIO STOP TIMEOUT`, `UI SAVE ERROR`, `STATE`, `DIAG`, and per-recording `LINK DIAG`. These are not JSON events. USB exposes the full diagnostic stream; the established paired link forwards only selected reports, so diagnostics such as sensor readings, microphone amplitude samples and Wi-Fi scan results are cable-only. Audio payload is carried in `AUDIO FRAME` lines only while a daemon recording is armed, over USB or the established encrypted local-network link.
 
 ### XGGF speech recording
 
@@ -126,6 +126,14 @@ Content-Type: application/json
 ```
 
 `vibebuddyd` validates the board and request, arms a single in-memory recording, and sends `device.audio.start`. `POST /v1/device/audio/stop` asks for an early finish; `DELETE /v1/device/audio` stops and discards the active or completed recording. `GET /v1/device/audio` returns the completed WAV, and `GET /v1/device/audio/stats` returns progress/results. All these routes use the same authorization policy. App opt-in (`VIBEBUDDY_XGGF_AUDIO=1`) is only valid with a loopback bind; the probe-token mode requires its bearer token.
+
+A physical K0 short press during an active recording emits this device-to-daemon event over USB and the encrypted Wi-Fi link:
+
+```json
+{"version":1,"event":"audio.stop.request"}
+```
+
+Only for the identified XGGF and an already-active audio session, the daemon marks the session as allowed to finish short and sends `device.audio.stop`; idle, duplicate and non-XGGF requests are ignored. This stop-only physical operation does not bypass authorization for HTTP start, stop, delete, WAV or stats endpoints, and it cannot start, retrieve or delete audio. The device keeps `REC` visible and deduplicates requests until `AUDIO END`. If no stop response arrives within two seconds, it uses the existing bounded local stop path and reports `AUDIO STOP TIMEOUT`; without the daemon's active-session stop marker, the resulting early recording may be rejected rather than padded to the armed duration.
 
 For an armed recording, the device sends these diagnostic records:
 

@@ -636,6 +636,11 @@
 "Voice commands come from the box's K0 button. This experimental device doesn't take them yet." = "语音指令来自盒子的 K0 按键。此实验性设备还不能下达语音指令。";
 "This device can record speech once this computer allows it (VIBEBUDDY_XGGF_AUDIO=1)." = "这台电脑允许后（VIBEBUDDY_XGGF_AUDIO=1），此设备就能录制语音。";
 "Record from this device" = "在此设备上录音";
+"XGGF buttons" = "XGGF 按键";
+"Left/K0: microphone or stop recording; hold to identify." = "左侧/K0：切换麦克风可视化或停止录音；长按识别设备。";
+"Middle/K1: cycle pages; hold for the menu." = "中间/K1：切换页面；长按打开菜单。";
+"Right/K2: open the Agent source; hold to mute." = "右侧/K2：打开 Agent 来源；长按切换静音。";
+"Hold until the panel shows LONG for long actions." = "长按操作请按住，直到面板显示 LONG。";
 "Sample rate" = "采样率";
 "Length: %lld s" = "时长：%lld 秒";
 "Record" = "录音";

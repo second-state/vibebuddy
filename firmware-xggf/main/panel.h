@@ -11,6 +11,10 @@ enum { PANEL_WIDTH = 64, PANEL_HEIGHT = 8, PANEL_PIXELS = 512,
 
 /* Logical pixels are row-major, RGB, with (0, 0) at the top left. */
 bool panel_set_pixel(uint8_t *frame, unsigned x, unsigned y, uint8_t r, uint8_t g, uint8_t b);
+bool panel_set_brightness(unsigned level);
+unsigned panel_brightness(void);
+unsigned panel_brightness_next(unsigned level);
+unsigned panel_brightness_or_default(unsigned level);
 /* Writes the inferred column-major, inverted-Y, GRB WS2812 waveform. */
 void panel_encode(const uint8_t *frame, uint8_t *transfer);
 

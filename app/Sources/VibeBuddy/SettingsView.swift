@@ -558,6 +558,17 @@ struct PairedComputersSection: View {
     }
 }
 
+struct XGGFButtonGuide: View {
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text("Left/K0: microphone or stop recording; hold to identify.")
+            Text("Middle/K1: cycle pages; hold for the menu.")
+            Text("Right/K2: open the Agent source; hold to mute.")
+            Text("Hold until the panel shows LONG for long actions.")
+        }
+    }
+}
+
 struct DeviceView: View {
     @ObservedObject var model: AppModel
 
@@ -635,6 +646,9 @@ struct DeviceView: View {
             }
             // The XGGF recorder, offered only when the daemon says this computer granted audio.
             if connected, model.status?.device.unsupportedBoard == "xggf-64x8" {
+                Section("XGGF buttons") {
+                    XGGFButtonGuide()
+                }
                 if model.status?.device.audioCapture == true {
                     Section("Record from this device") {
                         AudioRecorder(model: model)

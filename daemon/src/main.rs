@@ -499,7 +499,12 @@ async fn publish_device_message(state: &AppState, message: DeviceMessage) {
     let DeviceMessage::Event(event) = message else {
         return;
     };
-    if is_k2_press(&event) {
+    if event.event == "audio.stop.request" {
+        let xggf = state.device.lock().await.unsupported_board.as_deref() == Some("xggf-64x8");
+        if xggf && state.audio.lock().await.stop() {
+            send_event(state, device_command("device.audio.stop"));
+        }
+    } else if is_k2_press(&event) {
         open_k2_source(state).await;
     } else if let Some(card) = tapped_card(&event) {
         open_card_source(state, card).await;
@@ -2284,6 +2289,41 @@ mod tests {
         assert!(page.0.contains("Not signed in"));
         assert_eq!(callback(None, None).await.0, StatusCode::BAD_REQUEST);
         assert!(!state.snapshot().await.account.signed_in);
+    }
+
+    #[tokio::test]
+    async fn xggf_button_stop_is_active_only_idempotent_and_shortens_the_wav() {
+        let transport = Arc::new(RecordingTransport::default());
+        let state = test_state(transport.clone());
+        publish_device_message(&state, DeviceMessage::Connected { port: "/dev/test".into(), bridge: false, usb_serial: None }).await;
+        publish_device_message(&state, DeviceMessage::Line("BOARD xggf-64x8".into())).await;
+        publish_device_message(&state, DeviceMessage::Line("DISPLAY READY BUILD test".into())).await;
+        let request = || DeviceMessage::Event(device_command("audio.stop.request"));
+        let stop_count = || transport.events().iter().filter(|event| event.event == "device.audio.stop").count();
+
+        publish_device_message(&state, request()).await;
+        assert_eq!(stop_count(), 0);
+        assert!(state.audio.lock().await.stats().is_none());
+
+        state.audio.lock().await.arm(8000, 1000).unwrap();
+        publish_device_message(&state, DeviceMessage::Line("AUDIO BEGIN rate=8000 samples=160".into())).await;
+        publish_device_message(&state, DeviceMessage::Line("AUDIO FRAME 0 320 0 ".to_owned() + &"A".repeat(424) + "AAA=")).await;
+        publish_device_message(&state, request()).await;
+        publish_device_message(&state, request()).await;
+        assert_eq!(stop_count(), 1);
+        publish_device_message(&state, DeviceMessage::Line("AUDIO END 1 0 320".into())).await;
+        let stats = state.audio.lock().await.stats().unwrap();
+        assert_eq!((stats.pcm_bytes, stats.duration_ms, stats.timing_padding_frames), (320, 20, 0));
+        assert_eq!(state.audio.lock().await.peek_wav().unwrap().len(), 44 + 320);
+        publish_device_message(&state, request()).await;
+        assert_eq!(stop_count(), 1);
+
+        let other_transport = Arc::new(RecordingTransport::default());
+        let other = test_state(other_transport.clone());
+        other.audio.lock().await.arm(8000, 1000).unwrap();
+        publish_device_message(&other, request()).await;
+        assert!(!other_transport.events().iter().any(|event| event.event == "device.audio.stop"));
+        assert!(other.audio.lock().await.stats().is_some());
     }
 
     #[tokio::test]

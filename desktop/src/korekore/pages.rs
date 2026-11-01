@@ -462,7 +462,7 @@ impl crate::App {
                 Some(Err(client::HistoryError::DaemonDown)) => trouble(tr("The daemon isn't running. Restart it on the Advanced page.", &[])),
                 Some(Err(client::HistoryError::Unavailable(why))) => trouble(tr("The buddy's session isn't available: %@", &[why])),
                 Some(Ok(exchanges)) if exchanges.is_empty() => {
-                    // The XGGF has no K0 to hold, so the box's how-to line can't be its empty state.
+                    // The XGGF does not support voice commands, so the box's how-to line can't be its empty state.
                     let xggf = self.status.as_ref().and_then(|s| s.device.unsupported_board.as_deref()) == Some("xggf-64x8");
                     card(
                         column![
@@ -745,6 +745,9 @@ impl crate::App {
         }
         // The XGGF recorder in the korekore look, sharing the standard page's state and messages.
         if device.filter(|_| online).and_then(|device| device.unsupported_board.as_deref()) == Some("xggf-64x8") {
+            if let Some(guide) = self.xggf_button_guide() {
+                finding = finding.push(card(guide));
+            }
             if device.is_some_and(|device| device.audio_capture) {
                 let mut recorder = column![heading(tr("Record from this device", &[]))];
                 if self.audio_recording {

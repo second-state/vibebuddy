@@ -2,6 +2,7 @@
 #define XGGF_WIFI_LINK_H
 #include <stdbool.h>
 #include "cJSON.h"
+#include "link_status.h"
 
 typedef void (*wifi_line_handler)(void *context, char *line, bool usb);
 bool wifi_link_init(void);
@@ -10,6 +11,7 @@ void wifi_link_announce(void);
    online means the station currently holds an IP address. */
 bool wifi_link_configured(void);
 bool wifi_link_online(void);
+link_status_info wifi_link_get_status(void);
 bool wifi_link_usb_event(const char *event, const cJSON *root);
 void wifi_link_usb_activity(void);
 void wifi_link_tick(wifi_line_handler handler, void *context);

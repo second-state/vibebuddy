@@ -1,5 +1,6 @@
 #include "status.h"
 #include "panel.h"
+#include "font.h"
 #include <assert.h>
 #include <string.h>
 
@@ -20,6 +21,23 @@ static int same_apart_from_indicator(const uint8_t *a, const uint8_t *b)
         for (unsigned x = 0; x + 1 < PANEL_WIDTH; ++x)
             if (memcmp(at(x, y, a), at(x, y, b), 3)) return 0;
     return 1;
+}
+
+static void assert_label(const uint8_t *frame, const char *label)
+{
+    size_t length = strlen(label);
+    for (unsigned y = 0; y < XGGF_FONT_HEIGHT; ++y)
+        for (unsigned x = 13; x < 60; ++x) {
+            if (is_dot(x, y)) continue;
+            unsigned offset = x - 13, index = offset / 6, column = offset % 6;
+            bool expected = false;
+            if (index < length && column < XGGF_FONT_WIDTH) {
+                const xggf_glyph *glyph = xggf_font_glyph(label[index]);
+                expected = glyph && (glyph->rows[y] & (0x10u >> column));
+            }
+            const uint8_t *pixel = at(x, y, frame);
+            assert((pixel[0] || pixel[1] || pixel[2]) == expected);
+        }
 }
 
 int main(void)
@@ -62,10 +80,10 @@ int main(void)
     status_tick(&m, 1000); assert(!m.audio_active && m.audio_session);
     status_audio(&m, 4000, 1100); status_event(&m, "device.identify", 1101);
     assert(!m.audio_active && !m.audio_session);
-    status_set_recording(&m, true); assert(m.recording);
+    status_set_recording(&m, true); assert(m.button_actions.recording);
     status_render(&m, 1200, active); assert(memcmp(offline, active, sizeof(active)));
-    status_event(&m, "task.start", 1201); assert(m.recording);
-    status_set_recording(&m, false); assert(!m.recording);
+    status_event(&m, "task.start", 1201); assert(m.button_actions.recording);
+    status_set_recording(&m, false); assert(!m.button_actions.recording);
 
     status_init(&m);
     status_sensors(&m, true, 12, 34, true, 250, 600, 0);
@@ -94,6 +112,7 @@ int main(void)
     status_render(&m, 2400, active);
     status_buttons(&m, k1_down, k1_down);
     assert(m.long_mask == 2);
+    status_render(&m, 2400, active); assert_label(active, "LONG");
     const bool released[3] = {false, false, false};
     status_buttons(&m, released, no_long);
     status_render(&m, 2400, offline);
@@ -152,5 +171,95 @@ int main(void)
     assert(!memcmp(at(63,0,active), tint, 3) && !memcmp(at(63,7,active), pink, 3));
     status_init(&m); status_network(&m, true, true); status_render(&m, 0, active);
     assert(!memcmp(at(63,7,active), grey, 3));
+
+    status_init(&m);
+    m.view = STATUS_VIEW_ENVIRONMENT;
+    button_transition result = button_actions_handle(&m.button_actions, BUTTON_K1_LONG, 100);
+    assert(result.action == BUTTON_ACTION_MENU_OPEN && result.to.mode == BUTTON_UI_MENU);
+    status_home(&m); /* The MENU_OPEN effect preserves the original K1-long return-to-Agent behavior. */
+    assert(m.button_actions.row == BUTTON_MENU_MIC && m.view == STATUS_VIEW_AGENT);
+    status_render(&m, 100, active); assert_label(active, "MIC OFF");
+    result = button_actions_handle(&m.button_actions, BUTTON_K0_SHORT, 110);
+    assert(result.action == BUTTON_ACTION_MIC_TOGGLE && result.to.mode == BUTTON_UI_MENU);
+    status_audio_start(&m); status_render(&m, 110, active); assert_label(active, "MIC ON");
+    status_audio_stop(&m);
+    const button_menu_row rows[] = {
+        BUTTON_MENU_LINK, BUTTON_MENU_BRIGHTNESS, BUTTON_MENU_IDENTIFY,
+        BUTTON_MENU_MUTE, BUTTON_MENU_CLOSE, BUTTON_MENU_MIC
+    };
+    for (unsigned i = 0; i < sizeof(rows) / sizeof(rows[0]); ++i) {
+        result = button_actions_handle(&m.button_actions, BUTTON_K1_SHORT, 120 + i);
+        assert(result.action == BUTTON_ACTION_MENU_NEXT_ROW && m.button_actions.row == rows[i]);
+    }
+    assert(button_actions_handle(&m.button_actions, BUTTON_K1_SHORT, 130).to.row == BUTTON_MENU_LINK);
+    result = button_actions_handle(&m.button_actions, BUTTON_K0_SHORT, 131);
+    assert(result.action == BUTTON_ACTION_LINK_OPEN && result.to.mode == BUTTON_UI_LINK);
+    const char *pages[] = { "OFFLINE", "NOT SET", "NO IP", "PAIRS 0", "OFFLINE" };
+    for (unsigned i = 0; i < 5; ++i) {
+        status_render(&m, 132 + i, active); assert_label(active, pages[i]);
+        result = button_actions_handle(&m.button_actions, BUTTON_K1_SHORT, 132 + i);
+        assert(result.action == BUTTON_ACTION_LINK_NEXT_PAGE);
+    }
+    result = button_actions_handle(&m.button_actions, BUTTON_K2_SHORT, 140);
+    assert(result.action == BUTTON_ACTION_LINK_BACK && result.to.mode == BUTTON_UI_MENU);
+    assert(result.to.row == BUTTON_MENU_LINK && result.to.link_page == 0);
+    result = button_actions_handle(&m.button_actions, BUTTON_K0_SHORT, 141);
+    assert(result.action == BUTTON_ACTION_LINK_OPEN);
+    result = button_actions_handle(&m.button_actions, BUTTON_K0_SHORT, 142);
+    assert(result.action == BUTTON_ACTION_LINK_BACK && result.to.mode == BUTTON_UI_MENU);
+    result = button_actions_handle(&m.button_actions, BUTTON_K2_SHORT, 143);
+    assert(result.action == BUTTON_ACTION_MENU_CLOSE && result.to.mode == BUTTON_UI_HOME);
+    button_actions_handle(&m.button_actions, BUTTON_K1_LONG, 200);
+    result = button_actions_handle(&m.button_actions, BUTTON_K2_LONG, 201);
+    assert(result.action == BUTTON_ACTION_MUTE_TOGGLE && result.to.mode == BUTTON_UI_MENU);
+    result = button_actions_handle(&m.button_actions, BUTTON_K0_LONG, 202);
+    assert(result.action == BUTTON_ACTION_IGNORED_LONG_PRESS && result.to.mode == BUTTON_UI_MENU);
+    result = button_actions_tick(&m.button_actions, 30201); assert(result.action == BUTTON_ACTION_NONE);
+    result = button_actions_tick(&m.button_actions, 30202);
+    assert(result.action == BUTTON_ACTION_MENU_TIMEOUT && result.to.mode == BUTTON_UI_HOME);
+    button_actions_handle(&m.button_actions, BUTTON_K1_LONG, 40000);
+    status_set_recording(&m, true);
+    status_render(&m, 40001, active); assert_label(active, "REC");
+    assert(status_event(&m, "task.start", 40002));
+    assert(m.button_actions.mode == BUTTON_UI_HOME && m.view == STATUS_VIEW_AGENT && m.button_actions.recording);
+    status_set_recording(&m, false);
+    button_actions_handle(&m.button_actions, BUTTON_K1_LONG, 41000);
+    assert(status_event(&m, "device.identify", 41001));
+    assert(m.button_actions.mode == BUTTON_UI_HOME && m.identifying);
+
+    status_init(&m);
+    link_status_info info = {0};
+    info.paired_count = 3;
+    info.lan_active = true;
+    status_link_update(&m, &info);
+    assert(m.link_info.paired_count == 3 && m.link_info.lan_active);
+    button_actions_handle(&m.button_actions, BUTTON_K1_LONG, 50000);
+    button_actions_handle(&m.button_actions, BUTTON_K1_SHORT, 50001);
+    button_actions_handle(&m.button_actions, BUTTON_K0_SHORT, 50002);
+    status_event(&m, "device.heartbeat", 50003);
+    status_transport_update(&m, true);
+    status_render(&m, 50004, active); assert_label(active, "LINK USB");
+    status_transport_update(&m, false);
+    status_render(&m, 50005, active); assert_label(active, "LINK LAN");
+    m.button_actions.link_page = 1;
+    const struct { link_wifi_state state; const char *label; } wifi_pages[] = {
+        { LINK_WIFI_NOT_SET, "NOT SET" }, { LINK_WIFI_CONNECTING, "JOINING" },
+        { LINK_WIFI_FAILED, "WIFI FAIL" }, { LINK_WIFI_DISCONNECTED, "WIFI DOWN" }
+    };
+    for (unsigned i = 0; i < sizeof(wifi_pages) / sizeof(wifi_pages[0]); ++i) {
+        info.wifi_state = wifi_pages[i].state;
+        status_link_update(&m, &info);
+        status_render(&m, 50010 + i, active); assert_label(active, wifi_pages[i].label);
+    }
+    info.wifi_state = LINK_WIFI_JOINED;
+    strcpy(info.ssid, "12345678901234567890123456789012");
+    strcpy(info.ip, "192.168.100.200");
+    info.paired_count = 16;
+    status_link_update(&m, &info);
+    status_render(&m, 50020, active); assert_label(active, info.ssid);
+    m.button_actions.link_page = 2; status_render(&m, 50021, active); assert_label(active, info.ip);
+    m.button_actions.link_page = 3; status_render(&m, 50022, active); assert_label(active, "PAIRS 16");
+    m.button_actions.link_page = 0; status_tick(&m, 65003); status_render(&m, 65003, active);
+    assert_label(active, "OFFLINE");
     return 0;
 }

@@ -1,6 +1,10 @@
 """Independent guided tests for XGGF physical-button mapping and actions."""
+import math
+import struct
+import subprocess
 import sys
 import time
+import wave
 import serial
 
 if len(sys.argv) != 4 or sys.argv[2] not in ("map", "action"):
@@ -17,15 +21,30 @@ if mode == "map":
 else:
     instructions = {
         "K0": "Tap K0 twice to start/stop mic, then hold K0 once for 1.5 seconds",
-        "K1": "Tap K1 3 times to cycle all pages, then hold K1 once for 1.5 seconds",
+        "K1": "Hold K1 for 1.5 seconds and verify MIC, tap K1 once and verify LINK, tap K2 to close, then tap K1 3 times to cycle all pages",
         "K2": "Tap K2 once, then hold K2 twice for 1.5 seconds each to mute/unmute",
     }
     duration = 120
     instruction = instructions[subject]
 
+def action_beep():
+    path = "/tmp/xggf-action-beep.wav"
+    with wave.open(path, "wb") as tone:
+        tone.setnchannels(1)
+        tone.setsampwidth(2)
+        tone.setframerate(16000)
+        samples = (int(12000 * math.sin(2 * math.pi * 1000 * index / 16000)) for index in range(8000))
+        tone.writeframes(b"".join(struct.pack("<h", sample) for sample in samples))
+    try:
+        subprocess.run(["aplay", path], check=True)
+    except FileNotFoundError:
+        print("\a", end="", flush=True)
+
+
 with serial.Serial(port, 115200, timeout=0.1) as link:
     link.reset_input_buffer()
     lines = []
+    action_beep()
     print(instruction, flush=True)
     try:
         deadline = time.monotonic() + duration
@@ -39,7 +58,7 @@ with serial.Serial(port, 115200, timeout=0.1) as link:
             line = link.readline().decode("utf-8", "replace").strip()
             if not line:
                 continue
-            if line.startswith(("BUTTON ", "MUTE ", "MIC DONE")) or '"event":"button"' in line:
+            if line.startswith(("BUTTON ", "MUTE ", "MIC DONE", "MENU ")) or '"event":"button"' in line:
                 lines.append(line)
                 print(line, flush=True)
                 short_now = [item.split()[1] for item in lines if item.startswith("BUTTON K") and item.endswith(" SHORT")]
@@ -49,7 +68,8 @@ with serial.Serial(port, 115200, timeout=0.1) as link:
                 elif subject == "K0":
                     done = short_now.count("K0") >= 2 and long_now.count("K0") >= 1 and "MIC DONE" in lines
                 elif subject == "K1":
-                    done = short_now.count("K1") >= 3 and long_now.count("K1") >= 1
+                    done = (short_now.count("K1") >= 4 and long_now.count("K1") >= 1
+                            and "MENU ROW MIC" in lines and "MENU ROW LINK" in lines and "MENU CLOSED" in lines)
                 else:
                     mute_states = [item for item in lines if item.startswith("MUTE ")]
                     done = (short_now.count("K2") >= 1 and long_now.count("K2") >= 2
@@ -72,8 +92,12 @@ with serial.Serial(port, 115200, timeout=0.1) as link:
             assert any(line == "MIC DONE" for line in lines), "mic did not stop"
             print("PASS: K0 mic start/stop and identify")
         elif subject == "K1":
-            assert short.count("K1") >= 3 and long.count("K1") >= 1, (short, long)
-            print("PASS: K1 page cycle and return to Agent status")
+            assert short.count("K1") >= 4 and long.count("K1") >= 1, (short, long)
+            assert "MENU ROW MIC" in lines and "MENU ROW LINK" in lines, "menu rows did not open"
+            assert "MENU CLOSED" in lines, "K2 did not close the menu"
+            close = lines.index("MENU CLOSED")
+            assert not any('"event":"button"' in line for line in lines[:close]), "menu K2 emitted a source event"
+            print("PASS: K1 menu MIC/LINK, K2 close without source event, and normal page cycle")
         else:
             assert short.count("K2") >= 1 and long.count("K2") >= 2, (short, long)
             assert any('"event":"button"' in line and '"button":"K2"' in line for line in lines), "missing source event"
