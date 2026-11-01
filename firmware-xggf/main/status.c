@@ -1,5 +1,6 @@
 #include "status.h"
 #include "panel.h"
+#include "font.h"
 #include <stdio.h>
 #include <string.h>
 
@@ -107,32 +108,21 @@ void status_sensors(status_model *m, bool rtc_valid, unsigned hour, unsigned min
     m->environment_valid = environment_valid; m->temperature_tenths = temperature_tenths; m->humidity_tenths = humidity_tenths;
 }
 
-/* 3x5 uppercase glyphs, rows packed in the low three bits. */
-static const struct { char c; uint8_t rows[5]; } glyphs[] = {
-    {'A',{2,5,7,5,5}}, {'D',{6,5,5,5,6}}, {'E',{7,4,6,4,7}}, {'F',{7,4,6,4,4}},
-    {'G',{3,4,5,5,3}}, {'I',{7,2,2,2,7}}, {'K',{5,5,6,5,5}}, {'L',{4,4,4,4,7}},
-    {'M',{5,7,7,5,5}}, {'N',{5,7,7,7,5}}, {'O',{2,5,5,5,2}}, {'P',{6,5,6,4,4}},
-    {'R',{6,5,6,5,5}}, {'T',{7,2,2,2,2}}, {'U',{5,5,5,5,7}}, {'V',{5,5,5,5,2}},
-    {'W',{5,5,7,7,5}}, {'Y',{5,5,2,2,2}},
-    {'0',{7,5,5,5,7}}, {'1',{2,6,2,2,7}}, {'2',{6,1,2,4,7}}, {'3',{6,1,2,1,6}},
-    {'4',{5,5,7,1,1}}, {'5',{7,4,6,1,6}}, {'6',{3,4,7,5,7}}, {'7',{7,1,2,2,2}},
-    {'8',{7,5,7,5,7}}, {'9',{7,5,7,1,6}}, {'C',{3,4,4,4,3}},
-    {':',{0,2,0,2,0}}, {'%',{5,1,2,4,5}}, {'-',{0,0,7,0,0}}
-};
-
 static void pixel(uint8_t *f, unsigned x, unsigned y, const uint8_t *c)
 { panel_set_pixel(f, x, y, c[0], c[1], c[2]); }
 
+/* 5x7 petabyt glyphs in rows 0-6, six pixels per character: the area right of the
+   buddy holds eight characters, and longer labels clip. */
 static void text(uint8_t *f, const char *s, const uint8_t *c)
 {
     unsigned x = 13;
-    while (*s && x + 2 < PANEL_WIDTH) {
-        for (unsigned g = 0; g < sizeof(glyphs)/sizeof(glyphs[0]); ++g) if (glyphs[g].c == *s) {
-            for (unsigned y = 0; y < 5; ++y) for (unsigned col = 0; col < 3; ++col)
-                if (glyphs[g].rows[y] & (4u >> col)) pixel(f, x + col, y + 1, c);
-            break;
-        }
-        x += 4; ++s;
+    while (*s && x + XGGF_FONT_WIDTH - 1 < PANEL_WIDTH) {
+        const xggf_glyph *g = xggf_font_glyph(*s);
+        if (g)
+            for (unsigned y = 0; y < XGGF_FONT_HEIGHT; ++y)
+                for (unsigned col = 0; col < XGGF_FONT_WIDTH; ++col)
+                    if (g->rows[y] & (0x10u >> col)) pixel(f, x + col, y, c);
+        x += XGGF_FONT_WIDTH + 1; ++s;
     }
 }
 

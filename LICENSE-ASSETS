@@ -37,6 +37,11 @@ Not covered, because it is a third-party font under its own license:
   subset of Fusion Pixel Font 12 px by TakWolf, built from Ark Pixel Font
   and Cubic 11, under the SIL Open Font License 1.1. Its license files are
   next to it (OFL.txt, LICENSES/) and ship with the firmware as FONTS.txt.
+- fonts/petabyt-5x7/font.h and firmware-xggf/main/font.{h,c} derived from
+  it, the XGGF panel's 5x7 ASCII glyphs: the petabyt "7x5" font by Daniel
+  C (Petabyte), under the MIT License (GPL-compatible). The license file
+  is next to it (MIT-petabyt-font.txt); the derived table is regenerated
+  by tools/make-xggf-font.py, which centers each glyph's ink in its cell.
 
 Neither license grants rights to the name "VibeBuddy" or to the buddy
 character as a trademark.

@@ -65,11 +65,17 @@ The host tests require a C compiler:
 ```sh
 cc -std=c11 -Wall -Wextra -Werror -Ifirmware-xggf/main firmware-xggf/main/panel.c firmware-xggf/tests/panel_test.c -o /tmp/xggf-panel-test
 /tmp/xggf-panel-test
-cc -std=c11 -Wall -Wextra -Werror -Ifirmware-xggf/main firmware-xggf/main/panel.c firmware-xggf/main/status.c firmware-xggf/tests/status_test.c -o /tmp/xggf-status-test
+cc -std=c11 -Wall -Wextra -Werror -Ifirmware-xggf/main firmware-xggf/main/panel.c firmware-xggf/main/font.c firmware-xggf/main/status.c firmware-xggf/tests/status_test.c -o /tmp/xggf-status-test
 /tmp/xggf-status-test
+cc -std=c11 -Wall -Wextra -Werror -Ifirmware-xggf/main firmware-xggf/main/panel.c firmware-xggf/main/font.c firmware-xggf/main/status.c firmware-xggf/tests/font_test.c -o /tmp/xggf-font-test
+/tmp/xggf-font-test
 cc -std=c11 -Wall -Wextra -Werror -Ifirmware-xggf/main firmware-xggf/main/buttons.c firmware-xggf/tests/buttons_test.c -o /tmp/xggf-buttons-test
 /tmp/xggf-buttons-test
+cc -std=c11 -Wall -Wextra -Werror -Ifirmware-xggf/main firmware-xggf/main/panel.c firmware-xggf/main/font.c firmware-xggf/main/status.c firmware-xggf/tests/preview.c -o /tmp/xggf-preview
+/tmp/xggf-preview /tmp/xggf-previews
 ```
+
+The status labels draw with a 5x7 font covering printable ASCII. `firmware-xggf/main/font.{h,c}` are generated from the vendored petabyt 7x5 font by `tools/make-xggf-font.py` (run it after touching `fonts/petabyt-5x7/`); the generator's tests run with the other tools unit tests, and `tests/font_test.c` checks the table through the renderer. `tests/preview.c` writes every label scenario as 1x and 8x PBM files for reviewing the panel output before flashing.
 
 The previous panel probe and its results are described in the working notes. The current build starts in `OFFLINE` and displays Agent status once it receives events. Hold the repository-root `DEVICE.lock` for every complete flash or physical test, including data collection, and release it immediately afterward. From `firmware-xggf`, flash with `flock ../DEVICE.lock -c 'idf.py -p PORT flash'` after sourcing ESP-IDF; from the repository root, use `DEVICE.lock` as shown below. The lock file is ignored by Git.
 

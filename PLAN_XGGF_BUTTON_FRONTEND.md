@@ -132,7 +132,7 @@ Never render passwords, private keys, full pairing keys, or audio data.
 3. Route K1 long to menu-open instead of `status_home`.
 4. Preserve all normal K0/K2 shortcuts and K2 long mute.
 5. Give Agent events priority over the menu and close it on their arrival.
-6. Add compact row labels and current-state values. Extend the 3×5 glyph table only for characters actually required; avoid shrinking the font.
+6. Add compact row labels and current-state values. The labels draw with the generated full-ASCII 5×7 table in `firmware-xggf/main/font.{h,c}` (eight characters fit right of the buddy); regenerate with `tools/make-xggf-font.py` only for characters outside printable ASCII.
 7. Update the guided test to check menu events and visible labels rather than relying only on serial output.
 
 **Host tests:**
