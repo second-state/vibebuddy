@@ -140,7 +140,7 @@ The scanner is called from `FUN_ram_42001dc0` at `app0_disasm_from_fixed_elf.txt
 
 | # | Gap | Impact | Follow-up |
 |---|-----|--------|-----------|
-| 1 | The disassembly does not provide physical positions or case labels for indices 0/1/2. | GPIO mappings are known, but “left/middle/right” or “up/down/select” cannot be assigned from this evidence alone. | Press each physical button while logging GPIO2/8/9 levels. |
+| 1 | ~~Physical positions were not present in the disassembly.~~ **Resolved:** on-device verification confirmed left = button 0 / K0, middle = button 1 / K1, right = button 2 / K2. | The panel now identifies each held button directly. | None for physical mapping. Stock-firmware action names remain separate from VibeBuddy's action assignments. |
 | 2 | Mode 1 is `INPUT`, not `INPUT_PULLUP`. | Internal pull-up use must not be assumed. | Inspect the PCB or measure the unpressed pin voltage/bias. |
 | 3 | This investigation did not decode every short-press, long-press, and menu action. | Button behavior beyond scanning and debounce is outside the established result. | Trace the per-button event flags emitted by `0x42001b20` through `0x42001dc0`. |
 
@@ -152,4 +152,4 @@ High-confidence result: the stock XGGF firmware has exactly three independently 
 - **Button 1:** GPIO9
 - **Button 2:** GPIO2
 
-Each requires three consecutive low samples in the low-level reader. The sibling project's claims about GPIO3 ADC/resistance-ladder buttons are stale and contradicted by both the button reader and the buzzer initialization. Physical button names and positions remain unverified.
+Each requires three consecutive low samples in the low-level reader. The sibling project's claims about GPIO3 ADC/resistance-ladder buttons are stale and contradicted by both the button reader and the buzzer initialization. Subsequent on-device verification established the physical mapping: **left = K0 / GPIO8, middle = K1 / GPIO9, right = K2 / GPIO2**.
