@@ -1,5 +1,10 @@
 # XGGF working notes
 
+## 2026-11-01: Button feedback moved to per-key purple dots
+
+- The `K0 DOWN`/`LONG` text readout was a test-only indicator; the production behavior is now a temporary 2×2 purple dot (`{8,0,8}`) drawn over whatever view is current while a key is held, clearing on release: K0 at columns 44–45, K1 at 49–50, K2 at 54–55 (18–19, 13–14, 8–9 counted from the right), rows 0–1. The button screen no longer preempts the panel — the status, recording and microphone views keep rendering underneath, with `button_dots()` called at each of the three render exits. The dots sit clear of the connection bar (column 63) and the recording dot (columns 61–62, rows 0–1); a long press is no longer distinguished visually — its gesture (mute notice, identify animation, view change) provides the feedback instead.
+- Host checks: `status_test.c` asserts each key's dot position and color with all three held, that the view behind the dots still renders (label ink present, no takeover), and that releasing changes exactly the 18 dot pixels (the label text can share their columns, so the held and released frames are compared); `preview.c`'s button scenarios became `k0-down` and `keys-all-down`. The guided `buttons.py` test is unaffected — it waits on serial events, not panel text.
+
 ## 2026-11-01: Recording dot
 
 - Active voice recording now adds a steady 2×2 red dot (`{8,0,0}`) at columns 61–62, rows 0–1 — the top-right corner beside the connection bar. It draws in `status_render` right after the indicator and is gated only on `m->recording`, so it survives the button-label view that otherwise preempts the `REC` frame; button labels reach column 59, making that corner the one guaranteed-free spot left of the bar. The blinking pixel and `REC` frame are unchanged, and nothing extra renders when recording is off.

@@ -143,6 +143,19 @@ static void text(uint8_t *f, const char *s, const uint8_t *c)
     }
 }
 
+/* Pressed-key feedback: a temporary 2x2 purple dot per held key, rows 0-1 at columns
+   from the right 18-19 (K0), 13-14 (K1), 8-9 (K2), drawn over the current view. */
+static void button_dots(uint8_t *f, const status_model *m)
+{
+    static const uint8_t purple[] = {8,0,8};
+    for (unsigned key = 0; key < 3; ++key)
+        if (m->button_mask & (1u << key)) {
+            unsigned left = 63 - 19 + key * 5;
+            for (unsigned x = left; x <= left + 1; ++x)
+                for (unsigned y = 0; y <= 1; ++y) pixel(f, x, y, purple);
+        }
+}
+
 void status_render(const status_model *m, uint32_t now, uint8_t *f)
 {
     static const uint8_t gray[] = {3,3,3}, cyan[] = {0,6,8}, amber[] = {8,4,0},
@@ -150,21 +163,15 @@ void status_render(const status_model *m, uint32_t now, uint8_t *f)
     memset(f, 0, PANEL_RGB_BYTES);
     indicator(f, m);
     /* A steady 2x2 red dot in the top-right corner marks active voice recording in every
-       view; button labels can reach column 59, so the corner beside the bar is the safe spot. */
+       view; the corner beside the bar stays clear of the button dots and label text. */
     if (m->recording) for (unsigned x = 61; x <= 62; ++x) { pixel(f,x,0,red); pixel(f,x,1,red); }
-    if (m->button_mask) {
-        unsigned key = m->button_mask & 1 ? 0 : m->button_mask & 2 ? 1 : 2;
-        char label[16];
-        snprintf(label, sizeof(label), "K%u %s", key, (m->long_mask & (1u << key)) ? "LONG" : "DOWN");
-        text(f, label, white);
-        return;
-    }
     if (m->recording) {
         for (unsigned x = 2; x <= 8; ++x) { pixel(f,x,0,red); pixel(f,x,7,red); }
         for (unsigned y = 1; y < 7; ++y) { pixel(f,1,y,red); pixel(f,9,y,red); }
         pixel(f,3,2,red); pixel(f,7,2,red); pixel(f,5,5,red);
         if ((now / 500) % 2) pixel(f,12,1,red);
         text(f,"REC",red);
+        button_dots(f, m);
         return;
     }
     if (m->audio_session) {
@@ -178,6 +185,7 @@ void status_render(const status_model *m, uint32_t now, uint8_t *f)
             for (unsigned x = 13 + bar * 5; x < 16 + bar * 5; ++x)
                 for (unsigned y = 8 - height; y < 8; ++y) pixel(f,x,y,color);
         }
+        button_dots(f, m);
         return;
     }
     const uint8_t *color = gray; const char *label = "OFFLINE"; char sensor_label[32];
@@ -227,4 +235,5 @@ void status_render(const status_model *m, uint32_t now, uint8_t *f)
     }
     if (m->view == STATUS_VIEW_AGENT && m->linked && m->state == STATUS_WORKING && (now / 400) % 2) pixel(f,5,3,color);
     text(f,label,color);
+    button_dots(f, m);
 }

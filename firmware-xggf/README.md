@@ -8,7 +8,7 @@ The microphone also records speech on request: the daemon arms a bounded recordi
 
 ## Buttons
 
-All three buttons are active-low digital inputs with 40 ms debounce and a one-second long-press threshold. The panel shows `K0 DOWN`, `K1 DOWN` or `K2 DOWN` while a button is held and changes to `LONG` when its long press fires.
+All three buttons are active-low digital inputs with 40 ms debounce and a one-second long-press threshold. While a button is held, the panel draws a temporary 2×2 purple dot for that key over the current view — K0, K1 and K2 at columns 18–19, 13–14 and 8–9 counted from the right, rows 0–1 — and the dot clears on release. The earlier `K0 DOWN`-style text readout was a test-only indicator and is gone.
 
 | Physical button | GPIO | Short press | Long press |
 |---|---:|---|---|
@@ -93,6 +93,6 @@ flock DEVICE.lock -c 'python3 firmware-xggf/tests/buttons.py PORT action K1'
 flock DEVICE.lock -c 'python3 firmware-xggf/tests/buttons.py PORT action K2'
 ```
 
-The button tests print a gesture sequence, wait up to 120 seconds and finish as soon as the required events arrive. The panel identifies the held key and shows when the long-press threshold fires. `map left|middle|right` replaces `action K0|K1|K2` for repeated physical-mapping checks.
+The button tests print a gesture sequence, wait up to 120 seconds and finish as soon as the required events arrive. The panel shows the held key's purple dot; the long-press threshold fires the gesture event. `map left|middle|right` replaces `action K0|K1|K2` for repeated physical-mapping checks.
 
 The serial test sends every status state. The soak rotates states and checks diagnostics for the requested number of minutes. The microphone test activates the visualizer and reports only aggregate amplitude; with a WAV path it takes a baseline, plays the tone through `aplay`, and requires a clear response during a second probe. The round-trip test records six identify tones with `arecord`, checks their burst count and 1 kHz dominance, replays the recording through `aplay`, and requires the device microphone to detect it above the later baseline. Temporary recordings are deleted automatically. The identify command emits an 80 ms tone and remains covered by the serial test. The Wi-Fi test scans and provisions over USB, removes the cached address, reconnects through mDNS and drives eight encrypted controls; `CONNECTION` is an active NetworkManager connection whose credentials remain outside the repository.

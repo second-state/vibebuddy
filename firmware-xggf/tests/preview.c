@@ -67,13 +67,14 @@ int main(int argc, char **argv)
     status_toggle_mute(&m, 100);
     emit(argv[1], "mute-off", &m, 200);
 
+    /* Pressed-key dots: a temporary 2x2 purple dot per held key, rows 0-1, over the current view. */
     status_init(&m);
     bool pressed[3] = {true, false, false}, long_fired[3] = {false, false, false};
     status_buttons(&m, pressed, long_fired);
     emit(argv[1], "k0-down", &m, 0);
-    pressed[0] = false; pressed[2] = true; long_fired[2] = true;
+    pressed[0] = true; pressed[1] = true; pressed[2] = true;
     status_buttons(&m, pressed, long_fired);
-    emit(argv[1], "k2-long", &m, 0);
+    emit(argv[1], "keys-all-down", &m, 0);
 
     status_init(&m);
     status_set_recording(&m, true);

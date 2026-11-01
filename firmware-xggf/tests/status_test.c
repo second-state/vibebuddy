@@ -92,6 +92,32 @@ int main(void)
     status_render(&m, 2400, offline);
     assert(!m.button_mask && memcmp(offline, active, sizeof(active)));
 
+    /* Pressed-key dots: 2x2 purple at rows 0-1, columns from the right 18-19 (K0),
+       13-14 (K1), 8-9 (K2), drawn over the current view and cleared on release. */
+    static const uint8_t purple[3] = {8,0,8};
+    const bool all_down[3] = {true, true, true};
+    status_buttons(&m, all_down, no_long);
+    status_render(&m, 2400, active);
+    unsigned label_ink = 0;
+    for (unsigned key = 0; key < 3; ++key)
+        for (unsigned y = 0; y <= 1; ++y)
+            for (unsigned x = 63 - 19 + key * 5; x <= 63 - 18 + key * 5; ++x)
+                assert(!memcmp(at(x, y, active), purple, 3));
+    for (unsigned y = 0; y < 7; ++y) /* the view behind the dots still renders, no takeover */
+        for (unsigned x = 13; x < 44; ++x) {
+            const uint8_t *p = at(x, y, active);
+            if (p[0] | p[1] | p[2]) ++label_ink;
+        }
+    assert(label_ink > 20);
+    status_buttons(&m, released, no_long);
+    status_render(&m, 2400, offline);
+    /* releasing drops exactly the dots: the label text can share their columns, so
+       compare the held and released frames instead of asserting darkness */
+    for (unsigned y = 0; y < PANEL_HEIGHT; ++y)
+        for (unsigned x = 0; x + 1 < PANEL_WIDTH; ++x)
+            if (!((y == 0 || y == 1) && x >= 44 && x <= 55 && (x - 44) % 5 < 2))
+                assert(!memcmp(at(x, y, active), at(x, y, offline), 3));
+
     /* Connection indicator, rightmost column: rows 0-3 network, rows 4-7 host link. */
     static const uint8_t grey[3] = {3,3,3}, pink[3] = {8,2,3}, tint[3] = {2,8,3};
     status_init(&m);
