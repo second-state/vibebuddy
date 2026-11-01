@@ -1,0 +1,25 @@
+[package]
+name = "vibebuddy-xggf-link"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[workspace]
+
+[lib]
+crate-type = ["staticlib", "rlib"]
+
+[dependencies]
+vibebuddy-firmware-core = { path = "../../firmware-rs/core" }
+
+[dev-dependencies]
+ed25519-dalek = "2"
+
+[patch.crates-io]
+nanomp3-core = { path = "../../firmware-rs/vendor/nanomp3-core" }
+
+[profile.release]
+panic = "abort"
+opt-level = "s"
+lto = true
+codegen-units = 1

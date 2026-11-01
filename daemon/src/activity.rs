@@ -707,6 +707,13 @@ impl ActivityTracker {
         Some(visible)
     }
 
+    /// Restore a display after it reconnects without replaying an announcement.
+    pub fn reconnect_snapshot(&self) -> Event {
+        let mut event = self.activity_snapshot().unwrap_or_else(|| Event::named("agent.idle"));
+        event.extra.insert("suppress_audio".to_owned(), json!(true));
+        event
+    }
+
     /// Attach the current card stack to the event. End announcements carry it too: while hearing "done",
     /// the user should see what's still running.
     fn attach_tasks(&self, visible: &mut Event) {
@@ -1152,6 +1159,19 @@ mod tests {
             session_id: session.to_owned(),
             key: key.to_owned(),
         }
+    }
+
+    #[test]
+    fn reconnect_snapshot_preserves_priority_without_replaying_audio() {
+        let mut tracker = ActivityTracker::default();
+        assert_eq!(tracker.reconnect_snapshot().event, "agent.idle");
+        tracker.observe(&id("a", "a:1"), "BUILD", ActivityStatus::Working);
+        tracker.require_input(&id("b", "b:1"), "INPUT");
+        let snapshot = tracker.reconnect_snapshot();
+        assert_eq!(snapshot.event, "agent.input_required");
+        assert_eq!(snapshot.extra["suppress_audio"], true);
+        assert!(!snapshot.extra.contains_key("announcement"));
+        assert!(tracker.observe(&id("b", "b:1"), "INPUT", ActivityStatus::InputRequired).is_none());
     }
 
     #[test]

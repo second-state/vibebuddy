@@ -1,0 +1,4 @@
+# Separate NVS lives in the former coredump area; stock NVS remains untouched.
+# The stock flash must be backed up before this table is flashed.
+factory,  app,  factory, 0x10000,  0x1c0000,
+nvs,      data, nvs,     0x3e0000, 0x6000,

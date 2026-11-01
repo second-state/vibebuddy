@@ -12,6 +12,8 @@ struct ConversationView: View {
     let setBrain: (ResidentBrainChoice) async throws -> ResidentInfo
     /// Stores the user's Anthropic API key, or removes it with nil; the daemon answers with its info.
     let setKey: (String?) async throws -> ResidentInfo
+    /// Whether the attached device is the experimental XGGF, which has no K0 to hold; its empty state says so.
+    let xggfExperimental: Bool
 
     static let limit = 20
 
@@ -172,7 +174,11 @@ struct ConversationView: View {
             ContentUnavailableView {
                 Label("Nothing said yet", systemImage: "bubble.left.and.bubble.right")
             } description: {
-                Text("Hold K0 on the box and talk to the buddy. What you say and what it says back show up here.")
+                if xggfExperimental {
+                    Text("Voice commands come from the box's K0 button. This experimental device doesn't take them yet.")
+                } else {
+                    Text("Hold K0 on the box and talk to the buddy. What you say and what it says back show up here.")
+                }
             }
         } else if let exchanges {
             ScrollViewReader { proxy in

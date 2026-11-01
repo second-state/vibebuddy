@@ -51,6 +51,9 @@ impl crate::App {
     // MARK: Character
 
     fn kk_character(&self) -> Element<'_, Message> {
+        if self.status.as_ref().and_then(|s| s.device.unsupported_board.as_deref()) == Some("xggf-64x8") {
+            return text(tr("This experimental device supports USB and Wi-Fi status. Voice, Characters, Relay, timers, and device buttons are not yet supported.", &[])).into();
+        }
         if let Some(form) = &self.make {
             return self.kk_make_form(form);
         }
@@ -458,14 +461,23 @@ impl crate::App {
                 None => card(tag(tr("Loading the conversation…", &[]), theme::INK)).into(),
                 Some(Err(client::HistoryError::DaemonDown)) => trouble(tr("The daemon isn't running. Restart it on the Advanced page.", &[])),
                 Some(Err(client::HistoryError::Unavailable(why))) => trouble(tr("The buddy's session isn't available: %@", &[why])),
-                Some(Ok(exchanges)) if exchanges.is_empty() => card(
-                    column![
-                        row![badge(&sprites::KORE_NORMAL, false, theme::INK), heading(tr("Nothing said yet", &[]))].spacing(10).align_y(Alignment::Center),
-                        note(tr("Hold K0 on the box and talk to the buddy. Your words and its replies show up here.", &[])),
-                    ]
-                    .spacing(8),
-                )
-                .into(),
+                Some(Ok(exchanges)) if exchanges.is_empty() => {
+                    // The XGGF has no K0 to hold, so the box's how-to line can't be its empty state.
+                    let xggf = self.status.as_ref().and_then(|s| s.device.unsupported_board.as_deref()) == Some("xggf-64x8");
+                    card(
+                        column![
+                            row![badge(&sprites::KORE_NORMAL, false, theme::INK), heading(tr("Nothing said yet", &[]))].spacing(10)
+                                .align_y(Alignment::Center),
+                            note(if xggf {
+                                tr("Voice commands come from the box's K0 button. This experimental device doesn't take them yet.", &[])
+                            } else {
+                                tr("Hold K0 on the box and talk to the buddy. Your words and its replies show up here.", &[])
+                            }),
+                        ]
+                        .spacing(8),
+                    )
+                    .into()
+                }
                 Some(Ok(exchanges)) => card(
                     scrollable(
                         column(exchanges.iter().map(|exchange| {
@@ -562,7 +574,7 @@ impl crate::App {
         let device = self.status.as_ref().map(|status| &status.device);
         let online = self.online();
         let busy = self.busy();
-        let can_flash = online && (!device.is_some_and(|device| device.network) || device.is_some_and(|device| device.transfer));
+        let can_flash = online && device.is_some_and(|device| device.unsupported_board.is_none()) && (!device.is_some_and(|device| device.network) || device.is_some_and(|device| device.transfer));
         let updates = self.updates();
         let offer = updates.and_then(|updates| updates.firmware.as_ref());
         let downloaded = updates.and_then(status::Updates::firmware_directory).is_some();

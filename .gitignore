@@ -1,6 +1,7 @@
 .DS_Store
 .claude/
 .probe/
+/DEVICE.lock
 .env
 .env.*
 !.env.example
@@ -10,6 +11,7 @@ build/
 sdkconfig
 sdkconfig.old
 /firmware/managed_components/
+/firmware-xggf/managed_components/
 build-*/
 __pycache__/
 app/.build/

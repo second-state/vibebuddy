@@ -1,5 +1,6 @@
 mod account;
 mod activity;
+mod audio;
 mod app_server;
 mod ci;
 mod agent_hooks;
@@ -41,7 +42,7 @@ use std::time::Duration;
 use activity::{ActivitySource, ActivityTracker};
 use axum::body::Bytes;
 use axum::extract::{DefaultBodyLimit, State};
-use axum::http::StatusCode;
+use axum::http::{HeaderMap, StatusCode};
 use axum::response::sse::{Event as SseEvent, KeepAlive, Sse};
 use axum::routing::{get, post};
 use axum::{Json, Router};
@@ -52,7 +53,7 @@ use agent_hooks::AgentHook;
 use claude_hooks::ClaudeHook;
 use codex_hooks::CodexHook;
 use config::Config;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use serial_transport::{DeviceMessage, SerialConfig, SerialTransport, Transport, TransportError};
 use session_titles::SessionTitles;
 use status::{DaemonInfo, DeviceState, HooksSeen, Operation, OperationKind, OperationState, Status, Supervisor};
@@ -112,6 +113,8 @@ struct AppState {
     resident: Option<Arc<resident::Resident>>,
     /// Voice commands from the box (ADR-0017): its recording, and the turn being answered.
     voice: Arc<voice::Voice>,
+    /// Temporary, token-gated XGGF audio capture probe; samples stay in memory.
+    audio: Arc<Mutex<audio::AudioIngestor>>,
     /// The box on the cable said `LINK NOISE` since its last `BOX KEY` (ADR-0015).
     noise_seen: Arc<std::sync::atomic::AtomicBool>,
     /// What the App said about the Character pack it last wrote (who lends a custom one, the form of address),
@@ -161,6 +164,7 @@ impl AppState {
             check_updates: Arc::new(Notify::new()),
             resident: None,
             voice: Arc::new(voice::Voice::new(None, None)),
+            audio: Arc::default(),
             noise_seen: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             written: Arc::default(),
             making: Arc::new(making::Maker::new(None, None, account.clone(), voice_keys.clone())),
@@ -382,6 +386,14 @@ async fn handle_device_events(
 /// Every device message goes through here: update device state, broadcast to operations waiting for acks, and K2 opens the source.
 /// Tests inject device messages here too, so it must not depend on the serial port.
 async fn publish_device_message(state: &AppState, message: DeviceMessage) {
+    if matches!(message, DeviceMessage::Disconnected) {
+        state.audio.lock().await.disconnected();
+    }
+    if let DeviceMessage::Line(line) = &message
+        && let Err(error) = state.audio.lock().await.process_line(line)
+    {
+        warn!(%error, "audio probe rejected device input");
+    }
     let (changed, booted, usb_serial) = {
         let mut device = state.device.lock().await;
         let had_build = device.firmware_build.is_some();
@@ -394,6 +406,15 @@ async fn publish_device_message(state: &AppState, message: DeviceMessage) {
     }
     if changed {
         state.notify_status();
+    }
+    // The small display has no persistent activity state. Restore the aggregator's current
+    // priority on every build report, including a reset while the serial port stays open.
+    if let DeviceMessage::Line(line) = &message
+        && line.contains(serial_transport::BUILD_MARKER)
+        && state.device.lock().await.unsupported_board.as_deref() == Some("xggf-64x8")
+    {
+        let snapshot = state.activities.lock().await.reconnect_snapshot();
+        send_event(state, snapshot);
     }
     // The daily greeting waits for the firmware to report its build: the box restarts when the port
     // opens, and a line sent before it is listening would be lost.
@@ -774,6 +795,10 @@ fn app(state: AppState) -> Router {
         )
         .route("/v1/device/screenshot", post(post_screenshot))
         .route("/v1/device/firmware", post(post_firmware))
+        .route("/v1/device/audio/start", post(post_audio_start))
+        .route("/v1/device/audio/stop", post(post_audio_stop))
+        .route("/v1/device/audio", get(get_audio).delete(delete_audio))
+        .route("/v1/device/audio/stats", get(get_audio_stats))
         .route("/v1/daemon/restart", post(post_restart))
         .route("/v1/updates/check", post(post_check_updates))
         .route("/v1/resident", get(get_resident))
@@ -792,6 +817,88 @@ fn app(state: AppState) -> Router {
         .route("/v1/account/sign-out", post(post_sign_out))
         .route("/v1/account/refresh", post(post_account_refresh))
         .with_state(state)
+}
+
+#[derive(Deserialize)]
+struct AudioStartRequest {
+    sample_rate: u32,
+    duration_ms: u32,
+}
+
+fn audio_authorized(headers: &HeaderMap) -> bool {
+    let Ok(token) = env::var("VIBEBUDDY_AUDIO_PROBE_TOKEN") else { return false };
+    !token.is_empty()
+        && headers.get(axum::http::header::AUTHORIZATION).and_then(|value| value.to_str().ok())
+            == Some(&format!("Bearer {token}"))
+}
+
+fn audio_refusal(code: StatusCode, message: &str) -> (StatusCode, Json<ApiResponse>) {
+    (code, Json(ApiResponse { accepted: false, message: message.to_owned() }))
+}
+
+async fn post_audio_start(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(request): Json<AudioStartRequest>,
+) -> (StatusCode, Json<ApiResponse>) {
+    if !audio_authorized(&headers) {
+        return audio_refusal(StatusCode::UNAUTHORIZED, "audio probe authorization required");
+    }
+    if state.device.lock().await.unsupported_board.as_deref() != Some("xggf-64x8") {
+        return audio_refusal(StatusCode::CONFLICT, "audio probe requires the XGGF");
+    }
+    if let Err(message) = state.audio.lock().await.arm(request.sample_rate, request.duration_ms) {
+        return audio_refusal(StatusCode::CONFLICT, &message);
+    }
+    let mut event = device_command("device.audio.start");
+    event.extra.insert("sample_rate".to_owned(), request.sample_rate.into());
+    event.extra.insert("duration_ms".to_owned(), request.duration_ms.into());
+    send_event(&state, event);
+    (StatusCode::ACCEPTED, Json(ApiResponse { accepted: true, message: "recording started".to_owned() }))
+}
+
+async fn post_audio_stop(State(state): State<AppState>, headers: HeaderMap) -> (StatusCode, Json<ApiResponse>) {
+    if !audio_authorized(&headers) {
+        return audio_refusal(StatusCode::UNAUTHORIZED, "audio probe authorization required");
+    }
+    state.audio.lock().await.stop();
+    send_event(&state, device_command("device.audio.stop"));
+    (StatusCode::ACCEPTED, Json(ApiResponse { accepted: true, message: "recording stopping".to_owned() }))
+}
+
+async fn delete_audio(State(state): State<AppState>, headers: HeaderMap) -> (StatusCode, Json<ApiResponse>) {
+    if !audio_authorized(&headers) {
+        return audio_refusal(StatusCode::UNAUTHORIZED, "audio probe authorization required");
+    }
+    state.audio.lock().await.cancel();
+    send_event(&state, device_command("device.audio.stop"));
+    (StatusCode::ACCEPTED, Json(ApiResponse { accepted: true, message: "recording and buffered audio discarded".to_owned() }))
+}
+
+async fn get_audio(State(state): State<AppState>, headers: HeaderMap) -> axum::response::Response {
+    use axum::response::IntoResponse;
+    if !audio_authorized(&headers) {
+        return (StatusCode::UNAUTHORIZED, "audio probe authorization required").into_response();
+    }
+    match state.audio.lock().await.take_wav() {
+        Some(wav) => ([(axum::http::header::CONTENT_TYPE, "audio/wav")], wav).into_response(),
+        None => (StatusCode::CONFLICT, "no completed recording").into_response(),
+    }
+}
+
+async fn get_audio_stats(State(state): State<AppState>, headers: HeaderMap) -> axum::response::Response {
+    use axum::response::IntoResponse;
+    if !audio_authorized(&headers) {
+        return (StatusCode::UNAUTHORIZED, "audio probe authorization required").into_response();
+    }
+    let audio = state.audio.lock().await;
+    if let Some(error) = audio.error() {
+        return (StatusCode::CONFLICT, error).into_response();
+    }
+    match audio.stats() {
+        Some(stats) => Json(stats).into_response(),
+        None => (StatusCode::CONFLICT, "no completed recording statistics").into_response(),
+    }
 }
 
 /// Capture the box's current screen and return a PNG. Refused while writing a voice pack or flashing: screenshot lines would crowd out acks.
@@ -998,6 +1105,9 @@ async fn post_volume(
     State(state): State<AppState>,
     Json(request): Json<VolumeRequest>,
 ) -> (StatusCode, Json<ApiResponse>) {
+    if state.device.lock().await.unsupported_board.as_deref() == Some("xggf-64x8") {
+        return (StatusCode::CONFLICT, Json(ApiResponse { accepted: false, message: "this display has no speaker".to_owned() }));
+    }
     if !VOLUME_RANGE.contains(&request.level) {
         return (
             StatusCode::BAD_REQUEST,
@@ -1167,6 +1277,9 @@ async fn post_voice_pack(
     axum::extract::Query(query): axum::extract::Query<PackQuery>,
     body: Bytes,
 ) -> (StatusCode, Json<ApiResponse>) {
+    if state.device.lock().await.unsupported_board.as_deref() == Some("xggf-64x8") {
+        return (StatusCode::CONFLICT, Json(ApiResponse { accepted: false, message: "this display does not support Characters".to_owned() }));
+    }
     let Some(voice) = voice_writer::voice_id_of(&body) else {
         return (
             StatusCode::BAD_REQUEST,
@@ -1254,6 +1367,9 @@ async fn post_firmware(
     State(state): State<AppState>,
     Json(request): Json<FirmwareRequest>,
 ) -> (StatusCode, Json<ApiResponse>) {
+    if state.device.lock().await.unsupported_board.is_some() {
+        return (StatusCode::CONFLICT, Json(ApiResponse { accepted: false, message: "released firmware does not support this board".to_owned() }));
+    }
     let mut segments = Vec::new();
     for (address, path) in [(0x0_u32, &request.bootloader), (0x8000, &request.partition_table), (0x10000, &request.app)] {
         match std::fs::read(path) {
@@ -2047,6 +2163,22 @@ mod tests {
             SessionTitles::disabled(),
             None,
         )
+    }
+
+    #[tokio::test]
+    async fn xggf_reconnect_restores_priority_and_refuses_box_firmware() {
+        let transport = Arc::new(RecordingTransport::default());
+        let state = test_state(transport.clone());
+        let id = activity::ActivityId { session_id: "s".into(), key: "s:1".into() };
+        state.activities.lock().await.require_input(&id, "Needs input");
+        publish_device_message(&state, DeviceMessage::Connected { port: "/dev/test".into(), bridge: false, usb_serial: None }).await;
+        publish_device_message(&state, DeviceMessage::Line("BOARD xggf-64x8".into())).await;
+        publish_device_message(&state, DeviceMessage::Line("DISPLAY READY BUILD test".into())).await;
+        let snapshot = transport.events().into_iter().find(|event| event.event == "agent.input_required").unwrap();
+        assert_eq!(snapshot.extra["suppress_audio"], true);
+        let request = FirmwareRequest { bootloader: "missing".into(), partition_table: "missing".into(), app: "missing".into() };
+        let (code, _) = post_firmware(State(state), Json(request)).await;
+        assert_eq!(code, StatusCode::CONFLICT);
     }
 
     #[tokio::test]

@@ -40,7 +40,8 @@ struct KorekoreSettingsRoot: View {
                     setKey: { [client = model.client] key in try await client.setAnthropicKey(key) },
                     links: .init(anthropicConsole: Resources.anthropicConsole, codexInstall: Resources.codexInstallPage,
                                  claudeInstall: Resources.claudeInstallPage),
-                    avatar: nil)
+                    avatar: nil,
+                    xggfExperimental: model.status?.device.unsupportedBoard == "xggf-64x8")
                 }
             case .agents: KorekoreAgentsPage(model: model)
             case .device: KorekoreDevicePage(model: model)

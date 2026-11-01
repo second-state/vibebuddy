@@ -632,3 +632,5 @@
 "The box is on its UART bridge, and its firmware can't carry voice there. Update the firmware, or plug the cable into the box's native USB port." = "盒子接在 UART 桥上，它现在的固件没法在这条线上传语音。更新固件，或把线改插到盒子的原生 USB 口。";
 "The box is on its UART bridge, which didn't hold the speed voice needs. Plug the cable into the box's native USB port, or plug it in again to try once more." = "盒子接在 UART 桥上，这条线没跑到语音需要的速度。把线改插到盒子的原生 USB 口，或重新插一次再试。";
 "Voice needs this computer signed in to VibeBuddy." = "语音要先在这台电脑上登录 VibeBuddy。";
+"This experimental device supports USB and Wi-Fi status. Voice, Characters, Relay, timers, and device buttons are not yet supported." = "此实验性设备支持通过 USB 和 Wi-Fi 显示状态。语音、角色、中转、计时器和设备按键尚未受支持。";
+"Voice commands come from the box's K0 button. This experimental device doesn't take them yet." = "语音指令来自盒子的 K0 按键。此实验性设备还不能下达语音指令。";

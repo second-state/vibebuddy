@@ -15,6 +15,10 @@ struct KorekoreCharacterPage: View {
     private var connected: Bool { model.status?.device.connected ?? false }
 
     var body: some View {
+        if model.status?.device.unsupportedBoard == "xggf-64x8" {
+            Text("This experimental device supports USB and Wi-Fi status. Voice, Characters, Relay, timers, and device buttons are not yet supported.")
+                .padding()
+        } else {
         ScrollViewReader { proxy in
             ScrollView {
                 VStack(alignment: .leading, spacing: 14) {
@@ -52,6 +56,7 @@ struct KorekoreCharacterPage: View {
         }
         .onAppear { model.refreshMadeCharacters() }
         .sheet(isPresented: $makingCharacter) { KorekoreMakeSheet(model: model) }
+        }
     }
 
     private func writeProgress(_ operation: DeviceOperation) -> some View {

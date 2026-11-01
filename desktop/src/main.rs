@@ -1544,6 +1544,9 @@ impl App {
     }
 
     fn sound(&self) -> Element<'_, Message> {
+        if self.status.as_ref().and_then(|s| s.device.unsupported_board.as_deref()) == Some("xggf-64x8") {
+            return text(tr("This experimental device supports USB and Wi-Fi status. Voice, Characters, Relay, timers, and device buttons are not yet supported.", &[])).into();
+        }
         if let Some(form) = &self.make {
             return self.make_form(form);
         }
@@ -1976,7 +1979,7 @@ impl App {
         let online = device.is_some_and(|device| device.connected);
         // Firmware that reports TRANSFER 1 is updated over whatever carries the link (ADR-0016); older firmware is
         // flashed over the cable only, and over Wi-Fi or the Relay the daemon refuses it.
-        let can_flash = online && (!device.is_some_and(|device| device.network) || device.is_some_and(|device| device.transfer));
+        let can_flash = online && device.is_some_and(|device| device.unsupported_board.is_none()) && (!device.is_some_and(|device| device.network) || device.is_some_and(|device| device.transfer));
         let updates = self.updates();
         let offer = updates.and_then(|updates| updates.firmware.as_ref());
         // The offered version, or why there is none: a bare dash read as "no update checks at all".
@@ -2172,7 +2175,7 @@ impl App {
     fn device(&self) -> Element<'_, Message> {
         let device = self.status.as_ref().map(|status| &status.device);
         let online = device.is_some_and(|device| device.connected);
-        let can_flash = online && (!device.is_some_and(|device| device.network) || device.is_some_and(|device| device.transfer));
+        let can_flash = online && device.is_some_and(|device| device.unsupported_board.is_none()) && (!device.is_some_and(|device| device.network) || device.is_some_and(|device| device.transfer));
         let busy = self.status.as_ref().and_then(|status| status.operation.as_ref()).is_some_and(status::Operation::running);
         // The computers the box is paired with (ADR-0012). Every computer it's plugged into pairs on its own, so this
         // one has no Remove: it would only pair again.
@@ -2380,10 +2383,18 @@ impl App {
                 tr("Couldn't read the conversation", &[]),
                 tr("The buddy's session isn't available: %@", &[why]),
             ),
-            Some(Ok(exchanges)) if exchanges.is_empty() => placeholder(
-                tr("Nothing said yet", &[]),
-                tr("Hold K0 on the box and talk to the buddy. What you say and what it says back show up here.", &[]),
-            ),
+            Some(Ok(exchanges)) if exchanges.is_empty() => {
+                // The XGGF has no K0 to hold, so the box's how-to line can't be its empty state.
+                let xggf = self.status.as_ref().and_then(|s| s.device.unsupported_board.as_deref()) == Some("xggf-64x8");
+                placeholder(
+                    tr("Nothing said yet", &[]),
+                    if xggf {
+                        tr("Voice commands come from the box's K0 button. This experimental device doesn't take them yet.", &[])
+                    } else {
+                        tr("Hold K0 on the box and talk to the buddy. What you say and what it says back show up here.", &[])
+                    },
+                )
+            }
             Some(Ok(exchanges)) => scrollable(
                 column(exchanges.iter().map(|exchange| {
                     column![bubble(&exchange.said, true)]

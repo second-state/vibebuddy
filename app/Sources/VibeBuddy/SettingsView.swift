@@ -16,7 +16,8 @@ struct SettingsView: View {
                     load: { [client = model.client] in try await client.residentHistory(limit: ConversationView.limit) },
                     info: { [client = model.client] in try await client.resident() },
                     setBrain: { [client = model.client] choice in try await client.setResidentBrain(choice) },
-                    setKey: { [client = model.client] key in try await client.setAnthropicKey(key) }
+                    setKey: { [client = model.client] key in try await client.setAnthropicKey(key) },
+                    xggfExperimental: model.status?.device.unsupportedBoard == "xggf-64x8"
                 )
                     .tabItem { Label("Conversation", systemImage: "bubble.left.and.bubble.right") }
             }
@@ -164,6 +165,10 @@ struct VoicesView: View {
     @State private var makingCharacter = false
 
     var body: some View {
+        if model.status?.device.unsupportedBoard == "xggf-64x8" {
+            Text("This experimental device supports USB and Wi-Fi status. Voice, Characters, Relay, timers, and device buttons are not yet supported.")
+                .padding()
+        } else {
         VStack(alignment: .leading, spacing: 12) {
             VolumeRow(model: model)
             Divider()
@@ -199,6 +204,7 @@ struct VoicesView: View {
             }
         }
         .sheet(isPresented: $makingCharacter) { MakeCharacterSheet(model: model) }
+        }
     }
 
     private var currentVoiceName: String {
@@ -667,7 +673,7 @@ struct DeviceView: View {
 
     /// Firmware that reports `TRANSFER 1` is updated over whatever carries the link (ADR-0016); older firmware is
     /// flashed over the cable only, and over Wi-Fi or the Relay the daemon refuses it.
-    private var canFlash: Bool { connected && (model.status?.device.network != true || model.status?.device.transfer == true) }
+    private var canFlash: Bool { connected && model.status?.device.unsupportedBoard == nil && (model.status?.device.network != true || model.status?.device.transfer == true) }
 
     /// The offered version, or why there is none: a bare dash read as "no update checks at all".
     private var latestFirmware: String {

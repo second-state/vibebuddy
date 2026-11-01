@@ -11,7 +11,7 @@ struct KorekoreDevicePage: View {
     private var device: DeviceState? { model.status?.device }
     private var connected: Bool { device?.connected ?? false }
     /// Firmware that reports `TRANSFER 1` updates over any link (ADR-0016); older firmware over the cable only.
-    private var canFlash: Bool { connected && (device?.network != true || device?.transfer == true) }
+    private var canFlash: Bool { connected && device?.unsupportedBoard == nil && (device?.network != true || device?.transfer == true) }
 
     var body: some View {
         ScrollView {

@@ -24,6 +24,8 @@ public struct KorekoreConversationPage: View {
     let links: Links
     /// The Character the box wears, at 1×, beside each reply; nil shows Kore.
     let avatar: NSImage?
+    /// Whether the attached device is the experimental XGGF, which has no K0 to hold; its empty state says so.
+    let xggfExperimental: Bool
 
     public static let limit = 20
 
@@ -42,13 +44,15 @@ public struct KorekoreConversationPage: View {
 
     public init(load: @escaping () async throws -> [ResidentExchange], info: @escaping () async throws -> ResidentInfo,
                 setBrain: @escaping (ResidentBrainChoice) async throws -> ResidentInfo,
-                setKey: @escaping (String?) async throws -> ResidentInfo, links: Links, avatar: NSImage?) {
+                setKey: @escaping (String?) async throws -> ResidentInfo, links: Links, avatar: NSImage?,
+                xggfExperimental: Bool = false) {
         self.load = load
         self.info = info
         self.setBrain = setBrain
         self.setKey = setKey
         self.links = links
         self.avatar = avatar
+        self.xggfExperimental = xggfExperimental
     }
 
     public var body: some View {
@@ -177,7 +181,11 @@ public struct KorekoreConversationPage: View {
                         KoreBadge()
                         Text("Nothing said yet").font(.rounded(15))
                     }
-                    KNote(String(localized: "Hold K0 on the box and talk to the buddy. Your words and its replies show up here."))
+                    if xggfExperimental {
+                        KNote(String(localized: "Voice commands come from the box's K0 button. This experimental device doesn't take them yet."))
+                    } else {
+                        KNote(String(localized: "Hold K0 on the box and talk to the buddy. Your words and its replies show up here."))
+                    }
                 }
             }
         } else if let exchanges {
