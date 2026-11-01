@@ -891,7 +891,7 @@ async fn get_audio_stats(State(state): State<AppState>, headers: HeaderMap) -> a
     if !audio_authorized(&headers) {
         return (StatusCode::UNAUTHORIZED, "audio probe authorization required").into_response();
     }
-    let audio = state.audio.lock().await;
+    let mut audio = state.audio.lock().await;
     if let Some(error) = audio.error() {
         return (StatusCode::CONFLICT, error).into_response();
     }

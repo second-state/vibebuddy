@@ -174,6 +174,6 @@ Resource observations on the fixing build: `heap_free` about 29.6 KB idle-but-as
 
 ## Remaining work
 
-- Gate 4: listening confirmation of speech at 8/16 kHz over both transports, and the physical recovery matrix (unplug, Wi-Fi loss, daemon and device restarts mid-recording).
 - Gate 5: full project regression and the comprehensive report; confirm temporary pairings removed and `DEVICE.lock` released.
+- Gate 4 passed on 2026-11-01: the user confirmed speech intelligible from both transports, and the four-scenario physical recovery matrix (`tests/recovery_matrix.py`) passed — daemon restart, USB unplug, device power-cycle, and Wi-Fi loss mid-recording each end in a terminal reason with no partial WAV, and the next recording after the link returns is exact. The scenarios also hardened the daemon: stalled sessions on half-open links now expire with `device stopped sending the recording`.
 - A window stall longer than the send patience plus ring depth still loses the affected frames (counted as overruns with a discontinuity flag); a deeper ring is not affordable in RAM on the ESP32-C3, so the honest bound is documented rather than hidden.

@@ -1,11 +1,15 @@
 use base64::{Engine as _, engine::general_purpose::STANDARD};
 use serde::Serialize;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 const MAX_RATE: u32 = 16_000;
 const MAX_DURATION_MS: u32 = 60_000;
 const MAX_FRAME_BYTES: usize = 640;
 const TIMING_TOLERANCE_FRAMES: u32 = 25;
+/// A peer that lost power sends no TCP reset, so a half-open link would otherwise leave an armed
+/// session active forever. The device's worst legitimate silence between audio lines is its 4 s
+/// send patience plus reconnect slack; past this the recording can no longer finish.
+const SESSION_STALL: Duration = Duration::from_secs(10);
 
 #[derive(Clone, Debug, Default, Serialize)]
 pub struct AudioStats {
@@ -103,14 +107,25 @@ impl AudioIngestor {
         self.last_error = Some("device disconnected during recording".to_owned());
     }
 
-    pub fn error(&self) -> Option<String> {
+    pub fn error(&mut self) -> Option<String> {
+        self.expire_stalled();
         self.last_error.clone()
     }
 
-    pub fn stats(&self) -> Option<AudioStats> {
+    pub fn stats(&mut self) -> Option<AudioStats> {
+        self.expire_stalled();
         self.completed.as_ref().map(|completed| completed.stats.clone())
             .or_else(|| self.session.as_ref().map(|session| session.stats.clone()))
             .or_else(|| self.last_stats.clone())
+    }
+
+    fn expire_stalled(&mut self) {
+        let stalled = self.session.as_ref().is_some_and(|session| {
+            session.last_arrival.unwrap_or(session.armed).elapsed() >= SESSION_STALL
+        });
+        if stalled {
+            let _: Result<(), String> = self.fail("device stopped sending the recording");
+        }
     }
 
     pub fn take_wav(&mut self) -> Option<Vec<u8>> {
@@ -463,5 +478,25 @@ mod tests {
         audio.stop();
         audio.process_line("AUDIO END 0 0").unwrap();
         assert_eq!(audio.take_wav().unwrap().len(), 44);
+    }
+
+    #[test]
+    fn a_session_that_goes_silent_expires_with_a_terminal_reason() {
+        let mut audio = AudioIngestor::default();
+        audio.arm(16000, 60000).unwrap();
+        audio.process_line("AUDIO BEGIN rate=16000 samples=320").unwrap();
+        audio.process_line(&frame(0, 0, &vec![1; 640])).unwrap();
+        // A device that lost power sends no reset; age the last arrival past the stall bound.
+        audio.session.as_mut().unwrap().last_arrival =
+            Some(Instant::now() - Duration::from_secs(11));
+        assert!(audio.stats().is_none());
+        assert_eq!(audio.error().as_deref(), Some("device stopped sending the recording"));
+        assert!(audio.take_wav().is_none());
+        // A session armed but never begun expires the same way, from its arm time.
+        audio.arm(8000, 2000).unwrap();
+        audio.session.as_mut().unwrap().armed = Instant::now() - Duration::from_secs(11);
+        assert!(audio.stats().is_none());
+        assert_eq!(audio.error().as_deref(), Some("device stopped sending the recording"));
+        assert!(audio.arm(8000, 20).is_ok());
     }
 }
