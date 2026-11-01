@@ -16,8 +16,11 @@ bool microphone_init(void)
         .channel_format = I2S_CHANNEL_FMT_ONLY_LEFT,
         .communication_format = I2S_COMM_FORMAT_STAND_I2S,
         .intr_alloc_flags = 0,
-        .dma_buf_count = 8,
-        .dma_buf_len = 64,
+        /* Acquisition must outlast the main loop's worst stall: a sealed audio line can wait out a closed
+         * TCP window for two 250 ms parts beside the 15.8 ms panel transfer. The old 8x64 slots (about
+         * 32 ms at 16 kHz) lost samples between reads, silently under-delivering every Wi-Fi recording. */
+        .dma_buf_count = 32,
+        .dma_buf_len = 240,
         .use_apll = false,
         .tx_desc_auto_clear = false,
         .fixed_mclk = 0,

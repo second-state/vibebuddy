@@ -92,19 +92,26 @@ size_t audio_push(const int32_t *samples, size_t count, uint32_t now)
     return consumed;
 }
 
+/* How long a line whose delivery failed keeps being retried from the ring before the recording
+ * finishes without it. The peer may be reconnecting; past this the recording gives up on the link. */
+enum { AUDIO_DELIVERY_GRACE_MS = 3000 };
+
 void audio_tick(uint32_t now, audio_line_handler handler, void *context)
 {
     if (!handler) return;
     char line[960];
     uint32_t begin_rate = 0;
+    bool past_grace;
     AUDIO_LOCK();
     if (!active) { AUDIO_UNLOCK(); return; }
-    if (!begun) { begun = true; begin_rate = rate; }
+    if (!begun) begin_rate = rate;
     if ((uint32_t)(now - started_at) >= duration_ms) stopping = true;
+    past_grace = (uint32_t)(now - started_at) >= duration_ms + AUDIO_DELIVERY_GRACE_MS;
     AUDIO_UNLOCK();
     if (begin_rate) {
         snprintf(line, sizeof(line), "AUDIO BEGIN rate=%u samples=%u", (unsigned)begin_rate, (unsigned)(begin_rate / 50));
-        handler(context, line);
+        if (!handler(context, line) && !past_grace) return;
+        AUDIO_LOCK(); begun = true; AUDIO_UNLOCK();
     }
     for (unsigned emitted = 0; emitted < 4; ++emitted) {
         uint8_t pcm[AUDIO_MAX_FRAME_SAMPLES * 2];
@@ -118,24 +125,26 @@ void audio_tick(uint32_t now, audio_line_handler handler, void *context)
         sequence = sequences[ring_head];
         flags = discontinuity ? 2 : 0;
         if (stopping && ring_count == 1) flags |= 1;
-        discontinuity = false;
-        ring_head = (ring_head + 1) % AUDIO_RING_FRAMES; --ring_count;
         AUDIO_UNLOCK();
         char encoded[AUDIO_MAX_FRAME_SAMPLES * 2 * 4 / 3 + 5];
         base64_encode(pcm, bytes, encoded);
         snprintf(line, sizeof(line), "AUDIO FRAME %u %u %u %s", (unsigned)sequence, (unsigned)bytes, flags, encoded);
-        handler(context, line);
+        if (!handler(context, line) && !past_grace) break;
+        /* The frame leaves the ring only once its line went out; an undelivered line retries from
+         * the same slot on the next tick, which is what survives a link teardown mid-recording. */
+        AUDIO_LOCK();
+        discontinuity = false;
+        ring_head = (ring_head + 1) % AUDIO_RING_FRAMES; --ring_count;
+        AUDIO_UNLOCK();
     }
-    uint32_t end_sequence, end_overruns, end_slots;
-    bool finished = false;
     AUDIO_LOCK();
-    if (active && stopping && !ring_count) {
-        end_sequence = next_sequence; end_overruns = overrun_count; end_slots = raw_slots;
-        active = false; partial_count = 0; finished = true;
-    }
+    bool ready_to_end = active && stopping && !ring_count;
+    uint32_t end_sequence = next_sequence, end_overruns = overrun_count, end_slots = raw_slots;
     AUDIO_UNLOCK();
-    if (finished) {
+    if (ready_to_end) {
         snprintf(line, sizeof(line), "AUDIO END %u %u %u", (unsigned)end_sequence, (unsigned)end_overruns, (unsigned)end_slots);
-        handler(context, line);
+        if (handler(context, line) || past_grace) {
+            AUDIO_LOCK(); active = false; partial_count = 0; AUDIO_UNLOCK();
+        }
     }
 }

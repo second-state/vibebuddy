@@ -33,11 +33,30 @@ static int temperature_tenths;
 
 static uint32_t now_ms(void) { return (uint32_t)(esp_timer_get_time() / 1000); }
 
-static void audio_output(void *context, const char *output)
+/* A network-armed recording waits out a brief peerless gap in the audio ring; this bounds the wait
+ * so the END still goes out on time even if the peer never returns. */
+enum { AUDIO_HOLD_MARGIN_MS = 250 };
+static bool audio_armed_from_usb = true;
+static uint32_t audio_hold_deadline;
+
+static bool audio_output(void *context, const char *output)
 {
-    (void)context; puts(output); wifi_link_report(output);
+    (void)context;
+    bool sent = wifi_link_deliver(output);
+    puts(output);
     if (!strncmp(output, "AUDIO BEGIN ", 12)) wifi_link_diag_mark();
-    if (!strncmp(output, "AUDIO END ", 10)) wifi_link_diagnose();
+    if (!strncmp(output, "AUDIO END ", 10) && sent) wifi_link_diagnose();
+    /* A USB-armed recording counts the console as its destination; a network-armed one only the link. */
+    return audio_armed_from_usb || sent;
+}
+
+/* Runs from inside a blocked send's wait, so a closed TCP window cannot starve the microphone's
+ * DMA queue. Static storage: it fires from as deep as the sealed-line send path. */
+static void drain_microphone(void)
+{
+    static int32_t samples[512];
+    size_t count = microphone_read(samples, 512);
+    if (count) audio_push(samples, count, now_ms());
 }
 
 static void announce(void)
@@ -168,6 +187,8 @@ static void receive_line(void *context, char *input, bool usb)
                 !audio_start((uint32_t)rate->valuedouble, (uint32_t)duration->valuedouble, now_ms())) {
                 puts("AUDIO ERROR start"); wifi_link_report("AUDIO ERROR start"); cJSON_Delete(root); return;
             }
+            audio_armed_from_usb = usb;
+            audio_hold_deadline = now_ms() + (uint32_t)duration->valuedouble + AUDIO_HOLD_MARGIN_MS;
             status_set_recording(model, true);
         }
         if (!handled && strcmp(event->valuestring, "device.audio.stop") == 0) { audio_stop(); handled = true; }
@@ -224,6 +245,7 @@ void app_main(void)
     } else puts("BUTTONS ERROR");
     if (!buzzer_init()) puts("BUZZER ERROR init");
     if (!microphone_init()) puts("MIC ERROR init");
+    wifi_link_set_wait_drain(drain_microphone);
     announce();
     probe_sensors();
     status_sensors(&model, rtc_valid, rtc_hour, rtc_minute, environment_valid, temperature_tenths, humidity_tenths, now_ms());
@@ -263,7 +285,8 @@ void app_main(void)
                 if (!count) break;
                 audio_push(raw, count, now);
             }
-            audio_tick(now, audio_output, NULL);
+            if (audio_armed_from_usb || now >= audio_hold_deadline || !wifi_link_audio_hold())
+                audio_tick(now, audio_output, NULL);
             if (!audio_active()) { status_set_recording(&model, false); microphone_set_rate(8000); }
         } else {
             if (!model.audio_session) microphone_stop();

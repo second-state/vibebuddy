@@ -17,6 +17,8 @@ QUICK = "--quick" in sys.argv
 WIFI_ONLY = "--wifi-only" in sys.argv
 REPEAT = next((int(value.split("=", 1)[1]) for value in sys.argv if value.startswith("--repeat=")), 1)
 assert 1 <= REPEAT <= 100
+LONG_MS = next((int(value.split("=", 1)[1]) for value in sys.argv if value.startswith("--long-ms=")), 30000)
+assert 1000 <= LONG_MS <= 60000
 BASE = "http://127.0.0.1:17331"
 TOKEN = secrets.token_urlsafe(24)
 HEADERS = {"Authorization": f"Bearer {TOKEN}", "Content-Type": "application/json"}
@@ -168,14 +170,20 @@ with tempfile.TemporaryDirectory(prefix="vibebuddy-xggf-audio-") as directory:
                 label = "wifi-16k-speech" if REPEAT == 1 else f"wifi-16k-speech-{index + 1:02d}"
                 results.append(record(label, 16000, 5000, "/tmp/xggf-speech.wav"))
             if not QUICK:
-                results.append(record("wifi-16k-30s", 16000, 30000, None))
+                results.append(record(f"wifi-16k-{LONG_MS // 1000}s", 16000, LONG_MS, None))
     except Exception:
-        if "log" in locals() and not log.closed:
-            log.flush(); log.seek(0)
-            for line in log:
+        # The `with` above has already closed `log` by the time this runs, so read the file by path; the
+        # temporary directory is still alive here and vanishes right after, taking the transcript with it.
+        log_path = os.path.join(directory, "daemon.log")
+        if os.path.isfile(log_path):
+            with open(log_path) as source:
+                transcript = source.read()
+            for line in transcript.splitlines():
                 if any(text in line for text in ("audio probe rejected", "LINK DIAG ", "ending the session", "reconnecting",
                                                  "encrypted link")):
                     print(line.strip(), flush=True)
+            with open(os.path.join(OUTPUT, "daemon.log"), "w") as kept:
+                kept.write(transcript)
         raise
     finally:
         if process is not None:

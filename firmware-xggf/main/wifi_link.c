@@ -32,7 +32,12 @@ extern void vb_lan_usb(Bridge *, unsigned, bridge_callback, void *);
 extern void vb_lan_poll(Bridge *, unsigned, bridge_callback, void *);
 extern long vb_lan_send(Bridge *, const unsigned char *, size_t, unsigned char *, size_t);
 
-enum { MAX_PAIRS = 16, KEY_LENGTH = 43, PORT = 7340, BUFFER = 8192, SEND_TIMEOUT_MS = 20 };
+/* A closed TCP window on Wi-Fi only reopens after about one link RTT, which measured near 150 ms on
+ * the target network, and mid-recording window stalls just over two seconds have been observed;
+ * waiting less turns routine backpressure into a link teardown that loses whatever was in flight.
+ * The wait drains the microphone in slices (WAIT_SLICE_MS) so patience cannot starve acquisition,
+ * whose DMA hold is far smaller than this bound; the audio ring covers the stalled emission. */
+enum { MAX_PAIRS = 16, KEY_LENGTH = 43, PORT = 7340, BUFFER = 8192, SEND_TIMEOUT_MS = 4000, WAIT_SLICE_MS = 40 };
 enum { CLOSE_NONE, CLOSE_PROTOCOL, CLOSE_INPUT_OVERFLOW, CLOSE_PEER_EOF, CLOSE_RECEIVE, CLOSE_SEND, CLOSE_ENCRYPT, CLOSE_WIFI };
 enum { SEND_NONE, SEND_PAYLOAD, SEND_NEWLINE };
 static Bridge *bridge;
@@ -103,6 +108,15 @@ static void close_client(void)
     client = -1;
     set_peer(false);
 }
+/* Drained while a send waits for a writable socket, so a closed TCP window cannot starve the
+ * microphone's small DMA queue. Set by the main loop before any recording can start. */
+static void (*wait_drain)(void);
+
+void wifi_link_set_wait_drain(void (*drain)(void))
+{
+    wait_drain = drain;
+}
+
 static bool send_part(const unsigned char *bytes, size_t len, unsigned part)
 {
     size_t offset = 0;
@@ -125,11 +139,21 @@ static bool send_part(const unsigned char *bytes, size_t len, unsigned part)
         if (sent >= 0) ++diagnostics.partial_writes;
         else if (send_errno == EAGAIN || send_errno == EWOULDBLOCK) ++diagnostics.send_blocked;
         else break;
-        uint32_t elapsed = milliseconds() - started;
-        if (elapsed >= SEND_TIMEOUT_MS) { ++diagnostics.send_timeouts; break; }
-        struct pollfd writable = { .fd = client, .events = POLLOUT };
-        int ready = poll(&writable, 1, SEND_TIMEOUT_MS - elapsed);
-        if (ready < 0 && errno != EINTR) { sent = -1; send_errno = errno; break; }
+        bool writable = false;
+        for (uint32_t elapsed = milliseconds() - started; elapsed < SEND_TIMEOUT_MS && !writable;) {
+            uint32_t slice = SEND_TIMEOUT_MS - elapsed;
+            if (slice > WAIT_SLICE_MS) slice = WAIT_SLICE_MS;
+            struct pollfd descriptor = { .fd = client, .events = POLLOUT };
+            int ready = poll(&descriptor, 1, (int)slice);
+            if (ready > 0) writable = true;
+            else if (ready < 0 && errno != EINTR) { sent = -1; send_errno = errno; break; }
+            else if (wait_drain) wait_drain();
+            elapsed = milliseconds() - started;
+        }
+        if (sent < 0 && send_errno && send_errno != EAGAIN && send_errno != EWOULDBLOCK) break;
+        if (writable) continue;
+        ++diagnostics.send_timeouts;
+        break;
     }
     uint32_t waited = milliseconds() - started;
     diagnostics.last_send_ms = waited;
@@ -169,13 +193,26 @@ static void bridge_output(void *context, unsigned kind, unsigned conn, const uns
     }
 }
 
-void wifi_link_report(const char *line)
+/* Best-effort line delivery with a verdict, so audio can keep a failed line queued for retry. */
+bool wifi_link_deliver(const char *line)
 {
-    if (!peer || client < 0) return;
+    if (!peer || client < 0) return false;
     unsigned char encoded[2048];
     long n = vb_lan_send(bridge, (const unsigned char *)line, strlen(line), encoded, sizeof(encoded));
-    if (n < 0) { ++diagnostics.encryption_failures; request_close(CLOSE_ENCRYPT); return; }
-    send_line(encoded, (size_t)n);
+    if (n < 0) { ++diagnostics.encryption_failures; request_close(CLOSE_ENCRYPT); return false; }
+    return send_line(encoded, (size_t)n);
+}
+
+void wifi_link_report(const char *line)
+{
+    (void)wifi_link_deliver(line);
+}
+
+/* Whether a recording armed over the network should wait for its peer instead of emitting frames
+ * nowhere: Wi-Fi is associated and configured, but no encrypted peer is connected right now. */
+bool wifi_link_audio_hold(void)
+{
+    return bridge && ssid[0] && wifi_connected && !peer;
 }
 
 static const char *close_name(unsigned reason)

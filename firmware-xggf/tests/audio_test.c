@@ -12,7 +12,7 @@ static void reset(void)
     memset(lines, 0, sizeof(lines)); line_count = 0; frame_count = 0; expected_sequence = 0; sequence_ok = true;
 }
 
-static void collect(void *context, const char *line)
+static bool collect(void *context, const char *line)
 {
     (void)context;
     if (line_count < 4) snprintf(lines[line_count], sizeof(lines[0]), "%s", line);
@@ -22,6 +22,15 @@ static void collect(void *context, const char *line)
         if (sequence != expected_sequence) sequence_ok = false;
         expected_sequence = sequence + 1; frame_count++;
     }
+    return true;
+}
+
+/* Collects but reports failure, standing in a link that cannot take the line. */
+static bool fail_delivery;
+static bool flaky(void *context, const char *line)
+{
+    collect(context, line);
+    return !fail_delivery;
 }
 
 static void fidelity(void)
@@ -65,17 +74,44 @@ static void sixteen_kilohertz_and_overruns(void)
     assert(frame_count == 1 && strstr(lines[1], " 640 1 "));
     reset();
     assert(audio_start(8000, 1000, 0));
-    for (unsigned i = 0; i < 33; ++i) audio_push(samples, 320, i * 20 + 20);
+    for (unsigned i = 0; i < 97; ++i) audio_push(samples, 320, i * 20 + 20);
     expected_sequence = 1;
     audio_tick(0, collect, NULL);
     assert(audio_overruns() == 1 && expected_sequence == 5 && sequence_ok);
     audio_stop();
-    for (unsigned now = 1; now <= 10; ++now) audio_tick(now, collect, NULL);
+    for (unsigned now = 1; now <= 30; ++now) audio_tick(now, collect, NULL);
     assert(!audio_active());
+}
+
+static void delivery_retries_from_the_ring(void)
+{
+    int32_t samples[320] = {0};
+    /* A failed BEGIN keeps the recording queued and alive; the retry emits each line exactly once. */
+    reset(); fail_delivery = true;
+    assert(audio_start(8000, 40, 0));
+    audio_push(samples, 320, 20);
+    audio_tick(20, flaky, NULL);
+    assert(audio_active());
+    reset();
+    fail_delivery = false;
+    audio_tick(40, flaky, NULL);
+    assert(!audio_active() && line_count == 3 && frame_count == 1 && sequence_ok);
+    assert(!strcmp(lines[0], "AUDIO BEGIN rate=8000 samples=160"));
+    assert(!strncmp(lines[1], "AUDIO FRAME 0 320 1 ", 20));
+    assert(!strcmp(lines[2], "AUDIO END 1 0 320"));
+    /* Past the grace period an undeliverable recording finishes anyway, best effort. */
+    reset(); fail_delivery = true;
+    assert(audio_start(8000, 20, 0));
+    audio_push(samples, 320, 20);
+    audio_tick(20, flaky, NULL);
+    assert(audio_active());
+    audio_tick(20 + 20 + 3000, flaky, NULL);
+    /* The failed BEGIN from the first tick counts too: it went out to the observer, not the link. */
+    assert(!audio_active() && line_count == 4 && frame_count == 1);
 }
 
 int main(void)
 {
-    fidelity(); continuous(); sixteen_kilohertz_and_overruns();
+    fidelity(); continuous(); sixteen_kilohertz_and_overruns(); delivery_retries_from_the_ring();
     return 0;
 }

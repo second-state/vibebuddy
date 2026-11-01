@@ -2,11 +2,18 @@
 
 ## Status
 
-Gate 1 produced a measured firmware-side classification of the original failure: nonblocking TCP payload writes could complete short, and `send_line` treated those short writes as fatal. A bounded short-write retry was implemented and shown to recover some later short writes.
+**Gate 2 is met and Gate 3 has passed.** The intermittent completion failures were attributed with per-recording instrumentation and fixed by measurement in four steps:
 
-Gate 2 is **not met**. One same-session sequence passed 10/10 five-second 16 kHz captures, but an earlier equivalent sequence passed nine and then failed on the tenth with a fatal receive error (`recv_errno=113`). The cause and initiator of that receive failure remain unresolved. The isolated 10/10 run does not establish reliable behavior or erase the earlier failure.
+1. **Send-timeout link teardown.** The original 20 ms short-write bound treated any TCP window closure as fatal: on a link whose RTT measured near 150 ms, `POLLOUT` waits routinely expired, the firmware closed the socket (`last_close=send send_errno=11`), and the daemon reconnected in a storm (`accepts` climbing every few seconds). The daemon-side Noise bridge also logged a reset identically to a clean close, hiding the initiator.
+2. **I2S acquisition starvation.** The microphone's DMA queue held about 32 ms of slots at 16 kHz while loop iterations spent longer than that on sealed sends and the 15.8 ms panel transfer, so samples vanished between reads. Every historical Wi-Fi recording under-delivered (`device_slots` near 148,000 for 160,000 expected; `timing_padding` 14-22 frames) and the ±25-frame tolerance masked it until window stalls pushed it past the edge.
+3. **Frame bleed during reconnect gaps.** Frames popped from the ring while no peer was connected went nowhere, losing ~35 frames per teardown.
+4. **Ring/heap balance.** A 160-frame ring starved the Wi-Fi stack's heap (`heap_min=8928`, association failing); 96 frames restored it.
 
-Testing was stopped to prevent a loop. No 30-second Wi-Fi capture was run after the retry change, and USB audio was not rerun during this investigation.
+The fixing build (send patience 4 s with the microphone drained in 40 ms slices inside the wait, 96-frame ring with frames requeued until their line is confirmed sent, network-armed emission held while a peer is reconnecting, and 480 ms of I2S DMA buffering) passed two independent 10/10 five-second 16 kHz Wi-Fi sequences with zero loss, duplication, reordering, or overruns, `timing_padding` 0-2, and `device_slots` 101-109% of real time. A 30-second capture passed with a 1.2 s window stall ridden out inside the send path (`rec_timeouts=0`, no teardown), and a 60-second capture passed with a worst arrival interval of 228 ms. The historical `recv_errno=113` failures were this same teardown churn observed from the receive side; with teardowns gone, no errno-113 close has recurred.
+
+Results live under `/tmp/xggf-gate2-fix-8`, `/tmp/xggf-gate2-fix-9` (the two clean sequences), and `/tmp/xggf-gate3-30s`, `/tmp/xggf-gate3-60s`.
+
+Remaining: Gate 4 listening confirmation and the physical recovery matrix (both need hands and ears), the final regression, and the comprehensive report.
 
 ## Controls and test setup
 
@@ -152,10 +159,21 @@ The device had not been reset between this and the preceding failed invocation. 
 
 Results were saved under `/tmp/xggf-wifi-repeat-reset`; the earlier same-session failure sequence was under `/tmp/xggf-wifi-repeat-20ms`.
 
-## Remaining issues
+## Resolution (the fixing build)
 
-- The errno-113 receive failure remains intermittent and unexplained. A single subsequent 10/10 run is not sufficient to claim the Gate 2 reliability exit condition.
-- The investigation did not establish whether that receive failure originates in the daemon, network, or firmware below the instrumented send path.
-- The retry is bounded and queue-free, but no 30-second stress run or long-run resource measurement was performed after adding it.
-- USB speech/capture had passed before this investigation, but no post-change USB regression was run.
-- No daemon source or documentation was edited, and no commit was created.
+All changes are in `firmware-xggf/main/`; each was flashed and re-measured on its own:
+
+- `wifi_link.c`: `SEND_TIMEOUT_MS` 20 → 4000, with the `POLLOUT` wait sliced into 40 ms pieces that each drain the microphone through `wifi_link_set_wait_drain`, so patience cannot starve acquisition. `wifi_link_deliver` returns a verdict so a line that did not go out stays queued. `wifi_link_audio_hold` lets a network-armed recording wait out a peerless gap instead of emitting frames nowhere.
+- `audio.c`/`audio.h`: the ring deepened to 96 frames (1.92 s at 16 kHz); a frame leaves the ring only once its line is confirmed sent, so a teardown mid-recording retransmits from the ring; undelivered lines retry until `AUDIO_DELIVERY_GRACE_MS` (3 s past the armed duration), after which the recording finishes best-effort.
+- `microphone.c`: I2S DMA buffering 8x64 → 32x240 slots (about 480 ms at 16 kHz), which restored `device_slots` to 99-109% of real time.
+- `main/main.c`: records whether the arm arrived over USB or the network, bounds the peerless hold by the arm's deadline, and registers the in-wait microphone drain.
+- `daemon/src/noise_link.rs`: the Noise bridge now logs `encrypted link read/write failed` with the OS error, distinguishing a reset (`Connection reset by peer`) from a clean close — the evidence that first attributed the teardowns to the device side.
+- `tests/audio_probe.py`: the failure transcript is preserved as `daemon.log` next to the results (the old handler read a file the `with` block had already closed, so failure evidence had been silently dropped); `--long-ms` runs a longer final Wi-Fi capture; `tests/audio_session.sh` is the bounded, scope-announcing session runner used for these gates.
+
+Resource observations on the fixing build: `heap_free` about 29.6 KB idle-but-associated with `heap_min` 10.8 KB during full operation, main-stack headroom 5,244 bytes, `panel_us` unchanged at 15.86-15.87 ms with audio streaming (no measurable panel interference). The 160-frame ring experiment that failed association is the recorded upper bound for ring depth on this hardware.
+
+## Remaining work
+
+- Gate 4: listening confirmation of speech at 8/16 kHz over both transports, and the physical recovery matrix (unplug, Wi-Fi loss, daemon and device restarts mid-recording).
+- Gate 5: full project regression and the comprehensive report; confirm temporary pairings removed and `DEVICE.lock` released.
+- A window stall longer than the send patience plus ring depth still loses the affected frames (counted as overruns with a discontinuity flag); a deeper ring is not affordable in RAM on the ESP32-C3, so the honest bound is documented rather than hidden.
