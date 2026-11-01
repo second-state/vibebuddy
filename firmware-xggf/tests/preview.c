@@ -99,5 +99,29 @@ int main(int argc, char **argv)
     m.view = STATUS_VIEW_ENVIRONMENT;
     emit(argv[1], "no-env", &m, 0);
 
+    /* Connection indicator, rightmost column: rows 0-3 network, rows 4-7 host link. */
+    status_init(&m);
+    emit(argv[1], "link-unset", &m, 0);
+
+    status_init(&m);
+    status_event(&m, "device.heartbeat", 0);
+    emit(argv[1], "link-host-ok", &m, 100);
+
+    status_init(&m);
+    status_network(&m, true, true);
+    status_event(&m, "device.heartbeat", 0);
+    emit(argv[1], "link-ok", &m, 100);
+
+    status_init(&m);
+    status_network(&m, true, false);
+    status_event(&m, "device.heartbeat", 0);
+    emit(argv[1], "link-net-error", &m, 100);
+
+    status_init(&m);
+    status_network(&m, true, true);
+    status_event(&m, "device.heartbeat", 0);
+    status_tick(&m, 15000);
+    emit(argv[1], "link-host-error", &m, 15000);
+
     return 0;
 }

@@ -6,6 +6,10 @@
 typedef void (*wifi_line_handler)(void *context, char *line, bool usb);
 bool wifi_link_init(void);
 void wifi_link_announce(void);
+/* Indicator facts for the connection bar: configured means Wi-Fi credentials are stored,
+   online means the station currently holds an IP address. */
+bool wifi_link_configured(void);
+bool wifi_link_online(void);
 bool wifi_link_usb_event(const char *event, const cJSON *root);
 void wifi_link_usb_activity(void);
 void wifi_link_tick(wifi_line_handler handler, void *context);

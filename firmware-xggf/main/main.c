@@ -296,6 +296,7 @@ void app_main(void)
             if (model.audio_session && !microphone_active()) status_audio_stop(&model);
         }
         wifi_link_tick(receive_line, &model);
+        status_network(&model, wifi_link_configured(), wifi_link_online());
         if ((uint32_t)(now - sensors_at) >= 60000) {
             probe_sensors();
             status_sensors(&model, rtc_valid, rtc_hour, rtc_minute, environment_valid, temperature_tenths, humidity_tenths, now_ms());

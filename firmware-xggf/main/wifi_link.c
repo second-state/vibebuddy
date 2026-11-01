@@ -208,6 +208,15 @@ void wifi_link_report(const char *line)
     (void)wifi_link_deliver(line);
 }
 
+bool wifi_link_configured(void)
+{ return ssid[0] != 0; }
+
+bool wifi_link_online(void)
+{
+    esp_netif_ip_info_t ip;
+    return station && esp_netif_get_ip_info(station, &ip) == ESP_OK && ip.ip.addr != 0;
+}
+
 /* Whether a recording armed over the network should wait for its peer instead of emitting frames
  * nowhere: Wi-Fi is associated and configured, but no encrypted peer is connected right now. */
 bool wifi_link_audio_hold(void)

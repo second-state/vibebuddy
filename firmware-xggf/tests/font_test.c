@@ -46,6 +46,9 @@ static bool lit(const uint8_t *frame, unsigned x, unsigned y)
     return rgb[0] || rgb[1] || rgb[2];
 }
 
+static const uint8_t *rgb_at(unsigned x, unsigned y, const uint8_t *frame)
+{ return frame + (y * PANEL_WIDTH + x) * 3; }
+
 static void test_widest_label_fits_the_text_area(void)
 {
     status_model m;
@@ -60,9 +63,14 @@ static void test_widest_label_fits_the_text_area(void)
 
     for (unsigned y = 0; y < PANEL_HEIGHT; ++y) {
         for (unsigned x = 10; x <= 12; ++x) assert(!lit(first, x, y)); /* buddy gap */
-        for (unsigned x = 60; x < PANEL_WIDTH; ++x) assert(!lit(first, x, y)); /* clip margin */
+        for (unsigned x = 60; x <= 62; ++x) assert(!lit(first, x, y)); /* clip margin beside the indicator */
     }
-    for (unsigned x = 13; x < 60; ++x) assert(!lit(first, x, 7)); /* row 7 stays blank */
+    for (unsigned x = 13; x < 60; ++x) assert(!lit(first, x, 7)); /* row 7 stays blank outside the indicator */
+    /* The rightmost column is the connection indicator: network rows grey (no stored
+       credentials in this scenario), host rows tint green (heartbeat-linked). */
+    static const uint8_t grey[3] = {3,3,3}, tint[3] = {2,8,3};
+    for (unsigned y = 0; y < 4; ++y) assert(!memcmp(rgb_at(63, y, first), grey, 3));
+    for (unsigned y = 4; y < PANEL_HEIGHT; ++y) assert(!memcmp(rgb_at(63, y, first), tint, 3));
     bool eighth_char = false;
     for (unsigned x = 49; x < 60; ++x)
         for (unsigned y = 0; y < 7; ++y) eighth_char = eighth_char || lit(first, x, y);

@@ -5,14 +5,18 @@
 
 typedef enum { STATUS_READY, STATUS_WORKING, STATUS_INPUT, STATUS_DONE, STATUS_FAILED } status_kind;
 typedef enum { STATUS_VIEW_AGENT, STATUS_VIEW_CLOCK, STATUS_VIEW_ENVIRONMENT } status_view;
+/* Connection indicator on the rightmost panel column: grey unset, pink-red error, tint-green ok. */
+typedef enum { STATUS_LINK_UNSET, STATUS_LINK_OK, STATUS_LINK_ERROR } status_link_state;
 typedef struct {
     status_kind state;
     status_view view;
+    status_link_state network_link;
     uint32_t last_message_ms;
     uint32_t done_at_ms;
     uint32_t identify_at_ms;
     uint32_t audio_at_ms;
     bool linked;
+    bool host_seen;
     bool done_pending;
     bool identifying;
     bool audio_active;
@@ -44,5 +48,7 @@ void status_audio_stop(status_model *model);
 void status_audio(status_model *model, uint32_t mean, uint32_t now);
 void status_sensors(status_model *model, bool rtc_valid, unsigned hour, unsigned minute,
                     bool environment_valid, int temperature_tenths, unsigned humidity_tenths, uint32_t now);
+/* Feeds the network half of the indicator: configured means stored credentials exist, online means the station holds an IP. */
+void status_network(status_model *model, bool configured, bool online);
 void status_render(const status_model *model, uint32_t now, uint8_t *frame);
 #endif

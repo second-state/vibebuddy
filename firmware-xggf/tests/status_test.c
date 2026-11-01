@@ -3,6 +3,18 @@
 #include <assert.h>
 #include <string.h>
 
+static const uint8_t *at(unsigned x, unsigned y, const uint8_t *frame)
+{ return frame + (y * PANEL_WIDTH + x) * 3; }
+
+/* The rightmost column carries the connection indicator, so frame equality ignores it. */
+static int same_apart_from_indicator(const uint8_t *a, const uint8_t *b)
+{
+    for (unsigned y = 0; y < PANEL_HEIGHT; ++y)
+        for (unsigned x = 0; x + 1 < PANEL_WIDTH; ++x)
+            if (memcmp(at(x, y, a), at(x, y, b), 3)) return 0;
+    return 1;
+}
+
 int main(void)
 {
     status_model m; uint8_t offline[PANEL_RGB_BYTES], active[PANEL_RGB_BYTES];
@@ -16,7 +28,7 @@ int main(void)
     assert(m.state == STATUS_WORKING && m.last_message_ms == 100);
     status_tick(&m, 15099); assert(m.linked);
     status_tick(&m, 15100); assert(!m.linked);
-    status_render(&m, 15100, active); assert(!memcmp(offline, active, sizeof(active)));
+    status_render(&m, 15100, active); assert(same_apart_from_indicator(offline, active));
     status_event(&m, "device.heartbeat", 15101); assert(m.linked && m.state == STATUS_READY);
     status_event(&m, "agent.input_required", 16000); assert(m.state == STATUS_INPUT);
     status_event(&m, "task.done", 17000); status_tick(&m, 21999); assert(m.state == STATUS_DONE);
@@ -79,5 +91,32 @@ int main(void)
     status_buttons(&m, released, no_long);
     status_render(&m, 2400, offline);
     assert(!m.button_mask && memcmp(offline, active, sizeof(active)));
+
+    /* Connection indicator, rightmost column: rows 0-3 network, rows 4-7 host link. */
+    static const uint8_t grey[3] = {3,3,3}, pink[3] = {8,2,3}, tint[3] = {2,8,3};
+    status_init(&m);
+    status_render(&m, 0, active);
+    assert(!memcmp(at(63,0,active), grey, 3) && !memcmp(at(63,3,active), grey, 3));
+    assert(!memcmp(at(63,4,active), grey, 3) && !memcmp(at(63,7,active), grey, 3));
+    status_network(&m, false, true); status_render(&m, 0, active);
+    assert(!memcmp(at(63,0,active), grey, 3));
+    status_network(&m, true, false); status_render(&m, 0, active);
+    assert(!memcmp(at(63,0,active), pink, 3) && !memcmp(at(63,7,active), grey, 3));
+    status_network(&m, true, true); status_render(&m, 0, active);
+    assert(!memcmp(at(63,0,active), tint, 3) && !memcmp(at(63,7,active), grey, 3));
+    status_event(&m, "device.heartbeat", 100); status_render(&m, 100, active);
+    assert(!memcmp(at(63,0,active), tint, 3) && !memcmp(at(63,7,active), tint, 3));
+    status_set_recording(&m, true); status_render(&m, 100, active);
+    assert(!memcmp(at(63,0,active), tint, 3) && !memcmp(at(63,7,active), tint, 3));
+    static const uint8_t red_dot[3] = {8,0,0};
+    for (unsigned y = 0; y < 2; ++y)
+        for (unsigned x = 61; x <= 62; ++x) assert(!memcmp(at(x,y,active), red_dot, 3));
+    status_set_recording(&m, false); status_render(&m, 100, active);
+    for (unsigned y = 0; y < 2; ++y)
+        for (unsigned x = 61; x <= 62; ++x) assert(!(at(x,y,active)[0] | at(x,y,active)[1] | at(x,y,active)[2]));
+    status_tick(&m, 15100); assert(!m.linked); status_render(&m, 15100, active);
+    assert(!memcmp(at(63,0,active), tint, 3) && !memcmp(at(63,7,active), pink, 3));
+    status_init(&m); status_network(&m, true, true); status_render(&m, 0, active);
+    assert(!memcmp(at(63,7,active), grey, 3));
     return 0;
 }

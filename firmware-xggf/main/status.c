@@ -10,10 +10,10 @@ bool status_event(status_model *m, const char *event, uint32_t now)
 {
     if (!strcmp(event, "device.hello") || !strcmp(event, "device.heartbeat")) {
         if (!m->linked) { m->state = STATUS_READY; m->done_pending = false; }
-        m->linked = true; m->last_message_ms = now; return true;
+        m->linked = true; m->host_seen = true; m->last_message_ms = now; return true;
     }
     if (!strcmp(event, "device.identify")) {
-        m->linked = true; m->last_message_ms = now;
+        m->linked = true; m->host_seen = true; m->last_message_ms = now;
         status_identify(m, now);
         return true;
     }
@@ -24,7 +24,7 @@ bool status_event(status_model *m, const char *event, uint32_t now)
     else if (!strcmp(event, "task.done")) next = STATUS_DONE;
     else if (!strcmp(event, "task.error") || !strcmp(event, "agent.blocked")) next = STATUS_FAILED;
     else return false;
-    m->state = next; m->linked = true; m->last_message_ms = now;
+    m->state = next; m->linked = true; m->host_seen = true; m->last_message_ms = now;
     m->view = STATUS_VIEW_AGENT; m->mute_notice = false;
     m->done_pending = next == STATUS_DONE; m->done_at_ms = now;
     m->audio_active = false; m->audio_session = false;
@@ -108,15 +108,32 @@ void status_sensors(status_model *m, bool rtc_valid, unsigned hour, unsigned min
     m->environment_valid = environment_valid; m->temperature_tenths = temperature_tenths; m->humidity_tenths = humidity_tenths;
 }
 
+void status_network(status_model *m, bool configured, bool online)
+{ m->network_link = !configured ? STATUS_LINK_UNSET : online ? STATUS_LINK_OK : STATUS_LINK_ERROR; }
+
 static void pixel(uint8_t *f, unsigned x, unsigned y, const uint8_t *c)
 { panel_set_pixel(f, x, y, c[0], c[1], c[2]); }
 
+/* The rightmost column is a reserved connection indicator: rows 0-3 the Wi-Fi network, rows 4-7
+   the host link (grey unset, pink-red error, tint-green ok). A host that has linked at least once
+   reads as error rather than unset after the heartbeat times out. */
+static void indicator(uint8_t *f, const status_model *m)
+{
+    static const uint8_t bar_unset[] = {3,3,3}, bar_error[] = {8,2,3}, bar_ok[] = {2,8,3};
+    status_link_state host = m->linked ? STATUS_LINK_OK : m->host_seen ? STATUS_LINK_ERROR : STATUS_LINK_UNSET;
+    const uint8_t *network = m->network_link == STATUS_LINK_OK ? bar_ok
+        : m->network_link == STATUS_LINK_ERROR ? bar_error : bar_unset;
+    const uint8_t *link = host == STATUS_LINK_OK ? bar_ok : host == STATUS_LINK_ERROR ? bar_error : bar_unset;
+    for (unsigned y = 0; y < 4; ++y) pixel(f, 63, y, network);
+    for (unsigned y = 4; y < 8; ++y) pixel(f, 63, y, link);
+}
+
 /* 5x7 petabyt glyphs in rows 0-6, six pixels per character: the area right of the
-   buddy holds eight characters, and longer labels clip. */
+   buddy holds eight characters, and longer labels clip short of the indicator column. */
 static void text(uint8_t *f, const char *s, const uint8_t *c)
 {
     unsigned x = 13;
-    while (*s && x + XGGF_FONT_WIDTH - 1 < PANEL_WIDTH) {
+    while (*s && x + XGGF_FONT_WIDTH - 1 < PANEL_WIDTH - 1) {
         const xggf_glyph *g = xggf_font_glyph(*s);
         if (g)
             for (unsigned y = 0; y < XGGF_FONT_HEIGHT; ++y)
@@ -131,6 +148,10 @@ void status_render(const status_model *m, uint32_t now, uint8_t *f)
     static const uint8_t gray[] = {3,3,3}, cyan[] = {0,6,8}, amber[] = {8,4,0},
         green[] = {0,8,0}, red[] = {8,0,0}, white[] = {8,8,8};
     memset(f, 0, PANEL_RGB_BYTES);
+    indicator(f, m);
+    /* A steady 2x2 red dot in the top-right corner marks active voice recording in every
+       view; button labels can reach column 59, so the corner beside the bar is the safe spot. */
+    if (m->recording) for (unsigned x = 61; x <= 62; ++x) { pixel(f,x,0,red); pixel(f,x,1,red); }
     if (m->button_mask) {
         unsigned key = m->button_mask & 1 ? 0 : m->button_mask & 2 ? 1 : 2;
         char label[16];

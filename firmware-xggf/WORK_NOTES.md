@@ -1,5 +1,17 @@
 # XGGF working notes
 
+## 2026-11-01: Recording dot
+
+- Active voice recording now adds a steady 2×2 red dot (`{8,0,0}`) at columns 61–62, rows 0–1 — the top-right corner beside the connection bar. It draws in `status_render` right after the indicator and is gated only on `m->recording`, so it survives the button-label view that otherwise preempts the `REC` frame; button labels reach column 59, making that corner the one guaranteed-free spot left of the bar. The blinking pixel and `REC` frame are unchanged, and nothing extra renders when recording is off.
+- Host checks: `status_test.c` asserts the exact dot color while recording and that the four pixels go fully dark once it stops; the existing `rec` preview scenario now includes the dot. All four host test binaries pass and the ESP-IDF 5.5.4 C3 build passes; on-panel confirmation pending.
+
+## 2026-11-01: Right-edge connection indicator
+
+- The rightmost display column (x=63) is now a reserved connection indicator drawn before every scenario layout, so the button, recording and microphone-visualizer views keep it. Rows 0–3 report the Wi-Fi network: grey when no credentials are stored (`wifi_link_configured()`), tint green when the station holds an IP (`wifi_link_online()`, the same fact `LINK DIAG` and the reconnect path use), pink-red when credentials exist without an address. Rows 4–7 report the host link from the existing 15-second heartbeat model: grey until any daemon message arrives, tint green while current, pink-red once a link that was up times out — a new `host_seen` flag distinguishes a lost link from a never-connected one.
+- Colors stay within the 0–8 panel palette: grey `{3,3,3}`, pink-red `{8,2,3}`, tint green `{2,8,3}`. Text clipping now reserves column 63 explicitly; the widest label still ends at column 59 and the audio bars at column 60, so no scenario collides with the bar.
+- `status_network()` feeds the network half from the main loop each iteration; the host half is derived inside the renderer from `linked`/`host_seen`, so previews and tests need no preceding tick. Host checks: `status_test.c` asserts the exact bar colors for every state (its offline-frame equality now ignores column 63), `font_test.c`'s clip-margin check stops at column 62 plus explicit indicator-color assertions, and `preview.c` gained five link scenarios (unset, host-ok, both-ok, network-error, host-error).
+- Verification: panel/status/font/buttons host tests all pass; the PBM and an ASCII render show the bar beside `OFFLINE` and `READY` with correct colors; the ESP-IDF 5.5.4 C3 build passes. On-panel confirmation pending, as is a physical flash.
+
 ## 2026-11-01: Status font upgraded from hand-drawn 3x5 to petabyt 5x7
 
 - The status labels now draw with a 5-wide, 7-tall font covering all 95 printable ASCII characters, replacing the 31-glyph 3x5 table in `status.c`. The glyphs come from the petabyt "7x5" font (MIT, © 2020 Petabyte) vendored at `fonts/petabyt-5x7/`; `tools/make-xggf-font.py` converts it into the committed `main/font.{h,c}` (7 packed row bytes per glyph, bit 4 the leftmost column, ascending 0x20–0x7E so lookup is a range check and subtraction). The conversion centers each glyph's ink in its cell (petabyt hugs the left edge for `I ! 1 :`), takes the first of the two upstream `-` definitions, and gives the eight characters upstream leaves undefined (`$ & @ [ \ ] ^ |`, none used by any label) petabyt's own solid fallback block, all listed in the generated header. `LICENSE-ASSETS` records the font as third-party under its own license.
