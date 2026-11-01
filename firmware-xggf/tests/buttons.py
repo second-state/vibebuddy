@@ -82,5 +82,7 @@ with serial.Serial(port, 115200, timeout=0.1) as link:
             assert "MUTE OFF" in mute_states and mute_states[-1] == "MUTE OFF", "mute was not restored"
             print("PASS: K2 source event and mute/unmute restored off")
     finally:
+        if mode == "action" and subject == "K2":
+            time.sleep(2.5)
         link.write(b'{"version":1,"event":"agent.idle"}\n')
         link.flush()

@@ -51,14 +51,28 @@ static uint32_t last_ip;
 static bool wifi_connected, connecting_report, connected_report, disconnected_report, disconnect_was_connected;
 static bool scan_pending, scan_report;
 static unsigned disconnect_reason;
+static uint32_t last_wifi_down_ms;
 static struct {
     unsigned accepts, peer_up, peer_down, encryption_failures, send_failures, partial_writes, send_blocked, send_timeouts;
     unsigned disconnects, wifi_disconnects, last_close, last_send_part, last_send_len, last_wifi_reason;
     unsigned last_send_ms, max_send_ms;
     int last_send_sent, last_send_errno, last_recv_errno;
 } diagnostics;
+/* Counters snapshot taken when a recording starts, so LINK DIAG can attribute changes to one recording
+ * instead of the cumulative totals, which mixed sessions together during the errno-113 investigation. */
+static struct {
+    bool active;
+    uint32_t started;
+    int rssi;
+    unsigned accepts, peer_up, peer_down, encryption_failures, send_failures, partial_writes, send_blocked, send_timeouts, disconnects, wifi_disconnects;
+} mark;
 
 static uint32_t milliseconds(void) { return (uint32_t)(esp_timer_get_time() / 1000); }
+static int current_rssi(void)
+{
+    wifi_ap_record_t ap;
+    return esp_wifi_sta_get_ap_info(&ap) == ESP_OK ? ap.rssi : 0;
+}
 static bool store_blob(const char *key, const void *data, size_t len)
 { return nvs_set_blob(store, key, data, len) == ESP_OK && nvs_commit(store) == ESP_OK; }
 static bool store_pairs(void)
@@ -170,17 +184,69 @@ static const char *close_name(unsigned reason)
     return reason < sizeof(names) / sizeof(names[0]) ? names[reason] : "unknown";
 }
 
+static const char *wifi_failure_reason(unsigned reason)
+{
+    switch (reason) {
+        case WIFI_REASON_UNSPECIFIED: return "Unspecified";
+        case WIFI_REASON_AUTH_EXPIRE: return "AuthenticationExpired";
+        case WIFI_REASON_AUTH_LEAVE: return "AuthenticationLeft";
+        case WIFI_REASON_ASSOC_EXPIRE: return "AssociationExpired";
+        case WIFI_REASON_ASSOC_TOOMANY: return "AssociationTooMany";
+        case WIFI_REASON_ASSOC_LEAVE: return "AssociationLeft";
+        case WIFI_REASON_AUTH_FAIL: return "AuthenticationFailed";
+        case WIFI_REASON_ASSOC_FAIL: return "AssociationFailed";
+        case WIFI_REASON_CONNECTION_FAIL: return "ConnectionFailed";
+        case WIFI_REASON_NO_AP_FOUND: return "NoAccessPointFound";
+        case WIFI_REASON_BEACON_TIMEOUT: return "BeaconTimeout";
+        case WIFI_REASON_HANDSHAKE_TIMEOUT: return "HandshakeTimeout";
+        case WIFI_REASON_4WAY_HANDSHAKE_TIMEOUT: return "FourWayHandshakeTimeout";
+        case WIFI_REASON_MIC_FAILURE: return "MicFailure";
+        default: return NULL;
+    }
+}
+
+void wifi_link_diag_mark(void)
+{
+    mark.active = true;
+    mark.started = milliseconds();
+    mark.rssi = current_rssi();
+    mark.accepts = diagnostics.accepts;
+    mark.peer_up = diagnostics.peer_up;
+    mark.peer_down = diagnostics.peer_down;
+    mark.encryption_failures = diagnostics.encryption_failures;
+    mark.send_failures = diagnostics.send_failures;
+    mark.partial_writes = diagnostics.partial_writes;
+    mark.send_blocked = diagnostics.send_blocked;
+    mark.send_timeouts = diagnostics.send_timeouts;
+    mark.disconnects = diagnostics.disconnects;
+    mark.wifi_disconnects = diagnostics.wifi_disconnects;
+}
+
 void wifi_link_diagnose(void)
 {
-    char text[320];
-    snprintf(text, sizeof(text),
+    char text[640];
+    uint32_t now = milliseconds();
+    uint32_t wifi_down_ago = last_wifi_down_ms ? now - last_wifi_down_ms : 0;
+    const char *reason_name = wifi_failure_reason(diagnostics.last_wifi_reason);
+    int length = snprintf(text, sizeof(text),
         "LINK DIAG peer=%u tcp=%u accepts=%u peer_up=%u peer_down=%u encrypt_fail=%u send_fail=%u partial=%u blocked=%u timeouts=%u "
-        "disconnects=%u wifi_disconnects=%u last_close=%s send_part=%u send_len=%u send_sent=%d send_errno=%d send_ms=%u max_send_ms=%u recv_errno=%d wifi_reason=%u",
+        "disconnects=%u wifi_disconnects=%u last_close=%s send_part=%u send_len=%u send_sent=%d send_errno=%d send_ms=%u max_send_ms=%u recv_errno=%d "
+        "wifi_reason=%u wifi_reason_name=%s rssi=%d wifi_down_ago=%u",
         peer, client >= 0, diagnostics.accepts, diagnostics.peer_up, diagnostics.peer_down, diagnostics.encryption_failures,
         diagnostics.send_failures, diagnostics.partial_writes, diagnostics.send_blocked, diagnostics.send_timeouts, diagnostics.disconnects,
         diagnostics.wifi_disconnects, close_name(diagnostics.last_close), diagnostics.last_send_part, diagnostics.last_send_len,
         diagnostics.last_send_sent, diagnostics.last_send_errno, diagnostics.last_send_ms, diagnostics.max_send_ms,
-        diagnostics.last_recv_errno, diagnostics.last_wifi_reason);
+        diagnostics.last_recv_errno, diagnostics.last_wifi_reason, reason_name ? reason_name : "unknown", current_rssi(), (unsigned)wifi_down_ago);
+    if (mark.active && length > 0 && (size_t)length < sizeof(text)) {
+        length += snprintf(text + length, sizeof(text) - length,
+            " rec_ms=%u rec_rssi=%d rec_accepts=%u rec_peer_up=%u rec_peer_down=%u rec_encrypt_fail=%u rec_send_fail=%u rec_partial=%u "
+            "rec_blocked=%u rec_timeouts=%u rec_disconnects=%u rec_wifi_disconnects=%u",
+            (unsigned)(now - mark.started), mark.rssi, diagnostics.accepts - mark.accepts, diagnostics.peer_up - mark.peer_up,
+            diagnostics.peer_down - mark.peer_down, diagnostics.encryption_failures - mark.encryption_failures,
+            diagnostics.send_failures - mark.send_failures, diagnostics.partial_writes - mark.partial_writes,
+            diagnostics.send_blocked - mark.send_blocked, diagnostics.send_timeouts - mark.send_timeouts,
+            diagnostics.disconnects - mark.disconnects, diagnostics.wifi_disconnects - mark.wifi_disconnects);
+    }
     puts(text);
     wifi_link_report(text);
 }
@@ -197,20 +263,6 @@ void wifi_link_announce(void)
         snprintf(text, sizeof(text), "WIFI ADDRESS " IPSTR, IP2STR(&ip.ip)); puts(text); wifi_link_report(text);
     }
     wifi_link_diagnose();
-}
-
-static const char *wifi_failure_reason(unsigned reason)
-{
-    switch (reason) {
-        case WIFI_REASON_AUTH_EXPIRE: return "AuthenticationExpired";
-        case WIFI_REASON_AUTH_FAIL: return "AuthenticationFailed";
-        case WIFI_REASON_NO_AP_FOUND: return "NoAccessPointFound";
-        case WIFI_REASON_BEACON_TIMEOUT: return "BeaconTimeout";
-        case WIFI_REASON_HANDSHAKE_TIMEOUT: return "HandshakeTimeout";
-        case WIFI_REASON_4WAY_HANDSHAKE_TIMEOUT: return "FourWayHandshakeTimeout";
-        case WIFI_REASON_MIC_FAILURE: return "MicFailure";
-        default: return NULL;
-    }
 }
 
 static void report_scan(void)
@@ -249,6 +301,7 @@ static void wifi_event(void *arg, esp_event_base_t base, int32_t id, void *data)
         const wifi_event_sta_disconnected_t *event = data;
         disconnect_was_connected = wifi_connected; wifi_connected = false;
         disconnect_reason = event ? event->reason : 0; disconnected_report = true;
+        last_wifi_down_ms = milliseconds();
         ++diagnostics.wifi_disconnects; diagnostics.last_wifi_reason = disconnect_reason;
     } else if (id == WIFI_EVENT_SCAN_DONE) {
         scan_pending = false; scan_report = true;

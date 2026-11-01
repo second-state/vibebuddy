@@ -94,7 +94,16 @@ pub fn bridge<S: AsyncRead + AsyncWrite + Send + 'static>(stream: S, mut session
         loop {
             tokio::select! {
                 read = read_line(&mut sealed, &mut line) => {
-                    let Ok(true) = read else { break };
+                    // A read error and a clean end say different things about who closed the link, so only the
+                    // latter may look like the box hanging up quietly.
+                    match read {
+                        Ok(true) => {}
+                        Ok(false) => break,
+                        Err(error) => {
+                            tracing::warn!(%error, "encrypted link read failed");
+                            break;
+                        }
+                    }
                     let opened = std::str::from_utf8(&line).map_err(|_| "not a sealed line".to_owned()).and_then(|text| session.open(text));
                     let length = line.len();
                     line.clear();
@@ -114,7 +123,8 @@ pub fn bridge<S: AsyncRead + AsyncWrite + Send + 'static>(stream: S, mut session
                 outgoing = plain.next_line() => {
                     let Ok(Some(outgoing)) = outgoing else { break };
                     let Ok(sealed_line) = session.seal(outgoing.as_bytes()) else { break };
-                    if sealed_write.write_all(format!("{sealed_line}\n").as_bytes()).await.is_err() {
+                    if let Err(error) = sealed_write.write_all(format!("{sealed_line}\n").as_bytes()).await {
+                        tracing::warn!(%error, "encrypted link write failed");
                         break;
                     }
                 }

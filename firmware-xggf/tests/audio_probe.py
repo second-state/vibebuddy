@@ -173,7 +173,8 @@ with tempfile.TemporaryDirectory(prefix="vibebuddy-xggf-audio-") as directory:
         if "log" in locals() and not log.closed:
             log.flush(); log.seek(0)
             for line in log:
-                if any(text in line for text in ("audio probe rejected", "LINK DIAG ", "ending the session", "link closed")):
+                if any(text in line for text in ("audio probe rejected", "LINK DIAG ", "ending the session", "reconnecting",
+                                                 "encrypted link")):
                     print(line.strip(), flush=True)
         raise
     finally:

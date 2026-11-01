@@ -11,4 +11,6 @@ void wifi_link_usb_activity(void);
 void wifi_link_tick(wifi_line_handler handler, void *context);
 void wifi_link_report(const char *line);
 void wifi_link_diagnose(void);
+/* Snapshots the link counters as one recording starts, so the next LINK DIAG attributes changes to it. */
+void wifi_link_diag_mark(void);
 #endif

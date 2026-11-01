@@ -36,6 +36,7 @@ static uint32_t now_ms(void) { return (uint32_t)(esp_timer_get_time() / 1000); }
 static void audio_output(void *context, const char *output)
 {
     (void)context; puts(output); wifi_link_report(output);
+    if (!strncmp(output, "AUDIO BEGIN ", 12)) wifi_link_diag_mark();
     if (!strncmp(output, "AUDIO END ", 10)) wifi_link_diagnose();
 }
 
