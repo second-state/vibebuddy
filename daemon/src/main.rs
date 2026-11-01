@@ -136,6 +136,7 @@ impl AppState {
         activities: ActivityTracker,
         titles: SessionTitles,
         config_path: Option<PathBuf>,
+        audio_gate: AudioGate,
     ) -> Self {
         let config = config_path
             .as_deref()
@@ -167,7 +168,7 @@ impl AppState {
             resident: None,
             voice: Arc::new(voice::Voice::new(None, None)),
             audio: Arc::default(),
-            audio_gate: audio_gate_from_env(),
+            audio_gate,
             noise_seen: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             written: Arc::default(),
             making: Arc::new(making::Maker::new(None, None, account.clone(), voice_keys.clone())),
@@ -254,6 +255,7 @@ async fn main() {
         .unwrap_or_else(|_| "127.0.0.1:7331".to_owned())
         .parse::<SocketAddr>()
         .unwrap_or_else(|error| panic!("invalid VIBEBUDDY_BIND: {error}"));
+    let audio_gate = restrict_audio_gate(audio_gate_from_env(), bind_address);
     let identity = match identity::identity_file().map(|path| identity::Identity::load_or_create(&path, identity::computer_name())) {
         Some(Ok(identity)) => Some(Arc::new(identity)),
         Some(Err(error)) => {
@@ -298,6 +300,7 @@ async fn main() {
         activities,
         SessionTitles::from_home(),
         config::config_file(),
+        audio_gate,
     );
     serial_transport.set_relay_enabled(state.config.lock().await.relay);
     state.serial = Some(serial_transport);
@@ -865,6 +868,20 @@ fn audio_gate_from_env() -> AudioGate {
         .filter(|token| !token.is_empty())
         .map(AudioGate::Token)
         .unwrap_or(AudioGate::Off)
+}
+
+/// App-enabled recording is deliberately local-only. The daemon's other APIs can be exposed with
+/// `VIBEBUDDY_BIND`, but microphone capture and retrieval must not inherit that exposure implicitly.
+fn restrict_audio_gate(gate: AudioGate, bind_address: SocketAddr) -> AudioGate {
+    if gate == AudioGate::OptIn && !bind_address.ip().is_loopback() {
+        warn!(
+            address = %bind_address,
+            "XGGF audio opt-in requires a loopback VIBEBUDDY_BIND; disabling audio capture"
+        );
+        AudioGate::Off
+    } else {
+        gate
+    }
 }
 
 fn audio_refusal(code: StatusCode, message: &str) -> (StatusCode, Json<ApiResponse>) {
@@ -2197,7 +2214,35 @@ mod tests {
             ActivityTracker::default(),
             SessionTitles::disabled(),
             None,
+            AudioGate::Off,
         )
+    }
+
+    #[test]
+    fn xggf_audio_opt_in_is_limited_to_loopback_binds() {
+        let empty_headers = HeaderMap::new();
+        for address in ["127.0.0.1:7331", "[::1]:7331"] {
+            let bind = address.parse::<SocketAddr>().unwrap();
+            let gate = restrict_audio_gate(AudioGate::OptIn, bind);
+            assert_eq!(gate, AudioGate::OptIn, "loopback address {address}");
+            assert!(audio_authorized(&gate, &empty_headers));
+        }
+
+        for address in ["0.0.0.0:7331", "192.168.1.20:7331", "[::]:7331", "[2001:db8::1]:7331"] {
+            let bind = address.parse::<SocketAddr>().unwrap();
+            let gate = restrict_audio_gate(AudioGate::OptIn, bind);
+            assert_eq!(gate, AudioGate::Off, "non-loopback address {address}");
+            assert!(!audio_authorized(&gate, &empty_headers));
+        }
+
+        // The diagnostic bearer-token mode remains available for deliberate remote probes.
+        let remote = "192.168.1.20:7331".parse::<SocketAddr>().unwrap();
+        let gate = restrict_audio_gate(AudioGate::Token("probe".to_owned()), remote);
+        assert_eq!(gate, AudioGate::Token("probe".to_owned()));
+        assert!(!audio_authorized(&gate, &empty_headers));
+        let mut token_headers = HeaderMap::new();
+        token_headers.insert(axum::http::header::AUTHORIZATION, "Bearer probe".parse().unwrap());
+        assert!(audio_authorized(&gate, &token_headers));
     }
 
     #[tokio::test]
@@ -2866,6 +2911,7 @@ mod tests {
             ActivityTracker::default(),
             SessionTitles::disabled(),
             Some(path.clone()),
+            AudioGate::Off,
         );
         let wanted = Config { voice: Some("hsiaochen".to_owned()), notify_link: false, check_updates: Some(true), relay: false };
         let Json(returned) = put_config(State(state.clone()), Json(wanted.clone())).await;

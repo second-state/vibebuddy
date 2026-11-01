@@ -178,6 +178,7 @@ hook/      # vibebuddy-hook，Codex 与 Claude Code 的 Hook
 protocol/  # VibeBuddy Protocol 类型与编解码
 firmware-rs/  # Rust 版 vibebuddy-fw：core（不碰硬件）与 device（硬件胶水）
 firmware/  # 之前的 C 固件（ESP-IDF），保留作退路
+firmware-xggf/  # XGGF 64×8 PixelClock 的实验性 ESP32-C3 固件
 voices/    # 播报音色，一个音色一个目录
 docs/      # 架构、协议、硬件证据和路线图
 tools/     # 探测、烧录与素材脚本
@@ -260,9 +261,9 @@ cargo run -p vibebuddyd
 
 语音指令还在实验阶段，默认关闭：`VIBEBUDDY_RESIDENT_SESSION=1` 打开常驻会话，再配好语音识别，盒子长按 K0 就成了按住说话。由你自己的 Codex 来回答；也可以换成你自己的 Claude Code，配你自己的 Anthropic API 密钥（不能用 Claude 订阅）。打开期间，Mac 和 Linux 的设置里都会多出“对话”页，列出你最近的语音指令和氛围小助手的口头回复，也在这里选由谁回答、填 API 密钥。详见 [`docs/resident-session.md`](docs/resident-session.md)。
 
-在 XGGF 显示器上录制语音（实验性）也走同一套守护进程：设置 `VIBEBUDDY_XGGF_AUDIO=1` 后，设备页面就能从设备麦克风录制有时长的语音片段——USB 或配对加密的 Wi-Fi 均可——随后在电脑上播放或保存为 WAV。默认不在任何地方保留录音，每次录音都由明确的一次按下开始。Linux 上通过 `aplay` 播放。相关测量见 `firmware-xggf/AUDIO_PROBE_REPORT.md`。
+在 XGGF 显示器上录制语音（实验性）也走同一套守护进程：在 daemon 的环境中设置 `VIBEBUDDY_XGGF_AUDIO=1` 后，设备页面就能从设备麦克风录制有时长的语音片段——USB 或配对加密的 Wi-Fi 均可——随后在电脑上播放或保存为 WAV。App 的录音授权只允许 daemon 监听本机回环地址；默认地址是 `127.0.0.1:7331`。Linux 上可运行 `systemctl --user edit vibebuddyd.service`，在覆盖配置中加入 `[Service]` 和 `Environment=VIBEBUDDY_XGGF_AUDIO=1`，然后重启该服务。默认不会把录音写入磁盘，每次录音都由明确的一次按下开始。Linux 上通过 `aplay` 播放。相关测量见 `firmware-xggf/AUDIO_PROBE_REPORT.md`。
 
-daemon 平时由 App 看管。没有 App 的开发机可以用 [`packaging/com.vibebuddy.vibebuddyd.plist`](packaging/com.vibebuddy.vibebuddyd.plist) 装成 LaunchAgent，但两者不能同时跑，会抢串口。daemon 还为 App 提供 `GET /v1/status`、SSE `/v1/status/stream`、`/v1/config`、`/v1/device/{identify,volume,choice,screenshot,voice-pack,firmware}` 与 `/v1/daemon/restart`。
+daemon 平时由 App 看管。没有 App 的开发机可以用 [`packaging/com.vibebuddy.vibebuddyd.plist`](packaging/com.vibebuddy.vibebuddyd.plist) 装成 LaunchAgent，但两者不能同时跑，会抢串口。daemon 还为 App 提供 `GET /v1/status`、SSE `/v1/status/stream`、`/v1/config`、`/v1/device/{identify,volume,choice,screenshot,voice-pack,firmware}`、实验性 XGGF 录音接口 `POST /v1/device/audio/{start,stop}`、`GET|DELETE /v1/device/audio`、`GET /v1/device/audio/stats`，以及 `/v1/daemon/restart`。
 
 经盒子的 CH343 UART 桥发送时 daemon 按线速分段写：这条桥一次吞不下超过两百字节的连续数据，会把内容错位而长度不变；原生 USB 口不受影响。盒子报出版本后，daemon 和固件会把这条桥从 115200 提到 921600 波特，语音指令在这里也能用；固件太旧时停在 115200，这条线上语音关闭（见 docs/protocol.md 的 “Link speed on the UART bridge”）。教训见 [`LESSONS.md`](LESSONS.md)。
 

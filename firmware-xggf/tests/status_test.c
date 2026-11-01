@@ -6,6 +6,13 @@
 static const uint8_t *at(unsigned x, unsigned y, const uint8_t *frame)
 { return frame + (y * PANEL_WIDTH + x) * 3; }
 
+/* The pressed-key dots: rows 0-1, columns 45-46 (K0), 50-51 (K1), 54-55 (K2). */
+static int is_dot(unsigned x, unsigned y)
+{
+    return (y == 0 || y == 1)
+        && ((x >= 45 && x <= 46) || (x >= 50 && x <= 51) || (x >= 54 && x <= 55));
+}
+
 /* The rightmost column carries the connection indicator, so frame equality ignores it. */
 static int same_apart_from_indicator(const uint8_t *a, const uint8_t *b)
 {
@@ -92,16 +99,17 @@ int main(void)
     status_render(&m, 2400, offline);
     assert(!m.button_mask && memcmp(offline, active, sizeof(active)));
 
-    /* Pressed-key dots: 2x2 purple at rows 0-1, columns from the right 18-19 (K0),
-       13-14 (K1), 8-9 (K2), drawn over the current view and cleared on release. */
+    /* Pressed-key dots: 2x2 purple at rows 0-1, columns from the right 17-18 (K0),
+       12-13 (K1), 8-9 (K2), drawn over the current view and cleared on release. */
     static const uint8_t purple[3] = {8,0,8};
+    static const unsigned dot_left[3] = {45, 50, 54};
     const bool all_down[3] = {true, true, true};
     status_buttons(&m, all_down, no_long);
     status_render(&m, 2400, active);
     unsigned label_ink = 0;
     for (unsigned key = 0; key < 3; ++key)
         for (unsigned y = 0; y <= 1; ++y)
-            for (unsigned x = 63 - 19 + key * 5; x <= 63 - 18 + key * 5; ++x)
+            for (unsigned x = dot_left[key]; x <= dot_left[key] + 1; ++x)
                 assert(!memcmp(at(x, y, active), purple, 3));
     for (unsigned y = 0; y < 7; ++y) /* the view behind the dots still renders, no takeover */
         for (unsigned x = 13; x < 44; ++x) {
@@ -115,7 +123,7 @@ int main(void)
        compare the held and released frames instead of asserting darkness */
     for (unsigned y = 0; y < PANEL_HEIGHT; ++y)
         for (unsigned x = 0; x + 1 < PANEL_WIDTH; ++x)
-            if (!((y == 0 || y == 1) && x >= 44 && x <= 55 && (x - 44) % 5 < 2))
+            if (!is_dot(x, y))
                 assert(!memcmp(at(x, y, active), at(x, y, offline), 3));
 
     /* Connection indicator, rightmost column: rows 0-3 network, rows 4-7 host link. */

@@ -751,7 +751,13 @@ impl crate::App {
                     let expected = self.audio_rate as u64 / 50 * self.audio_seconds as u64;
                     let progress = self.audio_progress.as_ref().map_or_else(
                         || tr("Starting…", &[]),
-                        |stats| tr("%lld of %lld frames", &[&stats.frames, &expected]),
+                        |stats| {
+                            let mut label = tr("%lld of %lld frames", &[&stats.frames, &expected]);
+                            if stats.lost_frames > 0 {
+                                label.push_str(&tr(", %lld lost", &[&stats.lost_frames]));
+                            }
+                            label
+                        },
                     );
                     recorder = recorder
                         .push(note(progress))
@@ -768,7 +774,12 @@ impl crate::App {
                             .spacing(8)
                             .align_y(Alignment::Center),
                         )
-                        .push(pill(tr("Record", &[]), Fill::Sun, Some(Message::StartRecording)));
+                        .push(pill(
+                            tr("Record", &[]),
+                            Fill::Sun,
+                            (!self.audio_starting && !self.audio_cancel_after_start && !self.audio_discarding)
+                                .then_some(Message::StartRecording),
+                        ));
                 }
                 if self.audio_result.is_some() {
                     recorder = recorder.push(

@@ -115,6 +115,7 @@ When the Mac app changes, update the note in the same change.
 | [DEV-16](DEV-16-wifi-change-forget.md) | Change or forget the box's network |
 | [DEV-17](DEV-17-paired-computers.md) | See and remove the computers paired with the box |
 | [DEV-18](DEV-18-box-screen.md) | See and save what the box's screen shows |
+| [DEV-19](DEV-19-xggf-speech-recording.md) | XGGF recording consent, integrity, and lifecycle |
 
 ### Conversation tab
 

@@ -144,13 +144,14 @@ static void text(uint8_t *f, const char *s, const uint8_t *c)
 }
 
 /* Pressed-key feedback: a temporary 2x2 purple dot per held key, rows 0-1 at columns
-   from the right 18-19 (K0), 13-14 (K1), 8-9 (K2), drawn over the current view. */
+   from the right 17-18 (K0), 12-13 (K1), 8-9 (K2), drawn over the current view. */
 static void button_dots(uint8_t *f, const status_model *m)
 {
     static const uint8_t purple[] = {8,0,8};
+    static const unsigned lefts[3] = {45, 50, 54};
     for (unsigned key = 0; key < 3; ++key)
         if (m->button_mask & (1u << key)) {
-            unsigned left = 63 - 19 + key * 5;
+            unsigned left = lefts[key];
             for (unsigned x = left; x <= left + 1; ++x)
                 for (unsigned y = 0; y <= 1; ++y) pixel(f, x, y, purple);
         }

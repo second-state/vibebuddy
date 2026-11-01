@@ -4,11 +4,11 @@ This is experimental ESP32-C3 VibeBuddy firmware for the XGGF PixelClock. It dis
 
 ## Speech recording
 
-The microphone also records speech on request: the daemon arms a bounded recording (`POST /v1/device/audio/start`), the firmware streams numbered 20 ms base64 frames over USB and the encrypted Wi-Fi link, and the daemon rebuilds the WAV in memory. While a recording is active the panel shows the `REC` frame plus a steady 2×2 red dot in the top-right corner, beside the connection bar; the dot disappears the moment recording stops. From the apps' Device page this needs `VIBEBUDDY_XGGF_AUDIO=1` on this computer (record, play and save); the token-gated endpoints stay for the probe. The protocol, measurements and failure analysis are in [AUDIO_PROBE_REPORT.md](AUDIO_PROBE_REPORT.md), and the gated plan in [AUDIO_PROBE_PLAN.md](AUDIO_PROBE_PLAN.md).
+The microphone also records speech on request: the daemon arms a bounded recording (`POST /v1/device/audio/start`), the firmware streams numbered 20 ms base64 frames over USB and the encrypted Wi-Fi link, and the daemon rebuilds the WAV in memory. While a recording is active the panel shows the `REC` frame plus a steady 2×2 red dot in the top-right corner, beside the connection bar; the dot disappears the moment recording stops. App access requires `VIBEBUDDY_XGGF_AUDIO=1` in the daemon environment and is available only on a loopback listener; the daemon disables app audio access on non-loopback binds. Probes can instead use the bearer-token gate. The protocol, measurements and failure analysis are in [AUDIO_PROBE_REPORT.md](AUDIO_PROBE_REPORT.md), and the gated plan in [AUDIO_PROBE_PLAN.md](AUDIO_PROBE_PLAN.md).
 
 ## Buttons
 
-All three buttons are active-low digital inputs with 40 ms debounce and a one-second long-press threshold. While a button is held, the panel draws a temporary 2×2 purple dot for that key over the current view — K0, K1 and K2 at columns 18–19, 13–14 and 8–9 counted from the right, rows 0–1 — and the dot clears on release. The earlier `K0 DOWN`-style text readout was a test-only indicator and is gone.
+All three buttons are active-low digital inputs with 40 ms debounce and a one-second long-press threshold. While a button is held, the panel draws a temporary 2×2 purple dot for that key over the current view — K0, K1 and K2 at columns 17–18, 12–13 and 8–9 counted from the right, rows 0–1 — and the dot clears on release. The earlier `K0 DOWN`-style text readout was a test-only indicator and is gone.
 
 | Physical button | GPIO | Short press | Long press |
 |---|---:|---|---|
@@ -48,7 +48,7 @@ esptool --chip esp32c3 --port PORT read_flash 0 0x400000 xggf-restored.bin
 sha256sum xggf-backup-a.bin xggf-restored.bin
 ```
 
-This procedure has **not been tested on the current target unit**. Do not proceed without a verified backup and access to ROM download mode. Flash operations replace device contents; do not erase eFuses or assume another unit's backup is suitable.
+This recovery path was exercised on the examined target: the verified image was written in ROM download mode, esptool's write verification passed, and stock firmware booted with the normal display restored (see [working notes](WORK_NOTES.md)). That confirms recovery of this one unit and the display check recorded there; it is not a full validation of every stock feature or of another unit. Keep a separately verified, unit-specific backup and access to ROM download mode before proceeding. Flash operations replace device contents; do not erase eFuses or assume another unit's backup is suitable.
 
 ## Build and test
 

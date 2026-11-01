@@ -100,6 +100,45 @@ On a box with a touchscreen (ADR-0019), a tap on a task card names that card's a
 
 The `READY`, `EVENT`, `TITLE` and `ERROR` lines the firmware prints are diagnostic text for verifying the on-device link, not formal device-to-Mac JSON events. In the same category are `MODE DUTY` / `POMODORO` / `LEISURE` (mode switches); `POMODORO FOCUS START` / `FOCUS END` / `BREAK START` / `BREAK END` / `PAUSED` / `RESUMED` / `STOPPED` / `BREAK SKIPPED` (Pomodoro transitions); `LEISURE ALERT` / `BORED` / `SLEEPY`, `LEISURE SKIT <name>`, `LEISURE LIGHTS OUT` / `ON` (Leisure); and `CLOCK HOUR <n>` (the received hour changed), `TALLY LOADED <count> <seconds>S DAY <date>` (the daily record restored at boot), `MUTE ON` / `OFF` (K2 long press, or the menu), `MENU OPEN` / `MENU CLOSED` (the device menu), `TOUCH CHSC5432` / `TOUCH NONE` (whether the box has a touchscreen, at boot and in answer to `device.hello`; ADR-0019), `TAP <x> <y>` (a tap on the touchscreen, in screen pixels), `SWIPE UP` / `SWIPE DOWN` (a swipe on it), `CARDS PAGE <n>/<m>` (the task cards' page turned by a finger) and `AUDIO MUTED <which line>` (a voice line swallowed while muted). Pomodoro and Leisure state lives only in the firmware; the Mac just logs it.
 
+## XGGF 64×8 experimental board
+
+The XGGF PixelClock runs a separate ESP32-C3 firmware and reports `BOARD xggf-64x8` before `DISPLAY READY BUILD …`. This identity must precede the build marker so the daemon and apps can classify it as unsupported by released box firmware before offering any maintenance action. The XGGF is not the S3 box: do not flash box firmware onto it.
+
+The XGGF renders the aggregate Agent state and a short label on its 64×8 panel. It handles `device.hello`, `device.heartbeat`, `device.identify`, `task.start`, `agent.idle`, `agent.input_required`, `task.done`, `task.error` and `agent.blocked`. It does not render task cards or play voice lines. It does not implement box Character/voice-pack transfer, screenshot, volume, Relay, Pomodoro or Leisure behavior. At this firmware revision, `buddy.say` (including the daily greeting) has no visible effect.
+
+The device also handles `device.mic` for a bounded, ten-second local microphone visualizer and `device.audio.start` / `device.audio.stop` for speech capture. The latter accepts `sample_rate` 8000 or 16000 and `duration_ms` from 1 through 60000. The daemon API that arms and retrieves these recordings is described below and requires the XGGF audio opt-in or probe authorization; app opt-in is restricted to a loopback daemon listener.
+
+Pairing and Wi-Fi provisioning remain USB-only. `device.pair`, `device.pairs`, `device.unpair`, `device.wifi.set`, `device.wifi.forget` and `device.wifi.scan` are handled from the cable. The device serves a paired Noise-encrypted local-network link on TCP port 7340 and advertises `_vibebuddy._tcp` by mDNS; its TXT `key` is the device's pairing key. The daemon continues to apply the usual USB priority and pairing rules. These commands sent over the encrypted network link are not a provisioning path.
+
+The XGGF line parser accepts at most 4608 bytes excluding LF. Its current subset does not return the general protocol's `ERROR input_too_large`, `ERROR unsupported_version` or `EVENT <name>` responses: malformed JSON, invalid envelope fields, unsupported versions, unknown events and overlong lines are silently dropped (an overlong line is discarded through its next LF). Do not infer successful handling from transport delivery. The device emits `STATE <event>` for handled status/control events except hello and heartbeat; commands handled in the USB provisioning dispatcher use their own diagnostics. This is a documented board-specific limitation, not a change to the general v1 contract.
+
+The XGGF emits diagnostic text including `BOARD`, `DISPLAY READY BUILD`, `FIRMWARE VERSION`, `MODE`, `BOX KEY`, `LINK NOISE`, Wi-Fi connection/failure/address lines, `WIFI SEEN`, `PAIR*` / `PAIRED` / `UNPAIRED`, `BUTTON`, `MIC`, `SENSOR`, `AUDIO ERROR`, `STATE`, `DIAG`, and per-recording `LINK DIAG`. These are not JSON events. USB exposes the full diagnostic stream; the established paired link forwards only selected reports, so diagnostics such as sensor readings, microphone amplitude samples and Wi-Fi scan results are cable-only. Audio payload is carried in `AUDIO FRAME` lines only while a daemon recording is armed, over USB or the established encrypted local-network link.
+
+### XGGF speech recording
+
+Recording is requested through the local daemon, not by sending unauthenticated audio commands directly to the box:
+
+```http
+POST /v1/device/audio/start
+Content-Type: application/json
+
+{"sample_rate":16000,"duration_ms":5000}
+```
+
+`vibebuddyd` validates the board and request, arms a single in-memory recording, and sends `device.audio.start`. `POST /v1/device/audio/stop` asks for an early finish; `DELETE /v1/device/audio` stops and discards the active or completed recording. `GET /v1/device/audio` returns the completed WAV, and `GET /v1/device/audio/stats` returns progress/results. All these routes use the same authorization policy. App opt-in (`VIBEBUDDY_XGGF_AUDIO=1`) is only valid with a loopback bind; the probe-token mode requires its bearer token.
+
+For an armed recording, the device sends these diagnostic records:
+
+```text
+AUDIO BEGIN rate=16000 samples=320
+AUDIO FRAME 0 640 0 <base64 PCM>
+AUDIO END 250 0 <raw-slots>
+```
+
+PCM is mono signed 16-bit little-endian at the selected sample rate, split into nominal 20 ms frames. Frame sequence numbers start at zero. A frame has the form `AUDIO FRAME <sequence> <byte-length> <flags> <base64>`; flag bit 0 marks the final (possibly partial) frame and bit 1 marks a discontinuity after device-side ring loss. `AUDIO END <next-sequence> <device-overruns> <raw-slots>` closes the recording. The device retains no PCM. Its frame ring is bounded; a prolonged unavailable peer can therefore produce reported loss rather than unbounded buffering.
+
+The daemon validates frame size, sequence, flags and decoded length; it accounts for gaps, duplicates, reordering, device overruns, discontinuities and bounded timing normalization. A recording with no incoming audio line for ten seconds ends with a terminal error. The WAV remains in daemon memory until a new recording, discard or device disconnect; it is not written to disk by default. Full measured behavior and known transport limits are in [`firmware-xggf/AUDIO_PROBE_REPORT.md`](../firmware-xggf/AUDIO_PROBE_REPORT.md).
+
 ## Device maintenance: blink to identify and voice pack writes
 
 These messages are the app operating on the device itself. They don't count as agent activity, don't wake Leisure mode, and don't produce `EVENT` diagnostic lines.

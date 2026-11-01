@@ -127,15 +127,15 @@ enum Message {
     AudioRate(u32),
     AudioSeconds(u32),
     StartRecording,
-    RecordingStarted(Result<(), String>),
+    RecordingStarted(u64, Result<(), String>),
     StopRecording,
-    PollAudio,
-    AudioPolled(Result<client::Audio, String>),
+    PollAudio(u64),
+    AudioPolled(u64, Result<client::Audio, String>),
     PlayRecording,
     SaveRecording,
     AudioSaved(Result<(), String>),
     DiscardRecording,
-    AudioDiscarded(Result<(), String>),
+    AudioDiscarded(u64, Result<(), String>),
     WifiSsid(String),
     WifiPassword(String),
     JoinWifi,
@@ -277,7 +277,13 @@ struct App {
     /// without a result, whether a poll is in flight, and the player the last Play started.
     audio_rate: u32,
     audio_seconds: u32,
+    /// Invalidates poll/start replies that finish after navigation away from the recorder.
+    audio_generation: u64,
     audio_recording: bool,
+    audio_starting: bool,
+    audio_cancel_after_start: bool,
+    audio_discarding: bool,
+    quit_after_audio_cancel: bool,
     audio_polling: bool,
     audio_progress: Option<client::AudioStats>,
     audio_result: Option<Vec<u8>>,
@@ -406,7 +412,12 @@ impl App {
             screenshot_busy: false,
             audio_rate: 16000,
             audio_seconds: 5,
+            audio_generation: 0,
             audio_recording: false,
+            audio_starting: false,
+            audio_cancel_after_start: false,
+            audio_discarding: false,
+            quit_after_audio_cancel: false,
             audio_polling: false,
             audio_progress: None,
             audio_result: None,
@@ -502,6 +513,33 @@ impl App {
         (app, task)
     }
 
+    /// Stop an in-flight XGGF recording when its controls leave the screen. If the start request
+    /// itself is still in flight, defer the discard until its response so the device cannot receive
+    /// a start after an earlier discard.
+    fn cancel_audio_capture(&mut self) -> Task<Message> {
+        if self.audio_discarding || self.audio_cancel_after_start {
+            return Task::none();
+        }
+        if !self.audio_recording && !self.audio_starting {
+            return Task::none();
+        }
+        let was_starting = self.audio_starting;
+        self.audio_generation = self.audio_generation.wrapping_add(1);
+        let generation = self.audio_generation;
+        self.audio_recording = false;
+        self.audio_starting = false;
+        self.audio_polling = false;
+        self.audio_progress = None;
+        self.audio_result = None;
+        if was_starting {
+            self.audio_cancel_after_start = true;
+            Task::none()
+        } else {
+            self.audio_discarding = true;
+            Task::perform(client::discard_audio(), move |result| Message::AudioDiscarded(generation, result))
+        }
+    }
+
     fn title(&self, _window: window::Id) -> String {
         "VibeBuddy".to_owned()
     }
@@ -526,8 +564,9 @@ impl App {
             Subscription::none()
         };
         // The XGGF recorder follows its recording twice a second while it runs.
+        let audio_generation = self.audio_generation;
         let audio = if self.settings.is_some() && self.audio_recording {
-            iced::time::every(Duration::from_millis(500)).map(|_| Message::PollAudio)
+            iced::time::every(Duration::from_millis(500)).map(move |_| Message::PollAudio(audio_generation))
         } else {
             Subscription::none()
         };
@@ -669,28 +708,32 @@ impl App {
             Message::WindowClosed(id) => {
                 if self.settings == Some(id) {
                     self.settings = None;
+                    let cancel_audio = self.cancel_audio_capture();
                     if let Some((_, stop)) = self.previewing.take() {
                         stop.notify_one();
                     }
                     self.notice = None;
+                    return cancel_audio;
                 }
             }
             Message::Guide(page) => self.guide = page,
             Message::Tab(tab) => {
+                let cancel_audio = if tab != Tab::Device { self.cancel_audio_capture() } else { Task::none() };
                 self.tab = tab;
                 // Agents can be installed or set up behind the app's back; look again whenever the tab opens.
                 if tab == Tab::Agents {
-                    return Task::done(Message::RefreshAgents);
+                    return Task::batch([cancel_audio, Task::done(Message::RefreshAgents)]);
                 }
                 // The conversation goes on on the box while the window is elsewhere: read it each time the tab opens.
                 if tab == Tab::Conversation {
                     self.conversation_seen = None;
-                    return Task::done(Message::PollConversation);
+                    return Task::batch([cancel_audio, Task::done(Message::PollConversation)]);
                 }
                 // Reading the day's use costs a request to the service, so only when the tab opens; the status brings it.
                 if tab == Tab::Account && self.status.as_ref().is_some_and(|status| status.account.signed_in) {
-                    return Task::perform(client::refresh_account(), |_| Message::AccountDone(Ok(())));
+                    return Task::batch([cancel_audio, Task::perform(client::refresh_account(), |_| Message::AccountDone(Ok(())))]);
                 }
+                return cancel_audio;
             }
             Message::Resident(Ok(enabled)) => {
                 self.resident = enabled;
@@ -866,25 +909,52 @@ impl App {
             Message::AudioRate(rate) => self.audio_rate = rate,
             Message::AudioSeconds(seconds) => self.audio_seconds = seconds,
             Message::StartRecording => {
+                if self.audio_starting || self.audio_recording || self.audio_cancel_after_start || self.audio_discarding {
+                    return Task::none();
+                }
+                self.audio_generation = self.audio_generation.wrapping_add(1);
+                let generation = self.audio_generation;
+                self.audio_starting = true;
                 self.audio_note = None;
                 self.audio_result = None;
                 self.audio_progress = None;
                 let (rate, duration_ms) = (self.audio_rate, self.audio_seconds * 1000);
-                return Task::perform(client::start_audio(rate, duration_ms), Message::RecordingStarted);
+                return Task::perform(client::start_audio(rate, duration_ms), move |result| Message::RecordingStarted(generation, result));
             }
-            Message::RecordingStarted(Ok(())) => {
-                self.audio_recording = true;
-                return Task::done(Message::PollAudio);
-            }
-            Message::RecordingStarted(Err(reason)) => self.audio_note = Some(reason),
-            Message::StopRecording => return Task::perform(client::stop_audio(), |_| Message::PollAudio),
-            Message::PollAudio => {
-                if self.audio_recording && !self.audio_polling {
-                    self.audio_polling = true;
-                    return Task::perform(client::audio(), Message::AudioPolled);
+            Message::RecordingStarted(generation, result) => {
+                if generation != self.audio_generation {
+                    if self.audio_cancel_after_start {
+                        self.audio_cancel_after_start = false;
+                        if result.is_ok() {
+                            let current = self.audio_generation;
+                            self.audio_discarding = true;
+                            return Task::perform(client::discard_audio(), move |result| Message::AudioDiscarded(current, result));
+                        }
+                        if self.quit_after_audio_cancel { return iced::exit(); }
+                    }
+                    return Task::none();
+                }
+                self.audio_starting = false;
+                match result {
+                    Ok(()) => {
+                        self.audio_recording = true;
+                        return Task::done(Message::PollAudio(generation));
+                    }
+                    Err(reason) => self.audio_note = Some(reason),
                 }
             }
-            Message::AudioPolled(result) => {
+            Message::StopRecording => {
+                let generation = self.audio_generation;
+                return Task::perform(client::stop_audio(), move |_| Message::PollAudio(generation));
+            }
+            Message::PollAudio(generation) => {
+                if generation == self.audio_generation && self.audio_recording && !self.audio_polling {
+                    self.audio_polling = true;
+                    return Task::perform(client::audio(), move |result| Message::AudioPolled(generation, result));
+                }
+            }
+            Message::AudioPolled(generation, result) => {
+                if generation != self.audio_generation { return Task::none(); }
                 self.audio_polling = false;
                 match result {
                     Ok(client::Audio::Done(wav)) => {
@@ -928,13 +998,23 @@ impl App {
                 if let Some(mut playing) = self.audio_playing.take() {
                     let _ = playing.kill();
                 }
+                self.audio_generation = self.audio_generation.wrapping_add(1);
+                let generation = self.audio_generation;
+                self.audio_recording = false;
+                self.audio_starting = false;
+                self.audio_polling = false;
                 self.audio_result = None;
                 self.audio_progress = None;
                 self.audio_note = None;
-                return Task::perform(client::discard_audio(), Message::AudioDiscarded);
+                self.audio_discarding = true;
+                return Task::perform(client::discard_audio(), move |result| Message::AudioDiscarded(generation, result));
             }
-            Message::AudioDiscarded(Ok(())) => {}
-            Message::AudioDiscarded(Err(error)) => self.audio_note = Some(error),
+            Message::AudioDiscarded(generation, result) => {
+                if generation != self.audio_generation { return Task::none(); }
+                self.audio_discarding = false;
+                if let Err(error) = result { self.audio_note = Some(error); }
+                if self.quit_after_audio_cancel { return iced::exit(); }
+            }
             Message::TakeOver => return Task::perform(client::take_over(), Message::Done),
             Message::WifiSsid(ssid) => self.wifi_ssid = ssid,
             Message::WifiPassword(password) => self.wifi_password = password,
@@ -1327,7 +1407,17 @@ impl App {
                     self.notice = Some(Err(error));
                 }
             }
-            Message::Quit => return iced::exit(),
+            Message::Quit => {
+                if self.audio_recording || self.audio_starting {
+                    self.quit_after_audio_cancel = true;
+                    return self.cancel_audio_capture();
+                }
+                if self.audio_cancel_after_start || self.audio_discarding {
+                    self.quit_after_audio_cancel = true;
+                    return Task::none();
+                }
+                return iced::exit();
+            }
             // The korekore sections are the tabs, so what a tab does on opening happens here too.
             Message::Korekore(section) => return Task::done(Message::Tab(section.tab())),
         }
@@ -2481,7 +2571,13 @@ impl App {
                     ]
                     .spacing(12),
                 )
-                .push(row![button(text(tr("Record", &[]))).on_press(Message::StartRecording)].spacing(8));
+                .push(
+                    row![button(text(tr("Record", &[]))).on_press_maybe(
+                        (!self.audio_starting && !self.audio_cancel_after_start && !self.audio_discarding)
+                            .then_some(Message::StartRecording),
+                    )]
+                    .spacing(8),
+                );
         }
         if self.audio_result.is_some() {
             section = section.push(
