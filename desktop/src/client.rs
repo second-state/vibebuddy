@@ -503,6 +503,66 @@ async fn accepted(request: reqwest::RequestBuilder) -> Result<(), String> {
         .unwrap_or_else(|_| format!("the daemon answered {status}")))
 }
 
+/// One recording's progress as the daemon reports it (`GET /v1/device/audio/stats`); the daemon
+/// sends more, and only what the recorder shows is kept.
+#[derive(Clone, Debug, Default, Deserialize)]
+pub struct AudioStats {
+    pub frames: u32,
+    #[serde(default)]
+    pub lost_frames: u32,
+}
+
+/// What an audio poll found: a recording under way, its completed WAV, or why there is none.
+#[derive(Clone, Debug)]
+pub enum Audio {
+    Recording(AudioStats),
+    Done(Vec<u8>),
+    /// The daemon's reason, such as "device disconnected during recording" or "no completed recording".
+    Ended(String),
+}
+
+/// Starts an XGGF recording; the daemon refuses with its reason when this computer hasn't granted audio.
+pub async fn start_audio(sample_rate: u32, duration_ms: u32) -> Result<(), String> {
+    accepted(reqwest::Client::new()
+        .post(format!("{BASE}/v1/device/audio/start"))
+        .json(&serde_json::json!({"sample_rate": sample_rate, "duration_ms": duration_ms}))).await
+}
+
+/// Stops the recording early; the last partial seconds still arrive.
+pub async fn stop_audio() -> Result<(), String> {
+    accepted(reqwest::Client::new().post(format!("{BASE}/v1/device/audio/stop"))).await
+}
+
+/// Throws the recording and any buffered audio away.
+pub async fn discard_audio() -> Result<(), String> {
+    accepted(reqwest::Client::new().delete(format!("{BASE}/v1/device/audio"))).await
+}
+
+/// The recording's progress, its completed WAV, or the reason it ended without one.
+pub async fn audio() -> Result<Audio, String> {
+    let client = reqwest::Client::new();
+    let recording = client.get(format!("{BASE}/v1/device/audio")).timeout(Duration::from_secs(10)).send().await
+        .map_err(|error| error.to_string())?;
+    if recording.status().is_success() {
+        return Ok(Audio::Done(recording.bytes().await.map_err(|error| error.to_string())?.to_vec()));
+    }
+    let stats = client.get(format!("{BASE}/v1/device/audio/stats")).timeout(Duration::from_secs(10)).send().await
+        .map_err(|error| error.to_string())?;
+    let status = stats.status();
+    let body = stats.text().await.unwrap_or_default();
+    if status.is_success() {
+        return serde_json::from_str(&body)
+            .map(Audio::Recording)
+            .map_err(|_| "the daemon's audio statistics didn't parse".to_owned());
+    }
+    if let Some(message) = serde_json::from_str::<serde_json::Value>(&body).ok()
+        .and_then(|value| value["message"].as_str().map(str::to_owned))
+    {
+        return Ok(Audio::Ended(message));
+    }
+    Err(format!("the daemon answered {status}"))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

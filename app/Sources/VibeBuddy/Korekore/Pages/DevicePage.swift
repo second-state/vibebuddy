@@ -122,6 +122,24 @@ struct KorekoreDevicePage: View {
                 }
             }
         }
+        // The XGGF recorder in the korekore look, offered only when this computer granted audio.
+        if connected, device?.unsupportedBoard == "xggf-64x8" {
+            if device?.audioCapture == true {
+                KCard {
+                    VStack(alignment: .leading, spacing: 8) {
+                        HStack(spacing: 10) {
+                            KoreBadge()
+                            Text("Record from this device").font(.rounded(15))
+                        }
+                        AudioRecorder(model: model)
+                    }
+                }
+            } else {
+                KCard {
+                    KNote(String(localized: "This device can record speech once this computer allows it (VIBEBUDDY_XGGF_AUDIO=1)."))
+                }
+            }
+        }
     }
 
     // MARK: The screen and the box

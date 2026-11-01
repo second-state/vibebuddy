@@ -78,6 +78,9 @@ pub struct DeviceState {
     /// Connected, but running other firmware (a factory unit, or Muse on a box that runs it): it's there, not
     /// offline, and the daemon writes it nothing until it resets and reports our build.
     pub foreign_firmware: bool,
+    /// The daemon lets the apps record on this XGGF: the computer granted audio (opt-in or probe
+    /// token) and the attached board is the experimental display. Set by the daemon, not the device.
+    pub audio_capture: bool,
     /// Our firmware built for hardware that released firmware doesn't run on. Released firmware is never offered
     /// to it: on 2026-10-08 the update offer flashed the breadboard devkit with box firmware, and its screen,
     /// speaker and buttons all failed to start.
@@ -526,6 +529,7 @@ mod tests {
                 box_relay: None,
                 wifi_seen: Vec::new(),
                 foreign_firmware: false,
+                audio_capture: false,
                 unsupported_board: None,
                 pin: None,
                 candidates: Vec::new(),

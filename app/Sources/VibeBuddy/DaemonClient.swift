@@ -96,6 +96,52 @@ struct DaemonClient {
         guard code == 202 else { throw DaemonError(message: DaemonClient.message(in: data) ?? String(localized: "Forgetting Wi-Fi was rejected (\(code))")) }
     }
 
+    // MARK: XGGF recording
+
+    /// What one look at the recorder found: a recording under way, its finished WAV, or why there is none.
+    enum AudioPoll {
+        case recording(frames: Int, lost: Int)
+        case done(Data)
+        case ended(String?)
+    }
+
+    /// Starts a bounded recording on the XGGF; the daemon's refusal (audio not granted, wrong board) becomes the error.
+    func startAudio(sampleRate: Int, durationMs: Int) async throws {
+        let body = try JSONSerialization.data(withJSONObject: ["sample_rate": sampleRate, "duration_ms": durationMs])
+        let (code, data) = try await post("/v1/device/audio/start", body: body, contentType: "application/json")
+        guard code == 202 else { throw DaemonError(message: DaemonClient.message(in: data) ?? String(localized: "Starting the recording was rejected (\(code))")) }
+    }
+
+    /// Stops early; the seconds already spoken still arrive.
+    func stopAudio() async throws {
+        let (code, data) = try await post("/v1/device/audio/stop", body: Data(), contentType: "application/json")
+        guard code == 202 else { throw DaemonError(message: DaemonClient.message(in: data) ?? String(localized: "Stopping the recording was rejected (\(code))")) }
+    }
+
+    /// Throws the recording and its buffered audio away.
+    func discardAudio() async throws {
+        let (data, response) = try await URLSession.shared.data(for: request("/v1/device/audio", method: "DELETE"))
+        guard (response as? HTTPURLResponse)?.statusCode == 202 else {
+            throw DaemonError(message: DaemonClient.message(in: data) ?? String(localized: "Discarding the recording was rejected"))
+        }
+    }
+
+    /// The recording's progress, its completed WAV, or the reason it ended without one; a nil reason
+    /// just means nothing is armed.
+    func pollAudio() async throws -> AudioPoll {
+        let (data, response) = try await URLSession.shared.data(for: request("/v1/device/audio"))
+        if (response as? HTTPURLResponse)?.statusCode == 200 {
+            return .done(data)
+        }
+        let (stats, statsResponse) = try await URLSession.shared.data(for: request("/v1/device/audio/stats"))
+        if (statsResponse as? HTTPURLResponse)?.statusCode == 200,
+           let object = try? JSONSerialization.jsonObject(with: stats) as? [String: Any]
+        {
+            return .recording(frames: object["frames"] as? Int ?? 0, lost: object["lost_frames"] as? Int ?? 0)
+        }
+        return .ended(DaemonClient.message(in: stats))
+    }
+
     /// `lender` (the Character lending a custom one its voice, persona and lines) and `address` (the form of
     /// address its lines carry) aren't in the pack; the daemon keeps them for the buddy's spoken replies.
     func writeVoicePack(_ pack: Data, lender: String? = nil, address: String? = nil) async throws {

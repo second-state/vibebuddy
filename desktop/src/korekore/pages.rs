@@ -52,7 +52,7 @@ impl crate::App {
 
     fn kk_character(&self) -> Element<'_, Message> {
         if self.status.as_ref().and_then(|s| s.device.unsupported_board.as_deref()) == Some("xggf-64x8") {
-            return text(tr("This experimental device supports USB and Wi-Fi status. Voice, Characters, Relay, timers, and device buttons are not yet supported.", &[])).into();
+            return text(tr("This experimental device shows Agent status over USB and Wi-Fi, with working buttons, and its Device page records speech. Voice commands, Characters, Relay, timers, and the stock clock are not yet supported.", &[])).into();
         }
         if let Some(form) = &self.make {
             return self.kk_make_form(form);
@@ -742,6 +742,53 @@ impl crate::App {
             finding = finding.push(card(
                 column![heading(tr("This is a %@ board.", &[board])), note(tr("Released firmware doesn't run on it, so no update is offered.", &[]))].spacing(8),
             ));
+        }
+        // The XGGF recorder in the korekore look, sharing the standard page's state and messages.
+        if device.filter(|_| online).and_then(|device| device.unsupported_board.as_deref()) == Some("xggf-64x8") {
+            if device.is_some_and(|device| device.audio_capture) {
+                let mut recorder = column![heading(tr("Record from this device", &[]))];
+                if self.audio_recording {
+                    let expected = self.audio_rate as u64 / 50 * self.audio_seconds as u64;
+                    let progress = self.audio_progress.as_ref().map_or_else(
+                        || tr("Starting…", &[]),
+                        |stats| tr("%lld of %lld frames", &[&stats.frames, &expected]),
+                    );
+                    recorder = recorder
+                        .push(note(progress))
+                        .push(pill(tr("Stop", &[]), Fill::Paper, Some(Message::StopRecording)));
+                } else {
+                    recorder = recorder
+                        .push(
+                            row![
+                                pill("8 kHz".to_owned(), Fill::Paper, (self.audio_rate != 8000).then_some(Message::AudioRate(8000))),
+                                pill("16 kHz".to_owned(), Fill::Paper, (self.audio_rate != 16000).then_some(Message::AudioRate(16000))),
+                                note(tr("Length: %lld s", &[&self.audio_seconds])),
+                                iced::widget::slider(1..=60, self.audio_seconds, Message::AudioSeconds).step(1u32),
+                            ]
+                            .spacing(8)
+                            .align_y(Alignment::Center),
+                        )
+                        .push(pill(tr("Record", &[]), Fill::Sun, Some(Message::StartRecording)));
+                }
+                if self.audio_result.is_some() {
+                    recorder = recorder.push(
+                        row![
+                            pill(tr("Play", &[]), Fill::Paper, Some(Message::PlayRecording)),
+                            pill(tr("Save…", &[]), Fill::Paper, (!self.audio_saving).then_some(Message::SaveRecording)),
+                            pill(tr("Discard", &[]), Fill::Pink, Some(Message::DiscardRecording)),
+                        ]
+                        .spacing(8),
+                    );
+                }
+                if let Some(note_text) = &self.audio_note {
+                    recorder = recorder.push(tag(note_text, theme::KORE_PINK_TEXT));
+                }
+                finding = finding.push(card(recorder.spacing(8)));
+            } else {
+                finding = finding.push(card(
+                    column![note(tr("This device can record speech once this computer allows it (VIBEBUDDY_XGGF_AUDIO=1).", &[]))].spacing(8),
+                ));
+            }
         }
 
         finding

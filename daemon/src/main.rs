@@ -115,6 +115,8 @@ struct AppState {
     voice: Arc<voice::Voice>,
     /// Temporary, token-gated XGGF audio capture probe; samples stay in memory.
     audio: Arc<Mutex<audio::AudioIngestor>>,
+    /// Whether and how the XGGF audio endpoints accept requests; see [`AudioGate`].
+    audio_gate: AudioGate,
     /// The box on the cable said `LINK NOISE` since its last `BOX KEY` (ADR-0015).
     noise_seen: Arc<std::sync::atomic::AtomicBool>,
     /// What the App said about the Character pack it last wrote (who lends a custom one, the form of address),
@@ -165,6 +167,7 @@ impl AppState {
             resident: None,
             voice: Arc::new(voice::Voice::new(None, None)),
             audio: Arc::default(),
+            audio_gate: audio_gate_from_env(),
             noise_seen: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             written: Arc::default(),
             making: Arc::new(making::Maker::new(None, None, account.clone(), voice_keys.clone())),
@@ -184,6 +187,9 @@ impl AppState {
     async fn snapshot(&self) -> Status {
         let mut device = self.device.lock().await.clone();
         device.relay_refused = self.relay.as_ref().and_then(relay::RelayConfig::refused);
+        // Recording is offered only when the computer granted it and the attached device is the XGGF.
+        device.audio_capture =
+            self.audio_gate != AudioGate::Off && device.unsupported_board.as_deref() == Some("xggf-64x8");
         let updates = self.updates.lock().await.status(&device, self.update_checks_enabled().await);
         let (today, activities) = {
             let tracker = self.activities.lock().await;
@@ -360,6 +366,11 @@ async fn main() {
     // On macOS the app reports a lost link; elsewhere there is no app, so the daemon does it.
     if !cfg!(target_os = "macos") {
         tokio::spawn(link_alert::watch(state.clone()));
+    }
+    match &state.audio_gate {
+        AudioGate::OptIn => info!("XGGF audio capture is on for the apps on this computer (VIBEBUDDY_XGGF_AUDIO=1)"),
+        AudioGate::Token(_) => info!("XGGF audio capture is on for the probe token"),
+        AudioGate::Off => {}
     }
     let app = app(state);
     let listener = tokio::net::TcpListener::bind(bind_address)
@@ -825,11 +836,35 @@ struct AudioStartRequest {
     duration_ms: u32,
 }
 
-fn audio_authorized(headers: &HeaderMap) -> bool {
-    let Ok(token) = env::var("VIBEBUDDY_AUDIO_PROBE_TOKEN") else { return false };
-    !token.is_empty()
-        && headers.get(axum::http::header::AUTHORIZATION).and_then(|value| value.to_str().ok())
-            == Some(&format!("Bearer {token}"))
+fn audio_authorized(gate: &AudioGate, headers: &HeaderMap) -> bool {
+    match gate {
+        AudioGate::Off => false,
+        AudioGate::OptIn => true,
+        AudioGate::Token(token) => {
+            headers.get(axum::http::header::AUTHORIZATION).and_then(|value| value.to_str().ok())
+                == Some(&format!("Bearer {token}"))
+        }
+    }
+}
+
+/// How recordings may be started on the XGGF: never, by this computer's explicit opt-in, or only
+/// with the probe token. Default off: recording is a capability the computer grants on purpose.
+#[derive(Clone, Debug, PartialEq, Eq)]
+enum AudioGate {
+    Off,
+    OptIn,
+    Token(String),
+}
+
+fn audio_gate_from_env() -> AudioGate {
+    if env::var("VIBEBUDDY_XGGF_AUDIO").ok().as_deref() == Some("1") {
+        return AudioGate::OptIn;
+    }
+    env::var("VIBEBUDDY_AUDIO_PROBE_TOKEN")
+        .ok()
+        .filter(|token| !token.is_empty())
+        .map(AudioGate::Token)
+        .unwrap_or(AudioGate::Off)
 }
 
 fn audio_refusal(code: StatusCode, message: &str) -> (StatusCode, Json<ApiResponse>) {
@@ -841,7 +876,7 @@ async fn post_audio_start(
     headers: HeaderMap,
     Json(request): Json<AudioStartRequest>,
 ) -> (StatusCode, Json<ApiResponse>) {
-    if !audio_authorized(&headers) {
+    if !audio_authorized(&state.audio_gate, &headers) {
         return audio_refusal(StatusCode::UNAUTHORIZED, "audio probe authorization required");
     }
     if state.device.lock().await.unsupported_board.as_deref() != Some("xggf-64x8") {
@@ -858,7 +893,7 @@ async fn post_audio_start(
 }
 
 async fn post_audio_stop(State(state): State<AppState>, headers: HeaderMap) -> (StatusCode, Json<ApiResponse>) {
-    if !audio_authorized(&headers) {
+    if !audio_authorized(&state.audio_gate, &headers) {
         return audio_refusal(StatusCode::UNAUTHORIZED, "audio probe authorization required");
     }
     state.audio.lock().await.stop();
@@ -867,7 +902,7 @@ async fn post_audio_stop(State(state): State<AppState>, headers: HeaderMap) -> (
 }
 
 async fn delete_audio(State(state): State<AppState>, headers: HeaderMap) -> (StatusCode, Json<ApiResponse>) {
-    if !audio_authorized(&headers) {
+    if !audio_authorized(&state.audio_gate, &headers) {
         return audio_refusal(StatusCode::UNAUTHORIZED, "audio probe authorization required");
     }
     state.audio.lock().await.cancel();
@@ -877,18 +912,18 @@ async fn delete_audio(State(state): State<AppState>, headers: HeaderMap) -> (Sta
 
 async fn get_audio(State(state): State<AppState>, headers: HeaderMap) -> axum::response::Response {
     use axum::response::IntoResponse;
-    if !audio_authorized(&headers) {
+    if !audio_authorized(&state.audio_gate, &headers) {
         return (StatusCode::UNAUTHORIZED, "audio probe authorization required").into_response();
     }
-    match state.audio.lock().await.take_wav() {
-        Some(wav) => ([(axum::http::header::CONTENT_TYPE, "audio/wav")], wav).into_response(),
+    match state.audio.lock().await.peek_wav() {
+        Some(wav) => ([(axum::http::header::CONTENT_TYPE, "audio/wav")], wav.to_vec()).into_response(),
         None => (StatusCode::CONFLICT, "no completed recording").into_response(),
     }
 }
 
 async fn get_audio_stats(State(state): State<AppState>, headers: HeaderMap) -> axum::response::Response {
     use axum::response::IntoResponse;
-    if !audio_authorized(&headers) {
+    if !audio_authorized(&state.audio_gate, &headers) {
         return (StatusCode::UNAUTHORIZED, "audio probe authorization required").into_response();
     }
     let mut audio = state.audio.lock().await;
@@ -2204,6 +2239,51 @@ mod tests {
         assert!(page.0.contains("Not signed in"));
         assert_eq!(callback(None, None).await.0, StatusCode::BAD_REQUEST);
         assert!(!state.snapshot().await.account.signed_in);
+    }
+
+    #[tokio::test]
+    async fn xggf_recordings_follow_the_gate_and_the_wav_stays_until_discarded() {
+        let transport = Arc::new(RecordingTransport::default());
+        let mut state = test_state(transport);
+        publish_device_message(&state, DeviceMessage::Connected { port: "/dev/test".into(), bridge: false, usb_serial: None }).await;
+        publish_device_message(&state, DeviceMessage::Line("BOARD xggf-64x8".into())).await;
+        publish_device_message(&state, DeviceMessage::Line("DISPLAY READY BUILD test".into())).await;
+        assert!(!state.snapshot().await.device.audio_capture);
+
+        let request = || Json(AudioStartRequest { sample_rate: 16000, duration_ms: 20 });
+        // Default off, and the wrong bearer token with a token gate, both refuse.
+        let (code, _) = post_audio_start(State(state.clone()), HeaderMap::new(), request()).await;
+        assert_eq!(code, StatusCode::UNAUTHORIZED);
+        state.audio_gate = AudioGate::Token("probe".to_owned());
+        let mut wrong = HeaderMap::new();
+        wrong.insert(axum::http::header::AUTHORIZATION, "Bearer nope".parse().unwrap());
+        let (code, _) = post_audio_start(State(state.clone()), wrong, request()).await;
+        assert_eq!(code, StatusCode::UNAUTHORIZED);
+        let mut right = HeaderMap::new();
+        right.insert(axum::http::header::AUTHORIZATION, "Bearer probe".parse().unwrap());
+        let (code, _) = post_audio_start(State(state.clone()), right, request()).await;
+        assert_eq!(code, StatusCode::ACCEPTED);
+
+        // The opt-in answers without any header, and the status offers the recorder.
+        state.audio.lock().await.cancel();
+        state.audio_gate = AudioGate::OptIn;
+        assert!(state.snapshot().await.device.audio_capture);
+        let (code, _) = post_audio_start(State(state.clone()), HeaderMap::new(), request()).await;
+        assert_eq!(code, StatusCode::ACCEPTED);
+        publish_device_message(&state, DeviceMessage::Line("AUDIO BEGIN rate=16000 samples=320".into())).await;
+        publish_device_message(&state, DeviceMessage::Line("AUDIO FRAME 0 640 1 ".to_owned() + &"A".repeat(852) + "AA==")).await;
+        publish_device_message(&state, DeviceMessage::Line("AUDIO END 1 0 640".into())).await;
+        let first = get_audio(State(state.clone()), HeaderMap::new()).await;
+        let (parts, body) = first.into_parts();
+        let bytes = axum::body::to_bytes(body, usize::MAX).await.unwrap();
+        eprintln!("first GET: {} {:?}", parts.status, String::from_utf8_lossy(&bytes[..bytes.len().min(120)]));
+        assert_eq!(parts.status, StatusCode::OK);
+        let second = get_audio(State(state.clone()), HeaderMap::new()).await;
+        assert_eq!(second.status(), StatusCode::OK);
+        let (code, _) = delete_audio(State(state.clone()), HeaderMap::new()).await;
+        assert_eq!(code, StatusCode::ACCEPTED);
+        let discarded = get_audio(State(state.clone()), HeaderMap::new()).await;
+        assert_eq!(discarded.status(), StatusCode::CONFLICT);
     }
 
     #[tokio::test(start_paused = true)]

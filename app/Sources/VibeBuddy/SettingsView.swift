@@ -166,7 +166,7 @@ struct VoicesView: View {
 
     var body: some View {
         if model.status?.device.unsupportedBoard == "xggf-64x8" {
-            Text("This experimental device supports USB and Wi-Fi status. Voice, Characters, Relay, timers, and device buttons are not yet supported.")
+            Text("This experimental device shows Agent status over USB and Wi-Fi, with working buttons, and its Device page records speech. Voice commands, Characters, Relay, timers, and the stock clock are not yet supported.")
                 .padding()
         } else {
         VStack(alignment: .leading, spacing: 12) {
@@ -632,6 +632,19 @@ struct DeviceView: View {
             if connected, let device = model.status?.device, device.boxKey != nil {
                 WifiSection(model: model, device: device)
                 PairedComputersSection(model: model, device: device)
+            }
+            // The XGGF recorder, offered only when the daemon says this computer granted audio.
+            if connected, model.status?.device.unsupportedBoard == "xggf-64x8" {
+                if model.status?.device.audioCapture == true {
+                    Section("Record from this device") {
+                        AudioRecorder(model: model)
+                    }
+                } else {
+                    Section {
+                        Text("This device can record speech once this computer allows it (VIBEBUDDY_XGGF_AUDIO=1).")
+                            .font(.caption).foregroundStyle(.secondary)
+                    }
+                }
             }
             Section {
                 ZStack {

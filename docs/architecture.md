@@ -12,6 +12,7 @@ VibeBuddy turns status events from local programs into pictures and sounds on a 
 - Validates and encodes VibeBuddy Protocol messages.
 - Manages device discovery, the serial connection, reconnection after a drop, and device state.
 - Routes button events reported by the device back to local consumers.
+- Serves the experimental XGGF speech recorder: opt-in (`VIBEBUDDY_XGGF_AUDIO=1`), bounded in-memory recordings from the device's microphone over USB or encrypted Wi-Fi, with the WAV kept only until the next recording starts.
 - Aggregates sessions from all agents into at most 3 task cards, "newest on top"; activities that need user input take priority in driving the pet's global state.
 - Periodically clears activities that have gone a long time without events, so a session that exited abnormally can't hold a task card forever.
 

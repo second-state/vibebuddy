@@ -128,11 +128,10 @@ impl AudioIngestor {
         }
     }
 
-    pub fn take_wav(&mut self) -> Option<Vec<u8>> {
-        let completed = self.completed.take()?;
-        self.last_error = None;
-        self.last_stats = Some(completed.stats);
-        Some(completed.wav)
+    /// The completed WAV without consuming it, so a client can play it and then save it; the next
+    /// arm, a cancellation, or a disconnect drops it.
+    pub fn peek_wav(&self) -> Option<&[u8]> {
+        self.completed.as_ref().map(|completed| completed.wav.as_slice())
     }
 
     pub fn process_line(&mut self, line: &str) -> Result<bool, String> {
@@ -337,7 +336,7 @@ mod tests {
         assert_eq!(audio.process_line(line).unwrap_err(), expected);
         assert_eq!(audio.error().as_deref(), Some(expected));
         assert!(audio.stats().is_none());
-        assert!(audio.take_wav().is_none());
+        assert!(audio.peek_wav().is_none());
     }
 
     #[test]
@@ -351,14 +350,17 @@ mod tests {
         audio.process_line("AUDIO END 1 0").unwrap();
         let stats = audio.stats().unwrap();
         assert_eq!((stats.frames, stats.pcm_bytes, stats.duration_ms), (1, 320, 20));
-        let wav = audio.take_wav().unwrap();
+        let wav = audio.peek_wav().unwrap().to_vec();
         assert_eq!(&wav[..4], b"RIFF");
         assert_eq!(u32::from_le_bytes(wav[24..28].try_into().unwrap()), 8000);
         assert_eq!(u32::from_le_bytes(wav[28..32].try_into().unwrap()), 16000);
         assert_eq!(&wav[44..], pcm);
-        assert!(audio.take_wav().is_none());
+        // The WAV stays readable until the next arm or a discard, so a client can play and then save.
+        assert_eq!(audio.peek_wav().unwrap(), wav.as_slice());
         assert_eq!(audio.stats().unwrap().pcm_bytes, 320);
         assert_eq!(audio.error(), None);
+        audio.arm(8000, 20).unwrap();
+        assert!(audio.peek_wav().is_none());
     }
 
     #[test]
@@ -376,7 +378,7 @@ mod tests {
         let stats = audio.stats().unwrap();
         assert_eq!((stats.frames, stats.lost_frames, stats.duplicate_frames, stats.reordered_frames), (1, 1, 1, 1));
         assert_eq!((stats.discontinuities, stats.device_overruns, stats.pcm_bytes), (1, 3, 1280));
-        let wav = audio.take_wav().unwrap();
+        let wav = audio.peek_wav().unwrap().to_vec();
         assert_eq!(&wav[44..684], vec![0; 640]);
         assert_eq!(&wav[684..], samples);
     }
@@ -425,7 +427,7 @@ mod tests {
         audio.process_line("AUDIO END 2 0").unwrap();
         let stats = audio.stats().unwrap();
         assert_eq!((stats.timing_trim_frames, stats.lost_frames, stats.pcm_bytes, stats.duration_ms), (1, 0, 320, 20));
-        assert_eq!(&audio.take_wav().unwrap()[44..], vec![1; 320]);
+        assert_eq!(&audio.peek_wav().unwrap()[44..], vec![1; 320]);
     }
 
     #[test]
@@ -436,7 +438,7 @@ mod tests {
         let expected = "recording duration differs too much from the armed duration";
         assert_eq!(audio.process_line("AUDIO END 0 0").unwrap_err(), expected);
         assert_eq!(audio.error().as_deref(), Some(expected));
-        assert!(audio.take_wav().is_none());
+        assert!(audio.peek_wav().is_none());
         audio.arm(8000, 1000).unwrap();
         audio.process_line("AUDIO BEGIN rate=8000 samples=160").unwrap();
         audio.stop();
@@ -444,7 +446,7 @@ mod tests {
         let stats = audio.stats().unwrap();
         assert_eq!((stats.pcm_bytes, stats.duration_ms, stats.timing_padding_frames), (0, 0, 0));
         assert_eq!(audio.error(), None);
-        assert_eq!(audio.take_wav().unwrap().len(), 44);
+        assert_eq!(audio.peek_wav().unwrap().len(), 44);
     }
 
     #[test]
@@ -455,7 +457,7 @@ mod tests {
         audio.process_line(&frame(0, 0, &vec![0; 320])).unwrap();
         audio.cancel();
         assert!(audio.stats().is_none());
-        assert!(audio.take_wav().is_none());
+        assert!(audio.peek_wav().is_none());
         assert_eq!(audio.error(), None);
     }
 
@@ -468,7 +470,7 @@ mod tests {
         audio.disconnected();
         assert_eq!(audio.error().as_deref(), Some("device disconnected during recording"));
         assert!(audio.stats().is_none());
-        assert!(audio.take_wav().is_none());
+        assert!(audio.peek_wav().is_none());
         assert!(audio.process_line("AUDIO END 1 0").unwrap());
         assert_eq!(audio.error().as_deref(), Some("device disconnected during recording"));
         audio.arm(8000, 20).unwrap();
@@ -477,7 +479,7 @@ mod tests {
         audio.process_line("AUDIO BEGIN rate=8000 samples=160").unwrap();
         audio.stop();
         audio.process_line("AUDIO END 0 0").unwrap();
-        assert_eq!(audio.take_wav().unwrap().len(), 44);
+        assert_eq!(audio.peek_wav().unwrap().len(), 44);
     }
 
     #[test]
@@ -491,7 +493,7 @@ mod tests {
             Some(Instant::now() - Duration::from_secs(11));
         assert!(audio.stats().is_none());
         assert_eq!(audio.error().as_deref(), Some("device stopped sending the recording"));
-        assert!(audio.take_wav().is_none());
+        assert!(audio.peek_wav().is_none());
         // A session armed but never begun expires the same way, from its arm time.
         audio.arm(8000, 2000).unwrap();
         audio.session.as_mut().unwrap().armed = Instant::now() - Duration::from_secs(11);
@@ -500,3 +502,4 @@ mod tests {
         assert!(audio.arm(8000, 20).is_ok());
     }
 }
+

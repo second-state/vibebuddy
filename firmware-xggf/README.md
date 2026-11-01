@@ -2,6 +2,10 @@
 
 This is experimental ESP32-C3 VibeBuddy firmware for the XGGF PixelClock. It displays Agent status over USB or a paired, encrypted local Wi-Fi link, provides an identify animation and short tone, and cycles through offline status, RTC time, temperature and humidity while the link is down. A `device.mic` command opens a ten-second sound-reactive buddy and ten-bar level display; Agent events take priority and only another explicit microphone command restarts the visualizer after preemption. It does not provide speech recognition or voice support. Other stock features remain under investigation. Sensor readings are used as reported without calibration. Do not use the normal box firmware installer on this device.
 
+## Speech recording
+
+The microphone also records speech on request: the daemon arms a bounded recording (`POST /v1/device/audio/start`), the firmware streams numbered 20 ms base64 frames over USB and the encrypted Wi-Fi link, and the daemon rebuilds the WAV in memory. From the apps' Device page this needs `VIBEBUDDY_XGGF_AUDIO=1` on this computer (record, play and save); the token-gated endpoints stay for the probe. The protocol, measurements and failure analysis are in [AUDIO_PROBE_REPORT.md](AUDIO_PROBE_REPORT.md), and the gated plan in [AUDIO_PROBE_PLAN.md](AUDIO_PROBE_PLAN.md).
+
 ## Buttons
 
 All three buttons are active-low digital inputs with 40 ms debounce and a one-second long-press threshold. The panel shows `K0 DOWN`, `K1 DOWN` or `K2 DOWN` while a button is held and changes to `LONG` when its long press fires.

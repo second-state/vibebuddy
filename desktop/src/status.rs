@@ -274,6 +274,10 @@ pub struct Device {
     pub foreign_firmware: bool,
     /// Our firmware built for other hardware (the breadboard devkit); released firmware isn't offered to it.
     pub unsupported_board: Option<String>,
+    /// The daemon lets the apps record on this XGGF: the computer granted audio and the board is the
+    /// experimental display; older daemons report nothing, which reads as false.
+    #[serde(default)]
+    pub audio_capture: bool,
     /// An environment variable narrowing the search to one port or device; older daemons report none.
     pub pin: Option<Pin>,
     /// Devices that could be the box when there are several and none is the remembered one.

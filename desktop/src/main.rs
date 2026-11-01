@@ -123,6 +123,19 @@ enum Message {
     /// Forget another computer on the box, by its key.
     Unpair(String),
     TakeOver,
+    /// The XGGF recorder: pick the sample rate and length, arm, follow, and take the result.
+    AudioRate(u32),
+    AudioSeconds(u32),
+    StartRecording,
+    RecordingStarted(Result<(), String>),
+    StopRecording,
+    PollAudio,
+    AudioPolled(Result<client::Audio, String>),
+    PlayRecording,
+    SaveRecording,
+    AudioSaved(Result<(), String>),
+    DiscardRecording,
+    AudioDiscarded(Result<(), String>),
     WifiSsid(String),
     WifiPassword(String),
     JoinWifi,
@@ -260,6 +273,17 @@ struct App {
     /// The last screen grabbed from the box, as PNG, and whether a grab is under way.
     screenshot: Option<(Vec<u8>, image::Handle)>,
     screenshot_busy: bool,
+    /// The XGGF recorder: the request being composed, its progress, the finished WAV, why one ended
+    /// without a result, whether a poll is in flight, and the player the last Play started.
+    audio_rate: u32,
+    audio_seconds: u32,
+    audio_recording: bool,
+    audio_polling: bool,
+    audio_progress: Option<client::AudioStats>,
+    audio_result: Option<Vec<u8>>,
+    audio_note: Option<String>,
+    audio_playing: Option<std::process::Child>,
+    audio_saving: bool,
     /// Installed alongside the app; read once, since only reinstalling changes them.
     voices: Vec<assets::Voice>,
     /// Each installed Character's face, ready to draw.
@@ -380,6 +404,15 @@ impl App {
             volume: None,
             screenshot: None,
             screenshot_busy: false,
+            audio_rate: 16000,
+            audio_seconds: 5,
+            audio_recording: false,
+            audio_polling: false,
+            audio_progress: None,
+            audio_result: None,
+            audio_note: None,
+            audio_playing: None,
+            audio_saving: false,
             voices: Vec::new(),
             faces: Vec::new(),
             characters: custom::Settings::load(),
@@ -492,6 +525,12 @@ impl App {
         } else {
             Subscription::none()
         };
+        // The XGGF recorder follows its recording twice a second while it runs.
+        let audio = if self.settings.is_some() && self.audio_recording {
+            iced::time::every(Duration::from_millis(500)).map(|_| Message::PollAudio)
+        } else {
+            Subscription::none()
+        };
         Subscription::batch([
             Subscription::run(client::status_updates).map(Message::Daemon),
             iced::time::every(Duration::from_secs(2)).map(|_| Message::ThemeTick),
@@ -499,6 +538,7 @@ impl App {
             tray,
             instance,
             conversation,
+            audio,
         ])
     }
 
@@ -823,6 +863,78 @@ impl App {
             }
             Message::ChooseBox(usb_serial) => return Task::perform(client::choose_box(usb_serial), Message::Done),
             Message::Unpair(key) => return Task::perform(client::unpair(key), Message::Done),
+            Message::AudioRate(rate) => self.audio_rate = rate,
+            Message::AudioSeconds(seconds) => self.audio_seconds = seconds,
+            Message::StartRecording => {
+                self.audio_note = None;
+                self.audio_result = None;
+                self.audio_progress = None;
+                let (rate, duration_ms) = (self.audio_rate, self.audio_seconds * 1000);
+                return Task::perform(client::start_audio(rate, duration_ms), Message::RecordingStarted);
+            }
+            Message::RecordingStarted(Ok(())) => {
+                self.audio_recording = true;
+                return Task::done(Message::PollAudio);
+            }
+            Message::RecordingStarted(Err(reason)) => self.audio_note = Some(reason),
+            Message::StopRecording => return Task::perform(client::stop_audio(), |_| Message::PollAudio),
+            Message::PollAudio => {
+                if self.audio_recording && !self.audio_polling {
+                    self.audio_polling = true;
+                    return Task::perform(client::audio(), Message::AudioPolled);
+                }
+            }
+            Message::AudioPolled(result) => {
+                self.audio_polling = false;
+                match result {
+                    Ok(client::Audio::Done(wav)) => {
+                        self.audio_recording = false;
+                        self.audio_progress = None;
+                        self.audio_result = Some(wav);
+                    }
+                    Ok(client::Audio::Recording(stats)) => self.audio_progress = Some(stats),
+                    Ok(client::Audio::Ended(reason)) => {
+                        // "no completed recording" just means nothing is armed; anything else is why it failed.
+                        self.audio_recording = false;
+                        self.audio_progress = None;
+                        if !reason.starts_with("no completed recording") {
+                            self.audio_note = Some(reason);
+                        }
+                    }
+                    Err(error) => {
+                        self.audio_recording = false;
+                        self.audio_note = Some(error);
+                    }
+                }
+            }
+            Message::PlayRecording => {
+                if let Some(mut previous) = self.audio_playing.take() {
+                    let _ = previous.kill();
+                }
+                self.audio_playing = play_recording(self.audio_result.as_deref());
+            }
+            Message::SaveRecording => {
+                if let Some(wav) = self.audio_result.clone().filter(|_| !self.audio_saving) {
+                    self.audio_saving = true;
+                    return Task::perform(save_recording(wav), Message::AudioSaved);
+                }
+            }
+            Message::AudioSaved(Ok(())) => self.audio_saving = false,
+            Message::AudioSaved(Err(error)) => {
+                self.audio_saving = false;
+                self.audio_note = Some(error);
+            }
+            Message::DiscardRecording => {
+                if let Some(mut playing) = self.audio_playing.take() {
+                    let _ = playing.kill();
+                }
+                self.audio_result = None;
+                self.audio_progress = None;
+                self.audio_note = None;
+                return Task::perform(client::discard_audio(), Message::AudioDiscarded);
+            }
+            Message::AudioDiscarded(Ok(())) => {}
+            Message::AudioDiscarded(Err(error)) => self.audio_note = Some(error),
             Message::TakeOver => return Task::perform(client::take_over(), Message::Done),
             Message::WifiSsid(ssid) => self.wifi_ssid = ssid,
             Message::WifiPassword(password) => self.wifi_password = password,
@@ -1545,7 +1657,7 @@ impl App {
 
     fn sound(&self) -> Element<'_, Message> {
         if self.status.as_ref().and_then(|s| s.device.unsupported_board.as_deref()) == Some("xggf-64x8") {
-            return text(tr("This experimental device supports USB and Wi-Fi status. Voice, Characters, Relay, timers, and device buttons are not yet supported.", &[])).into();
+            return text(tr("This experimental device shows Agent status over USB and Wi-Fi, with working buttons, and its Device page records speech. Voice commands, Characters, Relay, timers, and the stock clock are not yet supported.", &[])).into();
         }
         if let Some(form) = &self.make {
             return self.make_form(form);
@@ -2219,6 +2331,7 @@ impl App {
         scrollable(
             self.box_section()
                 .push(self.wifi_section())
+                .push(self.audio_section())
                 .push(paired)
                 .push(column![
                     // Separately distributed firmware (VibeBuddy-firmware-*.zip on Releases) comes in here.
@@ -2318,6 +2431,72 @@ impl App {
             }
             wifi.push(text(tr("With Wi-Fi, a paired computer on the same network can drive the box without the cable.", &[])).size(13))
         })
+    }
+
+    /// The XGGF recorder: explicit, bounded recordings from the device's microphone, played and kept
+    /// on this computer. Shown for the experimental board, with a hint while the computer hasn't
+    /// granted recording.
+    fn audio_section(&self) -> Option<iced::widget::Column<'_, Message>> {
+        let device = self.status.as_ref().map(|status| &status.device);
+        let board = device.filter(|device| device.connected).and_then(|device| device.unsupported_board.as_deref());
+        if board != Some("xggf-64x8") {
+            return None;
+        }
+        if !device.is_some_and(|device| device.audio_capture) {
+            return Some(
+                column![text(tr("This device can record speech once this computer allows it (VIBEBUDDY_XGGF_AUDIO=1).", &[])).size(13)]
+                    .spacing(6),
+            );
+        }
+        let mut section = column![text(tr("Record from this device", &[]))];
+        if self.audio_recording {
+            let expected = self.audio_rate as u64 / 50 * self.audio_seconds as u64;
+            let progress = self.audio_progress.as_ref().map_or_else(
+                || tr("Starting…", &[]),
+                |stats| {
+                    let mut label = tr("%lld of %lld frames", &[&stats.frames, &expected]);
+                    if stats.lost_frames > 0 {
+                        label.push_str(&tr(", %lld lost", &[&stats.lost_frames]));
+                    }
+                    label
+                },
+            );
+            section = section
+                .push(row![text(tr("Status", &[])).width(140), text(progress)].spacing(12))
+                .push(row![button(text(tr("Stop", &[]))).on_press(Message::StopRecording)].spacing(8));
+        } else {
+            section = section
+                .push(
+                    row![
+                        text(tr("Sample rate", &[])).width(140),
+                        button(text("8 kHz")).on_press_maybe((self.audio_rate != 8000).then_some(Message::AudioRate(8000))),
+                        button(text("16 kHz")).on_press_maybe((self.audio_rate != 16000).then_some(Message::AudioRate(16000))),
+                    ]
+                    .spacing(8),
+                )
+                .push(
+                    row![
+                        text(tr("Length: %lld s", &[&self.audio_seconds])).width(140),
+                        slider(1..=60, self.audio_seconds, Message::AudioSeconds).step(1u32),
+                    ]
+                    .spacing(12),
+                )
+                .push(row![button(text(tr("Record", &[]))).on_press(Message::StartRecording)].spacing(8));
+        }
+        if self.audio_result.is_some() {
+            section = section.push(
+                row![
+                    button(text(tr("Play", &[]))).on_press(Message::PlayRecording),
+                    button(text(tr("Save…", &[]))).on_press_maybe((!self.audio_saving).then_some(Message::SaveRecording)),
+                    button(text(tr("Discard", &[]))).on_press(Message::DiscardRecording),
+                ]
+                .spacing(8),
+            );
+        }
+        if let Some(note) = &self.audio_note {
+            section = section.push(text(note).size(13).style(text::danger));
+        }
+        Some(section.spacing(6))
     }
 
     /// The user's last voice commands and the buddy's spoken replies, newest at the bottom, as on the Mac.
@@ -2642,8 +2821,30 @@ fn issue_url(summary: &str) -> reqwest::Url {
 }
 
 /// Starts a desktop helper and lets it run on its own.
-fn launch(program: &str, args: &[&std::ffi::OsStr]) -> Result<(), String> {
-    std::process::Command::new(program)
+/// Plays the recording through the computer's own speakers with `aplay`, the standard Linux player;
+/// the child is kept only so the next Play or a Discard can stop it.
+fn play_recording(wav: Option<&[u8]>) -> Option<std::process::Child> {
+    let wav = wav?;
+    let path = std::env::temp_dir().join("vibebuddy-recording.wav");
+    std::fs::write(&path, wav).ok()?;
+    std::process::Command::new("aplay").arg("-q").arg(&path).spawn().ok()
+}
+
+/// Asks where to keep the recording and writes it there; cancelling is a quiet success.
+async fn save_recording(wav: Vec<u8>) -> Result<(), String> {
+    let Some(file) = rfd::AsyncFileDialog::new()
+        .set_title(tr("Save the recording", &[]))
+        .add_filter("WAV", &["wav"])
+        .set_file_name("recording.wav")
+        .save_file()
+        .await
+    else {
+        return Ok(());
+    };
+    tokio::fs::write(file.path(), wav).await.map_err(|error| format!("{}: {error}", file.path().display()))
+}
+
+fn launch(program: &str, args: &[&std::ffi::OsStr]) -> Result<(), String> {    std::process::Command::new(program)
         .args(args)
         .spawn()
         .map(drop)

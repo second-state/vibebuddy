@@ -16,7 +16,7 @@ struct KorekoreCharacterPage: View {
 
     var body: some View {
         if model.status?.device.unsupportedBoard == "xggf-64x8" {
-            Text("This experimental device supports USB and Wi-Fi status. Voice, Characters, Relay, timers, and device buttons are not yet supported.")
+            Text("This experimental device shows Agent status over USB and Wi-Fi, with working buttons, and its Device page records speech. Voice commands, Characters, Relay, timers, and the stock clock are not yet supported.")
                 .padding()
         } else {
         ScrollViewReader { proxy in
