@@ -194,6 +194,11 @@ impl Section {
         Section::ALL.into_iter().find(|section| section.tab() == tab).unwrap_or(Section::Character)
     }
 
+    /// A section still being tried out: the sidebar marks it "Beta".
+    pub fn beta(self) -> bool {
+        self == Section::Conversation
+    }
+
     pub fn tile(self) -> &'static str {
         match self {
             Section::Character => "icon-nav-char",

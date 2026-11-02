@@ -128,6 +128,8 @@ final class AppModel: ObservableObject {
     func showSample(_ status: Status) {
         self.status = status
         daemonAlive = true
+        // The sample shows voice commands on, so the sidebar has its Conversation section.
+        residentEnabled = true
     }
     #endif
 
