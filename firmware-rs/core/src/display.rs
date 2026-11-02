@@ -1347,8 +1347,8 @@ impl Display {
         if !self.ready {
             return Err(());
         }
+        let update = self.shows(state, title);
         self.state = state;
-        self.animation_frame = 0;
         self.title = title.map(|title| truncated(title, TITLE_BYTES)).unwrap_or_default();
         self.tasks = tasks
             .iter()
@@ -1364,11 +1364,27 @@ impl Display {
             })
             .collect();
         self.tasks_total = total.max(self.tasks.len());
-        // News starts from the first page: the cards waiting for an answer are there.
-        self.page = 0;
-        self.page_turn_at = scene.now_ms.wrapping_add(PAGE_TURN_MS);
-        self.next_animation_at = scene.now_ms.wrapping_add(self.animation_period());
+        if update {
+            // Only the cards changed: the page and the animation go on, unless that page is gone.
+            if self.page >= self.pages() {
+                self.page = 0;
+            }
+        } else {
+            // News starts from the first page: the cards waiting for an answer are there.
+            self.page = 0;
+            self.page_turn_at = scene.now_ms.wrapping_add(PAGE_TURN_MS);
+            self.animation_frame = 0;
+            self.next_animation_at = scene.now_ms.wrapping_add(self.animation_period());
+        }
         self.render(screen, scene)
+    }
+
+    /// The screen already shows this state for this title, so an event with them only brings the cards up to date.
+    /// While a task waits for an answer, every change to the other cards comes as `agent.input_required` again.
+    pub fn shows(&self, state: State, title: Option<&[u8]>) -> bool {
+        matches!(state, State::Working | State::InputRequired)
+            && self.state == state
+            && self.title == title.map(|title| truncated(title, TITLE_BYTES)).unwrap_or_default()
     }
 
     /// The done announcement is over: go back to the cards that came with it and are still open, or to idle when

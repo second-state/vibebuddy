@@ -159,8 +159,10 @@ impl RelayBox {
         *self = Self::new();
     }
 
-    /// What has changed since the last report: the paired list, and what the box is linked to.
-    pub fn report(&mut self, firmware: &Firmware, now: u32) -> Vec<String> {
+    /// What has changed since the last report: the paired list, and what the box is linked to. At most `room`
+    /// messages, the room in the queue to the Relay: what doesn't fit is said on a later call, so a full queue never
+    /// loses the news that the cable took the box.
+    pub fn report(&mut self, firmware: &Firmware, now: u32, room: usize) -> Vec<String> {
         let mut out = Vec::new();
         if !self.welcomed {
             return out;
@@ -168,6 +170,9 @@ impl RelayBox {
         let Some(link) = firmware.link() else { return out };
         let paired: Vec<(String, String)> = link.paired.iter().map(|paired| (link::encode(&paired.key), paired.name.clone())).collect();
         if self.paired.as_ref() != Some(&paired) {
+            if out.len() == room {
+                return out;
+            }
             let computers: Vec<Value> = paired.iter().map(|(key, name)| json!({"key": key, "name": name})).collect();
             out.push(text(json!({"t": "paired", "computers": computers})));
             self.paired = Some(paired);
@@ -176,6 +181,9 @@ impl RelayBox {
         if self.local != Some(local) {
             // Nothing to undo on a fresh socket that was never linked.
             if self.local.is_some() || local != LocalLink::None {
+                if out.len() == room {
+                    return out;
+                }
                 out.push(text(match local {
                     LocalLink::Usb(key) => json!({"t": "linked", "via": "usb", "computer": key.map(|key| link::encode(&key))}),
                     LocalLink::Lan(key) => json!({"t": "linked", "via": "lan", "computer": link::encode(&key)}),

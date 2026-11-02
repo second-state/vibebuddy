@@ -344,7 +344,7 @@ fn main() {
         }
         firmware.poll(&mut board);
         if let Some(relay) = &board.relay {
-            for message in relay_box.report(&firmware, board.now_ms()) {
+            for message in relay_box.report(&firmware, board.now_ms(), usize::MAX) {
                 let _ = relay.send(message);
             }
         }

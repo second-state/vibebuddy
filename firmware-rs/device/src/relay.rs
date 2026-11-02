@@ -54,6 +54,9 @@ pub static IN: Channel<CriticalSectionRawMutex, RelayIn, 16> = Channel::new();
 /// Frames for an older socket are dropped: a hello signed for its nonce, or data for its computer, sent
 /// first on a new socket fails authentication there (seen on relay-staging, 2026-10-12).
 pub static OUT: Channel<CriticalSectionRawMutex, (u32, String), 32> = Channel::new();
+/// Slots in [`OUT`] the box's output lines leave free, for what the box tells the Relay itself: that the cable took
+/// the box must not wait behind a burst of lines for the computer it takes the box from.
+pub const CONTROL_ROOM: usize = 2;
 /// The socket frames are for now; 0 when there is none.
 static SOCKET: AtomicU32 = AtomicU32::new(0);
 static NEXT_SOCKET: AtomicU32 = AtomicU32::new(1);
