@@ -1,42 +1,36 @@
 #!/usr/bin/env python3
 """Draw the korekore box screens' type into firmware tables (ADR-0021, docs/design/korekore).
 
-The design sets the box screens in DotGothic16 at 9 to 38 px. On the box DotGothic16's strokes are one pixel wide,
-and next to the robot screens' blocky 5 × 7 type it read as thin and faint. So the box draws every size in one bold
-pixel font, Galmuri11 Bold, whole pixels only (no anti-aliasing), at its own 12 px or a whole multiple of it:
-  - 9 to 18 px: Galmuri11 Bold at 12 px
-  - 22 px: Galmuri11 Bold at 12 px, doubled
-  - 30 to 38 px: Galmuri11 Bold at 12 px, tripled
-Galmuri (SIL OFL 1.1) is one of the fonts behind the 12 px Chinese table, whose licenses are in
-firmware-rs/core/fonts, so Latin and Chinese match. Every character keeps at least one blank column after it. The
-"korekore" wordmark is M PLUS Rounded 1c ExtraBold, kept smooth: a rounded logo, not text.
+The design sets the box screens in DotGothic16 at 9 to 38 px. On the box, thin pixel fonts read as faint next to
+the robot screens' blocky type, so the korekore screens draw every size in the robot's own 5 × 7 font
+(firmware-rs/core/src/canvas.rs), whole pixels only, at a whole multiple of it:
+  - 9 to 18 px: 5 × 7
+  - 22 px: 5 × 7, doubled
+  - 30 to 36 px: 5 × 7, tripled
+  - 38 px: 5 × 7, four times
+Like the robot screens, the font has capitals only: a lowercase letter draws as its capital. This tool reads the
+letter and digit tables from canvas.rs and adds the punctuation the robot draws in glyph_row, plus a few more marks
+the korekore screens use. Every character is 5 columns wide with one blank column after it. The "korekore"
+wordmark is M PLUS Rounded 1c ExtraBold, kept smooth: a rounded logo, not text.
 
 The output is firmware-rs/core/src/korekore/glyphs.rs: each face's glyphs as 4-bit coverage (0 = none, 15 = full),
-which the text faces only ever use as 0 or 15. Galmuri's BDF is pinned by URL and SHA-256 and cached in
-~/.cache/vibebuddy-fonts; the wordmark goes through FreeType in Pillow, so a Pillow upgrade could move a pixel:
-regenerate and commit, don't compare in CI.
+which the text faces only ever use as 0 or 15. The wordmark goes through FreeType in Pillow, so a Pillow upgrade
+could move a pixel: regenerate and commit, don't compare in CI.
 
 Usage: tools/korekore-box-fonts.py
 """
-import hashlib
-import io
-import urllib.request
-import zipfile
+import re
 from pathlib import Path
 
 from PIL import ImageFont
 
 ROOT = Path(__file__).resolve().parents[1]
 FONTS = ROOT / "fonts/korekore"
+CANVAS = ROOT / "firmware-rs/core/src/canvas.rs"
 OUT = ROOT / "firmware-rs/core/src/korekore/glyphs.rs"
-CACHE = Path.home() / ".cache/vibebuddy-fonts"
-
-GALMURI_VERSION = "2.40.4"
-GALMURI_SHA256 = "c8b3d9861a62ae73c8b1178091401cd79994812437ef386413f6dd54856e60e7"
-GALMURI_BDF = "Galmuri11-Bold.bdf"
 
 ASCII = "".join(chr(code) for code in range(0x20, 0x7F)) + "·›‹…×"
-# The design's size, how many times Galmuri's 12 px is scaled to draw it, and the characters it needs.
+# The design's size, how many times the 5 × 7 font is scaled to draw it, and the characters it needs.
 FACES = [
     (9, 1, ASCII),
     (10, 1, ASCII),
@@ -48,77 +42,86 @@ FACES = [
     (18, 1, ASCII),
     (22, 2, ASCII),
     (30, 3, " 0123456789:ABCEFKORSU"),
-    (34, 3, "これ!"),
+    (34, 3, "!"),
     (36, 3, "YAT!"),
-    (38, 3, "0123456789:"),
+    (38, 4, "0123456789:"),
 ]
 WORDMARK = "korekore"
 WORDMARK_SIZES = [12, 14, 40]
+# Blank rows above the capitals and below the baseline, in 5 × 7 pixels.
+ABOVE, BELOW = 2, 2
+
+# The marks the robot draws in canvas.rs glyph_row, and the ones only korekore needs. Seven rows each, bit 4 the
+# left column.
+MARKS = {
+    "-": [0, 0, 0, 0x1F, 0, 0, 0],
+    ".": [0, 0, 0, 0, 0, 0, 0x04],
+    ",": [0, 0, 0, 0, 0, 0x04, 0x08],
+    "'": [0x04, 0x04, 0, 0, 0, 0, 0],
+    ":": [0, 0, 0x04, 0, 0, 0x04, 0],
+    "/": [0x10 >> min(row, 4) if row < 5 else 0x01 for row in range(7)],
+    "!": [0x04, 0x04, 0x04, 0x04, 0x04, 0, 0x04],
+    "?": [0x0E, 0x11, 0x01, 0x02, 0x04, 0x00, 0x04],
+    ">": [0x10, 0x08, 0x04, 0x02, 0x04, 0x08, 0x10],
+    "_": [0, 0, 0, 0, 0, 0, 0x1F],
+    "%": [0x18, 0x19, 0x02, 0x04, 0x08, 0x13, 0x03],
+    "<": [0x01, 0x02, 0x04, 0x08, 0x04, 0x02, 0x01],
+    "\"": [0x0A, 0x0A, 0, 0, 0, 0, 0],
+    "#": [0x0A, 0x1F, 0x0A, 0x0A, 0x0A, 0x1F, 0x0A],
+    "$": [0x04, 0x0F, 0x14, 0x0E, 0x05, 0x1E, 0x04],
+    "&": [0x0C, 0x12, 0x14, 0x08, 0x15, 0x12, 0x0D],
+    "(": [0x02, 0x04, 0x08, 0x08, 0x08, 0x04, 0x02],
+    ")": [0x08, 0x04, 0x02, 0x02, 0x02, 0x04, 0x08],
+    "*": [0, 0x04, 0x15, 0x0E, 0x15, 0x04, 0],
+    "+": [0, 0x04, 0x04, 0x1F, 0x04, 0x04, 0],
+    ";": [0, 0, 0x04, 0, 0, 0x04, 0x08],
+    "=": [0, 0, 0x1F, 0, 0x1F, 0, 0],
+    "@": [0x0E, 0x11, 0x17, 0x15, 0x17, 0x10, 0x0E],
+    "[": [0x0E, 0x08, 0x08, 0x08, 0x08, 0x08, 0x0E],
+    "\\": [0x10, 0x10, 0x08, 0x04, 0x02, 0x01, 0x01],
+    "]": [0x0E, 0x02, 0x02, 0x02, 0x02, 0x02, 0x0E],
+    "^": [0x04, 0x0A, 0x11, 0, 0, 0, 0],
+    "`": [0x08, 0x04, 0, 0, 0, 0, 0],
+    "{": [0x02, 0x04, 0x04, 0x08, 0x04, 0x04, 0x02],
+    "|": [0x04, 0x04, 0x04, 0x04, 0x04, 0x04, 0x04],
+    "}": [0x08, 0x04, 0x04, 0x02, 0x04, 0x04, 0x08],
+    "~": [0, 0, 0x08, 0x15, 0x02, 0, 0],
+    "·": [0, 0, 0, 0x04, 0, 0, 0],
+    "›": [0, 0x08, 0x04, 0x02, 0x04, 0x08, 0],
+    "‹": [0, 0x02, 0x04, 0x08, 0x04, 0x02, 0],
+    "…": [0, 0, 0, 0, 0, 0, 0x15],
+    "×": [0, 0x11, 0x0A, 0x04, 0x0A, 0x11, 0],
+}
 
 
-def galmuri_bdf():
-    name = f"Galmuri-v{GALMURI_VERSION}.zip"
-    path = CACHE / name
-    if not path.exists():
-        CACHE.mkdir(parents=True, exist_ok=True)
-        url = f"https://github.com/quiple/galmuri/releases/download/v{GALMURI_VERSION}/{name}"
-        path.write_bytes(urllib.request.urlopen(url).read())
-    data = path.read_bytes()
-    if hashlib.sha256(data).hexdigest() != GALMURI_SHA256:
-        raise SystemExit(f"{name} doesn't match its pinned SHA-256")
-    return zipfile.ZipFile(io.BytesIO(data)).read(GALMURI_BDF).decode()
+def robot_font():
+    """The 5 × 7 rows of every character korekore can draw: {character: seven rows of five bits}."""
+    source = CANVAS.read_text()
+
+    def table(name):
+        body = re.search(rf"const {name}: \[\[u8; 7\]; \d+\] = \[(.*?)\n\];", source, re.S).group(1)
+        return [[int(value, 16) for value in re.findall(r"0x[0-9a-fA-F]+", row)] for row in re.findall(r"\[([^\]]*)\]", body)]
+
+    letters, digits = table("LETTER_GLYPHS"), table("DIGIT_GLYPHS")
+    font = {" ": [0] * 7, **MARKS}
+    for index, rows in enumerate(letters):
+        font[chr(ord("A") + index)] = font[chr(ord("a") + index)] = rows
+    for index, rows in enumerate(digits):
+        font[chr(ord("0") + index)] = rows
+    return font
 
 
-def parse_bdf(text, wanted):
-    """The wanted characters' pixels from a BDF: {character: (advance, left, top, rows of 0/1)}, and ascent, descent."""
-    ascent = descent = 0
+def five_by_seven(characters, scale):
+    """The 5 × 7 font scaled by a whole number: {character: (advance, left, top, rows of 0/1)}, ascent, descent."""
+    font = robot_font()
     glyphs = {}
-    lines = iter(text.splitlines())
-    for line in lines:
-        if line.startswith("FONT_ASCENT "):
-            ascent = int(line.split()[1])
-        elif line.startswith("FONT_DESCENT "):
-            descent = int(line.split()[1])
-        elif line.startswith("STARTCHAR"):
-            code = advance = None
-            box = (0, 0, 0, 0)
-            for line in lines:
-                if line.startswith("ENCODING "):
-                    code = int(line.split()[1])
-                elif line.startswith("DWIDTH "):
-                    advance = int(line.split()[1])
-                elif line.startswith("BBX "):
-                    box = tuple(int(value) for value in line.split()[1:5])
-                elif line == "BITMAP":
-                    width, height, x_offset, y_offset = box
-                    rows = []
-                    for _ in range(height):
-                        bits = int(next(lines), 16)
-                        span = (width + 7) // 8 * 8
-                        rows.append([(bits >> (span - 1 - x)) & 1 for x in range(width)])
-                    if code is not None and code >= 0 and chr(code) in wanted:
-                        glyphs[chr(code)] = (advance, x_offset, None, y_offset, rows)
-                    break
-    return {
-        character: (advance, left, ascent - (y_offset + len(rows)), rows)
-        for character, (advance, left, _, y_offset, rows) in glyphs.items()
-    }, ascent, descent
-
-
-def galmuri(characters, scale):
-    """Galmuri11 Bold at its own 12 px, scaled by a whole number."""
-    glyphs, ascent, descent = parse_bdf(galmuri_bdf(), set(characters))
-    if scale > 1:
-        glyphs = {
-            character: (
-                advance * scale,
-                left * scale,
-                top * scale,
-                [[pixel for pixel in row for _ in range(scale)] for row in rows for _ in range(scale)],
-            )
-            for character, (advance, left, top, rows) in glyphs.items()
-        }
-    return glyphs, ascent * scale, descent * scale
+    for character in characters:
+        if character not in font:
+            continue
+        rows = [[(bits >> (4 - x)) & 1 for x in range(5)] for bits in font[character]]
+        rows = [[pixel for pixel in row for _ in range(scale)] for row in rows for _ in range(scale)]
+        glyphs[character] = (6 * scale, 0, ABOVE * scale, rows)
+    return glyphs, (ABOVE + 7) * scale, BELOW * scale
 
 
 def trimmed(rows):
@@ -143,8 +146,8 @@ def rust_bytes(data, indent):
 
 
 def face(size, scale, characters):
-    glyphs, ascent, descent = galmuri(characters, scale)
-    what = "Galmuri11 Bold at 12 px" + (f", ×{scale}" if scale > 1 else "")
+    glyphs, ascent, descent = five_by_seven(characters, scale)
+    what = "the 5 × 7 font" + (f", ×{scale}" if scale > 1 else "")
     rows_out = []
     alpha = b""
     for character in sorted(dict.fromkeys(characters), key=ord):

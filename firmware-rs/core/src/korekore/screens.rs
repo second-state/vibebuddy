@@ -887,7 +887,7 @@ impl Display {
             PanelKind::Text(scale) => {
                 let face = if scale >= 2 { &TYPE_16 } else { &TYPE_11 };
                 for (index, (label, _, line_tone)) in panel.lines.iter().enumerate() {
-                    let y = 50 + index as i32 * (face.line() + 1);
+                    let y = 50 + index as i32 * (face.line().max(font::CELL) + 2);
                     if y + face.line() > PANEL_RULE_Y {
                         break;
                     }

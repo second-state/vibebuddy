@@ -1,5 +1,5 @@
-//! Type on the korekore screens: Galmuri11 Bold at the design's sizes, and the "korekore" wordmark, as 4-bit coverage
-//! from `tools/korekore-box-fonts.py` (glyphs.rs), blended over what is already drawn. Characters a size doesn't
+//! Type on the korekore screens: the robot's 5 × 7 font at the design's sizes, and the "korekore" wordmark, as 4-bit
+//! coverage from `tools/korekore-box-fonts.py` (glyphs.rs), blended over what is already drawn. Characters a size doesn't
 //! have, such as Chinese in a task title, fall back to the 12 px table the robot screens use (font.rs).
 
 use crate::canvas::Canvas;
