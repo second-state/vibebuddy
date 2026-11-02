@@ -1,4 +1,4 @@
-//! Type on the korekore screens: DotGothic16 at the design's sizes, and the "korekore" wordmark, as 4-bit coverage
+//! Type on the korekore screens: Galmuri11 Bold at the design's sizes, and the "korekore" wordmark, as 4-bit coverage
 //! from `tools/korekore-box-fonts.py` (glyphs.rs), blended over what is already drawn. Characters a size doesn't
 //! have, such as Chinese in a task title, fall back to the 12 px table the robot screens use (font.rs).
 
@@ -74,14 +74,18 @@ fn advance(face: &Face, piece: &Piece) -> i32 {
     }
 }
 
-/// The characters of UTF-8 text up to a NUL or the first byte that isn't valid.
-fn characters(text: &[u8]) -> core::str::Chars<'_> {
+/// UTF-8 text up to a NUL or the first byte that isn't valid.
+fn valid(text: &[u8]) -> &str {
     let text = text.split(|&byte| byte == 0).next().unwrap_or_default();
-    let valid = match core::str::from_utf8(text) {
+    match core::str::from_utf8(text) {
         Ok(valid) => valid,
         Err(error) => core::str::from_utf8(&text[..error.valid_up_to()]).unwrap_or_default(),
-    };
-    valid.chars()
+    }
+}
+
+/// The characters of `valid` text.
+fn characters(text: &[u8]) -> core::str::Chars<'_> {
+    valid(text).chars()
 }
 
 /// How wide `text` is at `face`.
@@ -89,16 +93,42 @@ pub fn width(face: &Face, text: &[u8]) -> i32 {
     characters(text).map(|character| advance(face, &piece(face, character))).sum()
 }
 
-/// Draws `text` with the top of its line at `y`, as many whole characters as fit in `max_width`. Returns the width
-/// drawn.
+/// Draws `text` with the top of its line at `y`. Text wider than `max_width` is cut and ends in "…": at the last space
+/// that fits, or, in a word too long for the line or text without spaces, at the last character that fits. Returns
+/// the width drawn.
 pub fn draw(canvas: &mut Canvas, face: &Face, x: i32, y: i32, text: &[u8], color: u16, max_width: i32) -> i32 {
+    if width(face, text) <= max_width {
+        return draw_all(canvas, face, x, y, text, color);
+    }
+    let room = max_width - width(face, ELLIPSIS.as_bytes());
+    let text = valid(text);
+    let (mut fits, mut pen) = (0, 0);
+    for (index, character) in text.char_indices() {
+        pen += advance(face, &piece(face, character));
+        if pen > room {
+            break;
+        }
+        fits = index + character.len_utf8();
+    }
+    // Back to the last space when the cut falls inside a word.
+    let mid_word = !text[fits..].starts_with(' ');
+    let cut = match text[..fits].rfind(' ') {
+        Some(space) if mid_word && space > 0 => space,
+        _ => fits,
+    };
+    let kept = text[..cut].trim_end().as_bytes();
+    let drawn = draw_all(canvas, face, x, y, kept, color);
+    drawn + draw_all(canvas, face, x + drawn, y, ELLIPSIS.as_bytes(), color)
+}
+
+const ELLIPSIS: &str = "…";
+
+/// Draws all of `text` with the top of its line at `y`. Returns the width drawn.
+fn draw_all(canvas: &mut Canvas, face: &Face, x: i32, y: i32, text: &[u8], color: u16) -> i32 {
     let mut pen = x;
     for character in characters(text) {
         let piece = piece(face, character);
         let step = advance(face, &piece);
-        if pen + step - x > max_width {
-            break;
-        }
         match piece {
             Piece::Glyph(glyph) => {
                 let (left, top) = (pen + i32::from(glyph.left), y + i32::from(glyph.top));
