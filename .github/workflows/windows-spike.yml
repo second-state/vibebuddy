@@ -1,0 +1,43 @@
+# Temporary spike: finds what stops each crate from building and testing on Windows.
+# Every step continues on error, so one run lists all the failures. Not for merging.
+name: windows-spike
+
+on:
+  push:
+    branches: [claude/windows-version-assessment-8a6703]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        package: [vibebuddy-protocol, vibebuddy-manifest, vibebuddy-firmware-core, vibebuddy-hook, vibebuddyd, vibebuddy-desktop]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Toolchain
+        run: rustup update stable --no-self-update && rustup default stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.package }}
+      - name: Build
+        continue-on-error: true
+        shell: bash
+        run: cargo build -p ${{ matrix.package }} --locked --keep-going --message-format short 2>&1 | tee build.log
+      - name: Build tests
+        continue-on-error: true
+        shell: bash
+        run: cargo test -p ${{ matrix.package }} --locked --no-run --keep-going --message-format short 2>&1 | tee test-build.log
+      - name: Test
+        continue-on-error: true
+        shell: bash
+        run: cargo test -p ${{ matrix.package }} --locked --no-fail-fast 2>&1 | tee test.log
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: logs-${{ matrix.package }}
+          path: "*.log"
