@@ -564,9 +564,11 @@ impl App {
             Subscription::none()
         };
         // The XGGF recorder follows its recording twice a second while it runs.
-        let audio_generation = self.audio_generation;
+        // iced rejects capturing closures in `map`, so the generation rides along through `with`.
         let audio = if self.settings.is_some() && self.audio_recording {
-            iced::time::every(Duration::from_millis(500)).map(move |_| Message::PollAudio(audio_generation))
+            iced::time::every(Duration::from_millis(500))
+                .with(self.audio_generation)
+                .map(|(generation, _)| Message::PollAudio(generation))
         } else {
             Subscription::none()
         };
