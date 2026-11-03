@@ -718,34 +718,32 @@ async fn watch_parent() {
     }
 }
 
-/// Windows never re-parents an orphan, so the parent pid can't tell that the app is gone. Instead the daemon holds a
-/// handle on the app's process from the start, which also keeps a reused pid from passing for the app.
+/// Windows never re-parents an orphan, so the parent pid can't tell that the app is gone. Instead a thread holds a
+/// handle on the app's process from the start, which also keeps a reused pid from passing for the app, and waits on it.
 #[cfg(windows)]
 async fn watch_parent() {
-    use windows_sys::Win32::Foundation::{CloseHandle, WAIT_TIMEOUT};
-    use windows_sys::Win32::System::Threading::{OpenProcess, PROCESS_SYNCHRONIZE, WaitForSingleObject};
+    use windows_sys::Win32::Foundation::CloseHandle;
+    use windows_sys::Win32::System::Threading::{INFINITE, OpenProcess, PROCESS_SYNCHRONIZE, WaitForSingleObject};
     let Some(expected) = env::var("VIBEBUDDY_PARENT_PID")
         .ok()
         .and_then(|value| value.parse::<u32>().ok())
     else {
         return;
     };
-    // SAFETY: OpenProcess takes no pointers; a null handle means the process is already gone.
-    let handle = unsafe { OpenProcess(PROCESS_SYNCHRONIZE, 0, expected) };
-    if !handle.is_null() {
-        let mut ticker = tokio::time::interval(Duration::from_secs(2));
-        loop {
-            ticker.tick().await;
-            // SAFETY: the handle stays open until the loop ends; a zero timeout only asks whether it is signalled.
-            if unsafe { WaitForSingleObject(handle, 0) } != WAIT_TIMEOUT {
-                break;
+    // A plain thread rather than the runtime's blocking pool, which would hold up the runtime's shutdown.
+    std::thread::spawn(move || {
+        // SAFETY: OpenProcess takes no pointers; a null handle means the process is already gone.
+        let handle = unsafe { OpenProcess(PROCESS_SYNCHRONIZE, 0, expected) };
+        if !handle.is_null() {
+            // SAFETY: the handle is open until CloseHandle, which is called once.
+            unsafe {
+                WaitForSingleObject(handle, INFINITE);
+                CloseHandle(handle);
             }
         }
-        // SAFETY: the handle came from OpenProcess and is closed once.
-        unsafe { CloseHandle(handle) };
-    }
-    info!(expected, "the supervising app is gone, exiting too");
-    std::process::exit(0);
+        info!(expected, "the supervising app is gone, exiting too");
+        std::process::exit(0);
+    });
 }
 
 /// The daemon's build identifier: the git description plus the binary's own timestamp.
