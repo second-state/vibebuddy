@@ -4,13 +4,15 @@ Build an **experimental, USB-connected VibeBuddy firmware** for the XGGF PixelCl
 
 The first version will deliberately omit voice, wireless links, custom Character packs, timers and the stock clock features. Those omissions should be visible in the product documentation and, where the apps offer actions the device cannot perform, in both the Mac and Linux apps.
 
-## Current status — 2026-11-01
+## Current status — 2026-11-03
 
-The original USB-only implementation is in place and has been extended. The firmware now supports the compact renderer, bounded USB protocol, daemon state resynchronization, encrypted local Wi-Fi with mDNS discovery and persistent identity, RTC/environment readings, a bounded identify buzzer, an I2S microphone-driven sound visualizer, all three physical buttons with short/long gestures and on-panel feedback, a six-row menu, read-only LINK status, stop-only K0 recording control, and four persistent bounded brightness levels. Status labels draw with a generated 5×7 printable-ASCII font derived from the MIT-licensed petabyt 7x5 font (`fonts/petabyt-5x7/`, `tools/make-xggf-font.py`), with every label scenario previewable on the host through `firmware-xggf/tests/preview.c`. The rightmost pixel column is an always-on connection indicator — upper half network, lower half host link — using grey (unset), pink-red (error) and tint green (ok), and a steady 2×2 red dot beside it marks active voice recording. The Mac and Linux Device pages can scan nearby networks and provision Wi-Fi over USB, then drive the device over the encrypted network link. Speech recording and transfer now work over USB and the encrypted Wi-Fi link — bounded, opt-in recordings the Device pages of both apps can drive, play and save (`VIBEBUDDY_XGGF_AUDIO=1`); see `firmware-xggf/AUDIO_PROBE_REPORT.md`. Voice commands and speech recognition, Character packs, Relay, timers and stock clock functions remain unsupported.
+The original USB-only implementation is in place and has been extended. The firmware now supports the compact renderer, bounded USB protocol, daemon state resynchronization, encrypted local Wi-Fi with mDNS discovery and persistent identity, RTC/environment readings, a bounded identify buzzer, an I2S microphone-driven sound visualizer, all three physical buttons with short/long gestures and on-panel feedback, a six-row menu, read-only LINK status, stop-only K0 recording control, and four persistent bounded brightness levels. Status labels draw with a generated 5×7 printable-ASCII font derived from the MIT-licensed petabyt 7x5 font (`fonts/petabyt-5x7/`, `tools/make-xggf-font.py`), with every label scenario previewable on the host through `firmware-xggf/tests/preview.c`. The rightmost pixel column is an always-on connection indicator — upper half network, lower half host link — using grey (unset), pink-red (error) and tint green (ok), and a steady 2×2 red dot beside it marks active voice recording. The Mac and Linux Device pages can scan nearby networks and provision Wi-Fi over USB, then drive the device over the encrypted network link. Speech recording and transfer now work over USB and the encrypted Wi-Fi link — bounded, opt-in recordings the Device pages of both apps can drive, play and save (`VIBEBUDDY_XGGF_AUDIO=1`); see `firmware-xggf/AUDIO_PROBE_REPORT.md`. The RTC clock and environment views are implemented; voice commands and speech recognition, Character packs, Relay and timers remain unsupported.
 
 The physical unit passed a 15-minute rotating-state soak with no resets, stable stack headroom and panel timing, and no meaningful heap degradation. The laptop-speaker microphone test produced a clear amplitude response, and the microphone also detected the device's own identify tone. A `device.mic` command now opens a ten-second sound-reactive buddy and ten-bar level display; Agent events preempt it until another explicit microphone command. See `firmware-xggf/WORK_NOTES.md` for measurements and test commands.
 
 The stock-restore/prototype-reinstall cycle passed. Remaining acceptance work is a measured panel waveform, power observations and Mac app validation on a host with the Swift toolchain. A future product option is automatic ambient visualizer activation while offline, with an explicit setting and unchanged Agent priority. A measured waveform requires suitable external test equipment; it cannot be established from the working display alone.
+
+On 2026-11-03 the firmware was rebuilt from the committed source with the test-only button commands disabled, flashed, and verified against the built image. The physical K0 early-stop test passed on both transports: an 8 kHz USB recording was cut to 1.78 s and a 16 kHz encrypted Wi-Fi recording to 1.88 s, each with zero lost, duplicate or reordered frames and no timing padding. The device also stepped through the LINK pages over USB, and the panel showed `LINK USB`; the text of each page still needs checking on the panel. The Linux app builds again from HEAD, and the OpenCode state fix in the daemon clears stale input-required activities, which had kept the device on INPUT. Still open: LINK over Wi-Fi and while offline, brightness persistence across reboot, the Mac app, and the power and waveform measurements.
 
 ## What the investigation establishes
 
@@ -40,14 +42,18 @@ The daemon remains responsible for Agent aggregation and priority. The display r
 
 ## Implementation sequence
 
-### 1. Create the branch and establish a baseline
+### 1. Create the branch and establish a baseline — [DONE]
+
+> **Status (checked 2026-11-03):** Done. Branch `xggf-64x8` exists; the firmware, daemon and host test commands are in `firmware-xggf/README.md`; the daemon's reconnect snapshot is covered by `xggf_reconnect_restores_priority_and_refuses_box_firmware`; supported and omitted features are documented in `firmware-xggf/README.md` and `docs/device-menu.md`.
 
 - Start `xggf-64x8` from the intended current project base after checking the worktree and branch state.
 - Record the existing firmware, daemon and host test commands, and run the relevant baseline checks before changing shared code.
 - Inventory the current daemon’s initial connection and reconnect behavior: establish exactly when it sends the current aggregate state, how it handles a restarted device, and the existing timeout and done-to-idle rules. Reuse those semantics rather than guessing from individual events.
 - Document the prototype’s supported and omitted features before making app changes.
 
-### 2. Verify the specific device and make restoration possible
+### 2. Verify the specific device and make restoration possible — [PARTLY DONE]
+
+> **Status (checked 2026-11-03):** Partly done. Done: the unit was identified as ESP32-C3 rev 0.4 with 4 MB flash; two full reads were compared and the image verified; a verified write-back was made and stock firmware was confirmed to boot (`firmware-xggf/WORK_NOTES.md`, "Backup and initial panel bring-up"); the brightness cap is 8. Open: the power-supply capacity was not recorded.
 
 Before writing firmware to hardware:
 
@@ -58,7 +64,9 @@ Before writing firmware to hardware:
 
 The examined unit’s readable flash is encouraging, but neither its eFuse results nor its recovery behavior should be assumed for a different unit.
 
-### 3. Bring up only the display
+### 3. Bring up only the display — [DONE]
+
+> **Status (checked 2026-11-03):** Done; the gate is passed. Photos from the physical unit confirmed the origin, column mapping and GRB colour order (`firmware-xggf/WORK_NOTES.md`). GPIO 7 is the data pin, the SCLK pin is left unassigned and SPI runs at 3.2 MHz (`firmware-xggf/main/main.c`). Panel transfers measured 15.86 ms over the 15-minute soak. Open: stability across reboot was not recorded separately.
 
 Create a small, separate ESP-IDF ESP32-C3 firmware target, using the sibling template as a reference for pin assignments and encoding. Keep the existing ESP32-S3 firmware and its release artifacts separate.
 
@@ -70,7 +78,9 @@ Create a small, separate ESP-IDF ESP32-C3 firmware target, using the sibling tem
 
 **Gate:** proceed only after the physical patterns match the documented mapping and remain stable across repeated refreshes and reboot.
 
-### 4. Implement the compact VibeBuddy renderer
+### 4. Implement the compact VibeBuddy renderer — [PARTLY DONE]
+
+> **Status (checked 2026-11-03):** Partly done. Done: READY, WORKING, INPUT, DONE and FAILED map from the protocol events (`firmware-xggf/main/status.c`); offline draws a dim buddy with closed eyes; DONE holds for 5 seconds before returning to READY; the renderer tests pass; `firmware-xggf/tests/preview.c` writes 56 previews (1× and 8×) covering every scenario, and the physical unit was seen rendering OFFLINE, READY and the rotating states. Open: the table's animations are minimal. WORKING blinks one pixel; INPUT, DONE and FAILED are static, with no amber animation or green celebration. Identify flashes white but has no preview scenario.
 
 Keep the renderer and state transitions hardware-independent so they can run in host tests and a preview tool.
 
@@ -80,7 +90,9 @@ Keep the renderer and state transitions hardware-independent so they can run in 
 - Match the established VibeBuddy event-to-state behavior in [firmware.rs](/mnt/dell-ext/Workspace/vibebuddy-cardputer/firmware-rs/core/src/firmware.rs:1739), including the done timeout, as confirmed in step 1.
 - Make heartbeat loss close the buddy’s eyes and dim it. Verify reconnection restores the **current** aggregate state, including when the daemon or device restarts; add a daemon resynchronization path if the existing one does not guarantee this.
 
-### 5. Integrate the existing USB protocol
+### 5. Integrate the existing USB protocol — [PARTLY DONE]
+
+> **Status (checked 2026-11-03):** Partly done. Done: the firmware prints `BOARD xggf-64x8` and answers `device.hello`; the required events and `device.heartbeat`/`device.identify` are handled, and unhandled events get no `STATE` acknowledgement (`firmware-xggf/main/main.c`); the USB receive buffer is 8 KB after an oversized-burst overflow was found and fixed; the physical malformed and oversized input test passed (`tests/physical_serial.py`); Wi-Fi reconnect was tested physically (`tests/wifi_smoke.py`). Open: no host test covers split and combined reads (the parser runs only in ESP-IDF); no simulated-serial suite covers heartbeat loss, reset or malformed input; no test shows a foreign ESP-IDF device receives no writes.
 
 Implement the smallest compatible protocol subset in the C3 runtime:
 
@@ -92,7 +104,9 @@ Implement the smallest compatible protocol subset in the C3 runtime:
 
 Add end-to-end tests using a simulated serial peer: startup, hello, real daemon events, heartbeat loss, reconnect, reset, malformed input, unsupported events and a foreign ESP-IDF device that must receive no unintended writes.
 
-### 6. Make device capabilities and update safety explicit
+### 6. Make device capabilities and update safety explicit — [PARTLY DONE]
+
+> **Status (checked 2026-11-03):** Partly done. Done: the daemon refuses firmware upload to an identified unsupported board (`post_firmware` in `daemon/src/main.rs`), `offer_to_box` never offers box firmware to it, and the ROM flasher requires the ESP32-S3 chip ID; the Linux app (`can_flash` in `desktop/src/main.rs`) and the Mac DevicePage (`canFlash`) disable flashing for it; XGGF button guidance and the feature limits are shown on both platforms; `tools/check-localization.py` passes with 607 keys. Open: the Mac app has not been compiled or exercised (no Swift toolchain); the onboarding and manual-install flows in both apps were not audited individually; the board check is a string comparison (`unsupported_board == "xggf-64x8"`), not a capability model.
 
 A display-only device cannot honestly present itself as the existing box. Introduce a board/capability representation sufficient for the daemon and both apps to distinguish it.
 
@@ -101,7 +115,17 @@ A display-only device cannot honestly present itself as the existing box. Introd
 - Keep initial installation explicitly board-specific. Do not advertise automatic updates for XGGF until there is a separately identified, board-compatible release and recovery mechanism.
 - Add Chinese translations on both platforms and run `tools/check-localization.py`. Update both READMEs section for section if either changes, plus architecture and device documentation.
 
-### 7. Validate on hardware and define completion
+### 7. Validate on hardware and define completion — [PARTLY DONE]
+
+> **Status (checked 2026-11-03):** Partly done. Per acceptance item:
+> 1. **Done:** verified backup and restoration (see section 2).
+> 2. **Partly:** mapping and colours match the photos; the brightness cap is host-tested but its effect on the panel and its persistence across reboot have not been checked on hardware.
+> 3. **Partly:** READY, WORKING, DONE and INPUT were seen on the device from real OpenCode events; FAILED was not seen on hardware, and aggregated priority across competing agents has not been tested on the device.
+> 4. **Partly:** the reconnect snapshot is tested in the daemon and over Wi-Fi; restoring the current state after a device reboot is not recorded.
+> 5. **Done:** malformed and oversized input cannot crash the firmware (`tests/physical_serial.py`).
+> 6. **Partly:** Linux identifies and gates the device consistently; the Mac app is not validated.
+> 7. **Partly:** the 15-minute soak had no resets, a 64-byte heap variation and 10 KB stack headroom. Power observations and the measured panel waveform are not done; the waveform needs external equipment.
+> 8. **Done:** the stock-restore and prototype-reinstall cycle passed (recorded in the current status above).
 
 Run the host tests and both app checks, build the C3 firmware, and then test the actual device through the real daemon on both supported desktop platforms where hardware access is available.
 
@@ -117,6 +141,12 @@ Acceptance requires:
 8. Restore the stock firmware from the unit’s backup and verify it boots, then reinstall the prototype and verify it boots again.
 
 ## Decisions deferred until evidence exists
+
+> **Status (checked 2026-11-03):**
+> - **SPI timing and GPIO 7: decided.** GPIO 7 is data, SPI runs at 3.2 MHz and SCLK is unassigned, all chosen from the physical tests.
+> - **Reuse of Rust core: decided.** Wi-Fi reuses the Rust `Link`, `Lan` and Noise code through a bridge; the renderer and USB protocol are C. No shared-scenario test suite exists.
+> - **Microphone, buzzer, sensors, Wi-Fi and stock clock: added after the display milestone** and each validated on hardware. The RTC clock view is implemented; timers are not.
+> - **Licensing and provenance: partly decided.** The petabyt font is MIT-licensed and its licence is vendored in `fonts/petabyt-5x7/`. The PixelClock template's licence and the stock asset provenance were not recorded.
 
 - **SPI timing and GPIO 7:** choose from measurements and physical tests, not from the conflicting reconstructed and template claims.
 - **Reuse of Rust core:** extract a small shared state component only if it can be reused without dragging the S3 display, audio and network dependencies onto the C3. Otherwise retain the existing protocol contract and test the compact implementation against shared scenarios.
