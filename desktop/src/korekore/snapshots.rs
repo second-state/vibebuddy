@@ -85,7 +85,6 @@ const SAMPLE: &str = r#"{"daemon":{"build":"0.5.0 cc16829","revision":"firmware-
 fn draw_the_korekore_pages() {
     let (mut app, _) = crate::App::boot();
     app.status = Some(serde_json::from_str(SAMPLE).unwrap());
-    app.resident = true;
     app.resident_info = serde_json::from_str(r#"{"enabled":true,"revision":1,"brain_setting":"codex","anthropic_key_set":false}"#).unwrap();
     app.conversation = Some(Ok(vec![
         client::Exchange {

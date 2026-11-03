@@ -11,7 +11,7 @@
 //! commands or writes files, runs read-only, and every approval or question it raises is declined. It reads the
 //! user's Codex memories, but only through the daemon, which never writes them.
 //!
-//! Experimental and off unless `VIBEBUDDY_RESIDENT_SESSION=1`. The app-server starts on the first voice command
+//! In beta and off until the user turns on Voice commands (or `VIBEBUDDY_RESIDENT_SESSION=1`). The app-server starts on the first voice command
 //! and again on the next one after it dies. Voice commands are taken one at a time; the ones that arrive meanwhile
 //! wait their turn in arrival order.
 //!
@@ -37,7 +37,7 @@ use crate::resident_claude::{CONTEXT_PREFIX, ClaudeBrain, command_context, local
 /// The Codex version the app-server protocol was verified with. app-server and `dynamicTools` are experimental,
 /// so other versions get a warning in the log, but are still tried.
 pub const TESTED_CODEX_VERSION: &str = "0.162.0";
-/// Setting this to `1` turns the resident session on.
+/// Setting this to `1` turns the resident session on whatever the user's switch says: the developers' override.
 pub const ENABLE_VARIABLE: &str = "VIBEBUDDY_RESIDENT_SESSION";
 /// Names the `codex` binary explicitly; otherwise it is looked for on PATH and where installers put it.
 pub const CODEX_VARIABLE: &str = "VIBEBUDDY_CODEX";
@@ -63,7 +63,7 @@ const AUTH_STORE: &str = "cli_auth_credentials_store=\"file\"";
 /// Codex's built-in web search (`disabled`, `cached`, `indexed` or `live` in codex 0.162.0): `live`, since the
 /// questions it is for (weather, news, prices) are about now, which a cached index may not have yet.
 const WEB_SEARCH: &str = "live";
-/// The user's brain setting and Anthropic API key, in the config directory (mode 0600). A file of its own, written
+/// The user's voice commands switch, brain setting and Anthropic API key, in the config directory (mode 0600). A file of its own, written
 /// only through its own endpoints, because `PUT /v1/config` replaces the whole config and an older App would wipe a
 /// key it doesn't know.
 pub const SETTINGS_FILE: &str = "resident-settings.json";
@@ -88,7 +88,7 @@ pub enum ResidentError {
 impl std::fmt::Display for ResidentError {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::Disabled => write!(formatter, "the resident session is experimental and off; start vibebuddyd with {ENABLE_VARIABLE}=1"),
+            Self::Disabled => write!(formatter, "voice commands are off; turn them on in the Conversation tab"),
             Self::NoCodex => write!(formatter, "codex was not found on PATH (set {CODEX_VARIABLE} to its path)"),
             Self::NotLoggedIn => write!(formatter, "Codex is not logged in; run `codex login` first"),
             Self::NoClaude => {
@@ -149,6 +149,9 @@ pub struct Readiness {
 /// What the user set: the brain, and their Anthropic API key (never sent back to a client).
 #[derive(Clone, Default, Deserialize, Serialize)]
 struct Settings {
+    /// The user's Voice commands switch, off until they turn it on.
+    #[serde(default)]
+    on: bool,
     #[serde(default)]
     brain: BrainChoice,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -239,7 +242,8 @@ struct Saved {
 }
 
 pub struct Resident {
-    enabled: bool,
+    /// On whatever the switch says: [`ENABLE_VARIABLE`] was set.
+    forced: bool,
     /// The working directory the resident thread runs in; the daemon owns it.
     dir: PathBuf,
     /// The same directory with symlinks resolved, as Codex may report it in hooks.
@@ -278,13 +282,13 @@ pub struct Resident {
 impl Resident {
     /// `state_dir` is the daemon's state directory: the thread id is kept in `resident.json` there, the session
     /// works in `resident/`, and its Codex home is `resident-codex/`.
-    pub fn new(enabled: bool, state_dir: &Path, launcher: Launcher, activities: Arc<Mutex<ActivityTracker>>) -> Self {
+    pub fn new(forced: bool, state_dir: &Path, launcher: Launcher, activities: Arc<Mutex<ActivityTracker>>) -> Self {
         let dir = state_dir.join("resident");
         let state_file = state_dir.join("resident.json");
         let saved = load(&state_file);
         let canonical_dir = std::fs::canonicalize(&dir).unwrap_or_else(|_| dir.clone());
         Self {
-            enabled,
+            forced,
             dir,
             canonical_dir,
             state_file,
@@ -307,7 +311,7 @@ impl Resident {
         }
     }
 
-    /// Keeps the brain setting and the Anthropic API key in `path` (see [`SETTINGS_FILE`]), reading them now.
+    /// Keeps the switch, the brain setting and the Anthropic API key in `path` (see [`SETTINGS_FILE`]), reading them now.
     pub fn with_settings_file(mut self, path: PathBuf) -> Self {
         let settings = std::fs::read_to_string(&path).ok().and_then(|text| serde_json::from_str(&text).ok());
         self.settings = std::sync::Mutex::new(settings.unwrap_or_default());
@@ -373,8 +377,28 @@ impl Resident {
         })
     }
 
+    /// Whether voice commands are on: the user's switch, or [`ENABLE_VARIABLE`].
     pub fn enabled(&self) -> bool {
-        self.enabled
+        self.forced || self.settings.lock().expect("settings lock").on
+    }
+
+    /// Whether [`ENABLE_VARIABLE`] keeps the session on, so the switch can't turn it off.
+    pub fn forced(&self) -> bool {
+        self.forced
+    }
+
+    /// Turns voice commands on or off. Off stops a running Codex app-server or Claude Code session; on checks
+    /// readiness again at once, so the App and the box hear what is missing.
+    pub async fn set_on(&self, on: bool) -> std::io::Result<()> {
+        self.change_settings(|settings| settings.on = on)?;
+        info!(on, "voice commands were switched");
+        if self.enabled() {
+            self.check_readiness_now().await;
+        } else {
+            *self.session.lock().await = None;
+            self.claude.stop().await;
+        }
+        Ok(())
     }
 
     /// The session voice commands go to now: the Codex thread or the Claude Code session.
@@ -407,7 +431,7 @@ impl Resident {
     /// Whether the session can take a voice command: on, and the last check found the brain the setting picks
     /// ready (Codex installed and logged in, or Claude Code installed with a key).
     pub fn ready(&self) -> bool {
-        self.enabled && self.readiness().ready()
+        self.enabled() && self.readiness().ready()
     }
 
     /// Changes each time [`Resident::ready`] flips.
@@ -420,7 +444,7 @@ impl Resident {
     /// nothing. Starts no app-server, process or turn: it looks `codex` up as a start would and asks `codex login
     /// status` in the resident Codex home, which reads the login the app-server's `account/read` would.
     pub async fn check_readiness(&self) -> Readiness {
-        if !self.enabled {
+        if !self.enabled() {
             return self.readiness();
         }
         let last = *self.codex_readiness.lock().expect("readiness lock");
@@ -533,7 +557,7 @@ impl Resident {
         wearing: &Wearing,
         on_reply: &mut (dyn FnMut(&str) + Send),
     ) -> Result<String, ResidentError> {
-        if !self.enabled {
+        if !self.enabled() {
             return Err(ResidentError::Disabled);
         }
         let persona = Persona::of(wearing);
@@ -612,7 +636,7 @@ impl Resident {
     /// both, as the Character the buddy is `wearing`. Does nothing when switched off or already running; a failure
     /// is logged and the next command tries again.
     pub async fn warm(&self, wearing: &Wearing) {
-        if !self.enabled {
+        if !self.enabled() {
             return;
         }
         self.check_readiness().await;
@@ -634,7 +658,7 @@ impl Resident {
     /// The last `limit` voice commands and their spoken replies, oldest first, read from the thread through the
     /// app-server (the daemon keeps no record of its own). Empty while there is no thread yet.
     pub async fn history(&self, limit: usize) -> Result<Vec<Exchange>, ResidentError> {
-        if !self.enabled {
+        if !self.enabled() {
             return Err(ResidentError::Disabled);
         }
         if self.brain() == Brain::Claude {
@@ -2015,6 +2039,26 @@ pub(crate) mod tests {
     }
 
     #[tokio::test]
+    async fn the_switch_is_off_until_turned_on_kept_across_starts_and_the_variable_overrides_it() {
+        let dir = temp_dir("switch");
+        let file = dir.join("config").join(SETTINGS_FILE);
+        let resident = Resident::new(false, &dir, Launcher::Codex, Arc::default()).with_settings_file(file.clone());
+        assert!(!resident.enabled() && !resident.ready(), "off for a user who never turned it on");
+        assert_eq!(resident.history(5).await, Err(ResidentError::Disabled));
+
+        resident.set_on(true).await.unwrap();
+        assert!(resident.enabled());
+        let again = Resident::new(false, &dir, Launcher::Codex, Arc::default()).with_settings_file(file.clone());
+        assert!(again.enabled(), "read back at the next start");
+
+        again.set_on(false).await.unwrap();
+        assert!(!again.enabled());
+        let forced = Resident::new(true, &dir, Launcher::Codex, Arc::default()).with_settings_file(file);
+        assert!(forced.enabled() && forced.forced(), "the variable keeps it on whatever the switch says");
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[tokio::test]
     async fn the_key_and_brain_are_kept_in_a_private_file_and_switching_brains_moves_the_revision() {
         use std::os::unix::fs::PermissionsExt;
         let dir = temp_dir("settings");
@@ -2033,7 +2077,7 @@ pub(crate) mod tests {
         assert_eq!(resident.brain(), Brain::Claude, "auto falls back to Claude Code with a key");
         assert_eq!(std::fs::metadata(&file).unwrap().permissions().mode() & 0o777, 0o600);
         let stored: Value = serde_json::from_str(&std::fs::read_to_string(&file).unwrap()).unwrap();
-        assert_eq!(stored, json!({"brain": "auto", "anthropic_api_key": "sk-ant-secret"}));
+        assert_eq!(stored, json!({"on": false, "brain": "auto", "anthropic_api_key": "sk-ant-secret"}));
 
         // The voice command goes to Claude Code, with the stored key, and its session is the one reported.
         let answer = resident.say("hi", &Wearing::default()).await.unwrap();
@@ -2056,7 +2100,7 @@ pub(crate) mod tests {
         assert!(!resident.ready());
         assert_eq!(resident.say("hi", &Wearing::default()).await.unwrap_err(), ResidentError::NoAnthropicKey);
         let stored: Value = serde_json::from_str(&std::fs::read_to_string(&file).unwrap()).unwrap();
-        assert_eq!(stored, json!({"brain": "claude"}), "the key is gone from the file");
+        assert_eq!(stored, json!({"on": false, "brain": "claude"}), "the key is gone from the file");
 
         // Read back at the next start.
         let again = Resident::new(true, &dir, Launcher::Codex, Arc::default()).with_settings_file(file);

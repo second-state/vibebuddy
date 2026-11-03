@@ -423,6 +423,15 @@ impl crate::App {
     // MARK: Conversation
 
     fn kk_conversation(&self) -> Element<'_, Message> {
+        let switch_card = self.voice_commands_switch();
+        if self.resident_info.as_ref().is_none_or(|info| !info.enabled) {
+            return column![switch_card]
+                .push(self.resident_setting_error.as_ref().map(|error| tag(error, theme::KORE_PINK_TEXT)))
+                .push(matches!(self.conversation, Some(Err(client::HistoryError::DaemonDown))).then(|| note(tr("The daemon isn't running. Restart it on the Advanced page.", &[]))))
+                .spacing(14)
+                .height(Length::Fill)
+                .into();
+        }
         let choice = self.resident_info.as_ref().and_then(|info| info.brain_setting);
         let chip = |label: String, tile: Option<&'static super::Sprite>, option: client::BrainChoice| -> Element<'_, Message> {
             let on = choice == Some(option);
@@ -500,7 +509,7 @@ impl crate::App {
                 .into(),
             }
         };
-        column![header]
+        column![switch_card, header]
             .push(key)
             .push(voice_off)
             .push(container(body).height(Length::Fill))
@@ -508,6 +517,28 @@ impl crate::App {
             .spacing(14)
             .height(Length::Fill)
             .into()
+    }
+
+    /// Off until the user turns it on: a voice command runs their own Codex or Claude Code, on their account or key.
+    fn voice_commands_switch(&self) -> Element<'_, Message> {
+        let on = self.resident_info.as_ref().is_some_and(|info| info.enabled);
+        let forced = self.resident_info.as_ref().and_then(|info| info.forced) == Some(true);
+        let detail = if forced {
+            tr("On while the daemon runs with VIBEBUDDY_RESIDENT_SESSION=1.", &[])
+        } else {
+            tr("Hold K0 on the box and ask. Codex or Claude Code on this computer answers, with your own account or key, and the buddy speaks the reply. Your voice goes to VibeBuddy's speech service.", &[])
+        };
+        let toggle = (self.resident_info.is_some() && !forced).then_some(Message::VoiceCommands(!on));
+        rows([row![
+            column![text(tr("Voice commands", &[])).font(semibold()).size(14).color(theme::INK), small(detail)].spacing(2).width(Length::Fill),
+            tag(tr("Beta", &[]), theme::KORE_PINK_TEXT),
+            switch(on, toggle),
+        ]
+        .spacing(12)
+        .align_y(Alignment::Center)
+        .padding(Padding::from([12, 16]))
+        .into()])
+        .into()
     }
 
     fn key_card(&self) -> Element<'_, Message> {

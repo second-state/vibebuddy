@@ -1,8 +1,11 @@
 import Foundation
 
-/// `GET /v1/resident`: whether the daemon runs the experimental resident session (`VIBEBUDDY_RESIDENT_SESSION=1`).
+/// `GET /v1/resident`: whether voice commands (in beta) are on, by the user's switch or `VIBEBUDDY_RESIDENT_SESSION=1`.
 public struct ResidentInfo: Decodable, Equatable {
     public var enabled: Bool
+    /// `VIBEBUDDY_RESIDENT_SESSION=1` keeps voice commands on, so the switch can't turn them off. Nil from an older
+    /// daemon, which had only that variable.
+    public var forced: Bool?
     public var threadId: String?
     /// Goes up when a voice command's turn ends or the thread changes, so the Conversation tab reads the history again
     /// only then. Kept in memory: it starts again at 0 when the daemon restarts. Nil from a daemon older than it.
@@ -23,6 +26,7 @@ public struct ResidentInfo: Decodable, Equatable {
 
     enum CodingKeys: String, CodingKey {
         case enabled
+        case forced
         case threadId = "thread_id"
         case revision
         case problem
@@ -35,6 +39,7 @@ public struct ResidentInfo: Decodable, Equatable {
     public init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         enabled = try container.decode(Bool.self, forKey: .enabled)
+        forced = try container.decodeIfPresent(Bool.self, forKey: .forced)
         threadId = try container.decodeIfPresent(String.self, forKey: .threadId)
         revision = try container.decodeIfPresent(UInt64.self, forKey: .revision)
         problem = try container.decodeIfPresent(ResidentProblem.self, forKey: .problem)
@@ -50,7 +55,7 @@ public struct ResidentInfo: Decodable, Equatable {
         switch voiceOff {
         case "bridge_firmware": String(localized: "The box is on its UART bridge, and its firmware can't carry voice there. Update the firmware, or plug the cable into the box's native USB port.")
         case "bridge_slow": String(localized: "The box is on its UART bridge, which didn't hold the speed voice needs. Plug the cable into the box's native USB port, or plug it in again to try once more.")
-        case "signed_out": String(localized: "Voice needs this computer signed in to VibeBuddy.")
+        case "signed_out": String(localized: "Voice needs this computer signed in to VibeBuddy. Sign in on the General page.")
         case "allowance": String(localized: "Today's voice is used up. It comes back at \(AccountStatus.voiceComesBack()).")
         case "global_cap": String(localized: "Voice is paused for everyone today. It comes back at \(AccountStatus.voiceComesBack()).")
         default: nil

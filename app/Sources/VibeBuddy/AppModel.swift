@@ -17,9 +17,6 @@ final class AppModel: ObservableObject {
     @Published private(set) var previewingVoice: String?
     /// Serial port open but no build ID ever reported: the box isn't running our firmware (a factory box), so offer to flash it.
     @Published private(set) var foreignFirmware = false
-    /// The daemon runs the experimental resident session, so the Conversation tab shows. Asked each time the daemon
-    /// comes up, since only its environment at start decides; kept while it is down, so the tab can say so.
-    @Published private(set) var residentEnabled = false
     /// The Characters made on this computer, and the voices one can be made with (ADR-0020); asked when the daemon
     /// comes up and whenever a job changes state.
     @Published private(set) var madeCharacters: [MadeCharacter] = []
@@ -101,7 +98,6 @@ final class AppModel: ObservableObject {
     }
 
     private func apply(_ status: Status) {
-        if !daemonAlive { refreshResident() }
         if !daemonAlive || status.making?.id != self.status?.making?.id || status.making?.state != self.status?.making?.state {
             refreshMadeCharacters()
         }
@@ -117,19 +113,11 @@ final class AppModel: ObservableObject {
         }
     }
 
-    private func refreshResident() {
-        Task {
-            if let info = try? await client.resident() { residentEnabled = info.enabled }
-        }
-    }
-
     #if DEBUG
     /// Debug builds only: shows a sample status without a daemon, for the korekore page snapshots.
     func showSample(_ status: Status) {
         self.status = status
         daemonAlive = true
-        // The sample shows voice commands on, so the sidebar has its Conversation section.
-        residentEnabled = true
     }
     #endif
 
