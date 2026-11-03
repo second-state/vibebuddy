@@ -60,3 +60,19 @@ fn agent_icons_are_the_agents_marks() {
     assert_eq!(icon.pixel(0, 0), None);
     assert_eq!(icon.pixel(4, 0), Some(0xDBAA));
 }
+
+/// A title too wide for its room is cut at a word and ends in "…"; one that fits is drawn whole.
+#[test]
+fn long_text_is_cut_at_a_word() {
+    use vibebuddy_firmware_core::canvas::{Canvas, FRAME_BYTES};
+    use vibebuddy_firmware_core::korekore::{glyphs::TYPE_11, text};
+
+    let mut frame = vec![0u8; FRAME_BYTES];
+    let mut canvas = Canvas::new(&mut frame);
+    let title = b"Fix voice reply playback";
+    let room = text::width(&TYPE_11, b"Fix voice reply pla");
+    let drawn = text::draw(&mut canvas, &TYPE_11, 0, 0, title, 0xFFFF, room);
+    assert_eq!(drawn, text::width(&TYPE_11, "Fix voice reply…".as_bytes()));
+    assert!(drawn <= room);
+    assert_eq!(text::draw(&mut canvas, &TYPE_11, 0, 0, b"App tests", 0xFFFF, room), text::width(&TYPE_11, b"App tests"));
+}
