@@ -14,7 +14,8 @@ fn main() {
 
 fn describe() -> String {
     Command::new("git")
-        .args(["describe", "--always", "--tags", "--dirty"])
+        // The App's tags only, not the firmware's: the App's build number is described the same way (build-app.sh).
+        .args(["describe", "--always", "--tags", "--match", "v[0-9]*", "--dirty"])
         .output()
         .ok()
         .filter(|output| output.status.success())

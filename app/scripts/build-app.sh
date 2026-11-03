@@ -23,9 +23,11 @@ done
 
 # The semantic version comes from the Cargo workspace version (the repo had no tags yet, so git describe is just a hash);
 # the build number is the git description. The app's About shows both; the heartbeat carries only the semantic version.
+# Only the App's own tags count: Sparkle compares build numbers, and "firmware-v0.6.0" (the firmware tag on the same
+# commit) sorted below "v0.5.0", so 0.5.0 refused 0.6.0 as a downgrade.
 version="$(sed -n 's/^version = "\(.*\)"/\1/p' "${repo_root}/Cargo.toml" | head -n 1)"
 version="${version:-0.0.0}"
-build_number="$(git -C "${repo_root}" describe --tags --always --dirty 2>/dev/null || echo dev)"
+build_number="$(git -C "${repo_root}" describe --tags --match "v[0-9]*" --always --dirty 2>/dev/null || echo dev)"
 
 echo "== Localization"
 # A missing zh-Hans entry would silently show English to Chinese users; fail early.

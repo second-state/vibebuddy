@@ -9,7 +9,7 @@ fn main() {
     check_xtensa_linker_available();
     println!("cargo:rustc-link-arg=-Tlinkall.x");
 
-    let describe = run("git", &["describe", "--always", "--tags", "--dirty"]).unwrap_or_else(|| "unknown".to_owned());
+    let describe = run("git", &["describe", "--always", "--tags", "--match", "firmware-v[0-9]*", "--dirty"]).unwrap_or_else(|| "unknown".to_owned());
     let stamp = run("date", &["+%Y-%m-%d %H:%M"]).unwrap_or_default();
     let describe: String = describe.chars().take(24).collect();
     let stamp: String = stamp.chars().take(16).collect();
