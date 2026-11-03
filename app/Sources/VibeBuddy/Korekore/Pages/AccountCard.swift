@@ -40,12 +40,12 @@ struct KorekoreAccountCard: View {
                         KNote(String(localized: "With your own key, spoken replies in that provider's voices go straight to it, billed to your account there, and never through VibeBuddy."))
                     }
                     KDivider()
-                    KorekoreOwnKeyRow(title: "ElevenLabs", key: keys.elevenlabs, keyPage: Resources.elevenLabsKeys,
+                    KorekoreOwnKeyRow(title: "ElevenLabs", key: keys.elevenlabs,
                                       refused: String(localized: "ElevenLabs refused your own key. Replies in its voices stay silent until you set another one.")) { key in
                         await saveKey("elevenlabs", key)
                     }
                     KDivider()
-                    KorekoreOwnKeyRow(title: String(localized: "Volcano Engine"), key: keys.volc, keyPage: Resources.volcConsole,
+                    KorekoreOwnKeyRow(title: String(localized: "Volcano Engine"), key: keys.volc,
                                       refused: String(localized: "Volcano Engine refused your own key. Replies in its voices stay silent until you set another one.")) { key in
                         await saveKey("volc", key)
                     }
@@ -156,7 +156,6 @@ struct KorekoreAccountCard: View {
 struct KorekoreOwnKeyRow: View {
     let title: String
     let key: VoiceKeysStatus.Key
-    let keyPage: URL
     let refused: String
     /// Sends the key, or nil to clear it; true when the daemon took it.
     let save: (String?) async -> Bool
@@ -177,8 +176,6 @@ struct KorekoreOwnKeyRow: View {
                     Button(String(localized: "Save")) { submit() }.kButton(.sun)
                         .disabled(draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                 }
-                Link(destination: keyPage) { Text("Get a key").font(.rounded(12)).underline() }
-                    .foregroundStyle(Theme.Colors.korePinkText)
             }
             if key.refused {
                 KTag(refused, color: Theme.Colors.korePinkText)

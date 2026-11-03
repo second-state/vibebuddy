@@ -43,7 +43,7 @@ public struct MiniBox: View {
         VStack(spacing: 6) {
             Text(verbatim: "Z z").font(.pixel(14)).foregroundStyle(Theme.Colors.mist)
             Sprite(name: "kore-sleep", scale: 6, gray: true)
-            Text(verbatim: "NO LINK").font(.korekore(Theme.Typography.boxState)).foregroundStyle(Theme.Colors.mist)
+            Text(verbatim: "NO LINK").font(.pixel(Theme.Typography.boxState.size)).foregroundStyle(Theme.Colors.mist)
             Text(verbatim: "waiting for the Mac").font(.pixel(11)).foregroundStyle(Theme.Colors.mistText)
         }
         .frame(width: 320, height: 240)

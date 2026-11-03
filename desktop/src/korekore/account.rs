@@ -4,7 +4,7 @@
 use iced::widget::{Space, button, column, container, image, row, text};
 use iced::{Alignment, Border, Element, Length, Padding};
 
-use super::controls::{Fill, bar, bold, card, card_with, divider, field, heading, note, picker, pill, rows, semibold, small, tag};
+use super::controls::{Fill, bar, bold, card, card_with, divider, field, heading, note, picker, pill, rows, small, tag};
 use super::theme;
 use crate::i18n::tr;
 use crate::status;
@@ -130,14 +130,10 @@ impl crate::App {
                 .align_y(Alignment::Center)
                 .into()
             };
-            let link = button(text(tr("Get a key", &[])).font(semibold()).size(12).color(theme::KORE_PINK_TEXT))
-                .padding(0)
-                .style(|_, _| button::Style::default())
-                .on_press(Message::OpenOwnKeyPage(provider));
             items.push(divider());
             items.push(
                 container(
-                    column![row![text(name).font(bold()).size(14).color(theme::INK).width(Length::Fill), entry, link].spacing(10).align_y(Alignment::Center)]
+                    column![row![text(name).font(bold()).size(14).color(theme::INK).width(Length::Fill), entry].spacing(10).align_y(Alignment::Center)]
                         .push(key.refused.then(|| tag(refused, theme::KORE_PINK_TEXT)))
                         .spacing(6),
                 )

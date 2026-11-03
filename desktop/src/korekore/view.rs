@@ -211,6 +211,12 @@ fn sidebar<'a, M: Clone + 'a>(
         let on = section == current;
         button(
             row![sprite(tile(section.tile()), 2, false), text(section.title()).font(rounded(iced::font::Weight::ExtraBold)).size(15)]
+                .push(section.beta().then(|| {
+                    text(tr("Beta", &[]))
+                        .font(rounded(iced::font::Weight::ExtraBold))
+                        .size(11)
+                        .color(if on { theme::KORE_PINK } else { theme::KORE_PINK_TEXT })
+                }))
                 .spacing(10)
                 .align_y(Alignment::Center),
         )

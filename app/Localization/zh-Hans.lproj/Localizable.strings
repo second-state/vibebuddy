@@ -227,6 +227,7 @@
 
 /* Conversation (the resident session, experimental) */
 "Conversation" = "对话";
+"Beta" = "体验版";
 "Couldn't read the conversation" = "读不到对话";
 "The daemon isn't running. Restart it on the Advanced tab." = "daemon 没在运行，到“高级”页重启它。";
 "The buddy's session isn't available: %@" = "氛围小助手的会话现在用不了：%@";
@@ -454,7 +455,6 @@
 "Your own key" = "自己的密钥";
 "Set" = "已设置";
 "Clear" = "清除";
-"Get a key" = "获取密钥";
 "ElevenLabs refused your own key. Replies in its voices stay silent until you set another one." = "ElevenLabs 拒绝了你自己的密钥。换一个密钥之前，用它的声音的回复不会出声。";
 "Volcano Engine refused your own key. Replies in its voices stay silent until you set another one." = "火山引擎拒绝了你自己的密钥。换一个密钥之前，用它的声音的回复不会出声。";
 "Couldn't save your own key: %@" = "保存自己的密钥失败：%@";
