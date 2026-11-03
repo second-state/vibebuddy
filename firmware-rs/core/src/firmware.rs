@@ -280,6 +280,12 @@ pub struct Firmware {
     voice: VoiceCommand,
     /// The microphone is running for a voice command.
     voice_mic: bool,
+    /// K0 is down and the microphone already runs for the turn a long press would start.
+    pre_roll: bool,
+    /// Samples taken from the board that the turn hasn't had yet, when the turn started and how many it has
+    /// had: what was heard before the long press goes out at most `CATCH_UP` times as fast as real time.
+    voice_waiting: Vec<i16>,
+    voice_fed: (u32, u32),
     /// The turn whose spoken replies are played; None once they were stopped (an announcement, mute, K2, the
     /// overlay closing), and the rest of that turn's audio is then ignored.
     reply_turn: Option<u32>,
@@ -428,6 +434,9 @@ impl Firmware {
             mic: MicState::Idle,
             voice: VoiceCommand::new(),
             voice_mic: false,
+            pre_roll: false,
+            voice_waiting: Vec::new(),
+            voice_fed: (0, 0),
             reply_turn: None,
             voice_held: None,
         }
@@ -1101,6 +1110,14 @@ impl Firmware {
     /// its own job: leisure hides nothing that needs a look first.
     fn on_button<B: Board>(&mut self, board: &mut B, event: ButtonEvent) {
         let now = board.now_ms();
+        if event == ButtonEvent::K0Down {
+            return self.start_pre_roll(board);
+        }
+        // K0's next event ends the pre-roll: a long press records on from it; anything else stops the microphone.
+        let pre_rolled = matches!(event, ButtonEvent::K0Short | ButtonEvent::K0Long | ButtonEvent::K0LongEnd) && core::mem::take(&mut self.pre_roll);
+        if pre_rolled && event != ButtonEvent::K0Long {
+            self.stop_voice_mic(board);
+        }
         // While a transfer comes in only a long K2 counts: it cancels (ADR-0016).
         if self.transfer.active() {
             if event == ButtonEvent::K2Long {
@@ -1161,14 +1178,14 @@ impl Firmware {
                 self.show_overlay(board);
                 return;
             }
-            ButtonEvent::K0Short | ButtonEvent::K0Long | ButtonEvent::K0LongEnd => {}
+            ButtonEvent::K0Down | ButtonEvent::K0Short | ButtonEvent::K0Long | ButtonEvent::K0LongEnd => {}
         }
 
         // While the computer offers voice commands, a long K0 is push-to-talk; giving up a phase is then in
         // the menu (ADR-0017). With voice off and Pomodoro idle, it shows why voice is off, if the computer said.
         if event == ButtonEvent::K0Long {
             if self.voice.available() {
-                self.start_recording(board, now);
+                self.start_recording(board, now, pre_rolled);
             } else if self.pomodoro.view(now).is_idle() && self.voice.show_why_off(now) {
                 self.show_overlay(board);
             } else {
@@ -1377,18 +1394,37 @@ impl Firmware {
         self.show_overlay(board);
     }
 
-    /// K0 held while voice is offered: the microphone at voice gain, any sound stopped so the box doesn't
-    /// hear itself (a spoken reply too: a new command interrupts the last one's answer), and a new turn.
-    fn start_recording<B: Board>(&mut self, board: &mut B, now: u32) {
-        self.voice.cancel();
-        self.stop_voice_mic(board);
-        self.stop_reply(board);
+    /// K0 went down where a long press would start a voice command: the microphone starts now, so the turn has
+    /// what was said before the long press fires. The samples wait on the board until then. A short press only
+    /// runs the microphone while K0 is down; any sound playing goes on.
+    fn start_pre_roll<B: Board>(&mut self, board: &mut B) {
+        if self.voice.available() && !self.voice.listening() && !self.transfer.active() && !self.menu.is_open() {
+            self.pre_roll = self.start_voice_mic(board);
+        }
+    }
+
+    /// The microphone at voice gain, unless the diagnostic has it; false where it can't start.
+    fn start_voice_mic<B: Board>(&mut self, board: &mut B) -> bool {
         // A box without the ES8311 (the NS4168 variant) has no gain to set; its microphone, if any, is untested.
         let _ = mic::set_es8311_mic_gain(&mut BoardI2c { board: &mut *board, address: ES8311_ADDRESS }, voice_command::GAIN_DB);
-        let started = matches!(self.mic, MicState::Idle) && board.voice_start().is_ok();
+        self.voice_mic = matches!(self.mic, MicState::Idle) && board.voice_start().is_ok();
+        self.voice_waiting.clear();
+        self.voice_mic
+    }
+
+    /// K0 held while voice is offered: the microphone at voice gain (running since K0 went down, if it could),
+    /// any sound stopped so the box doesn't hear itself (a spoken reply too: a new command interrupts the last
+    /// one's answer), and a new turn.
+    fn start_recording<B: Board>(&mut self, board: &mut B, now: u32, pre_rolled: bool) {
+        self.voice.cancel();
+        self.stop_reply(board);
+        let started = pre_rolled || {
+            self.stop_voice_mic(board);
+            self.start_voice_mic(board)
+        };
         if started {
-            self.voice_mic = true;
             board.stop_audio();
+            self.voice_fed = (now, 0);
             let start = self.voice.start(now);
             Self::write_voice(board, [start]);
             self.reply_turn = Some(self.voice.turn());
@@ -1398,16 +1434,23 @@ impl Firmware {
         self.show_overlay(board);
     }
 
-    fn take_voice_samples<B: Board>(&mut self, board: &mut B) {
-        let mut samples = Vec::new();
-        board.voice_take(&mut samples);
+    /// What the board has, handed to the turn: all of it at the end, otherwise two lines' worth at once and then
+    /// no faster than `CATCH_UP` times real time, so the second heard before the long press doesn't go out in
+    /// one burst the network buffers would drop.
+    fn take_voice_samples<B: Board>(&mut self, board: &mut B, now: u32, all: bool) {
+        board.voice_take(&mut self.voice_waiting);
+        let (since, fed) = &mut self.voice_fed;
+        let allowed = 2 * voice_command::SAMPLES_PER_LINE as u32 + now.wrapping_sub(*since) * (voice_command::SAMPLE_RATE / 1000) * voice_command::CATCH_UP;
+        let count = if all { self.voice_waiting.len() } else { (allowed.saturating_sub(*fed) as usize).min(self.voice_waiting.len()) };
+        *fed += count as u32;
+        let samples: Vec<i16> = self.voice_waiting.drain(..count).collect();
         let out = self.voice.push(&samples);
         Self::write_voice(board, out);
     }
 
     /// K0 let go, or the 30 s are up: the last samples, then `VOICE END` (or `VOICE CANCEL` if it was short).
     fn end_recording<B: Board>(&mut self, board: &mut B, now: u32) {
-        self.take_voice_samples(board);
+        self.take_voice_samples(board, now, true);
         let out = self.voice.release(now);
         Self::write_voice(board, out);
         self.stop_voice_mic(board);
@@ -1458,9 +1501,10 @@ impl Firmware {
     }
 
     fn stop_voice_mic<B: Board>(&mut self, board: &mut B) {
-        if self.voice_mic && !self.voice.listening() {
+        if self.voice_mic && !self.voice.listening() && !self.pre_roll {
             board.voice_stop();
             self.voice_mic = false;
+            self.voice_waiting = Vec::new();
         }
     }
 
@@ -1468,7 +1512,7 @@ impl Firmware {
     /// overlay when its time is up.
     fn tend_voice<B: Board>(&mut self, board: &mut B, now: u32) {
         if self.voice.listening() {
-            self.take_voice_samples(board);
+            self.take_voice_samples(board, now, false);
             if self.voice.due(now) {
                 self.end_recording(board, now);
             }

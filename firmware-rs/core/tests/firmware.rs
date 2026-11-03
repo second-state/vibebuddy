@@ -1878,12 +1878,13 @@ fn with_voice_a_long_k0_records_a_turn_and_the_phase_keeps_running() {
     assert_eq!(press(&mut firmware, &mut board, Key::K0, 50), ["POMODORO FOCUS START", "MODE POMODORO"]);
     assert!(send(&mut firmware, &mut board, VOICE_ON).is_empty());
     let lines = hold_k0_talking(&mut firmware, &mut board, 2000);
-    // Recording starts when the long press fires, a second in, and runs until K0 comes up.
+    // The turn starts when the long press fires, a second in, but its recording runs from K0 going down
+    // until K0 comes up: the words said before the long press are in it.
     assert_eq!(lines.first().map(String::as_str), Some("VOICE START 1"));
     assert!(!lines.iter().any(|line| line.starts_with("POMODORO")), "{lines:?}");
     let end = lines.iter().find(|line| line.starts_with("VOICE END 1 ")).expect("VOICE END");
     let samples: usize = end.rsplit(' ').next().unwrap().parse().unwrap();
-    assert!((22_000..=24_500).contains(&samples), "about a second at 24 kHz: {samples}");
+    assert!((47_000..=48_000).contains(&samples), "two seconds at 24 kHz: {samples}");
     assert!(!board.voice_running, "the microphone stops with the recording");
     // Every data line went to the stream, numbered without gaps, the last one shorter.
     assert_eq!(board.stream.len(), samples.div_ceil(1152));
@@ -1895,6 +1896,56 @@ fn with_voice_a_long_k0_records_a_turn_and_the_phase_keeps_running() {
     // The overlay counts as the user being there.
     assert_eq!(press(&mut firmware, &mut board, Key::K2, 50), Vec::<String>::new(), "K2 closes the overlay");
     assert_eq!(press(&mut firmware, &mut board, Key::K0, 50), ["POMODORO PAUSED"], "the phase was never given up");
+}
+
+#[test]
+fn the_words_before_the_long_press_go_out_a_little_faster_than_real_time() {
+    let (mut firmware, mut board, _) = booted(blank_flash());
+    send(&mut firmware, &mut board, VOICE_ON);
+    board.advance(100);
+    board.k0 = true;
+    firmware.poll(&mut board);
+    assert!(board.voice_running, "the microphone starts as K0 goes down");
+    let talk = |firmware: &mut Firmware, board: &mut FakeBoard, ms: u32| {
+        for _ in 0..ms / 10 {
+            board.advance(10);
+            board.voice_samples.extend(std::iter::repeat_n(1000, 240));
+            firmware.poll(board);
+        }
+    };
+    talk(&mut firmware, &mut board, 1000);
+    assert_eq!(board.take_lines(), ["VOICE START 1"]);
+    // On the next pass a second is waiting: two lines go at once, not all 20, which the network buffers would drop.
+    talk(&mut firmware, &mut board, 10);
+    assert_eq!(board.stream.len(), 2);
+    // Three times as fast as real time, it has caught up half a second in: 1.5 s is 31 whole lines.
+    talk(&mut firmware, &mut board, 490);
+    assert_eq!(board.stream.len(), 31);
+    board.k0 = false;
+    firmware.poll(&mut board);
+    assert_eq!(board.take_lines().last().map(String::as_str), Some("VOICE END 1 36000"));
+}
+
+#[test]
+fn a_short_k0_with_voice_offered_only_runs_the_microphone_while_down() {
+    let (mut firmware, mut board, _) = booted(blank_flash());
+    send(&mut firmware, &mut board, VOICE_ON);
+    board.advance(100);
+    board.k0 = true;
+    firmware.poll(&mut board);
+    assert!(board.voice_running);
+    board.advance(50);
+    board.voice_samples.extend([1000; 1200]);
+    board.k0 = false;
+    firmware.poll(&mut board);
+    assert_eq!(board.take_lines(), ["POMODORO FOCUS START", "MODE POMODORO"], "K0 is still the Pomodoro key");
+    assert!(!board.voice_running && board.stream.is_empty(), "nothing is recorded");
+    // In the menu K0 is the menu's: the microphone stays off.
+    press(&mut firmware, &mut board, Key::K1, 1100);
+    board.advance(100);
+    board.k0 = true;
+    firmware.poll(&mut board);
+    assert!(!board.voice_running);
 }
 
 #[test]

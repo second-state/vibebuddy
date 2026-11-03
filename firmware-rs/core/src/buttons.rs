@@ -1,7 +1,8 @@
 //! Each of the three keys does one thing, regardless of mode. Short presses fire on
 //! release; holding past the threshold fires a long press, and the release then no
 //! longer counts as a short press. K0's release after a long press is an event of its own,
-//! since a voice command records for as long as K0 stays down.
+//! since a voice command records for as long as K0 stays down; so is K0 going down, since the
+//! recording starts from then, before anyone knows it will be a long press.
 //!
 //! On the board (ATK-DNESP32S3-BOX V1.1) K0 is the BOOT key, wired straight to GPIO0; K1 and
 //! K2 are P0.4 and P0.3 on the XL9555 expander. All three are active low. Reading the pins is
@@ -13,6 +14,9 @@ const LONG_PRESS_MS: u32 = 1000;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ButtonEvent {
+    /// K0 went down: it may become a short or a long press. The microphone starts here, so a voice
+    /// command has the words said before the long press fires.
+    K0Down,
     /// K0: pomodoro start / pause / resume.
     K0Short,
     /// K0 long press: push-to-talk while the computer offers voice commands, otherwise abandon the
@@ -33,6 +37,7 @@ pub enum ButtonEvent {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Press {
     None,
+    Down,
     Short,
     Long,
     /// Released after a long press.
@@ -69,7 +74,7 @@ impl Button {
             if pressed {
                 self.pressed_at = now;
                 self.long_fired = false;
-                return Press::None;
+                return Press::Down;
             }
             return if self.long_fired { Press::LongEnd } else { Press::Short };
         }
@@ -102,16 +107,17 @@ impl Buttons {
 
     /// K0 and the expander are read separately: when the expander read fails only K0 is updated, as in the C firmware.
     pub fn update(&mut self, k0: bool, expander: Option<(bool, bool)>, now: u32) -> [Option<ButtonEvent>; 3] {
-        fn emit(press: Press, short: ButtonEvent, long: ButtonEvent, long_end: Option<ButtonEvent>) -> Option<ButtonEvent> {
+        fn emit(press: Press, short: ButtonEvent, long: ButtonEvent, down_and_long_end: Option<(ButtonEvent, ButtonEvent)>) -> Option<ButtonEvent> {
             match press {
                 Press::None => None,
+                Press::Down => down_and_long_end.map(|(down, _)| down),
                 Press::Short => Some(short),
                 Press::Long => Some(long),
-                Press::LongEnd => long_end,
+                Press::LongEnd => down_and_long_end.map(|(_, long_end)| long_end),
             }
         }
         let mut events = [None; 3];
-        events[0] = emit(self.k0.update(k0, now), ButtonEvent::K0Short, ButtonEvent::K0Long, Some(ButtonEvent::K0LongEnd));
+        events[0] = emit(self.k0.update(k0, now), ButtonEvent::K0Short, ButtonEvent::K0Long, Some((ButtonEvent::K0Down, ButtonEvent::K0LongEnd)));
         if let Some((k1, k2)) = expander {
             events[1] = emit(self.k1.update(k1, now), ButtonEvent::K1Short, ButtonEvent::K1Long, None);
             events[2] = emit(self.k2.update(k2, now), ButtonEvent::K2Short, ButtonEvent::K2Long, None);
@@ -131,14 +137,14 @@ mod tests {
     #[test]
     fn a_short_tap_fires_on_release() {
         let mut buttons = Buttons::new(Levels::default(), 0);
-        assert_eq!(k0(&mut buttons, true, 100), None);
+        assert_eq!(k0(&mut buttons, true, 100), Some(ButtonEvent::K0Down));
         assert_eq!(k0(&mut buttons, false, 160), Some(ButtonEvent::K0Short));
     }
 
     #[test]
     fn bounces_inside_the_window_are_ignored() {
         let mut buttons = Buttons::new(Levels::default(), 0);
-        assert_eq!(k0(&mut buttons, true, 100), None);
+        assert_eq!(k0(&mut buttons, true, 100), Some(ButtonEvent::K0Down));
         assert_eq!(k0(&mut buttons, false, 120), None);
         assert_eq!(k0(&mut buttons, true, 130), None);
         assert_eq!(k0(&mut buttons, false, 200), Some(ButtonEvent::K0Short));
@@ -147,7 +153,7 @@ mod tests {
     #[test]
     fn holding_fires_long_once_and_release_is_not_a_short_press() {
         let mut buttons = Buttons::new(Levels::default(), 0);
-        k0(&mut buttons, true, 100);
+        assert_eq!(k0(&mut buttons, true, 100), Some(ButtonEvent::K0Down));
         assert_eq!(k0(&mut buttons, true, 1099), None);
         assert_eq!(k0(&mut buttons, true, 1100), Some(ButtonEvent::K0Long));
         assert_eq!(k0(&mut buttons, true, 2500), None);

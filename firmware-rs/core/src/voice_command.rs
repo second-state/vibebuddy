@@ -24,6 +24,10 @@ pub const SAMPLES_PER_LINE: usize = 1152;
 pub const MAX_SAMPLES: u32 = SAMPLE_RATE * 30;
 /// If the samples stop coming, the recording still ends this long after it started.
 const MAX_RECORDING_MS: u32 = 31_000;
+/// The microphone starts as K0 goes down, a second before the long press starts the turn. That second goes out
+/// at most this many times as fast as real time, so it catches up in half a second without filling the
+/// network buffers (the LAN link's is 4 KB, five lines).
+pub const CATCH_UP: u32 = 3;
 /// Shorter than this is a slip of the finger: the turn is cancelled.
 pub const MIN_RECORDING_MS: u32 = 500;
 /// The ES8311's microphone gain while recording a voice command. At the 30 dB the bring-up diagnostic
