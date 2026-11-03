@@ -235,7 +235,6 @@ enum Message {
     OwnKeyDraft(client::KeyProvider, String),
     SaveOwnKey(client::KeyProvider),
     ClearOwnKey(client::KeyProvider),
-    OpenOwnKeyPage(client::KeyProvider),
     /// The daemon took the key, or didn't; whether it is set comes with the next status.
     OwnKeySaved(client::KeyProvider, Result<(), String>),
     Done(Result<(), String>),
@@ -1348,16 +1347,6 @@ impl App {
             Message::ClearOwnKey(provider) => {
                 return Task::perform(client::set_voice_key(provider, None), move |result| Message::OwnKeySaved(provider, result));
             }
-            Message::OpenOwnKeyPage(provider) => {
-                let page = match provider {
-                    client::KeyProvider::ElevenLabs => ELEVENLABS_KEYS,
-                    client::KeyProvider::Volc => VOLC_CONSOLE,
-                    client::KeyProvider::Groq => GROQ_KEYS,
-                };
-                if let Err(error) = launch("xdg-open", &[std::ffi::OsStr::new(page)]) {
-                    self.notice = Some(Err(error));
-                }
-            }
             Message::OwnKeySaved(provider, result) => match result {
                 Ok(()) => self.own_key_drafts[provider as usize].clear(),
                 Err(error) => self.notice = Some(Err(tr("Couldn't save your own key: %@", &[&error]))),
@@ -1541,12 +1530,6 @@ const CODEX_INSTALL_PAGE: &str = "https://learn.chatgpt.com/docs/codex/cli";
 const CLAUDE_INSTALL_PAGE: &str = "https://code.claude.com/docs/en/setup";
 /// The Claude Console, where the user makes the Anthropic API key Claude Code answers voice commands with.
 const ANTHROPIC_CONSOLE: &str = "https://platform.claude.com/";
-/// Where the user makes their own key for spoken replies in ElevenLabs' voices.
-const ELEVENLABS_KEYS: &str = "https://elevenlabs.io/app/settings/api-keys";
-/// Volcano Engine's speech console, where the user makes their own key for the Doubao voices.
-const VOLC_CONSOLE: &str = "https://console.volcengine.com/speech/";
-/// Where the user makes their own Groq key for speech recognition.
-const GROQ_KEYS: &str = "https://console.groq.com/keys";
 const NEW_ISSUE: &str = "https://github.com/second-state/vibebuddy/issues/new";
 
 /// The id under which the box wears the user's own Character.

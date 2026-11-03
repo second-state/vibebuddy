@@ -29,6 +29,9 @@ public enum KorekoreSection: String, CaseIterable, Identifiable, Sendable {
         }
     }
 
+    /// A section still being tried out: the sidebar marks it "Beta".
+    var beta: Bool { self == .conversation }
+
     var tile: String {
         switch self {
         case .character: "icon-nav-char"
@@ -124,6 +127,9 @@ struct KorekoreSidebar: View {
             HStack(spacing: 10) {
                 Sprite(name: section.tile, scale: 2)
                 Text(verbatim: section.title).font(.rounded(15))
+                if section.beta {
+                    Text("Beta").font(.rounded(11)).foregroundStyle(current ? Theme.Colors.korePink : Theme.Colors.korePinkText)
+                }
             }
             .padding(.vertical, 6)
             .padding(.horizontal, 8)

@@ -4,7 +4,7 @@
 use iced::widget::{Space, button, column, container, image, row, text};
 use iced::{Alignment, Border, Element, Length, Padding};
 
-use super::controls::{Fill, bar, bold, card, card_with, divider, field, heading, note, picker, pill, rows, semibold, small, tag};
+use super::controls::{Fill, bar, bold, card, card_with, divider, field, heading, note, picker, pill, rows, small, tag};
 use super::theme;
 use crate::i18n::tr;
 use crate::status;
@@ -121,7 +121,7 @@ impl crate::App {
         if let Some(groq) = &keys.groq {
             items.push(divider());
             items.push(
-                container(note(tr("Voice commands need your own Groq key for speech recognition. Your recordings go straight to Groq, billed to your account there.", &[])))
+                container(note(tr("Voice commands need your own Groq key for speech recognition, from console.groq.com. Your recordings go straight to Groq, billed to your account there.", &[])))
                     .padding(Padding::from([12, 16]))
                     .into(),
             );
@@ -131,7 +131,7 @@ impl crate::App {
         rows(items).into()
     }
 
-    /// One own key's row: typed once and saved, then shown only as set, with Clear and where to get one.
+    /// One own key's row: typed once and saved, then shown only as set, with Clear.
     fn kk_own_key(&self, provider: client::KeyProvider, name: String, key: &status::VoiceKey, refused: String) -> Element<'_, Message> {
         let entry: Element<'_, Message> = if key.set {
             row![tag(tr("Set", &[]), theme::DONE_TEXT), pill(tr("Clear", &[]), Fill::Paper, Some(Message::ClearOwnKey(provider)))].spacing(10).align_y(Alignment::Center).into()
@@ -149,12 +149,8 @@ impl crate::App {
             .align_y(Alignment::Center)
             .into()
         };
-        let link = button(text(tr("Get a key", &[])).font(semibold()).size(12).color(theme::KORE_PINK_TEXT))
-            .padding(0)
-            .style(|_, _| button::Style::default())
-            .on_press(Message::OpenOwnKeyPage(provider));
         container(
-            column![row![text(name).font(bold()).size(14).color(theme::INK).width(Length::Fill), entry, link].spacing(10).align_y(Alignment::Center)]
+            column![row![text(name).font(bold()).size(14).color(theme::INK).width(Length::Fill), entry].spacing(10).align_y(Alignment::Center)]
                 .push(key.refused.then(|| tag(refused, theme::KORE_PINK_TEXT)))
                 .spacing(6),
         )
