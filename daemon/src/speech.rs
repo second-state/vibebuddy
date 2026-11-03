@@ -47,9 +47,11 @@ const OWN_MODEL: &str = "VIBEBUDDY_STT_MODEL";
 /// Groq's OpenAI-compatible API, for the user's own Groq key.
 const GROQ_URL: &str = "https://api.groq.com/openai/v1";
 const GROQ_MODEL: &str = "whisper-large-v3-turbo";
-/// Whisper often writes Mandarin in traditional characters, which the box's font doesn't have; a prompt in simplified
-/// Chinese makes it write simplified, as it follows the prompt's style. Not sent when the language is set to another.
-const SIMPLIFIED_PROMPT: &str = "以下是普通话的句子。";
+/// Whisper often writes Mandarin in traditional characters, which the box's font doesn't have. It takes the prompt as
+/// what was said before and follows its style, so a plain sentence in simplified Chinese makes it write simplified,
+/// and the English half keeps English as English. Not an instruction: Whisper can't follow one, and may echo the prompt
+/// on a near-silent recording. Not sent when the language is set to one other than Chinese.
+const SIMPLIFIED_PROMPT: &str = "好的，我们开始吧。OK, let's get started.";
 const CLOUDFLARE_MODEL: &str = "@cf/openai/whisper-large-v3-turbo";
 /// A 30 s recording is under 1.5 MB of WAV; Workers AI took 3.6 to 4.4 s for 5 s of it.
 const TIMEOUT: Duration = Duration::from_secs(30);
@@ -710,7 +712,7 @@ mod tests {
         assert!(request.starts_with("POST /audio/transcriptions"), "{request}");
         assert!(request.to_lowercase().contains("authorization: bearer gsk_secret"), "{request}");
         assert!(request.contains("whisper-large-v3-turbo") && request.contains("\r\n\r\nzh\r\n"), "{request}");
-        assert!(request.contains("name=\"prompt\"\r\n\r\n以下是普通话的句子。\r\n"), "simplified Chinese is asked for: {request}");
+        assert!(request.contains("name=\"prompt\"\r\n\r\n好的，我们开始吧。OK, let's get started.\r\n"), "simplified Chinese is asked for: {request}");
 
         let (groq, _server) = serve("HTTP/1.1 401 Unauthorized\r\nContent-Length: 2\r\nConnection: close\r\n\r\n{}");
         let recognizer = GroqOrService { groq_url: groq, ..recognizer };
