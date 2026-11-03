@@ -25,6 +25,7 @@ use crate::voice_keys::{Provider, VoiceKeys};
 /// The voice service's base URL, or `off`. Unset: staging, except in a release.
 pub const BASE_URL_VARIABLE: &str = "VIBEBUDDY_TTS_BASE_URL";
 pub const STAGING_URL: &str = "https://api-staging.korekore.ai";
+pub const PRODUCTION_URL: &str = "https://api.korekore.ai";
 /// The most text the service takes in one request, in UTF-16 code units (JavaScript's `length`).
 pub const MAX_TEXT: usize = 1000;
 /// A request gets this long for its whole answer; 1000 characters is about a minute of speech, made faster than
@@ -151,6 +152,7 @@ impl Synthesis {
                 let request = agent.post(&url).header("xi-api-key", key).header("Accept", "audio/mpeg");
                 ("ElevenLabs", request.header("Content-Type", "application/json").send(json!({"text": text, "model_id": ELEVENLABS_MODEL}).to_string().as_bytes()))
             }
+            Provider::Groq => unreachable!("no voice is from Groq"),
             Provider::Volc => {
                 // A speaker of the user's own carries the resource it answered on: `<speaker>#<resource>`.
                 let (speaker, resource) = voice.split_once('#').unwrap_or((voice, VOLC_RESOURCE_ID));
@@ -181,6 +183,7 @@ impl Synthesis {
         let reader = response.into_body().into_reader();
         match provider {
             Provider::ElevenLabs => forward(reader, name, on_audio),
+            Provider::Groq => unreachable!("no voice is from Groq"),
             Provider::Volc => forward_volc(reader, on_audio),
         }
     }
@@ -371,21 +374,31 @@ pub(crate) fn voice_field<'a>(file: &'a str, key: &str) -> Option<&'a str> {
 
 /// The synthesizer: the user's own keys, and the voice service the environment configures, if any.
 pub fn from_env(session: Option<Arc<Account>>, keys: Arc<VoiceKeys>) -> Arc<dyn Synthesizer> {
-    let service = configure(service_base(std::env::var(BASE_URL_VARIABLE).ok(), crate::relay::release()), session);
+    let service = configure(voice_base(std::env::var(BASE_URL_VARIABLE).ok()), session);
     Arc::new(Synthesis { service, keys, elevenlabs_url: ELEVENLABS_URL.to_owned(), volc_url: VOLC_URL.to_owned() })
 }
 
-/// The voice service's base URL, which speech recognition ([`crate::speech`]) uses too: the variable's, else
-/// staging outside a release. None when it is `off`, not http(s), or a release has none.
+/// The service's base URL, for the account: the variable's, else production in a release
+/// and staging outside one. None when it is `off` or not http(s).
 pub fn service_base(base_url: Option<String>, release: bool) -> Option<String> {
+    checked(base_url, if release { PRODUCTION_URL } else { STAGING_URL })
+}
+
+/// The voice service's base URL, for spoken replies, speech recognition ([`crate::speech`]) and Characters' lines:
+/// only the variable's. Neither production nor staging serves voice (ADR-0020), so every build gets its voice from the
+/// user's own keys alike; the variable is for testing a service that does.
+pub fn voice_base(base_url: Option<String>) -> Option<String> {
+    base_url.map(|url| url.trim().to_owned()).filter(|url| !url.is_empty() && url != "off").and_then(|url| checked(Some(url), STAGING_URL))
+}
+
+fn checked(base_url: Option<String>, default: &str) -> Option<String> {
     let base_url = match base_url.map(|url| url.trim().to_owned()).filter(|url| !url.is_empty()) {
         Some(url) if url == "off" => return None,
         Some(url) => url,
-        None if release => return None,
-        None => STAGING_URL.to_owned(),
+        None => default.to_owned(),
     };
     if !base_url.starts_with("https://") && !base_url.starts_with("http://") {
-        warn!(%base_url, "the voice service's base URL is not http(s); it is not used");
+        warn!(%base_url, "the service's base URL is not http(s); it is not used");
         return None;
     }
     Some(base_url)
@@ -446,13 +459,20 @@ mod tests {
     }
 
     #[test]
-    fn the_service_is_staging_outside_a_release_and_can_be_set_or_switched_off() {
-        let base = |url: Option<&str>, release| configure(service_base(url.map(str::to_owned), release), None).is_some();
-        assert!(base(None, false));
-        assert!(!base(None, true), "no production voice service yet");
-        assert!(base(Some("https://api.korekore.ai"), true));
-        assert!(!base(Some("off"), false));
-        assert!(!base(Some("api.korekore.ai"), false));
+    fn the_account_is_staging_outside_a_release_production_in_one_and_voice_only_where_the_variable_says() {
+        let service = |url: Option<&str>, release| service_base(url.map(str::to_owned), release);
+        assert_eq!(service(None, false).as_deref(), Some(STAGING_URL));
+        assert_eq!(service(None, true).as_deref(), Some(PRODUCTION_URL));
+        assert_eq!(service(Some("http://127.0.0.1:8787"), true).as_deref(), Some("http://127.0.0.1:8787"));
+        assert_eq!(service(Some("off"), false), None);
+        assert_eq!(service(Some("api.korekore.ai"), false), None);
+
+        // No service serves voice: any build has a voice service only when the variable names one.
+        let voice = |url: Option<&str>| configure(voice_base(url.map(str::to_owned)), None).is_some();
+        assert!(!voice(None));
+        assert!(voice(Some("http://127.0.0.1:8787")));
+        assert!(!voice(Some("off")));
+        assert!(!voice(Some("api.korekore.ai")));
     }
 
     /// Serves one canned HTTP answer on a local port; returns the base URL and the request it got.

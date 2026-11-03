@@ -110,7 +110,7 @@ impl std::fmt::Display for AccountError {
 }
 
 pub struct Account {
-    /// The service's base URL, as for voice (`synthesis::service_base`); None when this build has none.
+    /// The service's base URL (`synthesis::service_base`); None when it is switched off.
     base: Option<String>,
     file: Option<PathBuf>,
     redirect_uri: String,

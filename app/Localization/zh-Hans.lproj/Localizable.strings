@@ -423,7 +423,7 @@
 /* Account (ADR-0018) */
 "Account" = "账户";
 "Sign in" = "登录";
-"Signing in opens your browser. Voice commands need an account." = "登录会打开浏览器。语音指令需要登录账户。";
+"Signing in opens your browser." = "登录会打开浏览器。";
 "Waiting for the browser…" = "正在等浏览器完成登录…";
 "Signing in isn't available in this version of VibeBuddy." = "这个版本的 VibeBuddy 还不能登录。";
 "Signed in with GitHub as %@" = "已用 GitHub 账号 %@ 登录";
@@ -457,6 +457,9 @@
 "Clear" = "清除";
 "ElevenLabs refused your own key. Replies in its voices stay silent until you set another one." = "ElevenLabs 拒绝了你自己的密钥。换一个密钥之前，用它的声音的回复不会出声。";
 "Volcano Engine refused your own key. Replies in its voices stay silent until you set another one." = "火山引擎拒绝了你自己的密钥。换一个密钥之前，用它的声音的回复不会出声。";
+"Voice commands need your own Groq key for speech recognition, from console.groq.com. Your recordings go straight to Groq, billed to your account there." = "语音指令要用你自己的 Groq 密钥来识别语音，在 console.groq.com 申请。录音直接发给 Groq，费用记在你在那里的账户上。";
+"Groq refused your own key. Voice commands stop until you set another one." = "Groq 拒绝了你自己的密钥。换一个密钥之前，语音指令用不了。";
+"Voice commands need your own Groq key for speech recognition. Set it under Your own keys on the General page." = "语音指令要用你自己的 Groq 密钥来识别语音。请在通用页的“自己的密钥”里填上。";
 "Couldn't save your own key: %@" = "保存自己的密钥失败：%@";
 
 /* Making a Character (ADR-0020) */

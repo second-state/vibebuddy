@@ -166,7 +166,8 @@ struct DaemonClient {
         guard code == 200 else { throw DaemonError(message: DaemonClient.message(in: data) ?? String(localized: "The daemon answered \(code)")) }
     }
 
-    /// Sets the user's own key for a provider of spoken replies, `elevenlabs` or `volc` (nil clears it). The daemon
+    /// Sets the user's own key for a provider, `elevenlabs` or `volc` for spoken replies, `groq` for speech
+    /// recognition (nil clears it). The daemon
     /// never sends it back; the status says it is set.
     func setVoiceKey(_ provider: String, _ key: String?) async throws {
         let body = try JSONSerialization.data(withJSONObject: [provider: key.map { $0 as Any } ?? NSNull()])

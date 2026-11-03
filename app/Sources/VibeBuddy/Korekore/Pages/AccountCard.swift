@@ -22,7 +22,7 @@ struct KorekoreAccountCard: View {
                         signedIn(account)
                     } else {
                         row {
-                            KNote(String(localized: "Signing in opens your browser. Voice commands need an account."))
+                            KNote(String(localized: "Signing in opens your browser."))
                                 .frame(maxWidth: .infinity, alignment: .leading)
                             if waiting { KTag(String(localized: "Waiting for the browser…"), color: Theme.Colors.waitText) }
                             Button(String(localized: "Sign in")) { signIn() }.kButton(.sun)
@@ -48,6 +48,17 @@ struct KorekoreAccountCard: View {
                     KorekoreOwnKeyRow(title: String(localized: "Volcano Engine"), key: keys.volc,
                                       refused: String(localized: "Volcano Engine refused your own key. Replies in its voices stay silent until you set another one.")) { key in
                         await saveKey("volc", key)
+                    }
+                    if let groq = keys.groq {
+                        KDivider()
+                        row {
+                            KNote(String(localized: "Voice commands need your own Groq key for speech recognition, from console.groq.com. Your recordings go straight to Groq, billed to your account there."))
+                        }
+                        KDivider()
+                        KorekoreOwnKeyRow(title: "Groq", key: groq,
+                                          refused: String(localized: "Groq refused your own key. Voice commands stop until you set another one.")) { key in
+                            await saveKey("groq", key)
+                        }
                     }
                 }
             }

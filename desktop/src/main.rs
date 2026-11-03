@@ -331,7 +331,7 @@ struct App {
     /// Deleting the account waits for a second click, since it can't be undone.
     confirm_delete_account: bool,
     /// The own keys being typed, by provider; cleared once the daemon has one, and never filled from the daemon.
-    own_key_drafts: [String; 2],
+    own_key_drafts: [String; 3],
     /// The outcome of the last action, shown at the bottom of the window.
     notice: Option<Result<String, String>>,
     /// The language picked in Settings, and, while it differs from the UI's, the offer to restart.

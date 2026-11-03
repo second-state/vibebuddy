@@ -33,7 +33,7 @@ impl crate::App {
         }
         if !account.signed_in {
             return vec![line(
-                row![container(note(tr("Signing in opens your browser. Voice commands need an account.", &[]))).width(Length::Fill)]
+                row![container(note(tr("Signing in opens your browser.", &[]))).width(Length::Fill)]
                     .push(self.signing_in.then(|| tag(tr("Waiting for the browser…", &[]), theme::WAIT_TEXT)))
                     .push(pill(tr("Sign in", &[]), Fill::Sun, Some(Message::SignIn)))
                     .spacing(12)
@@ -102,46 +102,60 @@ impl crate::App {
         items
     }
 
-    /// Each key is typed once and never shown again: the daemon only says whether it has one.
+    /// Each key is typed once and never shown again: the daemon only says whether it has one. Groq's shows only when
+    /// the daemon knows it.
     fn kk_own_keys(&self, keys: &status::VoiceKeys) -> Element<'_, Message> {
         let mut items: Vec<Element<'_, Message>> = vec![
             container(note(tr("With your own key, spoken replies in that provider's voices go straight to it, billed to your account there, and never through VibeBuddy.", &[])))
                 .padding(Padding::from([12, 16]))
                 .into(),
         ];
-        for provider in client::KeyProvider::ALL {
+        for provider in client::KeyProvider::REPLIES {
             let (name, key, refused) = match provider {
                 client::KeyProvider::ElevenLabs => ("ElevenLabs".to_owned(), &keys.elevenlabs, tr("ElevenLabs refused your own key. Replies in its voices stay silent until you set another one.", &[])),
-                client::KeyProvider::Volc => (tr("Volcano Engine", &[]), &keys.volc, tr("Volcano Engine refused your own key. Replies in its voices stay silent until you set another one.", &[])),
-            };
-            let entry: Element<'_, Message> = if key.set {
-                row![tag(tr("Set", &[]), theme::DONE_TEXT), pill(tr("Clear", &[]), Fill::Paper, Some(Message::ClearOwnKey(provider)))].spacing(10).align_y(Alignment::Center).into()
-            } else {
-                let draft = &self.own_key_drafts[provider as usize];
-                row![
-                    field(&tr("Your own key", &[]), draft)
-                        .secure(true)
-                        .on_input(move |draft| Message::OwnKeyDraft(provider, draft))
-                        .on_submit(Message::SaveOwnKey(provider))
-                        .width(240),
-                    pill(tr("Save", &[]), Fill::Sun, (!draft.trim().is_empty()).then_some(Message::SaveOwnKey(provider))),
-                ]
-                .spacing(10)
-                .align_y(Alignment::Center)
-                .into()
+                _ => (tr("Volcano Engine", &[]), &keys.volc, tr("Volcano Engine refused your own key. Replies in its voices stay silent until you set another one.", &[])),
             };
             items.push(divider());
+            items.push(self.kk_own_key(provider, name, key, refused));
+        }
+        if let Some(groq) = &keys.groq {
+            items.push(divider());
             items.push(
-                container(
-                    column![row![text(name).font(bold()).size(14).color(theme::INK).width(Length::Fill), entry].spacing(10).align_y(Alignment::Center)]
-                        .push(key.refused.then(|| tag(refused, theme::KORE_PINK_TEXT)))
-                        .spacing(6),
-                )
-                .padding(Padding::from([11, 16]))
-                .into(),
+                container(note(tr("Voice commands need your own Groq key for speech recognition, from console.groq.com. Your recordings go straight to Groq, billed to your account there.", &[])))
+                    .padding(Padding::from([12, 16]))
+                    .into(),
             );
+            items.push(divider());
+            items.push(self.kk_own_key(client::KeyProvider::Groq, "Groq".to_owned(), groq, tr("Groq refused your own key. Voice commands stop until you set another one.", &[])));
         }
         rows(items).into()
+    }
+
+    /// One own key's row: typed once and saved, then shown only as set, with Clear.
+    fn kk_own_key(&self, provider: client::KeyProvider, name: String, key: &status::VoiceKey, refused: String) -> Element<'_, Message> {
+        let entry: Element<'_, Message> = if key.set {
+            row![tag(tr("Set", &[]), theme::DONE_TEXT), pill(tr("Clear", &[]), Fill::Paper, Some(Message::ClearOwnKey(provider)))].spacing(10).align_y(Alignment::Center).into()
+        } else {
+            let draft = &self.own_key_drafts[provider as usize];
+            row![
+                field(&tr("Your own key", &[]), draft)
+                    .secure(true)
+                    .on_input(move |draft| Message::OwnKeyDraft(provider, draft))
+                    .on_submit(Message::SaveOwnKey(provider))
+                    .width(240),
+                pill(tr("Save", &[]), Fill::Sun, (!draft.trim().is_empty()).then_some(Message::SaveOwnKey(provider))),
+            ]
+            .spacing(10)
+            .align_y(Alignment::Center)
+            .into()
+        };
+        container(
+            column![row![text(name).font(bold()).size(14).color(theme::INK).width(Length::Fill), entry].spacing(10).align_y(Alignment::Center)]
+                .push(key.refused.then(|| tag(refused, theme::KORE_PINK_TEXT)))
+                .spacing(6),
+        )
+        .padding(Padding::from([11, 16]))
+        .into()
     }
 
     // MARK: Making a Character

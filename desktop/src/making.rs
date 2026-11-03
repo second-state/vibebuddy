@@ -310,7 +310,7 @@ mod tests {
     #[test]
     fn without_an_own_key_for_its_provider_a_voice_needs_the_paid_plan() {
         let voice = |provider: &str| Voice { id: "v".to_owned(), provider: provider.to_owned(), language: "en".to_owned(), name: "V".to_owned(), own: false };
-        let keys = VoiceKeys { elevenlabs: VoiceKey { set: true, refused: false }, volc: VoiceKey { set: true, refused: true } };
+        let keys = VoiceKeys { elevenlabs: VoiceKey { set: true, refused: false }, volc: VoiceKey { set: true, refused: true }, groq: None };
         let signed_in = Account { available: true, signed_in: true, ..Account::default() };
         let signed_out = Account { available: true, ..Account::default() };
         assert_eq!(Readiness::of(&voice("elevenlabs"), Some(&keys), &Account::default()), Readiness::OwnKey);

@@ -187,7 +187,8 @@ pub struct ResidentInfo {
     #[serde(default)]
     pub anthropic_key_set: Option<bool>,
     /// Why the box can't take voice commands right now besides `problem`: `bridge_firmware`, `bridge_slow`,
-    /// `signed_out`, `allowance` or `global_cap`. None when nothing else holds voice back, and from an older daemon.
+    /// `own_key`, `signed_out`, `allowance` or `global_cap`. None when nothing else holds voice back, and from an older
+    /// daemon.
     #[serde(default)]
     pub voice_off: Option<String>,
 }
@@ -200,6 +201,7 @@ impl ResidentInfo {
         Some(match self.voice_off.as_deref()? {
             "bridge_firmware" => tr("The box is on its UART bridge, and its firmware can't carry voice there. Update the firmware, or plug the cable into the box's native USB port.", &[]),
             "bridge_slow" => tr("The box is on its UART bridge, which didn't hold the speed voice needs. Plug the cable into the box's native USB port, or plug it in again to try once more.", &[]),
+            "own_key" => tr("Voice commands need your own Groq key for speech recognition. Set it under Your own keys on the General page.", &[]),
             "signed_out" => tr("Voice needs this computer signed in to VibeBuddy. Sign in on the General page.", &[]),
             "allowance" => tr("Today's voice is used up. It comes back at %@.", &[&back()]),
             "global_cap" => tr("Voice is paused for everyone today. It comes back at %@.", &[&back()]),
@@ -268,26 +270,29 @@ pub async fn set_anthropic_key(key: Option<String>) -> Result<ResidentInfo, Stri
     resident_setting(request).await
 }
 
-/// A provider of spoken replies the user can give their own key for (ADR-0020).
+/// A provider the user can give their own key for (ADR-0020): of spoken replies, or Groq for speech recognition.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum KeyProvider {
     ElevenLabs,
     Volc,
+    Groq,
 }
 
 impl KeyProvider {
-    pub const ALL: [Self; 2] = [Self::ElevenLabs, Self::Volc];
+    /// The providers of spoken replies.
+    pub const REPLIES: [Self; 2] = [Self::ElevenLabs, Self::Volc];
 
     /// Its name in the daemon's API.
     pub fn as_str(self) -> &'static str {
         match self {
             Self::ElevenLabs => "elevenlabs",
             Self::Volc => "volc",
+            Self::Groq => "groq",
         }
     }
 }
 
-/// Sets the user's own key for a provider of spoken replies (None clears it). The daemon never sends it back; the
+/// Sets the user's own key for a provider (None clears it). The daemon never sends it back; the
 /// status says it is set.
 pub async fn set_voice_key(provider: KeyProvider, key: Option<String>) -> Result<(), String> {
     let request = reqwest::Client::new().put(format!("{BASE}/v1/voice-keys")).json(&serde_json::json!({provider.as_str(): key}));
@@ -545,6 +550,7 @@ mod tests {
         let bridge = parse(r#"{"enabled":true,"ready":true,"voice_off":"bridge_firmware"}"#);
         assert!(bridge.voice_off_note().is_some_and(|note| note.contains("UART bridge")), "{bridge:?}");
         assert!(parse(r#"{"enabled":true,"voice_off":"allowance"}"#).voice_off_note().is_some_and(|note| note.contains("comes back at")));
+        assert!(parse(r#"{"enabled":true,"voice_off":"own_key"}"#).voice_off_note().is_some_and(|note| note.contains("Groq")));
         assert_eq!(parse(r#"{"enabled":true,"voice_off":"something_new"}"#).voice_off_note(), None);
     }
 

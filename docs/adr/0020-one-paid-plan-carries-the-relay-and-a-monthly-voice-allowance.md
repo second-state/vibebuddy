@@ -31,3 +31,11 @@ The Relay and our voices cost us money to run, and users now want to make their 
 - The Relay protocol gets an account session from the daemon, and a refusal when the account has no plan. Box firmware does not change. When the Relay refuses, the App says why; the box only shows that the link is down.
 - The costs that made ADR-0018 reject payment still apply: invoices and tax in more than one market. Stripe Tax handles part of it. Whether users in China can pay through Stripe is still open.
 - `vibebuddy-api` stays on Workers Free for now (2026-10-24). Its CPU limit stays (vibebuddy-cloud#11), so our voices must avoid converting audio in the Worker where they can. Users with their own key are not affected, because the daemon converts their audio. The Stripe integration waits; the plan is recorded so a webhook can fill it in later.
+
+## Update, 2026-11-03: production serves no voice
+
+Until the Paid plan is on sale, production `vibebuddy-api` serves none of our voices: no recognition, no spoken replies, no Characters' lines, on any plan. Its voice calls answer `403 {"reason":"own_key"}` (docs/api.md). Staging does the same, so development builds behave as a release does. This replaces the Free daily allowance of our voices above for now; the Paid plan may bring our voices back.
+
+- Voice commands need the user's own Groq key for speech recognition, set in the App beside the other own keys. The daemon calls Groq's Whisper with it (docs/resident-session.md). Without one, the box shows SET VOICE KEY.
+- Spoken replies need an own ElevenLabs or Volcano Engine key for the Character's voice. Without one, a reply stays text.
+- No daemon calls the service for voice unless `VIBEBUDDY_TTS_BASE_URL` names one, in a release or not, so a signed-out computer isn't asked to sign in for nothing. Accounts and the Relay still use the service: production in a release, staging otherwise.

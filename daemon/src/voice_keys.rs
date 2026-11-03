@@ -1,5 +1,6 @@
-//! The user's own keys for spoken replies (ADR-0020, "Own key"): an ElevenLabs key and a Volcano Engine key, in
-//! `voice-keys.json` in the config directory, `{"elevenlabs"?, "volc"?}`, mode 0600. A file of its own, as
+//! The user's own keys (ADR-0020, "Own key"): an ElevenLabs key and a Volcano Engine key for spoken replies, and a
+//! Groq key for speech recognition ([`crate::speech`]), in `voice-keys.json` in the config directory,
+//! `{"elevenlabs"?, "volc"?, "groq"?}`, mode 0600. A file of its own, as
 //! `speech.json` is, because `PUT /v1/config` replaces the whole config and an older App would wipe a key it doesn't
 //! know. A reply whose voice is from a provider with an own key goes straight to that provider ([`crate::synthesis`]).
 //! Only which keys are set, and whether a provider refused one, leave the daemon; a key is never sent back or logged.
@@ -17,14 +18,22 @@ pub const FILE: &str = "voice-keys.json";
 pub enum Provider {
     ElevenLabs,
     Volc,
+    /// Speech recognition only: no voice is from it.
+    Groq,
 }
 
 impl Provider {
-    /// Its name in the file, the local API and a voice's `<vendor>:` prefix.
+    /// A provider of voices, by its name in a voice's `<vendor>:` prefix.
     pub fn named(name: &str) -> Option<Self> {
+        Self::keyed(name).filter(|provider| *provider != Self::Groq)
+    }
+
+    /// A provider by its name in the file and the local API.
+    pub fn keyed(name: &str) -> Option<Self> {
         match name {
             "elevenlabs" => Some(Self::ElevenLabs),
             "volc" => Some(Self::Volc),
+            "groq" => Some(Self::Groq),
             _ => None,
         }
     }
@@ -42,6 +51,8 @@ struct Saved {
     elevenlabs: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     volc: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    groq: Option<String>,
 }
 
 impl Saved {
@@ -49,6 +60,7 @@ impl Saved {
         match provider {
             Provider::ElevenLabs => &mut self.elevenlabs,
             Provider::Volc => &mut self.volc,
+            Provider::Groq => &mut self.groq,
         }
     }
 }
@@ -58,6 +70,7 @@ impl Saved {
 pub struct VoiceKeysStatus {
     pub elevenlabs: KeyStatus,
     pub volc: KeyStatus,
+    pub groq: KeyStatus,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Serialize)]
@@ -71,7 +84,7 @@ pub struct VoiceKeys {
     /// None without a config directory, and in tests unless one sets it; then no key can be set.
     file: Option<PathBuf>,
     saved: Mutex<Saved>,
-    refused: Mutex<[bool; 2]>,
+    refused: Mutex<[bool; 3]>,
     changed: watch::Sender<()>,
 }
 
@@ -91,7 +104,7 @@ impl VoiceKeys {
         let mut saved = self.saved.lock().unwrap().clone();
         let refused = *self.refused.lock().unwrap();
         let mut of = |provider: Provider| KeyStatus { set: saved.key(provider).is_some(), refused: refused[provider as usize] };
-        VoiceKeysStatus { elevenlabs: of(Provider::ElevenLabs), volc: of(Provider::Volc) }
+        VoiceKeysStatus { elevenlabs: of(Provider::ElevenLabs), volc: of(Provider::Volc), groq: of(Provider::Groq) }
     }
 
     pub fn key(&self, provider: Provider) -> Option<String> {
@@ -190,5 +203,6 @@ pub(crate) mod tests {
         assert_eq!(Provider::of("elevenlabs:abc"), Some((Provider::ElevenLabs, "abc")));
         assert_eq!(Provider::of("volc:zh_female_wanwanxiaohe_moon_bigtts"), Some((Provider::Volc, "zh_female_wanwanxiaohe_moon_bigtts")));
         assert_eq!(Provider::of("en-US-JennyNeural"), None);
+        assert_eq!(Provider::of("groq:whisper"), None, "Groq only hears");
     }
 }

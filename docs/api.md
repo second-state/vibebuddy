@@ -2,7 +2,7 @@
 
 How the daemon, the App and the box talk to `vibebuddy-api`, the service that holds accounts and voice (ADR-0017, ADR-0018). The service itself is the Worker `vibebuddy-api` in the closed-source `vibebuddy-cloud` repo; this is the part this repo implements.
 
-It lives at `https://api.korekore.ai`; staging is `https://api-staging.korekore.ai`. Releases use production and every other build uses staging, as for the Relay. Production has no route until accounts are complete (vibebuddy-cloud#11).
+It lives at `https://api.korekore.ai`; staging is `https://api-staging.korekore.ai`. Releases use production and every other build uses staging, as for the Relay. `VIBEBUDDY_TTS_BASE_URL` sets another base, or `off`.
 
 ## Accounts
 
@@ -51,6 +51,8 @@ The daemon sends the token as `Authorization: Bearer <token>` and keeps it in `c
 ## Voice
 
 Both calls need `Authorization: Bearer <session>` and answer 401 without a valid one. Only daemons call them: the box's audio reaches the daemon over the link, however the box is linked (ADR-0018).
+
+Production serves no voice (ADR-0020): every call below gets `403 {"reason":"own_key"}` there, before the session is checked, and voice comes from the user's own keys. Staging does the same. So no daemon calls them unless `VIBEBUDDY_TTS_BASE_URL` names a service; given that 403 anyway, it tells the box `own_key` for a command and leaves a reply as text. The service's `SERVE_VOICE` setting turns voice back on as described below, for testing or a later Paid plan.
 
 ### Recognizing a voice command
 

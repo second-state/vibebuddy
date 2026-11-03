@@ -34,6 +34,8 @@ pub struct Status {
 pub struct VoiceKeys {
     pub elevenlabs: VoiceKey,
     pub volc: VoiceKey,
+    /// For speech recognition; None from a daemon before it.
+    pub groq: Option<VoiceKey>,
 }
 
 #[derive(Clone, Debug, Default, Deserialize, PartialEq)]
@@ -592,7 +594,7 @@ mod tests {
         let status: Status = serde_json::from_str(LIVE).expect("status");
         assert_eq!(status.voice_keys, None);
         let keys: VoiceKeys = serde_json::from_str(r#"{"elevenlabs": {"set": true, "refused": true}, "volc": {"set": false, "refused": false}}"#).expect("keys");
-        assert_eq!(keys, VoiceKeys { elevenlabs: VoiceKey { set: true, refused: true }, volc: VoiceKey::default() });
+        assert_eq!(keys, VoiceKeys { elevenlabs: VoiceKey { set: true, refused: true }, volc: VoiceKey::default(), groq: None });
     }
 
     #[test]
