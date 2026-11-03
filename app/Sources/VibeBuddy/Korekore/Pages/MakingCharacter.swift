@@ -202,7 +202,7 @@ struct KorekoreMakeSheet: View {
                     KHeading(String(localized: "Voice"))
                     KRows {
                         // In one order whatever the lines: the voice comes first, so the lines don't move it.
-                        let options = model.characterVoices
+                        let options = VoiceKeysStatus.offered(model.characterVoices, keys: model.status?.voiceKeys, kept: voice)
                         ForEach(Array(options.enumerated()), id: \.element.id) { index, option in
                             if index > 0 { KDivider() }
                             voiceRow(option)
@@ -325,13 +325,16 @@ struct KorekoreMakeSheet: View {
         let providerName = ownProvider == "volc" ? String(localized: "Volcano Engine") : "ElevenLabs"
         let key = ownProvider == "volc" ? model.status?.voiceKeys?.volc : model.status?.voiceKeys?.elevenlabs
         let hasKey = key?.set == true
+        let showsVolc = model.status?.voiceKeys?.showsVolc == true
         return VStack(alignment: .leading, spacing: 10) {
             if addingOwn {
-                KNote(String(localized: "A voice you cloned or designed in your own ElevenLabs or Volcano Engine account. Paste its ID: VibeBuddy tries it with your own key by saying the first line, and keeps it for next time."))
+                KNote(showsVolc ? String(localized: "A voice you cloned or designed in your own ElevenLabs or Volcano Engine account. Paste its ID: VibeBuddy tries it with your own key by saying the first line, and keeps it for next time.") : String(localized: "A voice you cloned or designed in your own ElevenLabs account. Paste its ID: VibeBuddy tries it with your own key by saying the first line, and keeps it for next time."))
                 HStack(spacing: 8) {
-                    KMenu(selection: ownProvider, options: [("elevenlabs", "ElevenLabs"), ("volc", String(localized: "Volcano Engine"))]) {
-                        ownProvider = $0
-                        ownVoiceID = ""
+                    if showsVolc {
+                        KMenu(selection: ownProvider, options: [("elevenlabs", "ElevenLabs"), ("volc", String(localized: "Volcano Engine"))]) {
+                            ownProvider = $0
+                            ownVoiceID = ""
+                        }
                     }
                     // ElevenLabs lists the key's voices, so the id needn't be looked up; Volcano Engine can't with a key alone.
                     if ownProvider == "elevenlabs", let elevenVoices, !elevenVoices.isEmpty {

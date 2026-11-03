@@ -44,10 +44,12 @@ struct KorekoreAccountCard: View {
                                       refused: String(localized: "ElevenLabs refused your own key. Replies in its voices stay silent until you set another one.")) { key in
                         await saveKey("elevenlabs", key)
                     }
-                    KDivider()
-                    KorekoreOwnKeyRow(title: String(localized: "Volcano Engine"), key: keys.volc, keyPage: Resources.volcConsole,
-                                      refused: String(localized: "Volcano Engine refused your own key. Replies in its voices stay silent until you set another one.")) { key in
-                        await saveKey("volc", key)
+                    if keys.showsVolc {
+                        KDivider()
+                        KorekoreOwnKeyRow(title: String(localized: "Volcano Engine"), key: keys.volc, keyPage: Resources.volcConsole,
+                                          refused: String(localized: "Volcano Engine refused your own key. Replies in its voices stay silent until you set another one.")) { key in
+                            await saveKey("volc", key)
+                        }
                     }
                     if let groq = keys.groq {
                         KDivider()

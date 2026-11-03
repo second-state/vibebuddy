@@ -537,6 +537,7 @@
 /* A voice of the user's own, in making a Character */
 "Your own voice…" = "你自己的声音…";
 "A voice you cloned or designed in your own ElevenLabs or Volcano Engine account. Paste its ID: VibeBuddy tries it with your own key by saying the first line, and keeps it for next time." = "你在自己的 ElevenLabs 或火山引擎账号里克隆或设计的声音。粘贴它的 ID：VibeBuddy 会用你自己的 key 说第一句台词来试听，并记住它供下次使用。";
+"A voice you cloned or designed in your own ElevenLabs account. Paste its ID: VibeBuddy tries it with your own key by saying the first line, and keeps it for next time." = "你在自己的 ElevenLabs 账号里克隆或设计的声音。粘贴它的 ID：VibeBuddy 会用你自己的 key 说第一句台词来试听，并记住它供下次使用。";
 "Voice ID" = "Voice ID";
 "Speaker ID" = "音色 ID";
 "Try" = "试听";

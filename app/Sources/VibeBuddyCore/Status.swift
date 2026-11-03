@@ -68,6 +68,16 @@ public struct VoiceKeysStatus: Codable, Equatable {
     /// For speech recognition; nil from a daemon before it.
     public var groq: Key?
     public init(elevenlabs: Key, volc: Key, groq: Key? = nil) { self.elevenlabs = elevenlabs; self.volc = volc; self.groq = groq }
+
+    /// Volcano Engine is no longer offered: only a user who already set a key for it sees its key row and voices,
+    /// and can keep using or clear them.
+    public var showsVolc: Bool { volc.set }
+
+    /// The voices to offer: Volcano Engine's only to a user who still has a key for it, and `kept`, a voice already
+    /// chosen, whatever its provider.
+    public static func offered(_ voices: [CharacterVoice], keys: VoiceKeysStatus?, kept: String? = nil) -> [CharacterVoice] {
+        voices.filter { $0.provider != "volc" || keys?.showsVolc == true || $0.id == kept }
+    }
 }
 
 /// An account has an email or a GitHub user, never both.
