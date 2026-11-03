@@ -52,7 +52,7 @@ The daemon sends the token as `Authorization: Bearer <token>` and keeps it in `c
 
 Both calls need `Authorization: Bearer <session>` and answer 401 without a valid one. Only daemons call them: the box's audio reaches the daemon over the link, however the box is linked (ADR-0018).
 
-Production serves no voice (ADR-0020): every call below gets `403 {"reason":"own_key"}` there, before the session is checked, and voice comes from the user's own keys. A release daemon doesn't call them unless `VIBEBUDDY_TTS_BASE_URL` names a service; given that 403 anyway, it tells the box `own_key` for a command and leaves a reply as text. Staging serves voice as described.
+Production serves no voice (ADR-0020): every call below gets `403 {"reason":"own_key"}` there, before the session is checked, and voice comes from the user's own keys. Staging does the same. So no daemon calls them unless `VIBEBUDDY_TTS_BASE_URL` names a service; given that 403 anyway, it tells the box `own_key` for a command and leaves a reply as text. The service's `SERVE_VOICE` setting turns voice back on as described below, for testing or a later Paid plan.
 
 ### Recognizing a voice command
 

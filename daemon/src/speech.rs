@@ -7,8 +7,9 @@
 //! - The user's own Groq key, set in the App with their other own keys ([`crate::voice_keys`], ADR-0020). It is read
 //!   at each turn, so a key set or cleared takes effect at once.
 //! - The voice service in `vibebuddy-cloud`, `POST {base}/v1/voice/transcribe` with the account's session (ADR-0018,
-//!   docs/api.md), at the base spoken replies use ([`crate::synthesis::voice_base`]): staging outside a release,
-//!   none in a release, since production serves no voice. With neither, the box is told `own_key`.
+//!   docs/api.md), at the base spoken replies use ([`crate::synthesis::voice_base`]): only where
+//!   `VIBEBUDDY_TTS_BASE_URL` names one, since neither production nor staging serves voice. With neither, the box is
+//!   told `own_key`, in every build alike.
 //! - Cloudflare Workers AI's Whisper (`CLOUDFLARE_ACCOUNT_ID`, `CLOUDFLARE_AI_TOKEN`), for development; picked only
 //!   by name now that the voice service recognizes.
 //!
@@ -370,10 +371,7 @@ fn send(request: HttpRequest) -> Result<(u16, String), String> {
 pub fn from_env(session: Option<Arc<Account>>, keys: Option<Arc<VoiceKeys>>) -> Option<Arc<dyn Recognizer>> {
     let own = crate::config::config_dir().map(|dir| read_settings(&dir.join(SETTINGS_FILE))).unwrap_or_default();
     let file = std::env::var_os(ENV_FILE_VARIABLE).map(|path| read_env_file(Path::new(&path))).unwrap_or_default();
-    let service = crate::synthesis::voice_base(
-        std::env::var(crate::synthesis::BASE_URL_VARIABLE).ok(),
-        crate::relay::release(),
-    );
+    let service = crate::synthesis::voice_base(std::env::var(crate::synthesis::BASE_URL_VARIABLE).ok());
     configure(
         &|name| {
             std::env::var(name)

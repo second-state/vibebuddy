@@ -374,7 +374,7 @@ pub(crate) fn voice_field<'a>(file: &'a str, key: &str) -> Option<&'a str> {
 
 /// The synthesizer: the user's own keys, and the voice service the environment configures, if any.
 pub fn from_env(session: Option<Arc<Account>>, keys: Arc<VoiceKeys>) -> Arc<dyn Synthesizer> {
-    let service = configure(voice_base(std::env::var(BASE_URL_VARIABLE).ok(), crate::relay::release()), session);
+    let service = configure(voice_base(std::env::var(BASE_URL_VARIABLE).ok()), session);
     Arc::new(Synthesis { service, keys, elevenlabs_url: ELEVENLABS_URL.to_owned(), volc_url: VOLC_URL.to_owned() })
 }
 
@@ -384,15 +384,11 @@ pub fn service_base(base_url: Option<String>, release: bool) -> Option<String> {
     checked(base_url, if release { PRODUCTION_URL } else { STAGING_URL })
 }
 
-/// The voice service's base URL, for spoken replies, speech recognition ([`crate::speech`]) and Characters' lines: as
-/// [`service_base`], but a release has none unless the variable sets one, since production serves no voice (ADR-0020):
-/// the user's own keys give it.
-pub fn voice_base(base_url: Option<String>, release: bool) -> Option<String> {
-    let base_url = base_url.map(|url| url.trim().to_owned()).filter(|url| !url.is_empty());
-    if release && base_url.is_none() {
-        return None;
-    }
-    checked(base_url, STAGING_URL)
+/// The voice service's base URL, for spoken replies, speech recognition ([`crate::speech`]) and Characters' lines:
+/// only the variable's. Neither production nor staging serves voice (ADR-0020), so every build gets its voice from the
+/// user's own keys alike; the variable is for testing a service that does.
+pub fn voice_base(base_url: Option<String>) -> Option<String> {
+    base_url.map(|url| url.trim().to_owned()).filter(|url| !url.is_empty() && url != "off").and_then(|url| checked(Some(url), STAGING_URL))
 }
 
 fn checked(base_url: Option<String>, default: &str) -> Option<String> {
@@ -463,7 +459,7 @@ mod tests {
     }
 
     #[test]
-    fn the_service_is_staging_outside_a_release_production_in_one_and_can_be_set_or_switched_off() {
+    fn the_account_is_staging_outside_a_release_production_in_one_and_voice_only_where_the_variable_says() {
         let service = |url: Option<&str>, release| service_base(url.map(str::to_owned), release);
         assert_eq!(service(None, false).as_deref(), Some(STAGING_URL));
         assert_eq!(service(None, true).as_deref(), Some(PRODUCTION_URL));
@@ -471,13 +467,12 @@ mod tests {
         assert_eq!(service(Some("off"), false), None);
         assert_eq!(service(Some("api.korekore.ai"), false), None);
 
-        // Production serves no voice: a release has a voice service only when the variable names one.
-        let voice = |url: Option<&str>, release| configure(voice_base(url.map(str::to_owned), release), None).is_some();
-        assert!(voice(None, false));
-        assert!(!voice(None, true));
-        assert!(voice(Some("https://api-staging.korekore.ai"), true));
-        assert!(!voice(Some("off"), false));
-        assert!(!voice(Some("api.korekore.ai"), false));
+        // No service serves voice: any build has a voice service only when the variable names one.
+        let voice = |url: Option<&str>| configure(voice_base(url.map(str::to_owned)), None).is_some();
+        assert!(!voice(None));
+        assert!(voice(Some("http://127.0.0.1:8787")));
+        assert!(!voice(Some("off")));
+        assert!(!voice(Some("api.korekore.ai")));
     }
 
     /// Serves one canned HTTP answer on a local port; returns the base URL and the request it got.

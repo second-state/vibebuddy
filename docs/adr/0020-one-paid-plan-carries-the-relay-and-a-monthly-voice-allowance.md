@@ -34,8 +34,8 @@ The Relay and our voices cost us money to run, and users now want to make their 
 
 ## Update, 2026-11-03: production serves no voice
 
-Until the Paid plan is on sale, production `vibebuddy-api` serves none of our voices: no recognition, no spoken replies, no Characters' lines, on any plan. Its voice calls answer `403 {"reason":"own_key"}` (docs/api.md). Staging still serves them, for development. This replaces the Free daily allowance of our voices above for now; the Paid plan may bring our voices back.
+Until the Paid plan is on sale, production `vibebuddy-api` serves none of our voices: no recognition, no spoken replies, no Characters' lines, on any plan. Its voice calls answer `403 {"reason":"own_key"}` (docs/api.md). Staging does the same, so development builds behave as a release does. This replaces the Free daily allowance of our voices above for now; the Paid plan may bring our voices back.
 
 - Voice commands need the user's own Groq key for speech recognition, set in the App beside the other own keys. The daemon calls Groq's Whisper with it (docs/resident-session.md). Without one, the box shows SET VOICE KEY.
 - Spoken replies need an own ElevenLabs or Volcano Engine key for the Character's voice. Without one, a reply stays text.
-- A release daemon doesn't call production for voice at all, so a signed-out computer isn't asked to sign in for nothing. Accounts and the Relay still use production.
+- No daemon calls the service for voice unless `VIBEBUDDY_TTS_BASE_URL` names one, in a release or not, so a signed-out computer isn't asked to sign in for nothing. Accounts and the Relay still use the service: production in a release, staging otherwise.
