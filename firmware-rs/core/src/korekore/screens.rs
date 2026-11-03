@@ -164,7 +164,7 @@ fn hint(canvas: &mut Canvas, face: &Face, x: i32, y: i32, key: &[u8], action: &[
     used + kt::draw(canvas, face, x + used, y, action, color, i32::MAX)
 }
 
-/// "▸", which DotGothic16 doesn't have: a small triangle pointing right.
+/// "▸", which the type tables don't carry: a small triangle pointing right.
 fn pointer(canvas: &mut Canvas, x: i32, y: i32, color: u16) {
     for column in 0..4 {
         canvas.fill_rect(x + column, y + column, 1, 7 - 2 * column, color);
@@ -426,14 +426,23 @@ impl Display {
         if self.tasks.is_empty() {
             let quiet: &[u8] = if self.link_lost { b"" } else { b"ALL QUIET" };
             kt::draw_centered(canvas, &TYPE_12, 208, 100, quiet, BOX_TEXT);
-            let mut stats = Text::<64>::new();
-            for (index, stat) in self.stats.iter().enumerate() {
-                if index > 0 {
-                    stats.push_bytes(" · ".as_bytes());
+            // The stats on one line, or on as many as they need, each stat whole.
+            let mut lines = [Text::<64>::new(), Text::<64>::new(), Text::<64>::new()];
+            let mut line = 0;
+            let gap = " · ".as_bytes();
+            for stat in &self.stats {
+                let joined = kt::width(&TYPE_10, lines[line].as_bytes()) + kt::width(&TYPE_10, gap) + kt::width(&TYPE_10, stat);
+                if !lines[line].is_empty() && joined > 200 && line + 1 < lines.len() {
+                    line += 1;
                 }
-                stats.push_bytes(stat);
+                if !lines[line].is_empty() {
+                    lines[line].push_bytes(gap);
+                }
+                lines[line].push_bytes(stat);
             }
-            kt::draw_centered(canvas, &TYPE_10, 208, 120, stats.as_bytes(), BOX_TEXT_MUTED);
+            for (index, text) in lines.iter().take(line + 1).enumerate() {
+                kt::draw_centered(canvas, &TYPE_10, 208, 120 + index as i32 * TYPE_10.line(), text.as_bytes(), BOX_TEXT_MUTED);
+            }
             return;
         }
         for (slot, task) in self.tasks_on_page().iter().enumerate() {
@@ -495,10 +504,10 @@ impl Display {
             title = title.strip_prefix(icon.prefix()).unwrap_or(title);
         }
         let text_width = pill_x - 7 - text_x;
-        let title_y = rect.y + padding;
+        let title_y = rect.y + padding - 1;
         kt::draw(canvas, title_face, text_x, title_y, title, BOX_TEXT, text_width);
-        // Under the title's letters; DotGothic16's line has room for descenders the titles rarely use.
-        let line_y = title_y + title_face.line() - if title_face.line() > 20 { 4 } else { 0 };
+        // Two pixels between the title's descenders and the line's capitals: the bold type crowds without them.
+        let line_y = title_y + title_face.line() + 2;
         let elapsed = format_elapsed(self.task_elapsed_seconds(task, scene.now_ms));
         let time: Text<24> = match (takeover, task.state) {
             (true, State::InputRequired) => text!(24, "waiting {}", core::str::from_utf8(elapsed.as_bytes()).unwrap_or("")),
@@ -572,8 +581,8 @@ impl Display {
         canvas.fill_rect(3, 3, WIDTH - 6, HEIGHT - 6, BOX_GROUND);
         self.kk_buddy(canvas, Expr::Sad, 15, 15, 5, false, false);
         kt::draw(canvas, &TYPE_22, 127, tight(&TYPE_22, 26), b"daijoubu,", PEACH, i32::MAX);
-        kt::draw(canvas, &TYPE_22, 127, tight(&TYPE_22, 52), b"daijoubu.", PEACH, i32::MAX);
-        kt::draw(canvas, &TYPE_10, 127, 80, b"it happens. have a look?", BOX_TEXT_MUTED, i32::MAX);
+        kt::draw(canvas, &TYPE_22, 127, tight(&TYPE_22, 54), b"daijoubu.", PEACH, i32::MAX);
+        kt::draw(canvas, &TYPE_10, 127, 86, b"it happens. have a look?", BOX_TEXT_MUTED, i32::MAX);
         if let Some(index) = index {
             self.kk_card(canvas, scene, &self.tasks[index], FAILED_TICKET, BOX_CARD, 10, &TYPE_12, true);
         }
@@ -594,6 +603,10 @@ impl Display {
     // ---------- pomodoro ----------
 
     fn kk_pomodoro(&self, canvas: &mut Canvas, scene: &Scene, alarm: bool) {
+        // The dial's centre, and the column to its right, where the robot screens put theirs.
+        const DIAL_X: i32 = 118;
+        const COLUMN_X: i32 = 210;
+        const COLUMN_WIDTH: i32 = 102;
         let view = scene.pomodoro.view(scene.now_ms);
         let color = if view.is_idle() {
             LAVENDER
@@ -610,17 +623,18 @@ impl Display {
         canvas.fill_rect(0, 0, WIDTH, HEIGHT, BOX_GROUND);
         canvas.fill_rect(0, 0, WIDTH, 3, color);
 
-        // The dial: 60 ticks a minute each, the minutes gone lit, and a hand.
-        let (center_x, center_y) = (78.0f32, 121.0f32);
+        // The dial, as big as the robot screens' (display.rs): 60 ticks a minute each from radius 70 to 79, the
+        // minutes gone lit, and a hand from 64 to 86 that crosses the ticks and stays clear of the digits.
+        let (center_x, center_y) = (DIAL_X as f32, 122.0f32);
         let minutes = if view.run == Run::Pending { 0 } else { ((view.total_ms - view.remaining_ms) / 60_000) as i32 };
         for tick in 0..60 {
             let fill = if tick < minutes { color } else { BOX_FACE };
-            fill_rotated(canvas, center_x, center_y, tick as f32 * 6.0, 62.0, 4.0, 9.0, fill);
+            fill_rotated(canvas, center_x, center_y, tick as f32 * 6.0, 74.5, 4.0, 9.0, fill);
         }
-        fill_rotated(canvas, center_x, center_y, minutes as f32 * 6.0, 44.0, 4.0, 18.0, BOX_TEXT);
+        fill_rotated(canvas, center_x, center_y, minutes as f32 * 6.0, 75.0, 4.0, 22.0, BOX_TEXT);
         if !paused || self.animation_frame.is_multiple_of(2) {
             let digits = if paused { BOX_TEXT_MUTED } else { BOX_TEXT };
-            kt::draw_centered(canvas, &TYPE_38, 78, tight(&TYPE_38, 99), format_countdown(view.remaining_ms).as_bytes(), digits);
+            kt::draw_centered(canvas, &TYPE_38, DIAL_X, tight(&TYPE_38, 100), format_countdown(view.remaining_ms).as_bytes(), digits);
         }
         let under: &[u8] = match (view.is_idle(), view.phase, paused) {
             (true, _, _) => b"FOCUS 25 MIN",
@@ -628,7 +642,7 @@ impl Display {
             (_, Phase::Break, _) => b"rest your eyes",
             _ => b"ganbatte!",
         };
-        kt::draw_centered(canvas, &TYPE_10, 78, 143, under, color);
+        kt::draw_centered(canvas, &TYPE_10, DIAL_X, 145, under, color);
 
         // The column on the right: the phase, the keys, today, the buddy and the agents.
         let label: &[u8] = if view.is_idle() {
@@ -638,10 +652,8 @@ impl Display {
         } else {
             b"FOCUS"
         };
-        let label_width = kt::draw(canvas, &TYPE_22, 164, tight(&TYPE_22, 11), label, color, i32::MAX);
-        if paused {
-            chip(canvas, &TYPE_9, 164 + label_width + 6, 16, b"PAUSED", BOX_GROUND, BOX_TEXT);
-        }
+        // Paused shows under the digits and in the keys; the narrow column has no room for a chip beside the label.
+        kt::draw(canvas, &TYPE_22, COLUMN_X, tight(&TYPE_22, 11), label, color, COLUMN_WIDTH);
         let hints: [(&[u8], &[u8]); 2] = match (view.run, view.is_idle()) {
             (Run::Pending, true) => [(b"K0", b"start focus"), (b"", b"")],
             (Run::Pending, false) => [(b"K0", b"start break"), (b"HOLD K0", b"skip")],
@@ -650,16 +662,16 @@ impl Display {
         };
         for (row, (key, action)) in hints.iter().enumerate() {
             if !key.is_empty() {
-                hint(canvas, &TYPE_9, 164, 38 + row as i32 * 18, key, action, BOX_GROUND, BOX_TEXT, BOX_TEXT_MUTED);
+                hint(canvas, &TYPE_9, COLUMN_X, 42 + row as i32 * 18, key, action, BOX_GROUND, BOX_TEXT, BOX_TEXT_MUTED);
             }
         }
-        kt::draw(canvas, &TYPE_9, 164, 78, b"TODAY", BOX_TEXT_MUTED, i32::MAX);
-        let squares = view.completed.clamp(4, 12) as i32;
+        kt::draw(canvas, &TYPE_9, COLUMN_X, 82, b"TODAY", BOX_TEXT_MUTED, COLUMN_WIDTH);
+        let squares = view.completed.clamp(4, 9) as i32;
         for square in 0..squares {
             let fill = if (square as u32) < view.completed { KORE_PINK } else { BOX_FACE };
-            fill_round(canvas, Rect { x: 164 + square * 11, y: 96, width: 8, height: 8 }, 2, fill);
+            fill_round(canvas, Rect { x: COLUMN_X + square * 11, y: 100, width: 8, height: 8 }, 2, fill);
         }
-        kt::draw(canvas, &TYPE_10, 164, 108, format_tally(view.completed, view.focus_s).as_bytes(), KORE_PINK, 148);
+        kt::draw(canvas, &TYPE_10, COLUMN_X, 112, format_tally(view.completed, view.focus_s).as_bytes(), KORE_PINK, COLUMN_WIDTH);
 
         let expr = match (view.is_idle(), view.phase, paused) {
             (true, _, _) | (_, _, true) => Expr::Normal,
@@ -712,7 +724,7 @@ impl Display {
         outlined_round(canvas, bubble, 10, 2, BOX_GROUND, CREAM);
         let (first, rest) = split_line(&TYPE_12, line, bubble.width - 16);
         kt::draw(canvas, &TYPE_12, bubble.x + 8, bubble.y + 6, first, BOX_GROUND, bubble.width - 16);
-        kt::draw(canvas, &TYPE_12, bubble.x + 8, bubble.y + 6 + TYPE_12.line() - 4, rest, BOX_GROUND, bubble.width - 16);
+        kt::draw(canvas, &TYPE_12, bubble.x + 8, bubble.y + 6 + TYPE_12.line(), rest, BOX_GROUND, bubble.width - 16);
         let big: &[u8] = if focus_ended { b"BREAK 05:00" } else { b"FOCUS 25:00" };
         kt::draw(canvas, &TYPE_30, 14, tight(&TYPE_30, 133), big, BOX_GROUND, i32::MAX);
         let hints: [(&[u8], &[u8]); 2] = if focus_ended { [(b"K0", b"start break"), (b"HOLD K0", b"skip")] } else { [(b"K0", b"start focus"), (b"K1", b"on duty")] };
@@ -875,7 +887,7 @@ impl Display {
             PanelKind::Text(scale) => {
                 let face = if scale >= 2 { &TYPE_16 } else { &TYPE_11 };
                 for (index, (label, _, line_tone)) in panel.lines.iter().enumerate() {
-                    let y = 50 + index as i32 * (face.line() + 1);
+                    let y = 50 + index as i32 * (face.line().max(font::CELL) + 2);
                     if y + face.line() > PANEL_RULE_Y {
                         break;
                     }
