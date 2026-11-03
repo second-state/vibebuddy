@@ -1197,14 +1197,14 @@ fn user_codex_home() -> PathBuf {
     if let Some(home) = std::env::var_os("CODEX_HOME").filter(|home| !home.is_empty()) {
         return PathBuf::from(home);
     }
-    std::env::var_os("HOME").map(PathBuf::from).unwrap_or_default().join(".codex")
+    std::env::home_dir().unwrap_or_default().join(".codex")
 }
 
 /// Makes the resident session's Codex home (mode 0700) and links the user's login into it.
 fn prepare_codex_home(codex_home: &Path, user_codex_home: &Path) -> std::io::Result<()> {
-    use std::os::unix::fs::PermissionsExt;
     std::fs::create_dir_all(codex_home)?;
-    std::fs::set_permissions(codex_home, std::fs::Permissions::from_mode(0o700))?;
+    #[cfg(unix)]
+    std::fs::set_permissions(codex_home, std::os::unix::fs::PermissionsExt::from_mode(0o700))?;
     link_auth(codex_home, user_codex_home)
 }
 
@@ -1224,7 +1224,11 @@ fn link_auth(codex_home: &Path, user_codex_home: &Path) -> std::io::Result<()> {
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
         Err(error) => return Err(error),
     }
-    std::os::unix::fs::symlink(&target, &link)
+    #[cfg(unix)]
+    return std::os::unix::fs::symlink(&target, &link);
+    // A file symlink on Windows needs Developer Mode or admin rights; without them this fails and voice can't start.
+    #[cfg(windows)]
+    return std::os::windows::fs::symlink_file(&target, &link);
 }
 
 /// The user's Codex memory summary (`memories/memory_summary.md`), cut at Codex's own cap; None if there is none.
@@ -1254,7 +1258,8 @@ fn search_memories(root: &Path, query: &str) -> String {
     'files: for file in files {
         let Ok(text) = std::fs::read_to_string(&file) else { continue };
         let lines: Vec<&str> = text.lines().collect();
-        let name = file.strip_prefix(root).unwrap_or(&file).display().to_string();
+        // `/` on every platform, so the session sees one form of a name.
+        let name = file.strip_prefix(root).unwrap_or(&file).to_string_lossy().replace('\\', "/");
         let mut shown_until = 0;
         for (index, line) in lines.iter().enumerate() {
             let lower = line.to_lowercase();
@@ -1691,6 +1696,7 @@ pub(crate) mod tests {
         let _ = std::fs::remove_dir_all(dir);
     }
 
+    #[cfg(unix)]
     #[tokio::test]
     async fn the_codex_home_is_private_and_shares_the_users_login_through_a_link() {
         use std::os::unix::fs::PermissionsExt;
@@ -1706,6 +1712,7 @@ pub(crate) mod tests {
         let _ = std::fs::remove_dir_all(dir);
     }
 
+    #[cfg(unix)]
     #[test]
     fn a_copied_or_misdirected_login_is_replaced_by_the_link_on_every_start() {
         let dir = temp_dir("relink");
@@ -2058,6 +2065,7 @@ pub(crate) mod tests {
         let _ = std::fs::remove_dir_all(dir);
     }
 
+    #[cfg(unix)]
     #[tokio::test]
     async fn the_key_and_brain_are_kept_in_a_private_file_and_switching_brains_moves_the_revision() {
         use std::os::unix::fs::PermissionsExt;

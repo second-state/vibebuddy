@@ -316,7 +316,7 @@ fn describe_owned_file(before: Option<&str>, after: Option<&str>) -> Vec<String>
 }
 
 fn home() -> Result<PathBuf, String> {
-    std::env::var_os("HOME").map(PathBuf::from).ok_or_else(|| "HOME is not set".to_owned())
+    std::env::home_dir().ok_or_else(|| "no home directory".to_owned())
 }
 
 /// The path written into configs: this binary, wherever it was installed.

@@ -185,6 +185,7 @@ fn outermost_app(path: &str) -> Option<&str> {
 
 /// The process chain above this hook, read from `/proc`, so the common path still spawns nothing.
 /// Stops at init, or after 16 levels.
+#[cfg(unix)]
 fn ancestor_pids() -> Vec<u32> {
     let mut pids = Vec::new();
     let mut current = std::os::unix::process::parent_id();
@@ -199,6 +200,12 @@ fn ancestor_pids() -> Vec<u32> {
         current = parent;
     }
     pids
+}
+
+/// Windows has no `/proc`; until the hook walks a Toolhelp32 snapshot there, it reports no chain.
+#[cfg(windows)]
+fn ancestor_pids() -> Vec<u32> {
+    Vec::new()
 }
 
 /// The parent pid in `/proc/<pid>/stat`. The command name in parentheses may hold spaces and

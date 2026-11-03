@@ -52,11 +52,14 @@ impl Identity {
 
 fn write_private(path: &Path, text: &str) -> std::io::Result<()> {
     use std::io::Write;
-    use std::os::unix::fs::OpenOptionsExt;
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)?;
     }
-    let mut file = std::fs::OpenOptions::new().write(true).create_new(true).mode(0o600).open(path)?;
+    let mut options = std::fs::OpenOptions::new();
+    options.write(true).create_new(true);
+    #[cfg(unix)]
+    std::os::unix::fs::OpenOptionsExt::mode(&mut options, 0o600);
+    let mut file = options.open(path)?;
     file.write_all(text.as_bytes())
 }
 
@@ -75,14 +78,24 @@ pub fn computer_name() -> String {
     {
         return name.trim().to_owned();
     }
+    host_name().unwrap_or_else(|| "computer".to_owned())
+}
+
+#[cfg(unix)]
+fn host_name() -> Option<String> {
     let mut buffer = [0u8; 256];
     // SAFETY: the buffer is valid for its whole length, and gethostname writes at most that much.
     let result = unsafe { libc::gethostname(buffer.as_mut_ptr().cast(), buffer.len()) };
     let end = buffer.iter().position(|&byte| byte == 0).unwrap_or(buffer.len());
     match std::str::from_utf8(&buffer[..end]) {
-        Ok(name) if result == 0 && !name.is_empty() => name.trim_end_matches(".local").to_owned(),
-        _ => "computer".to_owned(),
+        Ok(name) if result == 0 && !name.is_empty() => Some(name.trim_end_matches(".local").to_owned()),
+        _ => None,
     }
+}
+
+#[cfg(windows)]
+fn host_name() -> Option<String> {
+    std::env::var("COMPUTERNAME").ok().filter(|name| !name.is_empty())
 }
 
 #[cfg(test)]
@@ -97,8 +110,11 @@ mod tests {
         let again = Identity::load_or_create(&path, "a".to_owned()).unwrap();
         assert_eq!(first.public_key(), again.public_key());
         assert_eq!(first.public_key().len(), 43);
-        use std::os::unix::fs::PermissionsExt;
-        assert_eq!(std::fs::metadata(&path).unwrap().permissions().mode() & 0o777, 0o600);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            assert_eq!(std::fs::metadata(&path).unwrap().permissions().mode() & 0o777, 0o600);
+        }
         std::fs::remove_dir_all(dir).ok();
     }
 

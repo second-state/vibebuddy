@@ -5243,6 +5243,7 @@ dependencies = [
  "vibebuddy-firmware-core",
  "vibebuddy-manifest",
  "vibebuddy-protocol",
+ "windows-sys 0.61.2",
  "zip",
 ]
 

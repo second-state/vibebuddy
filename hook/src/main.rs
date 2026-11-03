@@ -40,9 +40,13 @@ fn post_json(endpoint: &str, payload: &Map<String, Value>) -> std::io::Result<()
     Ok(())
 }
 
-/// `~/Library/Logs/VibeBuddy` on macOS; elsewhere the daemon's XDG state directory.
+/// `~/Library/Logs/VibeBuddy` on macOS; elsewhere the daemon's state directory (`%LOCALAPPDATA%\VibeBuddy` on
+/// Windows, XDG elsewhere).
 fn log_dir() -> Option<PathBuf> {
-    let home = std::env::var_os("HOME").map(PathBuf::from);
+    if cfg!(windows) {
+        return std::env::var_os("LOCALAPPDATA").map(PathBuf::from).filter(|dir| dir.is_absolute()).map(|dir| dir.join("VibeBuddy"));
+    }
+    let home = std::env::home_dir();
     if cfg!(target_os = "macos") {
         return home.map(|home| home.join("Library/Logs/VibeBuddy"));
     }

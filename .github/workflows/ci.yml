@@ -38,6 +38,17 @@ jobs:
       - name: Tool tests
         run: python3 -m unittest discover -s tools -p "test_*.py"
 
+  windows:
+    # The same crates on Windows, where nothing ships yet: it keeps them building and their tests passing there.
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Toolchain
+        run: rustup update stable --no-self-update && rustup default stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Test
+        run: cargo test --workspace --locked
+
   mac-app:
     # The Mac app's model and status decoding, through its SelfTest; the app itself is built only for releases.
     runs-on: macos-15

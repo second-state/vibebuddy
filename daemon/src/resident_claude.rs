@@ -544,22 +544,27 @@ pub fn find_claude() -> Option<PathBuf> {
 }
 
 fn prepare_config_dir(config_dir: &Path) -> std::io::Result<()> {
-    use std::os::unix::fs::PermissionsExt;
     std::fs::create_dir_all(config_dir)?;
-    std::fs::set_permissions(config_dir, std::fs::Permissions::from_mode(0o700))
+    #[cfg(unix)]
+    std::fs::set_permissions(config_dir, std::os::unix::fs::PermissionsExt::from_mode(0o700))?;
+    Ok(())
 }
 
 /// Writes a file only the user can read (0600), replacing it whole.
 pub(crate) fn write_private(path: &Path, text: &str) -> std::io::Result<()> {
     use std::io::Write;
-    use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)?;
     }
     let temporary = path.with_extension("tmp");
-    let mut file = std::fs::OpenOptions::new().write(true).create(true).truncate(true).mode(0o600).open(&temporary)?;
+    let mut options = std::fs::OpenOptions::new();
+    options.write(true).create(true).truncate(true);
+    #[cfg(unix)]
+    std::os::unix::fs::OpenOptionsExt::mode(&mut options, 0o600);
+    let mut file = options.open(&temporary)?;
     // A file left from before with wider permissions keeps them through `open`.
-    file.set_permissions(std::fs::Permissions::from_mode(0o600))?;
+    #[cfg(unix)]
+    file.set_permissions(std::os::unix::fs::PermissionsExt::from_mode(0o600))?;
     file.write_all(text.as_bytes())?;
     file.sync_all()?;
     std::fs::rename(temporary, path)
@@ -876,6 +881,7 @@ pub(crate) mod tests {
         Ok(replies)
     }
 
+    #[cfg(unix)]
     #[tokio::test]
     async fn the_first_command_starts_one_session_with_only_our_tools_and_the_users_key() {
         use std::os::unix::fs::PermissionsExt;
@@ -1235,6 +1241,7 @@ pub(crate) mod tests {
         assert!(!child_env(Path::new("/s"), "sk", Some(String::new())).iter().any(|(name, _)| name == "ANTHROPIC_BASE_URL"));
     }
 
+    #[cfg(unix)]
     #[test]
     fn private_files_are_written_0600_even_over_a_wider_one() {
         use std::os::unix::fs::PermissionsExt;

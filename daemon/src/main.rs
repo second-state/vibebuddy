@@ -700,6 +700,7 @@ fn is_k2_press(event: &Event) -> bool {
 /// When the app supervises it, the app puts its pid in VIBEBUDDY_PARENT_PID. If the app is force-killed, the daemon
 /// is adopted by launchd and its parent pid becomes 1; then exit too, rather than holding the serial port and HTTP port so
 /// the next app can't start. macOS has no prctl(PR_SET_PDEATHSIG), so this has to poll.
+#[cfg(unix)]
 async fn watch_parent() {
     let Some(expected) = env::var("VIBEBUDDY_PARENT_PID")
         .ok()
@@ -715,6 +716,36 @@ async fn watch_parent() {
             std::process::exit(0);
         }
     }
+}
+
+/// Windows never re-parents an orphan, so the parent pid can't tell that the app is gone. Instead the daemon holds a
+/// handle on the app's process from the start, which also keeps a reused pid from passing for the app.
+#[cfg(windows)]
+async fn watch_parent() {
+    use windows_sys::Win32::Foundation::{CloseHandle, WAIT_TIMEOUT};
+    use windows_sys::Win32::System::Threading::{OpenProcess, PROCESS_SYNCHRONIZE, WaitForSingleObject};
+    let Some(expected) = env::var("VIBEBUDDY_PARENT_PID")
+        .ok()
+        .and_then(|value| value.parse::<u32>().ok())
+    else {
+        return;
+    };
+    // SAFETY: OpenProcess takes no pointers; a null handle means the process is already gone.
+    let handle = unsafe { OpenProcess(PROCESS_SYNCHRONIZE, 0, expected) };
+    if !handle.is_null() {
+        let mut ticker = tokio::time::interval(Duration::from_secs(2));
+        loop {
+            ticker.tick().await;
+            // SAFETY: the handle stays open until the loop ends; a zero timeout only asks whether it is signalled.
+            if unsafe { WaitForSingleObject(handle, 0) } != WAIT_TIMEOUT {
+                break;
+            }
+        }
+        // SAFETY: the handle came from OpenProcess and is closed once.
+        unsafe { CloseHandle(handle) };
+    }
+    info!(expected, "the supervising app is gone, exiting too");
+    std::process::exit(0);
 }
 
 /// The daemon's build identifier: the git description plus the binary's own timestamp.

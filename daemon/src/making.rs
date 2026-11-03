@@ -978,7 +978,7 @@ mod tests {
     fn lines_with_an_address_are_made_once_per_form_and_named_as_make_character_names_them() {
         let lines = [line("done", "Nice."), line("done", "Done, {address}."), line("failed", "Oops.")];
         let pieces = pieces(&lines, &forms("en"));
-        let paths: Vec<String> = pieces.iter().map(|piece| piece.path.display().to_string()).collect();
+        let paths: Vec<String> = pieces.iter().map(|piece| piece.path.to_string_lossy().replace('\\', "/")).collect();
         // `printf '%s' 'Done, boss.' | shasum -a 1` starts 1641ab442f.
         assert!(paths.contains(&"audio-address/boss/done/0-002-1641ab442f.pcm".to_owned()), "{paths:?}");
         let texts: Vec<&str> = pieces.iter().map(|piece| piece.text.as_str()).collect();

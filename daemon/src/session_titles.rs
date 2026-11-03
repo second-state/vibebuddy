@@ -37,7 +37,7 @@ struct Cached {
 
 impl SessionTitles {
     pub fn from_home() -> Self {
-        let home = std::env::var_os("HOME").map(PathBuf::from);
+        let home = std::env::home_dir();
         Self {
             enabled: true,
             codex_db: home.map(|home| home.join(CODEX_STATE_DB)),

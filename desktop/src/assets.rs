@@ -1,14 +1,18 @@
 //! What was installed next to the app: the Character packs from `characters/`. Firmware isn't installed; the daemon
 //! downloads it (ADR-0010). On the Mac the packs ride inside the app bundle. Here `install.sh` puts them in `~/.local/share/vibebuddy`
-//! and a distribution package in `/usr/share/vibebuddy`; the user's copy wins, as XDG data lookups go.
+//! and a distribution package in `/usr/share/vibebuddy`; the user's copy wins, as XDG data lookups go. On Windows the
+//! installer puts them next to the app.
 
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 
 use crate::i18n::{self, tr};
 
-/// Where to look, in order: `$XDG_DATA_HOME`, then each of `$XDG_DATA_DIRS`.
+/// Where to look, in order: `$XDG_DATA_HOME`, then each of `$XDG_DATA_DIRS`; on Windows, the app's own folder.
 fn data_dirs() -> Vec<PathBuf> {
+    if cfg!(windows) {
+        return std::env::current_exe().ok().and_then(|exe| Some(exe.parent()?.to_owned())).into_iter().collect();
+    }
     search_dirs(std::env::var_os("XDG_DATA_HOME"), std::env::var_os("HOME"), std::env::var_os("XDG_DATA_DIRS"))
 }
 
@@ -233,6 +237,7 @@ pub async fn read_character(id: &str, form: Option<&str>) -> Result<crate::chara
 mod tests {
     use super::*;
 
+    #[cfg(unix)]
     #[test]
     fn the_users_copy_comes_before_the_systems() {
         let dirs = search_dirs(None, Some("/home/me".into()), Some("/usr/local/share:/usr/share".into()));
@@ -242,6 +247,7 @@ mod tests {
         );
     }
 
+    #[cfg(unix)]
     #[test]
     fn unset_or_empty_data_dirs_fall_back_to_the_spec_default() {
         let expected = ["/xdg/vibebuddy", "/usr/local/share/vibebuddy", "/usr/share/vibebuddy"].map(PathBuf::from);
@@ -263,6 +269,7 @@ mod tests {
         assert_eq!(switch("builtin", Language::Chinese, &|_: &str| false), None);
     }
 
+    #[cfg(unix)]
     #[test]
     fn relative_entries_are_ignored() {
         let dirs = search_dirs(Some("relative".into()), None, Some("share:/opt/share".into()));
