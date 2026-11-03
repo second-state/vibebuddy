@@ -319,7 +319,7 @@ async fn main() {
     let _ = making::OWN.set((own_voices.clone(), state.voice_keys.clone()));
     state.making = Arc::new(making::Maker::new(
         made,
-        synthesis::voice_base(env::var(synthesis::BASE_URL_VARIABLE).ok(), relay::release()),
+        synthesis::voice_base(env::var(synthesis::BASE_URL_VARIABLE).ok()),
         state.account.clone(),
         state.voice_keys.clone(),
         own_voices,
