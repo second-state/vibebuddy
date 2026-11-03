@@ -39,13 +39,13 @@ fn main() -> ExitCode {
 
 fn keygen(private: &Path) -> Result<(), String> {
     use std::io::Write;
-    use std::os::unix::fs::OpenOptionsExt;
 
     let (secret, public) = generate_key().map_err(|error| error.to_string())?;
-    let mut file = std::fs::OpenOptions::new()
-        .write(true)
-        .create_new(true)
-        .mode(0o600)
+    let mut options = std::fs::OpenOptions::new();
+    options.write(true).create_new(true);
+    #[cfg(unix)]
+    std::os::unix::fs::OpenOptionsExt::mode(&mut options, 0o600);
+    let mut file = options
         .open(private)
         .map_err(|error| format!("{}: {error}", private.display()))?;
     writeln!(file, "{secret}").map_err(|error| error.to_string())?;

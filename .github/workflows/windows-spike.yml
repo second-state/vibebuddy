@@ -31,7 +31,7 @@ jobs:
       - name: Build tests
         continue-on-error: true
         shell: bash
-        run: cargo test -p ${{ matrix.package }} --locked --no-run --keep-going --message-format short 2>&1 | tee test-build.log
+        run: cargo test -p ${{ matrix.package }} --locked --no-run --message-format short 2>&1 | tee test-build.log
       - name: Test
         continue-on-error: true
         shell: bash

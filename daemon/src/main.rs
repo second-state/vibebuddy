@@ -710,7 +710,12 @@ async fn watch_parent() {
     let mut ticker = tokio::time::interval(Duration::from_secs(2));
     loop {
         ticker.tick().await;
-        if std::os::unix::process::parent_id() != expected {
+        #[cfg(unix)]
+        let gone = std::os::unix::process::parent_id() != expected;
+        // Spike: Windows doesn't re-parent orphans; this needs a handle on the parent process instead.
+        #[cfg(windows)]
+        let gone = false;
+        if gone {
             info!(expected, "the supervising app is gone, exiting too");
             std::process::exit(0);
         }

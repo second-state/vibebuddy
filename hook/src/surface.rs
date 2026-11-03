@@ -187,7 +187,11 @@ fn outermost_app(path: &str) -> Option<&str> {
 /// Stops at init, or after 16 levels.
 fn ancestor_pids() -> Vec<u32> {
     let mut pids = Vec::new();
+    #[cfg(unix)]
     let mut current = std::os::unix::process::parent_id();
+    // Spike: Windows needs a Toolhelp32 snapshot for the parent; until then the chain is empty.
+    #[cfg(windows)]
+    let mut current = 0;
     while current > 1 && pids.len() < 16 {
         pids.push(current);
         let Some(parent) = std::fs::read_to_string(format!("/proc/{current}/stat"))

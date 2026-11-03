@@ -551,6 +551,7 @@ mod tests {
         Account::new(Some(base.to_owned()), Some(dir), 7331)
     }
 
+    #[cfg(unix)]
     #[test]
     fn signs_in_through_the_browser_and_keeps_the_session_privately() {
         let dir = scratch();
