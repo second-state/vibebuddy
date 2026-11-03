@@ -110,7 +110,7 @@ impl crate::App {
                 .padding(Padding::from([12, 16]))
                 .into(),
         ];
-        for provider in client::KeyProvider::REPLIES {
+        for provider in client::KeyProvider::REPLIES.into_iter().filter(|provider| *provider != client::KeyProvider::Volc || keys.shows_volc()) {
             let (name, key, refused) = match provider {
                 client::KeyProvider::ElevenLabs => ("ElevenLabs".to_owned(), &keys.elevenlabs, tr("ElevenLabs refused your own key. Replies in its voices stay silent until you set another one.", &[])),
                 _ => (tr("Volcano Engine", &[]), &keys.volc, tr("Volcano Engine refused your own key. Replies in its voices stay silent until you set another one.", &[])),
@@ -271,8 +271,8 @@ impl crate::App {
     pub(super) fn kk_make_form<'a>(&'a self, form: &'a MakeForm) -> Element<'a, Message> {
         let bases: Vec<Lender> = self.voices.iter().map(Lender::of).collect();
         // In one order whatever the lines: the voice comes first, so the lines don't move it.
-        let voices = self.character_voices.clone();
         let keys = self.status.as_ref().and_then(|status| status.voice_keys.as_ref());
+        let voices = making::offered(&self.character_voices, keys, form.voice.as_ref().map(|voice| voice.id.as_str()));
         let account = self.status.as_ref().map(|status| status.account.clone()).unwrap_or_default();
         let readiness = form.voice.as_ref().map(|voice| (making::Readiness::of(voice, keys, &account), voice.provider_name()));
         let job_running = self.status.as_ref().and_then(|status| status.making.as_ref()).is_some_and(making::Making::running);
@@ -400,23 +400,23 @@ impl crate::App {
         let Some(own) = own else { return pill(tr("Your own voice…", &[]), Fill::Paper, Some(Message::MakeOwnOpen(true))).into() };
         let keys = self.status.as_ref().and_then(|status| status.voice_keys.as_ref());
         let has_key = keys.is_some_and(|keys| if own.provider == crate::OwnProvider::Volc { keys.volc.set } else { keys.elevenlabs.set });
+        let shows_volc = keys.is_some_and(status::VoiceKeys::shows_volc);
         let id_label = if own.provider == crate::OwnProvider::Volc { tr("Speaker ID", &[]) } else { tr("Voice ID", &[]) };
         let ready = has_key && !own.trying && !own.voice.trim().is_empty() && !own.name.trim().is_empty();
         column![
-            note(tr("A voice you cloned or designed in your own ElevenLabs or Volcano Engine account. Paste its ID: VibeBuddy tries it with your own key by saying the first line, and keeps it for next time.", &[])),
-            row![
-                picker(vec![crate::OwnProvider::ElevenLabs, crate::OwnProvider::Volc], Some(own.provider), Message::MakeOwnProvider),
-                match (own.provider, &own.listed) {
+            note(if shows_volc { tr("A voice you cloned or designed in your own ElevenLabs or Volcano Engine account. Paste its ID: VibeBuddy tries it with your own key by saying the first line, and keeps it for next time.", &[]) } else { tr("A voice you cloned or designed in your own ElevenLabs account. Paste its ID: VibeBuddy tries it with your own key by saying the first line, and keeps it for next time.", &[]) }),
+            row![]
+                .push(shows_volc.then(|| picker(vec![crate::OwnProvider::ElevenLabs, crate::OwnProvider::Volc], Some(own.provider), Message::MakeOwnProvider)))
+                .push(match (own.provider, &own.listed) {
                     (crate::OwnProvider::ElevenLabs, Some(Ok(voices))) if !voices.is_empty() => {
                         let picked = voices.iter().find(|voice| voice.voice == own.voice).cloned();
                         picker(voices.clone(), picked, Message::MakeOwnPick)
                     }
                     _ => field(&id_label, &own.voice).on_input(Message::MakeOwnVoice).into(),
-                },
-                field(&tr("Name", &[]), &own.name).on_input(Message::MakeOwnName).width(160),
-            ]
-            .spacing(8)
-            .align_y(Alignment::Center),
+                })
+                .push(field(&tr("Name", &[]), &own.name).on_input(Message::MakeOwnName).width(160))
+                .spacing(8)
+                .align_y(Alignment::Center),
         ]
         .push(match (own.provider, &own.listed) {
             (crate::OwnProvider::ElevenLabs, Some(Err(why))) if has_key => Some(

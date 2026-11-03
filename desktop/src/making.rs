@@ -281,6 +281,12 @@ pub fn manifest(id: &str) -> Result<Request, String> {
     Ok(request)
 }
 
+/// The voices to offer: Volcano Engine's only to a user who still has a key for it, and `kept`, a voice already
+/// chosen, whatever its provider.
+pub fn offered(voices: &[Voice], keys: Option<&VoiceKeys>, kept: Option<&str>) -> Vec<Voice> {
+    voices.iter().filter(|voice| voice.provider != "volc" || keys.is_some_and(VoiceKeys::shows_volc) || Some(voice.id.as_str()) == kept).cloned().collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -350,5 +356,15 @@ mod tests {
         // In whichever language the UI is, it names the provider.
         assert!(!failed.running() && failed.explanation("ElevenLabs").unwrap().contains("ElevenLabs"));
         assert_eq!(Making { state: "done".to_owned(), ..Making::default() }.explanation("ElevenLabs"), None);
+    }
+
+    #[test]
+    fn volcano_engine_voices_are_offered_only_with_a_key_for_it_or_when_already_chosen() {
+        let voices: Vec<Voice> = serde_json::from_str(r#"[{"id":"ada","provider":"elevenlabs","voice":"t","language":"en","gender":"female","name":"Ada"},{"id":"wanwanxiaohe","provider":"volc","voice":"z","language":"zh","gender":"female","name":"Xiaohe"}]"#).unwrap();
+        let ids = |offered: Vec<Voice>| offered.into_iter().map(|voice| voice.id).collect::<Vec<_>>();
+        assert_eq!(ids(offered(&voices, None, None)), ["ada"]);
+        assert_eq!(ids(offered(&voices, None, Some("wanwanxiaohe"))), ["ada", "wanwanxiaohe"]);
+        let keys = VoiceKeys { volc: VoiceKey { set: true, refused: false }, ..VoiceKeys::default() };
+        assert_eq!(ids(offered(&voices, Some(&keys), None)), ["ada", "wanwanxiaohe"]);
     }
 }

@@ -38,6 +38,14 @@ pub struct VoiceKeys {
     pub groq: Option<VoiceKey>,
 }
 
+impl VoiceKeys {
+    /// Volcano Engine is no longer offered: only a user who already set a key for it sees its key row and voices,
+    /// and can keep using or clear them.
+    pub fn shows_volc(&self) -> bool {
+        self.volc.set
+    }
+}
+
 #[derive(Clone, Debug, Default, Deserialize, PartialEq)]
 #[serde(default)]
 pub struct VoiceKey {
