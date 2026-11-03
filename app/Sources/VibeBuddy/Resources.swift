@@ -34,6 +34,9 @@ enum Resources {
     /// Volcano Engine's speech console, where the user makes their own key for the Doubao voices.
     static let volcConsole = URL(string: "https://console.volcengine.com/speech/")!
 
+    /// Where the user makes their own Groq key for speech recognition.
+    static let groqKeys = URL(string: "https://console.groq.com/keys")!
+
     static var macOSDirectory: URL {
         Bundle.main.executableURL!.deletingLastPathComponent()
     }

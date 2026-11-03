@@ -72,6 +72,8 @@ pub enum Reason {
     NotReady,
     /// The box is on its UART bridge, which runs too slowly for the audio.
     SlowLink,
+    /// No speech recognizer: the user's own Groq key is needed (ADR-0020).
+    OwnKey,
     /// A reason this firmware doesn't know.
     Other,
     /// The box couldn't start its microphone.
@@ -91,6 +93,7 @@ impl Reason {
             "global_cap" => Self::GlobalCap,
             "not_ready" => Self::NotReady,
             "slow_link" => Self::SlowLink,
+            "own_key" => Self::OwnKey,
             _ => Self::Other,
         }
     }
@@ -105,6 +108,7 @@ impl Reason {
             Self::GlobalCap => b"VOICE PAUSED",
             Self::NotReady => b"NOT READY",
             Self::SlowLink => b"SLOW CABLE",
+            Self::OwnKey => b"SET VOICE KEY",
             Self::Other => b"VOICE ERROR",
             Self::NoMicrophone => b"NO MICROPHONE",
             Self::NoAnswer => b"NO ANSWER",
@@ -122,6 +126,7 @@ impl Reason {
             Self::GlobalCap => "Voice is paused for everyone today.",
             Self::NotReady => "My session on the computer isn't ready.",
             Self::SlowLink => "This port is too slow for voice. Use my other USB port.",
+            Self::OwnKey => "Set a Groq key on the computer to talk to me.",
             Self::Other => "Something went wrong.",
             Self::NoMicrophone => "This box can't record.",
             Self::NoAnswer => "The computer didn't answer.",
@@ -737,12 +742,13 @@ mod tests {
         assert!(!voice.is_open());
     }
 
-    const REASONS: [(&str, &[u8], &str); 5] = [
+    const REASONS: [(&str, &[u8], &str); 6] = [
         ("signed_out", b"SIGN IN", "Sign in on the computer to talk to me."),
         ("allowance", b"VOICE USED UP", "Today's voice is used up."),
         ("global_cap", b"VOICE PAUSED", "Voice is paused for everyone today."),
         ("not_ready", b"NOT READY", "My session on the computer isn't ready."),
         ("slow_link", b"SLOW CABLE", "This port is too slow for voice. Use my other USB port."),
+        ("own_key", b"SET VOICE KEY", "Set a Groq key on the computer to talk to me."),
     ];
 
     /// The panel's text, its rows joined again.

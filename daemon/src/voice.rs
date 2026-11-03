@@ -215,6 +215,7 @@ pub fn refusal_message(reason: &str) -> Option<String> {
         "allowance" => format!("Today's voice is used up. It comes back at {}.", back()),
         "global_cap" => format!("Voice is paused for everyone today. It comes back at {}.", back()),
         "not_ready" => "My session on the computer isn't ready.".to_owned(),
+        "own_key" => "Set a Groq key on the computer to talk to me.".to_owned(),
         _ => return None,
     })
 }
@@ -1253,7 +1254,7 @@ pub mod tests {
         let path = std::env::var("VIBEBUDDY_E2E_WAV").expect("VIBEBUDDY_E2E_WAV names a recording");
         let (left, rate) = left_channel(&std::fs::read(path).unwrap());
         assert_eq!(rate, SAMPLE_RATE, "the box records at 24 kHz");
-        let recognizer = crate::speech::from_env(None).expect("a speech recognizer is configured");
+        let recognizer = crate::speech::from_env(None, None).expect("a speech recognizer is configured");
         let dir = temp_dir("voice-e2e");
         let resident = Arc::new(Resident::new(true, &dir, crate::resident::Launcher::Codex, Arc::default()));
         let voice = Voice::new(Some(recognizer), Some(resident));

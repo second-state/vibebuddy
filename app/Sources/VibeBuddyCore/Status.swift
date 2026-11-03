@@ -65,7 +65,9 @@ public struct VoiceKeysStatus: Codable, Equatable {
     }
     public var elevenlabs: Key
     public var volc: Key
-    public init(elevenlabs: Key, volc: Key) { self.elevenlabs = elevenlabs; self.volc = volc }
+    /// For speech recognition; nil from a daemon before it.
+    public var groq: Key?
+    public init(elevenlabs: Key, volc: Key, groq: Key? = nil) { self.elevenlabs = elevenlabs; self.volc = volc; self.groq = groq }
 }
 
 /// An account has an email or a GitHub user, never both.

@@ -642,6 +642,7 @@ impl Maker {
                 let request = agent.post(&url).header("xi-api-key", key).header("Accept", "audio/pcm").header("Content-Type", "application/json");
                 ("ElevenLabs", request.send(json!({"text": text, "model_id": ELEVENLABS_MODEL}).to_string().as_bytes()))
             }
+            Provider::Groq => unreachable!("no voice is from Groq"),
             Provider::Volc => {
                 let body = json!({
                     "user": {"uid": "vibebuddy"},
@@ -664,6 +665,7 @@ impl Maker {
         }
         match provider {
             Provider::ElevenLabs => read_all(&mut response, name).map_err(|stop| (None, stop.message)),
+            Provider::Groq => unreachable!("no voice is from Groq"),
             Provider::Volc => {
                 let mut audio = Vec::new();
                 crate::synthesis::read_volc(response.into_body().into_reader(), &mut |piece| {

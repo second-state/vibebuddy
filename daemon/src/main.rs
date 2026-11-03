@@ -319,12 +319,12 @@ async fn main() {
     let _ = making::OWN.set((own_voices.clone(), state.voice_keys.clone()));
     state.making = Arc::new(making::Maker::new(
         made,
-        synthesis::service_base(env::var(synthesis::BASE_URL_VARIABLE).ok(), relay::release()),
+        synthesis::voice_base(env::var(synthesis::BASE_URL_VARIABLE).ok(), relay::release()),
         state.account.clone(),
         state.voice_keys.clone(),
         own_voices,
     ));
-    state.voice = Arc::new(voice::Voice::new(speech::from_env(session), state.resident.clone()).with_synthesizer(Some(synthesizer)));
+    state.voice = Arc::new(voice::Voice::new(speech::from_env(session, Some(state.voice_keys.clone())), state.resident.clone()).with_synthesizer(Some(synthesizer)));
     if let Some(resident) = state.resident.clone() {
         let wearing = wearing(&state).await;
         tokio::spawn(async move { resident.warm(&wearing).await });
@@ -522,7 +522,7 @@ async fn voice_offer(state: &AppState) -> Option<Event> {
 }
 
 /// Why voice commands can't be taken right now, for the Conversation tab: the bridge at 115200 (`bridge_firmware`
-/// when the firmware can't move it, `bridge_slow` when moving it failed), or the account's refusal (`signed_out`,
+/// when the firmware can't move it, `bridge_slow` when moving it failed), or the recognizer's refusal (`signed_out`, `own_key`,
 /// `allowance`, `global_cap`). The resident session not being ready is the tab's `problem` already.
 async fn voice_off(state: &AppState) -> Option<String> {
     let device = state.device.lock().await.clone();
@@ -605,13 +605,15 @@ fn follow_account(state: &AppState) {
     }
 }
 
-/// A provider refusing or taking an own key happens on a reply's thread; the status stream hears of it here.
+/// A provider refusing or taking an own key happens on a reply's or a turn's thread; the status stream hears of it
+/// here, and the box, since a Groq key set, cleared or refused turns voice on or off.
 fn follow_voice_keys(state: &AppState) {
     let mut changes = state.voice_keys.watch();
     let follower = state.clone();
     tokio::spawn(async move {
         while changes.changed().await.is_ok() {
             follower.notify_status();
+            offer_voice_again(&follower).await;
         }
     });
 }
@@ -1752,7 +1754,7 @@ struct ResidentInfo {
     /// Whether an Anthropic API key is stored; the key itself is never sent back.
     anthropic_key_set: bool,
     /// Why the box can't take voice commands right now besides `problem`: `bridge_firmware`, `bridge_slow`,
-    /// `signed_out`, `allowance` or `global_cap` (see [`voice_off`]).
+    /// `signed_out`, `own_key`, `allowance` or `global_cap` (see [`voice_off`]).
     voice_off: Option<String>,
 }
 
@@ -1873,14 +1875,14 @@ async fn set_anthropic_key(state: AppState, key: Option<String>) -> axum::respon
     get_resident(State(state)).await.into_response()
 }
 
-/// Sets or clears the user's own keys for spoken replies (ADR-0020): `{"elevenlabs"?, "volc"?}`, each a key, or null
+/// Sets or clears the user's own keys (ADR-0020): `{"elevenlabs"?, "volc"?, "groq"?}`, each a key, or null
 /// or "" to clear it; one left out stays. Answers which are set, as in the status; a key is never sent back or logged.
 async fn put_voice_keys(State(state): State<AppState>, Json(request): Json<serde_json::Map<String, serde_json::Value>>) -> axum::response::Response {
     use axum::response::IntoResponse;
     let refuse = |message: String| (StatusCode::BAD_REQUEST, Json(ApiResponse { accepted: false, message })).into_response();
     let mut changes = Vec::new();
     for (name, value) in request {
-        let Some(provider) = voice_keys::Provider::named(&name) else { return refuse(format!("{name} is not a provider: elevenlabs or volc")) };
+        let Some(provider) = voice_keys::Provider::keyed(&name) else { return refuse(format!("{name} is not a provider: elevenlabs, volc or groq")) };
         match value {
             serde_json::Value::Null => changes.push((provider, None)),
             serde_json::Value::String(key) => changes.push((provider, Some(key))),
@@ -2440,11 +2442,12 @@ mod tests {
         state.voice_keys = Arc::new(voice_keys::VoiceKeys::new(Some(&dir)));
         let put = |body: serde_json::Value| put_voice_keys(State(state.clone()), Json(serde_json::from_value(body).unwrap()));
 
-        let response = put(serde_json::json!({"elevenlabs": "sk_eleven_secret", "volc": "volc_secret"})).await;
+        let response = put(serde_json::json!({"elevenlabs": "sk_eleven_secret", "volc": "volc_secret", "groq": "gsk_secret"})).await;
         assert_eq!(response.status(), StatusCode::OK);
         let body = http_body_util::BodyExt::collect(response.into_body()).await.unwrap().to_bytes();
         let answer: serde_json::Value = serde_json::from_slice(&body).unwrap();
-        assert_eq!(answer, serde_json::json!({"elevenlabs": {"set": true, "refused": false}, "volc": {"set": true, "refused": false}}));
+        let set = serde_json::json!({"set": true, "refused": false});
+        assert_eq!(answer, serde_json::json!({"elevenlabs": set, "volc": set, "groq": set}));
         let status = serde_json::to_string(&state.snapshot().await).unwrap();
         assert!(status.contains(r#""voice_keys":{"elevenlabs":{"set":true"#), "{status}");
         assert!(!status.contains("secret") && !String::from_utf8_lossy(&body).contains("secret"));

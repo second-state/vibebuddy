@@ -332,7 +332,7 @@ struct App {
     /// Deleting the account waits for a second click, since it can't be undone.
     confirm_delete_account: bool,
     /// The own keys being typed, by provider; cleared once the daemon has one, and never filled from the daemon.
-    own_key_drafts: [String; 2],
+    own_key_drafts: [String; 3],
     /// The outcome of the last action, shown at the bottom of the window.
     notice: Option<Result<String, String>>,
     /// The language picked in Settings, and, while it differs from the UI's, the offer to restart.
@@ -1352,6 +1352,7 @@ impl App {
                 let page = match provider {
                     client::KeyProvider::ElevenLabs => ELEVENLABS_KEYS,
                     client::KeyProvider::Volc => VOLC_CONSOLE,
+                    client::KeyProvider::Groq => GROQ_KEYS,
                 };
                 if let Err(error) = launch("xdg-open", &[std::ffi::OsStr::new(page)]) {
                     self.notice = Some(Err(error));
@@ -1544,6 +1545,8 @@ const ANTHROPIC_CONSOLE: &str = "https://platform.claude.com/";
 const ELEVENLABS_KEYS: &str = "https://elevenlabs.io/app/settings/api-keys";
 /// Volcano Engine's speech console, where the user makes their own key for the Doubao voices.
 const VOLC_CONSOLE: &str = "https://console.volcengine.com/speech/";
+/// Where the user makes their own Groq key for speech recognition.
+const GROQ_KEYS: &str = "https://console.groq.com/keys";
 const NEW_ISSUE: &str = "https://github.com/second-state/vibebuddy/issues/new";
 
 /// The id under which the box wears the user's own Character.
