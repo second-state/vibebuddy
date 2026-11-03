@@ -6,7 +6,8 @@
 //!   spoken replies, read from the thread (or, on Claude Code, the session). Both live in a home of the daemon's
 //!   own, so neither Agent's App can open them.
 //!
-//! The resident session is experimental: the daemon has it only when started with `VIBEBUDDY_RESIDENT_SESSION=1`.
+//! The resident session is in beta and off until the user turns on Voice commands in the Conversation tab, or the daemon
+//! starts with `VIBEBUDDY_RESIDENT_SESSION=1`.
 
 use std::io::{Read, Write};
 use std::net::{SocketAddr, TcpStream};
@@ -61,7 +62,7 @@ fn say(text: &str) -> Result<(), String> {
 fn resident(limit: usize) -> Result<(), String> {
     let info = call("GET", "/v1/resident", None, QUICK_TIMEOUT)?;
     if info["enabled"] != true {
-        return Err("the resident session is off; start vibebuddyd with VIBEBUDDY_RESIDENT_SESSION=1".to_owned());
+        return Err("voice commands are off; turn them on in Settings → Conversation".to_owned());
     }
     match info["problem"].as_str() {
         Some("codex_missing") => eprintln!("voice is off: Codex isn't installed (https://learn.chatgpt.com/docs/codex/cli)"),

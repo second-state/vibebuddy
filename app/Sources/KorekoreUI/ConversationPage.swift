@@ -2,8 +2,8 @@ import SwiftUI
 import VibeBuddyCore
 
 /// The Conversation page (canvas: "Mac · Conversation", and its states on "App · Agents, Conversation, Character
-/// states"): the last voice commands and the buddy's spoken replies, newest at the bottom. It reads and follows the
-/// history through four calls to the daemon.
+/// states"): the Voice commands switch (beta, off until the user turns it on), then the last voice commands and the
+/// buddy's spoken replies, newest at the bottom. It reads and follows the history through five calls to the daemon.
 public struct KorekoreConversationPage: View {
     public struct Links {
         public var anthropicConsole: URL
@@ -19,6 +19,7 @@ public struct KorekoreConversationPage: View {
 
     let load: () async throws -> [ResidentExchange]
     let info: () async throws -> ResidentInfo
+    let setOn: (Bool) async throws -> ResidentInfo
     let setBrain: (ResidentBrainChoice) async throws -> ResidentInfo
     let setKey: (String?) async throws -> ResidentInfo
     let links: Links
@@ -41,10 +42,12 @@ public struct KorekoreConversationPage: View {
     }
 
     public init(load: @escaping () async throws -> [ResidentExchange], info: @escaping () async throws -> ResidentInfo,
+                setOn: @escaping (Bool) async throws -> ResidentInfo,
                 setBrain: @escaping (ResidentBrainChoice) async throws -> ResidentInfo,
                 setKey: @escaping (String?) async throws -> ResidentInfo, links: Links, avatar: NSImage?) {
         self.load = load
         self.info = info
+        self.setOn = setOn
         self.setBrain = setBrain
         self.setKey = setKey
         self.links = links
@@ -52,6 +55,47 @@ public struct KorekoreConversationPage: View {
     }
 
     public var body: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            switchCard
+            if let settingError, latest?.enabled != true || latest?.brainSetting == .codex {
+                KTag(settingError, color: Theme.Colors.korePinkText)
+            }
+            if latest?.enabled == true {
+                conversation
+            } else {
+                if failure == .daemonDown {
+                    KNote(String(localized: "The daemon isn't running. Restart it on the Advanced page."))
+                }
+                Spacer()
+            }
+        }
+        .task { await follow() }
+    }
+
+    /// Off until the user turns it on: a voice command runs their own Codex or Claude Code, on their account or key.
+    private var switchCard: some View {
+        KRows {
+            KRow(String(localized: "Voice commands"),
+                 detail: latest?.forced == true
+                     ? String(localized: "On while the daemon runs with VIBEBUDDY_RESIDENT_SESSION=1.")
+                     : String(localized: "Hold K0 on the box and ask. Codex or Claude Code on this computer answers, with your own account or key, and the buddy speaks the reply. Your voice goes to VibeBuddy's speech service.")) {
+                HStack(spacing: 10) {
+                    KTag(String(localized: "Beta"), color: Theme.Colors.korePinkText)
+                    KToggle(String(localized: "Voice commands"), isOn: Binding(
+                        get: { latest?.enabled ?? false },
+                        set: { on in Task { await switchTo(on) } }))
+                        .disabled(latest == nil || latest?.forced == true)
+                }
+            }
+        }
+    }
+
+    private func switchTo(_ on: Bool) async {
+        await apply { try await setOn(on) }
+        if latest?.enabled == true { await reload() }
+    }
+
+    private var conversation: some View {
         VStack(alignment: .leading, spacing: 14) {
             HStack(spacing: 10) {
                 if let choice = latest?.brainSetting {
@@ -76,7 +120,6 @@ public struct KorekoreConversationPage: View {
             Text("last 20 exchanges · newest at the bottom · stays on this Mac")
                 .font(.pixel(12)).foregroundStyle(Theme.Colors.muted2)
         }
-        .task { await follow() }
     }
 
     private func brainChips(_ choice: ResidentBrainChoice) -> some View {
@@ -317,7 +360,7 @@ public struct KorekoreConversationPage: View {
             problem = first.problem
             latest = first
         }
-        await reload()
+        if latest?.enabled == true { await reload() }
         while !Task.isCancelled {
             try? await Task.sleep(for: .seconds(marked ? 2 : 5))
             if Task.isCancelled { return }
@@ -325,9 +368,11 @@ public struct KorekoreConversationPage: View {
                 let now = try await info()
                 marked = now.revision != nil
                 let becameReady = problem != nil && now.problem == nil
+                let turnedOn = latest?.enabled != true && now.enabled
                 problem = now.problem
                 latest = now
-                if now.revision == nil || now.revision != seen || becameReady {
+                guard now.enabled else { continue }
+                if now.revision == nil || now.revision != seen || becameReady || turnedOn {
                     seen = now.revision
                     await reload()
                 }

@@ -163,18 +163,15 @@ pub async fn restart_daemon() -> Result<(), String> {
     post("/v1/daemon/restart", None).await
 }
 
-/// Whether the daemon runs the experimental resident session (`VIBEBUDDY_RESIDENT_SESSION=1`).
-pub async fn resident_enabled() -> Result<bool, String> {
-    resident_info().await.map(|info| info.enabled).map_err(|error| match error {
-        HistoryError::DaemonDown => "the daemon isn't running".to_owned(),
-        HistoryError::Unavailable(why) => why,
-    })
-}
-
 /// `GET /v1/resident`.
 #[derive(Clone, Debug, Deserialize, PartialEq)]
 pub struct ResidentInfo {
+    /// Voice commands (in beta) are on: the user's switch, or `VIBEBUDDY_RESIDENT_SESSION=1`.
     pub enabled: bool,
+    /// `VIBEBUDDY_RESIDENT_SESSION=1` keeps them on, so the switch can't turn them off. None from an older daemon,
+    /// which had only that variable.
+    #[serde(default)]
+    pub forced: Option<bool>,
     /// Goes up when a voice command's turn ends or the thread changes, so the Conversation tab reads the history
     /// again only then. Kept in memory: it starts again at 0 when the daemon restarts. None from an older daemon.
     #[serde(default)]
@@ -203,7 +200,7 @@ impl ResidentInfo {
         Some(match self.voice_off.as_deref()? {
             "bridge_firmware" => tr("The box is on its UART bridge, and its firmware can't carry voice there. Update the firmware, or plug the cable into the box's native USB port.", &[]),
             "bridge_slow" => tr("The box is on its UART bridge, which didn't hold the speed voice needs. Plug the cable into the box's native USB port, or plug it in again to try once more.", &[]),
-            "signed_out" => tr("Voice needs this computer signed in to VibeBuddy.", &[]),
+            "signed_out" => tr("Voice needs this computer signed in to VibeBuddy. Sign in on the General page.", &[]),
             "allowance" => tr("Today's voice is used up. It comes back at %@.", &[&back()]),
             "global_cap" => tr("Voice is paused for everyone today. It comes back at %@.", &[&back()]),
             _ => return None,
@@ -246,6 +243,12 @@ impl BrainChoice {
             Self::Claude => "claude",
         }
     }
+}
+
+/// The Voice commands switch. Its own endpoint, not part of the config.
+pub async fn set_resident_on(on: bool) -> Result<ResidentInfo, String> {
+    let request = reqwest::Client::new().put(format!("{BASE}/v1/resident/on")).json(&serde_json::json!({"on": on}));
+    resident_setting(request).await
 }
 
 /// Which Agent answers voice commands. Its own endpoint, not part of the config.
@@ -522,8 +525,9 @@ mod tests {
     fn the_resident_info_reads_its_revision_and_problem_and_an_older_daemons_without_them() {
         let parse = |json: &str| serde_json::from_str::<ResidentInfo>(json).unwrap();
         let older = parse(r#"{"enabled":true,"thread_id":null}"#);
-        let nothing = ResidentInfo { enabled: true, revision: None, problem: None, brain_setting: None, anthropic_key_set: None, voice_off: None };
+        let nothing = ResidentInfo { enabled: true, forced: None, revision: None, problem: None, brain_setting: None, anthropic_key_set: None, voice_off: None };
         assert_eq!(older, nothing);
+        assert_eq!(parse(r#"{"enabled":false,"forced":false}"#).forced, Some(false), "the switch is off and the variable unset");
         let ready = parse(r#"{"enabled":true,"thread_id":"t1","revision":7,"ready":true,"problem":null}"#);
         assert_eq!(ready, ResidentInfo { revision: Some(7), ..nothing.clone() });
         let missing = parse(r#"{"enabled":true,"thread_id":null,"revision":0,"ready":false,"problem":"codex_missing"}"#);

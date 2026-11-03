@@ -18,8 +18,7 @@ struct KorekoreSettingsRoot: View {
     }
 
     var body: some View {
-        // Voice commands are experimental: no Conversation section while the daemon has them off.
-        let sections = KorekoreSection.allCases.filter { $0 != .conversation || model.residentEnabled }
+        let sections = KorekoreSection.allCases
         KorekoreSettings(picture: BoxPicture.derive(status: model.status, daemonAlive: model.daemonAlive),
                          versions: KorekoreVersions(app: Resources.bundleVersion, firmware: model.status?.device.firmwareVersion),
                          sections: sections, selection: $selection) { section in
@@ -28,7 +27,8 @@ struct KorekoreSettingsRoot: View {
             case .conversation:
                 if let sampleConversation {
                     let info = ResidentInfo.sample
-                    KorekoreConversationPage(load: { sampleConversation }, info: { info }, setBrain: { _ in info }, setKey: { _ in info },
+                    KorekoreConversationPage(load: { sampleConversation }, info: { info }, setOn: { _ in info }, setBrain: { _ in info },
+                                             setKey: { _ in info },
                                              links: .init(anthropicConsole: Resources.anthropicConsole, codexInstall: Resources.codexInstallPage,
                                                           claudeInstall: Resources.claudeInstallPage),
                                              avatar: nil)
@@ -36,6 +36,7 @@ struct KorekoreSettingsRoot: View {
                 KorekoreConversationPage(
                     load: { [client = model.client] in try await client.residentHistory(limit: KorekoreConversationPage.limit) },
                     info: { [client = model.client] in try await client.resident() },
+                    setOn: { [client = model.client] on in try await client.setResidentOn(on) },
                     setBrain: { [client = model.client] choice in try await client.setResidentBrain(choice) },
                     setKey: { [client = model.client] key in try await client.setAnthropicKey(key) },
                     links: .init(anthropicConsole: Resources.anthropicConsole, codexInstall: Resources.codexInstallPage,

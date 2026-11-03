@@ -548,4 +548,8 @@
 "%@ · stock" = "%@ · 自带";
 "The box is on its UART bridge, and its firmware can't carry voice there. Update the firmware, or plug the cable into the box's native USB port." = "盒子接在 UART 桥上，它现在的固件没法在这条线上传语音。更新固件，或把线改插到盒子的原生 USB 口。";
 "The box is on its UART bridge, which didn't hold the speed voice needs. Plug the cable into the box's native USB port, or plug it in again to try once more." = "盒子接在 UART 桥上，这条线没跑到语音需要的速度。把线改插到盒子的原生 USB 口，或重新插一次再试。";
-"Voice needs this computer signed in to VibeBuddy." = "语音要先在这台电脑上登录 VibeBuddy。";
+"Voice needs this computer signed in to VibeBuddy. Sign in on the General page." = "语音要先在这台电脑上登录 VibeBuddy。到“通用”页登录。";
+"Voice commands" = "语音指令";
+"Beta" = "体验版";
+"On while the daemon runs with VIBEBUDDY_RESIDENT_SESSION=1." = "daemon 带着 VIBEBUDDY_RESIDENT_SESSION=1 运行时一直开启。";
+"Hold K0 on the box and ask. Codex or Claude Code on this computer answers, with your own account or key, and the buddy speaks the reply. Your voice goes to VibeBuddy's speech service." = "按住盒子上的 K0 提问。由这台电脑上的 Codex 或 Claude Code 用你自己的账号或密钥回答，再由伙伴念出来。你的语音会发到 VibeBuddy 的语音识别服务。";

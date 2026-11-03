@@ -69,7 +69,7 @@ enum Tab {
     Sound,
     Agents,
     Device,
-    /// Only while the daemon runs the resident session (experimental).
+    /// Voice commands (in beta): their switch, and what was said.
     Conversation,
     Advanced,
 }
@@ -193,8 +193,6 @@ enum Message {
     /// Play a Character's preview lines here, or stop the one playing.
     TogglePreview(&'static str),
     PreviewDone(String, Result<(), String>),
-    /// Whether the daemon runs the resident session, asked each time it comes up.
-    Resident(Result<bool, String>),
     RefreshConversation,
     Conversation(Result<Vec<client::Exchange>, client::HistoryError>),
     /// Ask `GET /v1/resident` again while the Conversation tab shows.
@@ -203,12 +201,14 @@ enum Message {
     OpenCodexInstallPage,
     OpenClaudeInstallPage,
     OpenAnthropicConsole,
+    /// The Voice commands switch.
+    VoiceCommands(bool),
     /// Which Agent answers voice commands.
     PickBrain(client::BrainChoice),
     AnthropicKeyDraft(String),
     SaveAnthropicKey,
     RemoveAnthropicKey,
-    /// The daemon's answer to a brain or key change.
+    /// The daemon's answer to a switch, brain or key change.
     ResidentSettingSaved(Result<client::ResidentInfo, String>),
     /// Ask `vibebuddy-hook` for each agent's state again.
     RefreshAgents,
@@ -311,9 +311,6 @@ struct App {
     agents: Vec<agents::Setup>,
     /// A change to an agent's config, shown before it's written.
     hook_plan: Option<agents::Plan>,
-    /// The daemon runs the experimental resident session, so the Conversation tab shows. Kept while the daemon is
-    /// down, so the tab can say so.
-    resident: bool,
     /// The last voice commands and spoken replies read, or why they couldn't be; None before the first read.
     conversation: Option<Result<Vec<client::Exchange>, client::HistoryError>>,
     conversation_loading: bool,
@@ -458,7 +455,6 @@ impl App {
             previewing: None,
             agents: Vec::new(),
             hook_plan: None,
-            resident: false,
             conversation: None,
             conversation_loading: false,
             conversation_seen: None,
@@ -542,7 +538,7 @@ impl App {
         #[cfg(not(target_os = "linux"))]
         let (tray, instance) = (Subscription::none(), Subscription::none());
         // Only while the Conversation tab is in an open window: the history is read again when it changed.
-        let conversation = if self.settings.is_some() && self.resident && self.tab == Tab::Conversation {
+        let conversation = if self.settings.is_some() && self.tab == Tab::Conversation {
             let every = if self.conversation_marked { 2 } else { 5 };
             iced::time::every(Duration::from_secs(every)).map(|_| Message::PollConversation)
         } else {
@@ -573,12 +569,6 @@ impl App {
                 } else {
                     self.confirm_delete_account = false;
                 }
-                // Only the daemon's environment at start decides, so ask once each time it comes up.
-                let resident = if self.status.is_none() {
-                    Task::perform(client::resident_enabled(), Message::Resident)
-                } else {
-                    Task::none()
-                };
                 let job = |status: &Status| status.making.as_ref().map(|making| (making.id.clone(), making.state.clone()));
                 let made = if self.status.as_ref().is_none_or(|before| job(before) != job(&status)) {
                     self.refresh_made()
@@ -589,7 +579,6 @@ impl App {
                 return Task::batch([
                     self.refresh_tray(),
                     voice.map_or_else(Task::none, |id| Task::done(Message::UseVoice(id))),
-                    resident,
                     made,
                 ]);
             }
@@ -686,13 +675,6 @@ impl App {
                     return Task::perform(client::refresh_account(), |_| Message::AccountDone(Ok(())));
                 }
             }
-            Message::Resident(Ok(enabled)) => {
-                self.resident = enabled;
-                if !enabled && self.tab == Tab::Conversation {
-                    self.tab = Tab::General;
-                }
-            }
-            Message::Resident(Err(_)) => {}
             Message::RefreshConversation => {
                 if !self.conversation_loading {
                     self.conversation_loading = true;
@@ -717,6 +699,10 @@ impl App {
                         let became_ready = self.resident_problem.is_some() && info.problem.is_none();
                         self.resident_problem = info.problem.clone();
                         self.resident_info = Some(info.clone());
+                        // Off: only the switch shows, and the history can't be read.
+                        if !info.enabled {
+                            return Task::none();
+                        }
                         let changed = info.revision.is_none() || info.revision != self.conversation_seen || became_ready;
                         // A read already under way is left alone; the next poll sees the change again.
                         if (changed || self.conversation.is_none()) && !self.conversation_loading {
@@ -748,6 +734,7 @@ impl App {
                     self.notice = Some(Err(error));
                 }
             }
+            Message::VoiceCommands(on) => return Task::perform(client::set_resident_on(on), Message::ResidentSettingSaved),
             Message::PickBrain(choice) => return Task::perform(client::set_resident_brain(choice), Message::ResidentSettingSaved),
             Message::AnthropicKeyDraft(draft) => self.anthropic_key_draft = draft,
             Message::SaveAnthropicKey => {
@@ -1464,11 +1451,7 @@ impl App {
 
     /// The korekore settings window (ADR-0021).
     fn korekore(&self, section: korekore::Section) -> Element<'_, Message> {
-        // Voice commands are experimental: no Conversation section while the daemon has them off.
-        let sections: Vec<korekore::Section> = korekore::Section::ALL
-            .into_iter()
-            .filter(|&section| section != korekore::Section::Conversation || self.resident)
-            .collect();
+        let sections: Vec<korekore::Section> = korekore::Section::ALL.into_iter().collect();
         let picture = korekore::picture::BoxPicture::derive(self.status.as_ref());
         korekore::view::settings(&picture, &sections, section, env!("CARGO_PKG_VERSION"), Message::Korekore, self.korekore_page(section))
     }

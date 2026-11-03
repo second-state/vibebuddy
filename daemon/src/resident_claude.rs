@@ -19,7 +19,7 @@
 //!   and the usual built-ins denied by name besides. `--bare` would skip even more, but it also takes WebSearch
 //!   away (checked with claude 2.1.296), so the config dir and the flags do it instead.
 //!
-//! Experimental, behind the same `VIBEBUDDY_RESIDENT_SESSION=1` as the Codex session; see docs/resident-session.md.
+//! In beta, behind the same Voice commands switch as the Codex session; see docs/resident-session.md.
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;

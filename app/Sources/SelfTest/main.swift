@@ -448,6 +448,8 @@ do {
     check(info.enabled && info.threadId == nil && info.revision == nil, "resident info decodes, without a revision from an older daemon")
     let revised = try StatusCoding.decoder().decode(ResidentInfo.self, from: Data(#"{"enabled":true,"revision":7,"thread_id":"t1"}"#.utf8))
     check(revised.revision == 7 && revised.threadId == "t1" && revised.problem == nil, "resident info carries its revision")
+    let switchedOff = try StatusCoding.decoder().decode(ResidentInfo.self, from: Data(#"{"enabled":false,"forced":false,"thread_id":null}"#.utf8))
+    check(!switchedOff.enabled && switchedOff.forced == false && info.forced == nil, "resident info says whether the variable forces voice on; an older daemon doesn't")
     let missing = try StatusCoding.decoder().decode(ResidentInfo.self, from: Data(#"{"enabled":true,"problem":"codex_missing","ready":false,"revision":0,"thread_id":null}"#.utf8))
     check(missing.problem == .codexMissing, "resident info says Codex is missing")
     let loggedOut = try StatusCoding.decoder().decode(ResidentInfo.self, from: Data(#"{"enabled":true,"problem":"codex_logged_out","ready":false,"revision":0,"thread_id":null}"#.utf8))

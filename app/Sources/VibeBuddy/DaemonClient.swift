@@ -258,6 +258,12 @@ struct DaemonClient {
         return try StatusCoding.decoder().decode(ResidentHistory.self, from: data).exchanges
     }
 
+    /// The Voice commands switch. Its own endpoint, not part of the config.
+    func setResidentOn(_ on: Bool) async throws -> ResidentInfo {
+        let body = try JSONSerialization.data(withJSONObject: ["on": on])
+        return try await residentSetting("/v1/resident/on", method: "PUT", body: body)
+    }
+
     /// Which Agent answers voice commands. Its own endpoint, not part of the config.
     func setResidentBrain(_ choice: ResidentBrainChoice) async throws -> ResidentInfo {
         let body = try JSONSerialization.data(withJSONObject: ["brain": choice.rawValue])

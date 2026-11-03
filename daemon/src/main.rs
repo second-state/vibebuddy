@@ -298,11 +298,11 @@ async fn main() {
         state.written = Arc::new(Mutex::new(persona::Written::load(&dir.join(persona::RECORD_FILE))));
     }
     state.resident =state.state_dir.as_deref().map(|dir| {
-        let enabled = resident::enabled_by_env();
-        if enabled {
-            warn!("the experimental resident session is on");
+        let forced = resident::enabled_by_env();
+        if forced {
+            warn!("{}=1 keeps voice commands on", resident::ENABLE_VARIABLE);
         }
-        let resident = resident::Resident::new(enabled, dir, resident::Launcher::Codex, state.activities.clone());
+        let resident = resident::Resident::new(forced, dir, resident::Launcher::Codex, state.activities.clone());
         Arc::new(match config::config_dir() {
             Some(config) => resident.with_settings_file(config.join(resident::SETTINGS_FILE)),
             None => resident,
@@ -346,7 +346,7 @@ async fn main() {
     tokio::spawn(poll_ci(state.clone()));
     tokio::spawn(handle_device_events(state.clone(), device_events));
     tokio::spawn(check_for_updates(state.clone()));
-    if let Some(resident) = state.resident.clone().filter(|resident| resident.enabled()) {
+    if let Some(resident) = state.resident.clone() {
         follow_resident_readiness(&state, resident);
     }
     follow_account(&state);
@@ -787,6 +787,7 @@ fn app(state: AppState) -> Router {
         .route("/v1/resident", get(get_resident))
         .route("/v1/resident/say", post(post_resident_say))
         .route("/v1/resident/history", get(get_resident_history))
+        .route("/v1/resident/on", axum::routing::put(put_resident_on))
         .route("/v1/resident/brain", axum::routing::put(put_resident_brain))
         .route("/v1/resident/anthropic-key", axum::routing::put(put_anthropic_key).delete(delete_anthropic_key))
         .route("/v1/voice-keys", axum::routing::put(put_voice_keys))
@@ -1732,7 +1733,10 @@ struct SayRequest {
 
 #[derive(Serialize)]
 struct ResidentInfo {
+    /// Voice commands are on: the user's switch, or `VIBEBUDDY_RESIDENT_SESSION=1`.
     enabled: bool,
+    /// `VIBEBUDDY_RESIDENT_SESSION=1` keeps them on, so the switch can't turn them off.
+    forced: bool,
     thread_id: Option<String>,
     /// Goes up when a voice command's turn ends or the thread changes; the Conversation tab polls it.
     revision: u64,
@@ -1758,6 +1762,7 @@ async fn get_resident(State(state): State<AppState>) -> Json<ResidentInfo> {
     let Some(resident) = state.resident.as_ref() else {
         return Json(ResidentInfo {
             enabled: false,
+            forced: false,
             thread_id: None,
             revision: 0,
             ready: false,
@@ -1772,6 +1777,7 @@ async fn get_resident(State(state): State<AppState>) -> Json<ResidentInfo> {
     let on = resident.enabled();
     Json(ResidentInfo {
         enabled: on,
+        forced: resident.forced(),
         thread_id: resident.thread_id(),
         revision: resident.revision(),
         ready: resident.ready(),
@@ -1781,6 +1787,41 @@ async fn get_resident(State(state): State<AppState>) -> Json<ResidentInfo> {
         anthropic_key_set: resident.anthropic_key_set(),
         voice_off: if on { voice_off(&state).await } else { None },
     })
+}
+
+#[derive(serde::Deserialize)]
+struct OnRequest {
+    on: bool,
+}
+
+/// The user's Voice commands switch. Its own endpoint, kept out of `PUT /v1/config`. Turning it on starts the brain
+/// ahead of the first command; either way the box is told again whether it may offer voice.
+async fn put_resident_on(State(state): State<AppState>, Json(request): Json<OnRequest>) -> axum::response::Response {
+    use axum::response::IntoResponse;
+    let Some(resident) = state.resident.clone() else {
+        return no_state_directory();
+    };
+    if let Err(error) = resident.set_on(request.on).await {
+        warn!(%error, "failed to save the voice commands switch");
+        return (StatusCode::INTERNAL_SERVER_ERROR, Json(ApiResponse { accepted: false, message: error.to_string() })).into_response();
+    }
+    if resident.enabled() {
+        let wearing = wearing(&state).await;
+        let warming = resident.clone();
+        tokio::spawn(async move { warming.warm(&wearing).await });
+        offer_voice_again(&state).await;
+    } else {
+        // Switched off, voice is unset rather than off for a reason, which `offer_voice_again` doesn't send: the box
+        // stops offering it and has nothing to explain.
+        let booted = {
+            let device = state.device.lock().await;
+            device.connected && device.firmware_build.is_some()
+        };
+        if booted {
+            send_event(&state, voice::available_event(voice::Availability::Unset));
+        }
+    }
+    get_resident(State(state)).await.into_response()
 }
 
 #[derive(serde::Deserialize)]
@@ -2572,6 +2613,44 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn the_voice_commands_switch_offers_voice_to_the_box_and_withdraws_it() {
+        let dir = resident::tests::temp_dir("main-switch");
+        let transport = Arc::new(RecordingTransport::default());
+        let mut state = test_state(transport.clone());
+        let script = resident::tests::logged_in();
+        let launch = script.clone();
+        let resident = Arc::new(resident::Resident::new(
+            false,
+            &dir,
+            resident::Launcher::Fake(Box::new(move || resident::tests::fake_server(launch.clone()))),
+            Arc::default(),
+        ));
+        state.resident = Some(resident.clone());
+        state.voice = Arc::new(voice::Voice::new(Some(Arc::new(SilentRecognizer)), Some(resident.clone())));
+        let offers = || {
+            transport
+                .events()
+                .iter()
+                .filter(|event| event.event == "voice.available")
+                .map(|event| (event.extra["on"].clone(), event.extra.get("reason").cloned()))
+                .collect::<Vec<_>>()
+        };
+        publish_device_message(&state, DeviceMessage::Connected { port: "/dev/cu.x".to_owned(), bridge: false, usb_serial: None }).await;
+        publish_device_message(&state, DeviceMessage::Line("DISPLAY READY BUILD v9 2026-10-01".to_owned())).await;
+        assert!(offers().is_empty(), "off by default: the box isn't offered voice");
+
+        let on = put_resident_on(State(state.clone()), Json(OnRequest { on: true })).await;
+        assert_eq!(on.status(), StatusCode::OK);
+        assert_eq!(offers(), [(serde_json::json!(true), None)]);
+
+        put_resident_on(State(state.clone()), Json(OnRequest { on: false })).await;
+        assert_eq!(offers().last(), Some(&(serde_json::json!(false), None)), "off with no reason to show");
+        let Json(info) = get_resident(State(state)).await;
+        assert!(!info.enabled && !info.forced);
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[tokio::test]
     async fn the_box_is_told_each_time_the_resident_session_becomes_ready_or_stops_being() {
         let dir = resident::tests::temp_dir("main-readiness-offer");
         let transport = Arc::new(RecordingTransport::default());
@@ -2691,6 +2770,7 @@ mod tests {
             serde_json::to_value(&info).unwrap(),
             serde_json::json!({
                 "enabled": true,
+                "forced": true,
                 "thread_id": null,
                 "revision": 0,
                 "ready": true,
