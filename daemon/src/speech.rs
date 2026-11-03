@@ -47,6 +47,9 @@ const OWN_MODEL: &str = "VIBEBUDDY_STT_MODEL";
 /// Groq's OpenAI-compatible API, for the user's own Groq key.
 const GROQ_URL: &str = "https://api.groq.com/openai/v1";
 const GROQ_MODEL: &str = "whisper-large-v3-turbo";
+/// Whisper often writes Mandarin in traditional characters, which the box's font doesn't have; a prompt in simplified
+/// Chinese makes it write simplified, as it follows the prompt's style. Not sent when the language is set to another.
+const SIMPLIFIED_PROMPT: &str = "以下是普通话的句子。";
 const CLOUDFLARE_MODEL: &str = "@cf/openai/whisper-large-v3-turbo";
 /// A 30 s recording is under 1.5 MB of WAV; Workers AI took 3.6 to 4.4 s for 5 s of it.
 const TIMEOUT: Duration = Duration::from_secs(30);
@@ -249,6 +252,8 @@ pub struct OpenAiCompatible {
     api_key: Option<String>,
     model: String,
     language: Option<String>,
+    /// Text the transcript follows the style of.
+    prompt: Option<String>,
 }
 
 impl OpenAiCompatible {
@@ -264,6 +269,9 @@ impl OpenAiCompatible {
         field("response_format", "", b"json");
         if let Some(language) = &self.language {
             field("language", "", language.as_bytes());
+        }
+        if let Some(prompt) = &self.prompt {
+            field("prompt", "", prompt.as_bytes());
         }
         body.extend_from_slice(format!("--{boundary}--\r\n").as_bytes());
         let mut headers = vec![("Content-Type".to_owned(), format!("multipart/form-data; boundary={boundary}"))];
@@ -315,7 +323,14 @@ impl Recognizer for GroqOrService {
         let Some(key) = self.keys.key(Provider::Groq) else {
             return self.service.as_ref().ok_or_else(|| named("own_key"))?.recognize(wav);
         };
-        let groq = OpenAiCompatible { base_url: self.groq_url.clone(), api_key: Some(key), model: GROQ_MODEL.to_owned(), language: self.language.clone() };
+        let prompt = self.language.as_deref().is_none_or(|language| language == "zh").then(|| SIMPLIFIED_PROMPT.to_owned());
+        let groq = OpenAiCompatible {
+            base_url: self.groq_url.clone(),
+            api_key: Some(key),
+            model: GROQ_MODEL.to_owned(),
+            language: self.language.clone(),
+            prompt,
+        };
         let (status, body) = groq.send(wav)?;
         // A refused key stays refused until the user sets another; the box is told to set one.
         let refused = matches!(status, 401 | 403);
@@ -403,6 +418,7 @@ fn configure(
             api_key: lookup(OWN_API_KEY),
             model: lookup(OWN_MODEL).unwrap_or_else(|| "whisper-1".to_owned()),
             language: language.clone(),
+            prompt: None,
         };
         Some(("an OpenAI-compatible endpoint", Arc::new(backend)))
     };
@@ -523,6 +539,7 @@ mod tests {
             api_key: Some("sk-test".to_owned()),
             model: "whisper-large-v3".to_owned(),
             language: Some("zh".to_owned()),
+            prompt: None,
         };
         let request = backend.request(b"RIFF\x00\x01", "BOUNDARY");
         assert_eq!(request.url, "http://127.0.0.1:8000/v1/audio/transcriptions");
@@ -693,6 +710,7 @@ mod tests {
         assert!(request.starts_with("POST /audio/transcriptions"), "{request}");
         assert!(request.to_lowercase().contains("authorization: bearer gsk_secret"), "{request}");
         assert!(request.contains("whisper-large-v3-turbo") && request.contains("\r\n\r\nzh\r\n"), "{request}");
+        assert!(request.contains("name=\"prompt\"\r\n\r\n以下是普通话的句子。\r\n"), "simplified Chinese is asked for: {request}");
 
         let (groq, _server) = serve("HTTP/1.1 401 Unauthorized\r\nContent-Length: 2\r\nConnection: close\r\n\r\n{}");
         let recognizer = GroqOrService { groq_url: groq, ..recognizer };
