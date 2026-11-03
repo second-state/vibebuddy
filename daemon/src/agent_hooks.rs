@@ -74,7 +74,7 @@ pub fn apply(tracker: &mut ActivityTracker, hook: AgentHook) -> Option<Event> {
         "working" => {
             // A new turn replaces the previous one; repeats within the turn only keep it alive.
             if !tracker.has_activity(&id) {
-                tracker.clear_turns(&hook.session_id);
+                tracker.clear_turns(&id.session_id);
             }
             tracker.observe(&id, &title, ActivityStatus::Working)
         }
@@ -83,7 +83,7 @@ pub fn apply(tracker: &mut ActivityTracker, hook: AgentHook) -> Option<Event> {
         "done" => tracker.finish(&id, &title),
         // Interrupted or failed: neither a success nor something to wait on.
         "stopped" => tracker.discard(&id, "STOPPED"),
-        "session_end" => tracker.discard_session(&hook.session_id, "ALL QUIET"),
+        "session_end" => tracker.discard_session(&id.session_id, "ALL QUIET"),
         _ => None,
     };
     tracker.associate_source(&id, source);
@@ -141,6 +141,29 @@ mod tests {
         apply(&mut tracker, hook("opencode", "stopped", Some("msg_1")));
         let after = apply(&mut tracker, hook("opencode", "done", Some("msg_1")));
         assert!(after.is_none_or(|event| event.event != "task.done"));
+    }
+
+    #[test]
+    fn a_new_opencode_turn_replaces_the_one_left_waiting_on_the_user() {
+        let mut tracker = ActivityTracker::default();
+        apply(&mut tracker, hook("opencode", "working", Some("msg_1")));
+        let mut asking = hook("opencode", "done", Some("msg_1"));
+        asking.response_kind = Some("input_required".to_owned());
+        apply(&mut tracker, asking);
+        let next = apply(&mut tracker, hook("opencode", "working", Some("msg_2"))).expect("event");
+        assert_eq!(next.event, "task.start");
+        assert!(!tracker.has_activity(&activity_id(&hook("opencode", "working", Some("msg_1")))));
+    }
+
+    #[test]
+    fn ending_an_opencode_session_clears_its_turns() {
+        let mut tracker = ActivityTracker::default();
+        apply(&mut tracker, hook("opencode", "working", Some("msg_1")));
+        let mut asking = hook("opencode", "done", Some("msg_1"));
+        asking.response_kind = Some("input_required".to_owned());
+        apply(&mut tracker, asking);
+        apply(&mut tracker, hook("opencode", "session_end", None));
+        assert!(!tracker.has_activity(&activity_id(&hook("opencode", "working", Some("msg_1")))));
     }
 
     #[test]
