@@ -73,7 +73,7 @@ The Relay sends the box `{"t":"linked","computer":"<key>","name":"…"}` when a 
 
 After welcome the Relay sends `{"t":"status","box":<online>,"owner":{"key","name","via","linked"}|null}`, and again whenever either changes.
 
-- `{"t":"link"}`: link if the box is free, already ours, or its computer has been gone at least 10 minutes. Answered with `{"t":"linked"}` or `{"t":"busy","reason":"linked"|"usb","owner":"<name>"}`.
+- `{"t":"link"}`: link if the box is free, already ours, or its computer has been gone at least 10 minutes. Answered with `{"t":"linked"}` or `{"t":"busy","reason":"linked"|"usb","owner":"<name>"}`. When the 10 minutes run out, the Relay frees the box and sends `status` with `owner: null`, so a computer told `busy` knows to ask again.
 - `{"t":"takeover"}`: the user chose to take the box. Always granted unless another computer's USB cable is in (`busy`, reason `usb`).
 - `{"t":"unlink"}`: give the box up.
 - `{"t":"data","line":"…"}`: one line for the box, only while linked (`error`, code `not_linked`, otherwise).
