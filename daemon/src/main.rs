@@ -1632,7 +1632,7 @@ async fn send_heartbeats(state: AppState) {
     loop {
         ticker.tick().await;
         let now = chrono::Local::now();
-        let heartbeat = heartbeat_event(&build, now.hour(), local_day(&now));
+        let heartbeat = heartbeat_event(&build, now.hour(), now.minute(), local_day(&now));
         match heartbeat.to_ndjson() {
             // A full queue means the device isn't receiving anything; a heartbeat is pointless then, so just drop it.
             Ok(frame) => drop(state.transport.send(frame)),
@@ -1645,7 +1645,7 @@ async fn send_heartbeats(state: AppState) {
 /// because the device may restart at any time and a one-off handshake would be lost. The hour tells the buddy whether it's day
 /// or night, and the date tells the pomodoro when a new day starts: the device has no clock and shouldn't
 /// join Wi-Fi just for that.
-fn heartbeat_event(build: &str, hour: u32, day: u32) -> Event {
+fn heartbeat_event(build: &str, hour: u32, minute: u32, day: u32) -> Event {
     Event {
         version: VERSION,
         event: "device.heartbeat".to_owned(),
@@ -1655,6 +1655,7 @@ fn heartbeat_event(build: &str, hour: u32, day: u32) -> Event {
         extra: [
             ("build".to_owned(), serde_json::json!(build)),
             ("hour".to_owned(), serde_json::json!(hour)),
+            ("minute".to_owned(), serde_json::json!(minute)),
             ("day".to_owned(), serde_json::json!(day)),
         ]
         .into_iter()
@@ -3137,13 +3138,14 @@ mod tests {
 
     #[test]
     fn heartbeat_carries_build_local_hour_and_day() {
-        let frame = heartbeat_event("abc1234 2026-09-15 12:00", 23, 20260915)
+        let frame = heartbeat_event("abc1234 2026-09-15 12:00", 23, 59, 20260915)
             .to_ndjson()
             .expect("heartbeat should encode");
         let text = String::from_utf8(frame).expect("heartbeat must be UTF-8");
         assert!(text.contains(r#""event":"device.heartbeat""#));
         assert!(text.contains(r#""build":"abc1234 2026-09-15 12:00""#));
         assert!(text.contains(r#""hour":23"#));
+        assert!(text.contains(r#""minute":59"#));
         assert!(text.contains(r#""day":20260915"#));
     }
 
