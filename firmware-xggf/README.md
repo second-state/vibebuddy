@@ -1,6 +1,6 @@
 # XGGF experimental firmware
 
-This is experimental ESP32-C3 VibeBuddy firmware for the XGGF PixelClock. It displays Agent status over USB or a paired, encrypted local Wi-Fi link, provides an identify animation and short tone, and cycles through offline status, RTC time, temperature and humidity while the link is down. The rightmost pixel column is an always-on connection indicator: its upper half reports the network — grey with no stored Wi-Fi credentials, pink-red while credentials exist but the station holds no IP address, tint green once it does — and its lower half the host link: grey until a daemon first connects, tint green while its heartbeat is current, pink-red after an established link times out. A `device.mic` command opens a ten-second sound-reactive buddy and ten-bar level display; Agent events take priority and only another explicit microphone command restarts the visualizer after preemption. It does not provide speech recognition or voice support. Other stock features remain under investigation. Sensor readings are used as reported without calibration. Do not use the normal box firmware installer on this device.
+This is experimental ESP32-C3 VibeBuddy firmware for the XGGF PixelClock. It displays Agent status over USB or a paired, encrypted local Wi-Fi link, provides an identify animation and short tone, and shows the synced clock while the link is down. The rightmost pixel column is an always-on connection indicator: its upper half reports the network — grey with no stored Wi-Fi credentials, pink-red while credentials exist but the station holds no IP address, tint green once it does — and its lower half the host link: grey until a daemon first connects, tint green while its heartbeat is current, pink-red after an established link times out. A `device.mic` command opens a ten-second sound-reactive buddy and ten-bar level display; Agent events take priority and only another explicit microphone command restarts the visualizer after preemption. It does not provide speech recognition or voice support. Other stock features remain under investigation. Sensor readings are used as reported without calibration. Do not use the normal box firmware installer on this device.
 
 ## Speech recording
 
@@ -12,13 +12,13 @@ All three buttons are active-low digital inputs with 40 ms debounce and a one-se
 
 | Physical button | GPIO | Short press | Long press |
 |---|---:|---|---|
-| Left (K0) | 8 | Stop an active speech recording, otherwise start or stop the microphone visualizer | Identify animation and tone |
-| Middle (K1) | 9 | Cycle Agent status, clock and environment pages | Open the menu on MIC |
+| Left (K0) | 8 | Stop recording; on Pomodoro start/pause/resume; otherwise no action | Identify animation and tone |
+| Middle (K1) | 9 | Cycle Agent, clock, environment and Pomodoro pages | Open the menu on MIC |
 | Right (K2) | 2 | Send the standard `button` event; the daemon opens the current Agent source | Toggle buzzer mute |
 
 The device routes gestures through one state machine with HOME, MENU and LINK states. Every gesture resolves to a named action and a full before/after state; serial diagnostics print the action and both state snapshots. Recording start and finish, menu timeout and external Agent resets are tracked as transitions too. While recording, K0 short requests stop in every state without changing navigation. The host transition emulator is `tests/button_actions_test.c`.
 
-In MENU, K1 short selects the next row, K0 short activates it and K2 short closes; K0/K1 long are ignored, and K2 long toggles mute. The menu closes after 30 seconds without a key. Rows are MIC, LINK, BRIGHTNESS, IDENTIFY, MUTE and CLOSE. In LINK, K1 short advances the four read-only pages, K0/K2 short return to MENU, K0/K1 long are ignored and K2 long toggles mute. New Agent activity closes the menu. LINK pages show transport (USB, LAN or offline), Wi-Fi state/SSID, IPv4 address and paired-computer count. Values are clipped to the compact panel and never include passwords or key material. BRIGHTNESS cycles 2 → 4 → 6 → 8 → 2, scales every channel centrally with the existing cap of 8, and saves changes in the separate `xggf_ui` NVS namespace.
+In MENU, K1 short selects the next row, K0 short activates it and K2 short closes; K0/K1 long are ignored, and K2 long toggles mute. The menu closes after 30 seconds without a key. Rows are MIC, LINK, BRIGHTNESS, VOLUME, IDENTIFY, STOP FOCUS (during a phase), MUTE and CLOSE. In LINK, K1 short advances the four read-only pages, K0/K2 short return to MENU, K0/K1 long are ignored and K2 long toggles mute. New Agent activity closes the menu. LINK pages show transport (USB, LAN or offline), Wi-Fi state/SSID, IPv4 address and paired-computer count. Values are clipped to the compact panel and never include passwords or key material. BRIGHTNESS cycles 2 → 4 → 6 → 8 → 2, scales every channel centrally with the existing cap of 8, and saves changes in the separate `xggf_ui` NVS namespace.
 
 K0 during speech capture sends the stop-only `audio.stop.request` over USB and encrypted Wi-Fi. `REC` stays visible until the normal `AUDIO END`; duplicate presses are idempotent. If no stop command arrives within two seconds, the firmware uses its existing local bounded stop path and reports `AUDIO STOP TIMEOUT`. This gesture cannot start, retrieve or delete a recording.
 
@@ -89,7 +89,7 @@ The status labels draw with a 5x7 font covering printable ASCII. `firmware-xggf/
 
 The previous panel probe and its results are described in the working notes. The current build starts in `OFFLINE` and displays Agent status once it receives events. Hold the repository-root `DEVICE.lock` for every complete flash or physical test, including data collection, and release it immediately afterward. From `firmware-xggf`, flash with `flock ../DEVICE.lock -c 'idf.py -p PORT flash'` after sourcing ESP-IDF; from the repository root, use `DEVICE.lock` as shown below. The lock file is ignored by Git.
 
-For a no-touch MCU state-machine run, build a separate test image with `idf.py -B build-autopilot -D SDKCONFIG=/tmp/xggf-autopilot-sdkconfig -D XGGF_BUTTON_AUTOPILOT=ON build`, flash that image under `DEVICE.lock`, then run `python3 tests/button_autopilot.py PORT`. USB-injected commands call only the transition state machine: they do not invoke microphone, buzzer, mute, brightness, or daemon side effects, so this run is silent. This verifies the on-device state machine, not electrical GPIO actuation.
+For a no-touch MCU state-machine run, build a separate test image with `idf.py -B build-autopilot -D SDKCONFIG=/tmp/xggf-autopilot-sdkconfig -D XGGF_BUTTON_AUTOPILOT=ON build`, flash that image under `DEVICE.lock`, then run `python3 tests/button_autopilot.py PORT`. USB-injected commands call only the transition state machine: they do not invoke side effects unless the explicit `effects: true` test field is supplied (used by the soak), so this run is silent. This verifies the on-device state machine, not electrical GPIO actuation.
 
 With the device already running this firmware, these physical tests are available:
 
@@ -108,3 +108,56 @@ flock DEVICE.lock -c 'python3 firmware-xggf/tests/buttons.py PORT action K2'
 The button tests print a gesture sequence, wait up to 120 seconds and finish as soon as the required events arrive. The panel shows the held key's purple dot; the long-press threshold fires the gesture event. `map left|middle|right` replaces `action K0|K1|K2` for repeated physical-mapping checks.
 
 The serial test sends every status state. The soak rotates states and checks diagnostics for the requested number of minutes. The microphone test activates the visualizer and reports only aggregate amplitude; with a WAV path it takes a baseline, plays the tone through `aplay`, and requires a clear response during a second probe. The round-trip test records six identify tones with `arecord`, checks their burst count and 1 kHz dominance, replays the recording through `aplay`, and requires the device microphone to detect it above the later baseline. Temporary recordings are deleted automatically. The identify command emits an 80 ms tone and remains covered by the serial test. The Wi-Fi test scans and provisions over USB, removes the cached address, reconnects through mDNS and drives eight encrypted controls; `CONNECTION` is an active NetworkManager connection whose credentials remain outside the repository.
+
+
+### XGGF Pomodoro controls
+
+K1 cycles Agent → Clock → Environment → Pomodoro; hold K1 for the menu.
+K0 starts, pauses or resumes the timer on the Pomodoro page and otherwise does
+nothing. While recording, K0 stops recording on every page. Hold K0 to identify.
+MIC in the menu toggles the microphone meter. STOP FOCUS appears during an active,
+paused or break-ready phase and abandons it silently. VOLUME cycles
+20, 35, 50, 65, 80 and 100 percent. Hold K2 to mute all buzzer sounds.
+
+Focus lasts 25 minutes and break lasts five minutes, each started by K0.
+Phase completion brings the timer page forward and sounds a chime. The daily
+completed-focus count survives reboot; the running timer returns to idle.
+Agent input blinks an amber 2×2 dot beside the connection bar on every page.
+The daemon supplies local time; offline Agent shows that clock, or NO TIME before
+valid time is available. RTC writes are experimental and disabled by default;
+offline reboot retention is awaiting hardware validation.
+
+
+Pomodoro host checks:
+
+```sh
+cc -std=c11 -Wall -Wextra -Werror -Ifirmware-xggf/main firmware-xggf/main/clock.c firmware-xggf/tests/clock_test.c -o /tmp/xggf-clock-test
+/tmp/xggf-clock-test
+cc -std=c11 -Wall -Wextra -Werror -Ifirmware-xggf/main firmware-xggf/main/volume.c firmware-xggf/tests/volume_test.c -o /tmp/xggf-volume-test
+/tmp/xggf-volume-test
+```
+
+Acceptance builds use `-DXGGF_BUTTON_AUTOPILOT=ON` and
+`-DXGGF_POMODORO_TIME_SCALE=60`; production builds use `OFF` and `1`.
+`XGGF_RTC_WRITE` defaults to `OFF`; enable only for RTC retention experiments.
+The soak uses test-only injected gestures with `effects: true` to exercise
+Pomodoro navigation and transitions. Default firmware ignores these commands.
+
+
+Additional sound and RTC checks:
+
+```sh
+cc -std=c11 -Wall -Wextra -Werror -Ifirmware-xggf/tests/stubs -Ifirmware-xggf/main firmware-xggf/main/buzzer.c firmware-xggf/tests/buzzer_test.c -o /tmp/xggf-buzzer-test
+/tmp/xggf-buzzer-test
+cc -std=c11 -Wall -Wextra -Werror -Ifirmware-xggf/main firmware-xggf/main/clock.c firmware-xggf/main/rtc.c firmware-xggf/tests/rtc_test.c -o /tmp/xggf-rtc-test
+/tmp/xggf-rtc-test
+```
+
+See [RTC evidence](docs/RTC.md) and the owner-approved
+[layout preview](docs/pomodoro-preview.png). Acceptance serial checks are in
+`tests/pomodoro_serial.py`; run with the daemon stopped and `DEVICE.lock` held.
+
+`tests/pomodoro_reboot_serial.py PORT` additionally checks write/readback,
+RTC-derived time before any heartbeat after reset, persisted tally and volume,
+and the deliberate return to idle. This requires experimental RTC writes ON.
+It does not substitute for a power-off test.

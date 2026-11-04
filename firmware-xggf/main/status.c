@@ -7,7 +7,7 @@
 void status_init(status_model *m)
 {
     memset(m, 0, sizeof(*m));
-    m->brightness = 8;
+    m->brightness = 8; m->volume = 50;
     button_actions_init(&m->button_actions);
 }
 
@@ -30,7 +30,7 @@ bool status_event(status_model *m, const char *event, uint32_t now)
     else if (!strcmp(event, "task.error") || !strcmp(event, "agent.blocked")) next = STATUS_FAILED;
     else return false;
     m->state = next; m->linked = true; m->host_seen = true; m->last_message_ms = now;
-    m->view = STATUS_VIEW_AGENT; m->mute_notice = false;
+    m->mute_notice = false;
     button_actions_external_reset(&m->button_actions);
     m->done_pending = next == STATUS_DONE; m->done_at_ms = now;
     m->audio_active = false; m->audio_session = false;
@@ -54,13 +54,15 @@ void status_buttons(status_model *m, const bool pressed[3], const bool long_fire
 
 void status_next_view(status_model *m)
 {
-    m->view = (status_view)((m->view + 1) % 3);
+    m->view = (status_view)((m->view + 1) % 4);
+    m->button_actions.pomodoro_page = m->view == STATUS_VIEW_POMODORO;
     m->mute_notice = false;
 }
 
 void status_home(status_model *m)
 {
     m->view = STATUS_VIEW_AGENT;
+    m->button_actions.pomodoro_page = false;
     m->mute_notice = false;
 }
 
@@ -69,6 +71,7 @@ void status_identify(status_model *m, uint32_t now)
     m->identifying = true;
     m->identify_at_ms = now;
     m->view = STATUS_VIEW_AGENT;
+    m->button_actions.pomodoro_page = false;
     m->mute_notice = false;
     button_actions_external_reset(&m->button_actions);
     m->audio_active = false;
@@ -78,7 +81,6 @@ void status_identify(status_model *m, uint32_t now)
 void status_toggle_mute(status_model *m, uint32_t now)
 {
     m->muted = !m->muted;
-    m->view = STATUS_VIEW_AGENT;
     m->mute_notice = true;
     m->mute_notice_at_ms = now;
 }
@@ -112,7 +114,7 @@ void status_audio(status_model *m, uint32_t mean, uint32_t now)
 void status_sensors(status_model *m, bool rtc_valid, unsigned hour, unsigned minute,
                     bool environment_valid, int temperature_tenths, unsigned humidity_tenths, uint32_t now)
 {
-    m->rtc_valid = rtc_valid; m->rtc_hour = hour; m->rtc_minute = minute; m->rtc_read_ms = now;
+    if (!m->host_seen) { m->rtc_valid = rtc_valid; m->rtc_hour = hour; m->rtc_minute = minute; m->rtc_read_ms = now; }
     m->environment_valid = environment_valid; m->temperature_tenths = temperature_tenths; m->humidity_tenths = humidity_tenths;
 }
 
@@ -191,6 +193,8 @@ void status_render(const status_model *m, uint32_t now, uint8_t *f)
     indicator(f, m);
     /* A steady 2x2 red dot in the top-right corner marks active voice recording in every
        view; the corner beside the bar stays clear of the button dots and label text. */
+    if (m->state == STATUS_INPUT && (now / 500) % 2 == 0)
+        for (unsigned x = 61; x <= 62; ++x) { pixel(f,x,6,amber); pixel(f,x,7,amber); }
     if (m->button_actions.recording) for (unsigned x = 61; x <= 62; ++x) { pixel(f,x,0,red); pixel(f,x,1,red); }
     if (m->button_actions.recording) {
         for (unsigned x = 2; x <= 8; ++x) { pixel(f,x,0,red); pixel(f,x,7,red); }
@@ -229,6 +233,8 @@ void status_render(const status_model *m, uint32_t now, uint8_t *f)
             case BUTTON_MENU_LINK: label = "LINK"; break;
             case BUTTON_MENU_BRIGHTNESS:
                 snprintf(value, sizeof(value), "BRIGHT %u", m->brightness); label = value; break;
+            case BUTTON_MENU_VOLUME: snprintf(value,sizeof(value),"VOL %u",m->volume); label=value; break;
+            case BUTTON_MENU_STOP_FOCUS: label = "STOP FOC"; break;
             case BUTTON_MENU_IDENTIFY: label = "IDENTIFY"; break;
             case BUTTON_MENU_MUTE: label = m->muted ? "MUTE ON" : "MUTE OFF"; break;
             case BUTTON_MENU_CLOSE: label = "CLOSE"; break;
@@ -255,6 +261,34 @@ void status_render(const status_model *m, uint32_t now, uint8_t *f)
         button_feedback(f, m);
         return;
     }
+    if (m->view == STATUS_VIEW_POMODORO) {
+        const pomodoro_view *v = &m->pomodoro;
+        const uint8_t *c = v->phase ? green : v->run ? red : cyan;
+        uint8_t pulse[3];
+        uint32_t alarm_age=(uint32_t)(now-m->pomodoro_alarm_at_ms);
+        if(m->pomodoro_alarm && alarm_age>=2000) {
+            unsigned t=alarm_age%2000;
+            unsigned brightness=2+(t<1000?t:2000-t)*6/1000;
+            for(unsigned i=0;i<3;++i) pulse[i]=c[i]*brightness/8;
+            c=pulse;
+        }
+        char timer[16];
+        unsigned seconds = (v->remaining_ms + 999) / 1000;
+        snprintf(timer, sizeof(timer), "%02u:%02u", seconds / 60, seconds % 60);
+        if (v->run != 2 || (now / 500) % 2 == 0) text(f, timer, c);
+        unsigned filled = v->total_ms ? (uint64_t)(v->total_ms - v->remaining_ms) * 46 / v->total_ms : 0;
+        if (m->pomodoro_alarm) filled = 46;
+        for (unsigned x = 13; x < 59; ++x)
+            pixel(f, x, 7, x < 13 + filled && (!m->pomodoro_alarm || alarm_age>=2000 || (now / 500) % 2 == 0) ? c : gray);
+        snprintf(timer, sizeof(timer), "%u", (unsigned)(v->completed > 99 ? 99 : v->completed));
+        for(unsigned digit=0;timer[digit];++digit) {
+            const xggf_glyph *g = xggf_font_glyph(timer[digit]);
+            if (g) for (unsigned y=0;y<7;++y) for(unsigned x=0;x<5;++x)
+                if (g->rows[y] & (0x10u >> x)) pixel(f,digit*6+x,y,c);
+        }
+        button_feedback(f,m);
+        return;
+    }
     const uint8_t *color = gray; const char *label = "OFFLINE"; char sensor_label[32];
     if (m->view == STATUS_VIEW_CLOCK) {
         color = cyan;
@@ -262,7 +296,7 @@ void status_render(const status_model *m, uint32_t now, uint8_t *f)
             unsigned minute = (m->rtc_hour * 60 + m->rtc_minute + (uint32_t)(now - m->rtc_read_ms) / 60000) % 1440;
             snprintf(sensor_label, sizeof(sensor_label), "%02u:%02u", minute / 60, minute % 60);
             label = sensor_label;
-        } else label = "NO RTC";
+        } else label = "NO TIME";
     } else if (m->view == STATUS_VIEW_ENVIRONMENT) {
         color = cyan;
         if (m->environment_valid) {
@@ -270,13 +304,12 @@ void status_render(const status_model *m, uint32_t now, uint8_t *f)
             label = sensor_label;
         } else label = "NO ENV";
     } else {
-        if (!m->linked && m->rtc_valid && (now / 4000) % 3 == 1) {
-            unsigned minute = (m->rtc_hour * 60 + m->rtc_minute + (uint32_t)(now - m->rtc_read_ms) / 60000) % 1440;
-            snprintf(sensor_label, sizeof(sensor_label), "%02u:%02u", minute / 60, minute % 60);
-            label = sensor_label;
-        } else if (!m->linked && m->environment_valid && (now / 4000) % 3 == 2) {
-            snprintf(sensor_label, sizeof(sensor_label), "%dC %u%%", m->temperature_tenths / 10, m->humidity_tenths / 10);
-            label = sensor_label;
+        if (!m->linked) {
+            if (m->rtc_valid) {
+                unsigned minute = (m->rtc_hour * 60 + m->rtc_minute + (uint32_t)(now - m->rtc_read_ms) / 60000) % 1440;
+                snprintf(sensor_label,sizeof(sensor_label),"%02u:%02u",minute/60,minute%60);
+                label = sensor_label;
+            } else label = "NO TIME";
         }
         if (m->linked) switch (m->state) {
             case STATUS_READY: color = cyan; label = "READY"; break;

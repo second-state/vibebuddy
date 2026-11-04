@@ -15,7 +15,9 @@ typedef enum {
     BUTTON_MENU_MIC,
     BUTTON_MENU_LINK,
     BUTTON_MENU_BRIGHTNESS,
+    BUTTON_MENU_VOLUME,
     BUTTON_MENU_IDENTIFY,
+    BUTTON_MENU_STOP_FOCUS,
     BUTTON_MENU_MUTE,
     BUTTON_MENU_CLOSE,
     BUTTON_MENU_ROW_COUNT
@@ -24,6 +26,9 @@ typedef enum {
 /* Each gesture has one semantic result; menu navigation is represented separately from effects. */
 typedef enum {
     BUTTON_ACTION_NONE,
+    BUTTON_ACTION_VOLUME_NEXT,
+    BUTTON_ACTION_POMODORO_TOGGLE,
+    BUTTON_ACTION_POMODORO_STOP,
     BUTTON_ACTION_MIC_TOGGLE,
     BUTTON_ACTION_RECORDING_STOP,
     BUTTON_ACTION_IDENTIFY,
@@ -50,6 +55,7 @@ typedef struct {
     unsigned link_page;
     uint32_t last_activity_ms;
     bool recording;
+    bool pomodoro_page, pomodoro_active;
 } button_actions_state;
 
 typedef struct {

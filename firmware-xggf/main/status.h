@@ -4,17 +4,21 @@
 #include <stdint.h>
 #include "button_actions.h"
 #include "link_status.h"
+#include "pomodoro.h"
 
 typedef enum { STATUS_READY, STATUS_WORKING, STATUS_INPUT, STATUS_DONE, STATUS_FAILED } status_kind;
-typedef enum { STATUS_VIEW_AGENT, STATUS_VIEW_CLOCK, STATUS_VIEW_ENVIRONMENT } status_view;
+typedef enum { STATUS_VIEW_AGENT, STATUS_VIEW_CLOCK, STATUS_VIEW_ENVIRONMENT, STATUS_VIEW_POMODORO } status_view;
 /* Connection indicator on the rightmost panel column: grey unset, pink-red error, tint-green ok. */
 typedef enum { STATUS_LINK_UNSET, STATUS_LINK_OK, STATUS_LINK_ERROR } status_link_state;
 typedef enum { STATUS_TRANSPORT_NONE, STATUS_TRANSPORT_USB, STATUS_TRANSPORT_LAN } status_transport;
 typedef struct {
+    pomodoro_view pomodoro;
+    bool pomodoro_alarm;
+    uint32_t pomodoro_alarm_at_ms;
     status_kind state;
     status_view view;
     button_actions_state button_actions;
-    unsigned brightness;
+    unsigned brightness, volume;
     status_link_state network_link;
     status_transport transport;
     link_status_info link_info;

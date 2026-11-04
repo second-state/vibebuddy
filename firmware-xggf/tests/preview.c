@@ -26,12 +26,28 @@ static void write_pbm(const char *dir, const char *name, unsigned scale, const u
     printf("%s\n", path);
 }
 
+static void write_ppm(const char *dir, const char *name, unsigned scale, const uint8_t *frame)
+{
+    char path[512];
+    snprintf(path,sizeof(path),"%s/%s-%ux.ppm",dir,name,scale);
+    FILE *out=fopen(path,"wb");
+    if(!out) { perror(path); exit(1); }
+    fprintf(out,"P6\n%u %u\n255\n",PANEL_WIDTH*scale,PANEL_HEIGHT*scale);
+    for(unsigned y=0;y<PANEL_HEIGHT*scale;++y) for(unsigned x=0;x<PANEL_WIDTH*scale;++x) {
+        const uint8_t *rgb=frame+((y/scale)*PANEL_WIDTH+x/scale)*3;
+        for(unsigned c=0;c<3;++c) fputc(rgb[c]*31,out);
+    }
+    fclose(out);
+}
+
 static void emit(const char *dir, const char *name, const status_model *m, uint32_t now)
 {
     static uint8_t frame[PANEL_RGB_BYTES];
     status_render(m, now, frame);
     write_pbm(dir, name, 1, frame);
     write_pbm(dir, name, 8, frame);
+    write_ppm(dir,name,1,frame);
+    write_ppm(dir,name,8,frame);
 }
 
 static void agent_state(const char *dir, const char *name, const char *event)
@@ -152,5 +168,22 @@ int main(int argc, char **argv)
     status_buttons(&m, pressed, long_fired);
     emit(argv[1], "k1-long", &m, 1000);
 
+    status_init(&m); status_sensors(&m,true,12,34,false,0,0,0);
+    emit(argv[1],"offline-clock",&m,0);
+    const char *names[]={"pomodoro-idle","focus-running","focus-paused","break-ready","break-running","alarm"};
+    for(unsigned i=0;i<6;++i) {
+        status_init(&m); m.view=STATUS_VIEW_POMODORO;
+        m.pomodoro=(pomodoro_view){.phase=i>=3,.run=i==1||i==4?1:i==2?2:0,.total_ms=i>=3?300000:1500000,.remaining_ms=i>=3?300000:1500000,.completed=3};
+        if(i==1||i==2) m.pomodoro.remaining_ms=750000;
+        m.pomodoro_alarm=i==5; emit(argv[1],names[i],&m,0);
+        if(i==2) emit(argv[1],"focus-paused-hidden",&m,500);
+        if(i==5) {emit(argv[1],"alarm-hidden",&m,500);emit(argv[1],"alarm-pulse",&m,2500);}
+    }
+    for(unsigned i=0;i<4;++i) {
+        status_init(&m); m.state=STATUS_INPUT; m.linked=true; m.view=(status_view)i;
+        m.pomodoro=(pomodoro_view){.total_ms=1500000,.remaining_ms=1500000};
+        char name[32]; snprintf(name,sizeof(name),"alert-page-%u",i); emit(argv[1],name,&m,0);
+        m.button_actions.recording=true; snprintf(name,sizeof(name),"record-alert-%u",i); emit(argv[1],name,&m,0);
+    }
     return 0;
 }

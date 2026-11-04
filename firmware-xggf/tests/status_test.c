@@ -64,8 +64,8 @@ int main(void)
     status_event(&m, "task.start", UINT32_MAX - 100); status_tick(&m, 14899); assert(!m.linked);
     status_sensors(&m, true, 23, 59, true, 329, 582, 0);
     status_render(&m, 0, offline);
-    status_render(&m, 4000, active); assert(memcmp(offline, active, sizeof(active)));
-    status_render(&m, 8000, active); assert(memcmp(offline, active, sizeof(active)));
+    status_render(&m, 4000, active); assert(!memcmp(offline, active, sizeof(active)));
+    status_render(&m, 8000, active); assert(!memcmp(offline, active, sizeof(active)));
     status_init(&m);
     status_render(&m, 0, offline);
     status_audio_start(&m); status_audio(&m, 1000, 100); assert(m.audio_active && m.audio_level == 1);
@@ -92,9 +92,10 @@ int main(void)
     status_render(&m, 0, offline); status_render(&m, 4000, active);
     assert(!memcmp(offline, active, sizeof(active)));
     status_next_view(&m); assert(m.view == STATUS_VIEW_ENVIRONMENT);
+    status_next_view(&m); assert(m.view == STATUS_VIEW_POMODORO);
     status_next_view(&m); assert(m.view == STATUS_VIEW_AGENT);
     status_next_view(&m); status_event(&m, "task.start", 100);
-    assert(m.view == STATUS_VIEW_AGENT);
+    assert(m.view == STATUS_VIEW_CLOCK);
     status_next_view(&m); status_home(&m); assert(m.view == STATUS_VIEW_AGENT);
     status_toggle_mute(&m, 200); assert(m.muted && m.mute_notice);
     status_tick(&m, 2199); assert(m.mute_notice);
@@ -184,7 +185,7 @@ int main(void)
     status_audio_start(&m); status_render(&m, 110, active); assert_label(active, "MIC ON");
     status_audio_stop(&m);
     const button_menu_row rows[] = {
-        BUTTON_MENU_LINK, BUTTON_MENU_BRIGHTNESS, BUTTON_MENU_IDENTIFY,
+        BUTTON_MENU_LINK, BUTTON_MENU_BRIGHTNESS, BUTTON_MENU_VOLUME, BUTTON_MENU_IDENTIFY,
         BUTTON_MENU_MUTE, BUTTON_MENU_CLOSE, BUTTON_MENU_MIC
     };
     for (unsigned i = 0; i < sizeof(rows) / sizeof(rows[0]); ++i) {
@@ -261,5 +262,21 @@ int main(void)
     m.button_actions.link_page = 3; status_render(&m, 50022, active); assert_label(active, "PAIRS 16");
     m.button_actions.link_page = 0; status_tick(&m, 65003); status_render(&m, 65003, active);
     assert_label(active, "OFFLINE");
+    for(unsigned page=0;page<4;++page) {
+        status_init(&m); m.view=(status_view)page; m.state=STATUS_INPUT; m.linked=true;
+        status_render(&m,0,active); status_render(&m,500,offline);
+        for(unsigned y=6;y<8;++y) for(unsigned x=61;x<63;++x) {
+            unsigned i=(y*64+x)*3;
+            assert(active[i]==8 && active[i+1]==4 && active[i+2]==0);
+            assert(offline[i]==0 && offline[i+1]==0 && offline[i+2]==0);
+        }
+        status_set_recording(&m,true); status_render(&m,0,active);
+        assert(active[(0*64+61)*3]==8 && active[(6*64+61)*3]==8);
+    }
+    const char *events[]={"task.start","agent.input_required","task.done","task.error","agent.idle"};
+    for(unsigned page=0;page<4;++page) for(unsigned e=0;e<5;++e) {
+        status_init(&m); m.view=(status_view)page;
+        assert(status_event(&m,events[e],100)); assert(m.view==(status_view)page);
+    }
     return 0;
 }

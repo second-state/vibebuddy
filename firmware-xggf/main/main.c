@@ -20,6 +20,8 @@
 #include "panel.h"
 #include "settings.h"
 #include "status.h"
+#include "clock.h"
+#include "rtc.h"
 #include "wifi_link.h"
 
 /* The verified stock SPI setup uses GPIO 7 for MOSI and GPIO 21 for SCLK. */
@@ -107,9 +109,10 @@ static void probe_sensors(void)
     if (rtc_found) {
         uint8_t reg = 0, raw[7];
         if (i2c_master_write_read_device(I2C_NUM_0, 0x32, &reg, 1, raw, sizeof(raw), pdMS_TO_TICKS(100)) == ESP_OK) {
-            unsigned h = raw[2] & 0x3f, m = raw[1] & 0x7f;
-            rtc_hour = (h >> 4) * 10 + (h & 15); rtc_minute = (m >> 4) * 10 + (m & 15);
-            rtc_valid = (h & 15) < 10 && (m & 15) < 10 && rtc_hour < 24 && rtc_minute < 60;
+            uint8_t control_reg=0xe0, control[2];
+            xggf_clock checked={0};
+            rtc_valid=i2c_master_write_read_device(I2C_NUM_0,0x32,&control_reg,1,control,2,pdMS_TO_TICKS(100))==ESP_OK && rtc_decode(raw,control,now_ms(),&checked);
+            if(rtc_valid) {rtc_hour=checked.minute/60;rtc_minute=checked.minute%60;}
         }
     }
     if (environment_found) {
@@ -166,7 +169,7 @@ static const char *button_ui_mode_name(button_ui_mode mode)
 
 static const char *button_menu_row_name(button_menu_row row)
 {
-    static const char *const names[] = { "MIC", "LINK", "BRIGHTNESS", "IDENTIFY", "MUTE", "CLOSE" };
+    static const char *const names[] = { "MIC", "LINK", "BRIGHTNESS", "VOLUME", "IDENTIFY", "STOP FOCUS", "MUTE", "CLOSE" };
     return (unsigned)row < sizeof(names) / sizeof(names[0]) ? names[row] : "UNKNOWN";
 }
 
@@ -185,7 +188,7 @@ static void report_button_transition(const button_transition *transition)
 
 static void report_menu(const status_model *model)
 {
-    static const char *rows[] = { "MIC", "LINK", "BRIGHTNESS", "IDENTIFY", "MUTE", "CLOSE" };
+    static const char *rows[] = { "MIC", "LINK", "BRIGHTNESS", "VOLUME", "IDENTIFY", "STOP FOCUS", "MUTE", "CLOSE" };
     const button_actions_state *state = &model->button_actions;
     char report[40];
     if (state->mode == BUTTON_UI_HOME) snprintf(report, sizeof(report), "MENU CLOSED");
@@ -194,9 +197,43 @@ static void report_menu(const status_model *model)
     puts(report); wifi_link_report(report);
 }
 
+static xggf_clock desktop_clock;
+static void *pomodoro;
+static uint32_t pomodoro_activity;
+
+#ifdef XGGF_RTC_WRITE
+/* Recovered stock writer at 0x420018BE: register zero followed by seven BCD bytes.
+   Chip identity and backup retention still require physical validation. */
+static bool rtc_write_clock(const xggf_clock *c)
+{
+    i2c_config_t config={.mode=I2C_MODE_MASTER,.sda_io_num=4,.scl_io_num=5,
+        .sda_pullup_en=GPIO_PULLUP_ENABLE,.scl_pullup_en=GPIO_PULLUP_ENABLE,.master.clk_speed=100000};
+    if(i2c_param_config(I2C_NUM_0,&config)!=ESP_OK || i2c_driver_install(I2C_NUM_0,I2C_MODE_MASTER,0,0,0)!=ESP_OK) return false;
+    uint8_t reg=0xe0,controls[3]={0xe0,0,0},data[8]={0},readback[7];
+    bool ok=i2c_master_write_read_device(I2C_NUM_0,0x32,&reg,1,&controls[1],2,pdMS_TO_TICKS(100))==ESP_OK;
+    controls[1]|=0x20;
+    controls[2]=(controls[2]|0x20)&~0x50;
+    ok=ok && rtc_encode(c,&data[1]) &&
+        i2c_master_write_to_device(I2C_NUM_0,0x32,controls,3,pdMS_TO_TICKS(100))==ESP_OK &&
+        i2c_master_write_to_device(I2C_NUM_0,0x32,data,8,pdMS_TO_TICKS(100))==ESP_OK;
+    reg=0;
+    ok=ok && i2c_master_write_read_device(I2C_NUM_0,0x32,&reg,1,readback,7,pdMS_TO_TICKS(100))==ESP_OK && memcmp(&readback[1],&data[2],6)==0;
+    i2c_driver_delete(I2C_NUM_0);
+    puts(ok ? "RTC SYNC OK" : "RTC ERROR write or readback");
+    return ok;
+}
+#endif
+
 static void run_button_action(status_model *model, button_action action, uint32_t now)
 {
+    if (action != BUTTON_ACTION_NONE) pomodoro_activity = now;
     switch (action) {
+        case BUTTON_ACTION_VOLUME_NEXT: settings_cycle_volume(); model->volume=settings_volume(); break;
+        case BUTTON_ACTION_POMODORO_TOGGLE:
+            status_audio_stop(model);
+            vb_pomodoro_toggle(pomodoro, now); model->pomodoro_alarm = false; break;
+        case BUTTON_ACTION_POMODORO_STOP:
+            vb_pomodoro_stop(pomodoro); model->pomodoro_alarm = false; break;
         case BUTTON_ACTION_MIC_TOGGLE: toggle_microphone(model, now); break;
         case BUTTON_ACTION_RECORDING_STOP:
             if (audio_request_stop(now)) {
@@ -213,7 +250,7 @@ static void run_button_action(status_model *model, button_action action, uint32_
             wifi_link_report(request);
             break;
         }
-        case BUTTON_ACTION_MUTE_TOGGLE: toggle_mute(model, now); break;
+        case BUTTON_ACTION_MUTE_TOGGLE: toggle_mute(model, now); buzzer_mute(model->muted); break;
         case BUTTON_ACTION_BRIGHTNESS_NEXT:
             if (!settings_cycle_brightness()) puts("UI SAVE ERROR");
             model->brightness = panel_brightness();
@@ -259,6 +296,13 @@ static void report_autopilot_transition(const button_transition *result)
 
 static bool button_autopilot_command(status_model *model, const cJSON *root, const char *event)
 {
+    if (!strcmp(event, "device.test.status")) {
+        printf("BUTTON TEST STATUS PAGE %u PHASE %u RUN %u LEFT %u COUNT %u CLOCK %u %u:%u VOLUME %u MUTED %u\n",
+            (unsigned)model->view,(unsigned)model->pomodoro.phase,(unsigned)model->pomodoro.run,
+            (unsigned)model->pomodoro.remaining_ms,(unsigned)model->pomodoro.completed,
+            model->rtc_valid,model->rtc_hour,model->rtc_minute,model->volume,model->muted);
+        return true;
+    }
     if (!strcmp(event, "device.test.buttons.reset")) {
         button_actions_init(&model->button_actions);
         puts("BUTTON TEST RESET HOME/MIC/0/REC0");
@@ -299,6 +343,7 @@ static bool button_autopilot_command(status_model *model, const cJSON *root, con
             if (strcmp(gesture->valuestring, button_event_name(button))) continue;
             button_transition result = button_actions_handle(&model->button_actions, button, now_ms());
             report_autopilot_transition(&result);
+            if(cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(root,"effects"))) run_button_action(model,result.action,now_ms());
             return true;
         }
         puts("BUTTON TEST ERROR unknown gesture");
@@ -362,6 +407,23 @@ static void receive_line(void *context, char *input, bool usb)
                 report_button_transition(&reset);
             }
         }
+        if (strcmp(event->valuestring, "device.heartbeat") == 0) {
+            const cJSON *h=cJSON_GetObjectItemCaseSensitive(root,"hour");
+            const cJSON *m=cJSON_GetObjectItemCaseSensitive(root,"minute");
+            const cJSON *d=cJSON_GetObjectItemCaseSensitive(root,"day");
+            if(cJSON_IsNumber(h) && cJSON_IsNumber(m) && cJSON_IsNumber(d) &&
+               h->valuedouble==h->valueint && m->valuedouble==m->valueint && d->valuedouble==d->valueint &&
+               clock_sync(&desktop_clock,(unsigned)d->valueint,(unsigned)h->valueint,(unsigned)m->valueint,now_ms())) {
+#ifdef XGGF_RTC_WRITE
+                static uint32_t last_rtc_day, last_rtc_minute;
+                if(last_rtc_day!=desktop_clock.day || last_rtc_minute!=desktop_clock.minute) {
+                    if(rtc_write_clock(&desktop_clock)) {last_rtc_day=desktop_clock.day; last_rtc_minute=desktop_clock.minute;}
+                }
+#endif
+                model->rtc_valid=true; model->rtc_hour=h->valueint; model->rtc_minute=m->valueint; model->rtc_read_ms=now_ms();
+                if(vb_pomodoro_set_day(pomodoro,desktop_clock.day)) settings_pomodoro_save(pomodoro);
+            }
+        }
         if (handled && strcmp(event->valuestring, "device.identify") == 0 && !model->muted) buzzer_identify(now_ms());
         if (handled && !hello && strcmp(event->valuestring, "device.heartbeat") != 0) {
             char report[96]; snprintf(report, sizeof(report), "STATE %.80s", event->valuestring);
@@ -392,6 +454,7 @@ void app_main(void)
     error = spi_bus_add_device(SPI2_HOST, &config, &spi);
     if (error != ESP_OK) { printf("PANEL ERROR device %d\n", (int)error); spi_bus_free(SPI2_HOST); free(transfer); return; }
     status_model model; status_init(&model);
+    pomodoro = vb_pomodoro_new();
     gpio_config_t button_config = {
         .pin_bit_mask = (1ULL << 8) | (1ULL << 9) | (1ULL << 2),
         .mode = GPIO_MODE_INPUT,
@@ -417,6 +480,8 @@ void app_main(void)
     uint32_t sensors_at = now_ms();
     if (wifi_link_init()) announce(); else puts("WIFI UNAVAILABLE");
     settings_init();
+    settings_pomodoro_load(pomodoro);
+    model.volume=settings_volume();
     model.brightness = panel_brightness();
     uint32_t diagnostics_at = now_ms(), panel_us = 0;
     size_t used = 0; bool dropping = false;
@@ -485,6 +550,20 @@ void app_main(void)
             report_button_transition(&button_timeout);
             report_menu(&model);
         }
+        if (!pomodoro) pomodoro = vb_pomodoro_new();
+        clock_tick(&desktop_clock,now);
+        if(desktop_clock.valid) {
+            model.rtc_valid=true; model.rtc_hour=desktop_clock.minute/60; model.rtc_minute=desktop_clock.minute%60; model.rtc_read_ms=desktop_clock.at_ms;
+            if(vb_pomodoro_set_day(pomodoro,desktop_clock.day)) settings_pomodoro_save(pomodoro);
+        }
+        uint32_t ended = vb_pomodoro_tick(pomodoro, now);
+        if (ended) { status_audio_stop(&model); button_actions_external_reset(&model.button_actions); pomodoro_activity=now; buzzer_chime(ended,now); settings_pomodoro_save(pomodoro); model.view = STATUS_VIEW_POMODORO; model.pomodoro_alarm = true; model.pomodoro_alarm_at_ms=now; }
+        vb_pomodoro_view(pomodoro, now, &model.pomodoro);
+        if (model.view == STATUS_VIEW_POMODORO &&
+            ((model.pomodoro.run == 2 && (uint32_t)(now-pomodoro_activity)>=1800000) ||
+             (model.pomodoro.phase == 1 && model.pomodoro.run == 0 && (uint32_t)(now-pomodoro_activity)>=300000))) status_home(&model);
+        model.button_actions.pomodoro_page = model.view == STATUS_VIEW_POMODORO;
+        model.button_actions.pomodoro_active = model.pomodoro.run != 0 || model.pomodoro.phase != 0;
         status_tick(&model, now);
         status_render(&model, now, frame);
         panel_encode(frame, transfer);

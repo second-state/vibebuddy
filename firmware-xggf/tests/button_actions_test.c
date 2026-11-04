@@ -16,6 +16,8 @@ static void assert_state_equal(button_actions_state actual, button_actions_state
     assert(actual.link_page == expected.link_page);
     assert(actual.last_activity_ms == expected.last_activity_ms);
     assert(actual.recording == expected.recording);
+    assert(actual.pomodoro_page == expected.pomodoro_page);
+    assert(actual.pomodoro_active == expected.pomodoro_active);
 }
 
 static button_transition send(button_actions_state *state, button_event event, uint32_t now)
@@ -87,7 +89,7 @@ static void select_row(button_actions_state *state, button_menu_row row, uint32_
 int main(void)
 {
     static const expected_transition home[] = {
-        { BUTTON_K0_SHORT, BUTTON_ACTION_MIC_TOGGLE, BUTTON_UI_HOME },
+        { BUTTON_K0_SHORT, BUTTON_ACTION_NONE, BUTTON_UI_HOME },
         { BUTTON_K0_LONG, BUTTON_ACTION_IDENTIFY, BUTTON_UI_HOME },
         { BUTTON_K1_SHORT, BUTTON_ACTION_VIEW_NEXT, BUTTON_UI_HOME },
         { BUTTON_K1_LONG, BUTTON_ACTION_MENU_OPEN, BUTTON_UI_MENU },
@@ -126,14 +128,15 @@ int main(void)
     enter_menu(&state, 400);
     const button_action row_actions[] = {
         BUTTON_ACTION_MIC_TOGGLE, BUTTON_ACTION_LINK_OPEN, BUTTON_ACTION_BRIGHTNESS_NEXT,
-        BUTTON_ACTION_IDENTIFY, BUTTON_ACTION_MUTE_TOGGLE, BUTTON_ACTION_MENU_CLOSE
+        BUTTON_ACTION_VOLUME_NEXT, BUTTON_ACTION_IDENTIFY, BUTTON_ACTION_POMODORO_STOP, BUTTON_ACTION_MUTE_TOGGLE, BUTTON_ACTION_MENU_CLOSE
     };
     const button_ui_mode row_modes[] = {
         BUTTON_UI_MENU, BUTTON_UI_LINK, BUTTON_UI_MENU,
-        BUTTON_UI_HOME, BUTTON_UI_MENU, BUTTON_UI_HOME
+        BUTTON_UI_MENU, BUTTON_UI_HOME, BUTTON_UI_HOME, BUTTON_UI_MENU, BUTTON_UI_HOME
     };
     for (unsigned row = 0; row < BUTTON_MENU_ROW_COUNT; ++row) {
         button_actions_init(&state);
+        state.pomodoro_active = true;
         select_row(&state, (button_menu_row)row, 500 + row * 20);
         button_transition result = send(&state, BUTTON_K0_SHORT, 510 + row * 20);
         assert_transition(result, row_actions[row], BUTTON_UI_MENU, row_modes[row]);
@@ -142,7 +145,8 @@ int main(void)
 
     button_actions_init(&state);
     enter_menu(&state, 700);
-    for (unsigned i = 0; i < 6; ++i) {
+    state.pomodoro_active = true;
+    for (unsigned i = 0; i < BUTTON_MENU_ROW_COUNT; ++i) {
         button_transition moved = send(&state, BUTTON_K1_SHORT, 710 + i);
         assert_transition(moved, BUTTON_ACTION_MENU_NEXT_ROW, BUTTON_UI_MENU, BUTTON_UI_MENU);
         assert(moved.to.row == (button_menu_row)((i + 1) % BUTTON_MENU_ROW_COUNT));
@@ -238,5 +242,24 @@ int main(void)
     assert_transition(result, BUTTON_ACTION_EXTERNAL_RESET, BUTTON_UI_LINK, BUTTON_UI_HOME);
 
     assert(strcmp(button_action_name(BUTTON_ACTION_MENU_TIMEOUT), "MENU TIMEOUT") == 0);
+    for(unsigned page=0;page<4;++page) {
+        button_actions_init(&state); state.pomodoro_page=page==3;
+        assert(send(&state,BUTTON_K0_SHORT,1).action == (page==3 ? BUTTON_ACTION_POMODORO_TOGGLE : BUTTON_ACTION_NONE));
+        state.recording=true;
+        assert(send(&state,BUTTON_K0_LONG,2).action==BUTTON_ACTION_IGNORED_LONG_PRESS);
+        assert(send(&state,BUTTON_K2_SHORT,2).action==BUTTON_ACTION_SOURCE_OPEN);
+        assert(send(&state,BUTTON_K2_LONG,2).action==BUTTON_ACTION_MUTE_TOGGLE);
+        assert(send(&state,BUTTON_K0_SHORT,2).action==BUTTON_ACTION_RECORDING_STOP);
+        assert(send(&state,BUTTON_K1_SHORT,3).action==BUTTON_ACTION_VIEW_NEXT);
+    }
+    for(unsigned active=0;active<2;++active) {
+        button_actions_init(&state); state.pomodoro_active=active;
+        enter_menu(&state,0); bool found=false;
+        for(unsigned i=0;i<BUTTON_MENU_ROW_COUNT;++i) {
+            if(state.row==BUTTON_MENU_STOP_FOCUS) found=true;
+            send(&state,BUTTON_K1_SHORT,i+1);
+        }
+        assert(found==(bool)active);
+    }
     return 0;
 }

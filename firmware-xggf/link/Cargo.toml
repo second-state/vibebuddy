@@ -12,6 +12,9 @@ crate-type = ["staticlib", "rlib"]
 [dependencies]
 vibebuddy-firmware-core = { path = "../../firmware-rs/core" }
 
+[features]
+fast-clock = ["vibebuddy-firmware-core/fast-clock"]
+
 [dev-dependencies]
 ed25519-dalek = "2"
 

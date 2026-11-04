@@ -19,8 +19,8 @@ states = (
     "device.identify",
 )
 
-def send(link, event):
-    link.write((json.dumps({"version": 1, "event": event}) + "\n").encode())
+def send(link, event, **fields):
+    link.write((json.dumps({"version": 1, "event": event, **fields}) + "\n").encode())
     link.flush()
 
 with serial.Serial(port, 115200, timeout=0.2) as link:
@@ -32,12 +32,21 @@ with serial.Serial(port, 115200, timeout=0.2) as link:
     next_heartbeat = started
     next_state = started
     state_index = 0
+    next_page = started + 20
+    page_index = 0
     samples = []
     while time.monotonic() < deadline:
         now = time.monotonic()
         if now >= next_heartbeat:
-            send(link, "device.heartbeat")
+            local=time.localtime()
+            send(link, "device.heartbeat",hour=local.tm_hour,minute=local.tm_min,day=local.tm_year*10000+local.tm_mon*100+local.tm_mday)
             next_heartbeat = now + 5
+        # Requires the autopilot acceptance build to exercise timer pages.
+        if now >= next_page:
+            send(link,"device.test.buttons.gesture",gesture="K1 SHORT",effects=True)
+            page_index=(page_index+1)%4
+            if page_index==3: send(link,"device.test.buttons.gesture",gesture="K0 SHORT",effects=True)
+            next_page=now+20
         if now >= next_state:
             send(link, states[state_index % len(states)])
             state_index += 1
@@ -47,7 +56,7 @@ with serial.Serial(port, 115200, timeout=0.2) as link:
             raise AssertionError("device restarted during the soak")
         if "Guru Meditation" in line or "Stack protection fault" in line:
             raise AssertionError(line)
-        if line.startswith(("PANEL ERROR", "MDNS ERROR", "WIFI UNAVAILABLE", "IDENTITY MIGRATION REQUIRED")):
+        if line.startswith(("PANEL ERROR", "MDNS ERROR", "WIFI UNAVAILABLE", "IDENTITY MIGRATION REQUIRED", "RTC ERROR")):
             raise AssertionError(line)
         if not line.startswith("DIAG "):
             continue

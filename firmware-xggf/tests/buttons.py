@@ -20,8 +20,8 @@ if mode == "map":
     instruction = f"Tap {subject.upper()} 3 times, then hold it twice for 1.5 seconds each; touch no other button"
 else:
     instructions = {
-        "K0": "Tap K0 twice to start/stop mic, then hold K0 once for 1.5 seconds",
-        "K1": "Hold K1 for 1.5 seconds and verify MIC, tap K1 once and verify LINK, tap K2 to close, then tap K1 3 times to cycle all pages",
+        "K0": "On Agent, tap K0 twice (no action), then hold K0 for 1.5 seconds to identify",
+        "K1": "Hold K1 for 1.5 seconds and verify MIC, tap K1 once and verify LINK, tap K2 to close, then tap K1 4 times to cycle all pages",
         "K2": "Tap K2 once, then hold K2 twice for 1.5 seconds each to mute/unmute",
     }
     duration = 120
@@ -66,7 +66,7 @@ with serial.Serial(port, 115200, timeout=0.1) as link:
                 if mode == "map":
                     done = len(short_now) >= 3 and len(long_now) >= 2 and len(set(short_now + long_now)) == 1
                 elif subject == "K0":
-                    done = short_now.count("K0") >= 2 and long_now.count("K0") >= 1 and "MIC DONE" in lines
+                    done = short_now.count("K0") >= 2 and long_now.count("K0") >= 1
                 elif subject == "K1":
                     done = (short_now.count("K1") >= 4 and long_now.count("K1") >= 1
                             and "MENU ROW MIC" in lines and "MENU ROW LINK" in lines and "MENU CLOSED" in lines)
@@ -89,8 +89,8 @@ with serial.Serial(port, 115200, timeout=0.1) as link:
             print(f"PASS: {subject}={short[0]}, repeated short/long detection and restored state")
         elif subject == "K0":
             assert short.count("K0") >= 2 and long.count("K0") >= 1, (short, long)
-            assert any(line == "MIC DONE" for line in lines), "mic did not stop"
-            print("PASS: K0 mic start/stop and identify")
+            assert "MIC DONE" not in lines, "HOME K0 unexpectedly toggled the microphone"
+            print("PASS: K0 no-action on Agent and identify")
         elif subject == "K1":
             assert short.count("K1") >= 4 and long.count("K1") >= 1, (short, long)
             assert "MENU ROW MIC" in lines and "MENU ROW LINK" in lines, "menu rows did not open"

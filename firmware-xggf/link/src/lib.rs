@@ -236,3 +236,58 @@ mod tests {
         unsafe { drop(Box::from_raw(bridge)) };
     }
 }
+
+// Opaque C ABI; the box and XGGF share the same timer implementation.
+use vibebuddy_firmware_core::pomodoro::{Pomodoro, Phase, Run, Transition};
+#[repr(C)]
+pub struct PomoView { pub phase: u32, pub run: u32, pub remaining_ms: u32, pub total_ms: u32, pub completed: u32, pub focus_s: u32 }
+#[unsafe(no_mangle)]
+pub extern "C" fn vb_pomodoro_new() -> *mut Pomodoro { Box::into_raw(Box::new(Pomodoro::new())) }
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn vb_pomodoro_free(p: *mut Pomodoro) { if !p.is_null() { drop(unsafe { Box::from_raw(p) }); } }
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn vb_pomodoro_toggle(p: &mut Pomodoro, now: u32) { p.toggle(now); }
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn vb_pomodoro_stop(p: &mut Pomodoro) { p.stop(); }
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn vb_pomodoro_tick(p: &mut Pomodoro, now: u32) -> u32 { match p.tick(now) { Transition::Nothing => 0, Transition::FocusEnded => 1, Transition::BreakEnded => 2 } }
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn vb_pomodoro_view(p: &Pomodoro, now: u32, out: &mut PomoView) {
+ let v=p.view(now); *out=PomoView { phase: if v.phase == Phase::Focus {0} else {1}, run: match v.run { Run::Pending=>0, Run::Running=>1, Run::Paused=>2 }, remaining_ms:v.remaining_ms,total_ms:v.total_ms,completed:v.completed,focus_s:v.focus_s };
+}
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn vb_pomodoro_set_day(p: &mut Pomodoro, day:u32) -> bool { p.set_day(day) }
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn vb_pomodoro_tally(p: &Pomodoro, day:&mut u32, count:&mut u32, secs:&mut u32) { let t=p.tally(); *day=t.day; *count=t.completed; *secs=t.focus_s; }
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn vb_pomodoro_restore(p: &mut Pomodoro, day:u32, completed:u32, focus_s:u32) { p.restore_tally(vibebuddy_firmware_core::pomodoro::Tally {day,completed,focus_s}); }
+#[cfg(test)]
+mod pomodoro_ffi_tests {
+ use super::*;
+ #[test] fn restored_tally_and_abandon_through_c_abi() { unsafe {
+     let p=vb_pomodoro_new(); vb_pomodoro_restore(&mut *p,20261103,3,4500);
+     let (mut day,mut count,mut seconds)=(0,0,0);
+     vb_pomodoro_tally(&*p,&mut day,&mut count,&mut seconds);
+     assert_eq!((day,count,seconds),(20261103,3,4500));
+     vb_pomodoro_toggle(&mut *p,0); vb_pomodoro_toggle(&mut *p,1000);
+     vb_pomodoro_stop(&mut *p); assert!((*p).view(2000).is_idle());
+     assert_eq!((*p).tally().completed,3);
+     assert!(vb_pomodoro_set_day(&mut *p,20261104));
+     assert_eq!((*p).tally().completed,0); vb_pomodoro_free(p);
+ } }
+ #[cfg(not(feature="fast-clock"))]
+ #[test] fn default_build_uses_real_durations() {
+     assert_eq!(vibebuddy_firmware_core::TIME_SCALE,1);
+     let timer=Pomodoro::new(); assert_eq!(timer.view(0).total_ms,25*60*1000);
+ }
+ #[test] fn complete_cycle_through_c_abi() { unsafe {
+ let p=vb_pomodoro_new(); vb_pomodoro_set_day(&mut *p,20261103);
+ let mut v=PomoView {phase:0,run:0,remaining_ms:0,total_ms:0,completed:0,focus_s:0};
+ vb_pomodoro_view(&*p,0,&mut v); assert_eq!(v.total_ms,1500000 / vibebuddy_firmware_core::TIME_SCALE);
+ vb_pomodoro_toggle(&mut *p,0); assert_eq!(vb_pomodoro_tick(&mut *p,1500000),1);
+ assert_eq!(vb_pomodoro_tick(&mut *p,1500000),0);
+ vb_pomodoro_toggle(&mut *p,1500000); assert_eq!(vb_pomodoro_tick(&mut *p,1800000),2);
+ vb_pomodoro_view(&*p,1800000,&mut v); assert_eq!(v.completed,1); assert_eq!(v.run,0);
+ vb_pomodoro_free(p);
+ } }
+}

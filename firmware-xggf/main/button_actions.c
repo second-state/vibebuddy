@@ -40,8 +40,8 @@ button_transition button_actions_handle(button_actions_state *state, button_even
 
     if (state->mode == BUTTON_UI_HOME) {
         switch (event) {
-            case BUTTON_K0_SHORT: action = BUTTON_ACTION_MIC_TOGGLE; break;
-            case BUTTON_K0_LONG: action = BUTTON_ACTION_IDENTIFY; break;
+            case BUTTON_K0_SHORT: action = state->pomodoro_page ? BUTTON_ACTION_POMODORO_TOGGLE : BUTTON_ACTION_NONE; break;
+            case BUTTON_K0_LONG: action = state->recording ? BUTTON_ACTION_IGNORED_LONG_PRESS : BUTTON_ACTION_IDENTIFY; break;
             case BUTTON_K1_SHORT: action = BUTTON_ACTION_VIEW_NEXT; break;
             case BUTTON_K1_LONG:
                 state->mode = BUTTON_UI_MENU;
@@ -90,10 +90,12 @@ button_transition button_actions_handle(button_actions_state *state, button_even
                     action = BUTTON_ACTION_LINK_OPEN;
                     break;
                 case BUTTON_MENU_BRIGHTNESS: action = BUTTON_ACTION_BRIGHTNESS_NEXT; break;
+                case BUTTON_MENU_VOLUME: action = BUTTON_ACTION_VOLUME_NEXT; break;
                 case BUTTON_MENU_IDENTIFY:
                     close_menu(state);
                     action = BUTTON_ACTION_IDENTIFY;
                     break;
+                case BUTTON_MENU_STOP_FOCUS: action = BUTTON_ACTION_POMODORO_STOP; close_menu(state); break;
                 case BUTTON_MENU_MUTE: action = BUTTON_ACTION_MUTE_TOGGLE; break;
                 case BUTTON_MENU_CLOSE:
                     close_menu(state);
@@ -104,6 +106,7 @@ button_transition button_actions_handle(button_actions_state *state, button_even
             break;
         case BUTTON_K1_SHORT:
             state->row = (button_menu_row)((state->row + 1) % BUTTON_MENU_ROW_COUNT);
+            if (state->row == BUTTON_MENU_STOP_FOCUS && !state->pomodoro_active) ++state->row;
             action = BUTTON_ACTION_MENU_NEXT_ROW;
             break;
         case BUTTON_K2_SHORT:
@@ -145,7 +148,7 @@ button_transition button_actions_external_reset(button_actions_state *state)
 const char *button_action_name(button_action action)
 {
     static const char *const names[] = {
-        "NONE", "MIC TOGGLE", "RECORDING STOP", "IDENTIFY", "VIEW NEXT", "SOURCE OPEN",
+        "NONE", "VOLUME NEXT", "POMODORO TOGGLE", "POMODORO STOP", "MIC TOGGLE", "RECORDING STOP", "IDENTIFY", "VIEW NEXT", "SOURCE OPEN",
         "MUTE TOGGLE", "BRIGHTNESS NEXT", "MENU OPEN", "MENU NEXT ROW", "MENU CLOSE",
         "LINK OPEN", "LINK NEXT PAGE", "LINK BACK", "IGNORED LONG PRESS", "MENU TIMEOUT",
         "EXTERNAL RESET", "RECORDING STARTED", "RECORDING FINISHED"
