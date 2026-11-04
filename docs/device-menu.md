@@ -122,7 +122,7 @@ The daemon sends up to six cards, three a page, those waiting for input first (#
 
 ## XGGF 64×8 variant
 
-The experimental XGGF uses the same K1-long-open, K1-next, K0-activate and K2-close convention, with a 30-second timeout and K2 long always toggling mute. Its rows are MIC, LINK, BRIGHTNESS, IDENTIFY, MUTE and CLOSE. All Agent events close this menu, recording keeps priority over its contents, and the compact panel shows per-key dots while held and LONG at the one-second threshold.
+The experimental XGGF uses the same K1-long-open, K1-next, K0-activate and K2-close convention, with a 30-second timeout and K2 long always toggling mute. Its rows are MIC, LINK, BRIGHTNESS, VOLUME, IDENTIFY, STOP FOCUS (while a phase is active), MUTE and CLOSE. All Agent events close this menu, recording keeps priority over its contents, and the compact panel shows per-key dots while held and LONG at the one-second threshold.
 
 LINK is read-only: transport from the last valid protocol line (USB, LAN or offline after the normal link timeout), Wi-Fi state/SSID, IPv4 and paired-computer count. It has no unpair, new-identity or forget-network action. BRIGHTNESS cycles 2, 4, 6 and 8 and persists in `xggf_ui`; the main box has no brightness row because its backlight is on/off. K0 stops an active speech recording before doing any menu or visualizer action. XGGF has no Pomodoro, Leisure, Character, Relay, stock-clock or voice-command menu behavior.
 
@@ -169,3 +169,21 @@ All of it is firmware logic that doesn't touch hardware, in `firmware-rs/core` b
 - The menu is built even though it has few rows: it gives the box's own controls a place to grow.
 - STATUS stays about the box; agent detail stays on the cards.
 - The panel covers the whole screen, buddy included, rather than a narrower panel beside it.
+
+
+### XGGF Pomodoro controls
+
+K1 cycles Agent → Clock → Environment → Pomodoro; hold K1 for the menu.
+K0 starts, pauses or resumes the timer on the Pomodoro page and otherwise does
+nothing. While recording, K0 stops recording on every page. Hold K0 to identify.
+MIC in the menu toggles the microphone meter. STOP FOCUS appears during an active,
+paused or break-ready phase and abandons it silently. VOLUME cycles
+20, 35, 50, 65, 80 and 100 percent. Hold K2 to mute all buzzer sounds.
+
+Focus lasts 25 minutes and break lasts five minutes, each started by K0.
+Phase completion brings the timer page forward and sounds a chime. The daily
+completed-focus count survives reboot; the running timer returns to idle.
+Agent input blinks an amber 2×2 dot beside the connection bar on every page.
+The daemon supplies local time; offline Agent shows that clock, or NO TIME before
+valid time is available. RTC writes are experimental and disabled by default;
+offline reboot retention is awaiting hardware validation.

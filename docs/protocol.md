@@ -342,3 +342,11 @@ The computer still writes to the bridge in pieces of at most 128 bytes, each fol
 | `ERROR invalid_message` | The root isn't an object, or `version`, `event` or `title` is missing or misused |
 | `ERROR unsupported_version` | `version` isn't `1` |
 | `ERROR input_too_large` | A line exceeds 4608 bytes (1024 for firmware without `TRANSFER 1`) |
+
+
+### XGGF heartbeat time
+
+`device.heartbeat` includes `build`, `hour` (0–23), `minute` (0–59), and
+`day` (local YYYYMMDD). XGGF validates the calendar date and time, then advances
+its local clock from monotonic milliseconds even while offline. The date resets
+the completed-focus record. `minute` is additive; older devices ignore it.

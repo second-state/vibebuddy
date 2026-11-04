@@ -42,7 +42,10 @@ Status key: **same**; **differs** (both do it, by a different mechanism or with 
 | Device: Wi-Fi (scan, join, forget, change), paired computers, take over, make the box blink, box screen (refresh, save) | yes | yes | same |
 | Device: firmware update, flash from a firmware zip, retry with the K0 hint | yes | yes (`firmware_file.rs`) | same |
 | Device: experimental XGGF recorder (consent, progress, loss/errors, stop, save and discard) | yes when the daemon opt-in is enabled | yes when the daemon opt-in is enabled | same intended behavior; see [DEV-19](parity-scenarios/DEV-19-xggf-speech-recording.md) |
-| Device: XGGF button guide and unsupported-feature text | yes | yes | same English guidance and shared zh-Hans table; K0 mic/stop and identify, K1 pages/menu, K2 source/mute, LONG hint |
+| Device: XGGF button guide and unsupported-feature text | yes | yes | same English guidance and shared zh-Hans table; K0 Pomodoro/recording stop and identify, MIC in the menu, K1 pages/menu, K2 source/mute, LONG hint |
+| XGGF Pomodoro controls and MIC menu guidance | yes | yes | shared English keys and Chinese translations; timer runs on device |
+| XGGF VOLUME and chimes | device menu | device menu | persisted locally; K2 mute applies to all buzzer tones |
+| XGGF clock | daemon heartbeat | daemon heartbeat | local hour/minute/date; experimental RTC writes gated |
 | Device: several boards plugged in ("This is the box"), the port pin notice, cable help | yes; the help also mentions macOS's accessory permission | yes; the help also points to "Permission denied" in the daemon log (the serial group) | same, each with its platform's hint |
 | Advanced: daemon status, Open logs folder, Restart daemon, Export diagnostics, config path | yes; restart works while down | yes, plus Show daemon log (in `xdg-terminal-exec`, else GNOME Terminal, Konsole, Xfce Terminal or xterm); restart uses systemd while up or down, as the tray does, and reports errors. A daemon that doesn't run as the service (started by hand, say) gets "start it again the way you started it" from Restart and "its log isn't in the journal" from Show daemon log, and its own restart endpoint refuses, since exiting would only stop it | Linux has one more |
 | First-run guide | includes connecting agents and launch at login | Welcome, Find the box, Pick a character, Wi-Fi, Done (`install.sh` already connected agents and set autostart; `docs/app.md`) | differs, by design |
@@ -171,3 +174,21 @@ not compiled on Linux).
 - Signing: the Linux tarball's checksum is in the signed manifest; the first pass said nothing was documented.
 - Removed: the claim about `/dev/ttyUSB*` (not checked), and "CI covers less of the Mac app" as a Linux gap (it is not
   one).
+
+
+### XGGF Pomodoro controls
+
+K1 cycles Agent → Clock → Environment → Pomodoro; hold K1 for the menu.
+K0 starts, pauses or resumes the timer on the Pomodoro page and otherwise does
+nothing. While recording, K0 stops recording on every page. Hold K0 to identify.
+MIC in the menu toggles the microphone meter. STOP FOCUS appears during an active,
+paused or break-ready phase and abandons it silently. VOLUME cycles
+20, 35, 50, 65, 80 and 100 percent. Hold K2 to mute all buzzer sounds.
+
+Focus lasts 25 minutes and break lasts five minutes, each started by K0.
+Phase completion brings the timer page forward and sounds a chime. The daily
+completed-focus count survives reboot; the running timer returns to idle.
+Agent input blinks an amber 2×2 dot beside the connection bar on every page.
+The daemon supplies local time; offline Agent shows that clock, or NO TIME before
+valid time is available. RTC writes are experimental and disabled by default;
+offline reboot retention is awaiting hardware validation.
