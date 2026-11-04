@@ -561,7 +561,7 @@ struct PairedComputersSection: View {
 struct XGGFButtonGuide: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
-            Text("Left/K0: microphone or stop recording; hold to identify.")
+            Text("Left/K0: start, pause or resume on Pomodoro; stop recording; hold to identify. Use MIC in the menu for the microphone.")
             Text("Middle/K1: cycle pages; hold for the menu.")
             Text("Right/K2: open the Agent source; hold to mute.")
             Text("Hold until the panel shows LONG for long actions.")

@@ -637,7 +637,7 @@
 "This device can record speech once this computer allows it (VIBEBUDDY_XGGF_AUDIO=1)." = "这台电脑允许后（VIBEBUDDY_XGGF_AUDIO=1），此设备就能录制语音。";
 "Record from this device" = "在此设备上录音";
 "XGGF buttons" = "XGGF 按键";
-"Left/K0: microphone or stop recording; hold to identify." = "左侧/K0：切换麦克风可视化或停止录音；长按识别设备。";
+"Left/K0: start, pause or resume on Pomodoro; stop recording; hold to identify. Use MIC in the menu for the microphone." = "左侧/K0：在番茄钟页面开始、暂停或继续；停止录音；长按识别设备。通过菜单中的 MIC 使用麦克风。";
 "Middle/K1: cycle pages; hold for the menu." = "中间/K1：切换页面；长按打开菜单。";
 "Right/K2: open the Agent source; hold to mute." = "右侧/K2：打开 Agent 来源；长按切换静音。";
 "Hold until the panel shows LONG for long actions." = "长按操作请按住，直到面板显示 LONG。";
