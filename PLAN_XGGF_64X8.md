@@ -152,3 +152,43 @@ Acceptance requires:
 - **Reuse of Rust core:** extract a small shared state component only if it can be reused without dragging the S3 display, audio and network dependencies onto the C3. Otherwise retain the existing protocol contract and test the compact implementation against shared scenarios.
 - **Microphone, buzzer, sensors, Wi-Fi and stock clock functions:** the reverse engineering suggests these peripherals exist, but they are outside the first milestone. Add them only after the display-only product works and their wiring and usefulness are verified.
 - **Licensing and asset provenance:** check the sibling template’s license and the provenance of recovered stock fonts or artwork before copying anything. Prefer original minimal VibeBuddy artwork and independently implemented protocol code.
+
+## Decisions 2026-11-03: Pomodoro, clock and display
+
+Recorded from the owner's review. No code has been changed for these yet.
+
+1. **Offline screen shows the clock.** It replaces the rotating offline view and is styled for the 64×8 panel. Until the time has been synced from the desktop, it shows `NO TIME` rather than a guessed time.
+2. **The mic meter loses its button, not its function.** K0 short no longer toggles the visualizer. The MIC row in the menu still starts it. Because K0 short changes meaning, the button state machine (`main/button_actions.c`), its host emulator (`tests/button_actions_test.c`) and the autopilot test must change with it. K0 short still stops an active recording.
+3. **Pomodoro chimes play on the buzzer, and their loudness is set by a VOLUME row in the menu.** The row also governs the identify tone. The step values are not yet chosen.
+4. **Date and time come from the desktop daemon.** The daemon sends local time on hello and whenever the time changes; the firmware sets the RTC from it. The Pomodoro daily record resets on this date. This needs a protocol addition documented in `docs/protocol.md`.
+5. **Agent alert:** while input is required, a 2×2 dot blinks in the bottom-right corner. It mirrors the steady recording dot in the top-right.
+6. **The device display is English only.** Its strings are not translated. The desktop app's guidance text stays translated, as `AGENTS.md` requires.
+7. **The Pomodoro dial becomes a progress bar,** with the countdown in the 5×7 font.
+
+The implementation plan is in [`PLAN_XGGF_POMODORO_DISPLAY.md`](PLAN_XGGF_POMODORO_DISPLAY.md).
+
+Still open:
+- Where identify goes, since K0 long currently triggers it and K0 is needed for Pomodoro.
+- Whether Leisure exists on the XGGF.
+- The VOLUME step values.
+- How the Pomodoro page is reached. The proposal is that K1 short cycles through Agent, clock, environment and Pomodoro.
+- The look of the offline clock, which needs a preview before it is accepted.
+
+Proposed phases:
+- **Phase A, firmware only:** the state machine change for decision 2, the agent alert dot, the progress bar and the Pomodoro page without a stored daily record.
+- **Phase B, protocol:** the time and date from the daemon, the offline clock, and the stored daily record.
+- **Phase C:** the VOLUME row and the chime.
+- **Phase D, docs and both apps:** the device guide in both apps, the zh-Hans strings, and `docs/device-menu.md`.
+
+
+Implementation update (2026-11-03): owner accepted D8–D14 recommendations in
+PLAN_XGGF_POMODORO_DISPLAY.md. Pomodoro bridge/UI, alert, heartbeat minute,
+daily tally persistence, volume/chimes and both translated app guides are in
+progress in this working tree. Physical gates and preview approval remain open;
+RTC identity and retention are unverified. No phase is marked accepted yet.
+
+Automated acceptance update: host tests, default/accelerated builds, device
+Pomodoro/recording controls, RTC readback and reset persistence, a 15-minute soak
+and a two-minute RTC follow-up passed. Default firmware and the rebuilt daemon
+are restored. Layout approval is recorded. Remaining manual hardware and PR
+gates are listed in `firmware-xggf/docs/POMODORO_VALIDATION.md`.
