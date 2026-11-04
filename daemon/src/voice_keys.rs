@@ -151,6 +151,7 @@ fn load(path: &Path) -> Saved {
 
 #[cfg(test)]
 pub(crate) mod tests {
+    #[cfg(unix)]
     use std::os::unix::fs::PermissionsExt;
 
     use super::*;
@@ -161,6 +162,7 @@ pub(crate) mod tests {
         std::env::temp_dir().join(format!("vibebuddy-voice-keys-{tag}-{}-{}", std::process::id(), u64::from_le_bytes(bytes)))
     }
 
+    #[cfg(unix)]
     #[test]
     fn keys_are_kept_0600_and_the_status_says_only_which_are_set() {
         let dir = scratch("file");

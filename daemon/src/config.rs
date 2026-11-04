@@ -47,7 +47,7 @@ impl Config {
 }
 
 /// Config file location: `VIBEBUDDY_CONFIG_FILE` wins, otherwise `config.json` in [`config_dir`].
-/// Without `HOME` nothing is written and config lives only in memory.
+/// Without a home directory nothing is written and config lives only in memory.
 pub fn config_file() -> Option<PathBuf> {
     if let Ok(path) = std::env::var("VIBEBUDDY_CONFIG_FILE") {
         return Some(PathBuf::from(path));
@@ -55,19 +55,23 @@ pub fn config_file() -> Option<PathBuf> {
     Some(config_dir()?.join("config.json"))
 }
 
-/// Where the daemon keeps its config. On macOS it shares Application Support with the app; elsewhere it follows
-/// the XDG base directories.
+/// Where the daemon keeps its config. On macOS it shares Application Support with the app; on Windows it is in the
+/// roaming AppData; elsewhere it follows the XDG base directories.
 pub fn config_dir() -> Option<PathBuf> {
-    app_dir("XDG_CONFIG_HOME", ".config")
+    app_dir("XDG_CONFIG_HOME", ".config", "APPDATA")
 }
 
-/// Where the daemon keeps state such as today's stats; the same directory as [`config_dir`] on macOS.
+/// Where the daemon keeps state such as today's stats; the same directory as [`config_dir`] on macOS, the local
+/// AppData on Windows.
 pub fn state_dir() -> Option<PathBuf> {
-    app_dir("XDG_STATE_HOME", ".local/state")
+    app_dir("XDG_STATE_HOME", ".local/state", "LOCALAPPDATA")
 }
 
-fn app_dir(xdg_variable: &str, xdg_default: &str) -> Option<PathBuf> {
-    let home = std::env::var_os("HOME").map(PathBuf::from);
+fn app_dir(xdg_variable: &str, xdg_default: &str, windows_variable: &str) -> Option<PathBuf> {
+    if cfg!(windows) {
+        return windows_dir(std::env::var_os(windows_variable).map(PathBuf::from));
+    }
+    let home = std::env::home_dir();
     if cfg!(target_os = "macos") {
         return home.map(|home| home.join("Library/Application Support/VibeBuddy"));
     }
@@ -76,6 +80,11 @@ fn app_dir(xdg_variable: &str, xdg_default: &str) -> Option<PathBuf> {
         home,
         xdg_default,
     )
+}
+
+/// `%APPDATA%\VibeBuddy` or `%LOCALAPPDATA%\VibeBuddy`; Windows always sets both to absolute paths.
+fn windows_dir(value: Option<PathBuf>) -> Option<PathBuf> {
+    value.filter(|dir| dir.is_absolute()).map(|dir| dir.join("VibeBuddy"))
 }
 
 /// The XDG spec says a relative value is invalid and must be ignored, so it falls back to the default under `HOME`.
@@ -122,6 +131,8 @@ mod tests {
         let _ = std::fs::remove_dir_all(dir);
     }
 
+    // XDG paths are Unix paths: `/xdg/config` isn't absolute on Windows.
+    #[cfg(unix)]
     #[test]
     fn xdg_dirs_fall_back_to_home_unless_set_to_an_absolute_path() {
         let home = Some(PathBuf::from("/home/me"));
@@ -138,5 +149,13 @@ mod tests {
             Some(PathBuf::from("/home/me/.local/state/vibebuddy"))
         );
         assert_eq!(xdg_dir(None, None, ".config"), None);
+    }
+
+    #[test]
+    fn a_windows_dir_needs_an_absolute_path() {
+        let appdata = std::env::temp_dir();
+        assert_eq!(windows_dir(Some(appdata.clone())), Some(appdata.join("VibeBuddy")));
+        assert_eq!(windows_dir(Some(PathBuf::from("relative"))), None);
+        assert_eq!(windows_dir(None), None);
     }
 }

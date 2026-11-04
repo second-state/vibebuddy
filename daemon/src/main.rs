@@ -700,6 +700,7 @@ fn is_k2_press(event: &Event) -> bool {
 /// When the app supervises it, the app puts its pid in VIBEBUDDY_PARENT_PID. If the app is force-killed, the daemon
 /// is adopted by launchd and its parent pid becomes 1; then exit too, rather than holding the serial port and HTTP port so
 /// the next app can't start. macOS has no prctl(PR_SET_PDEATHSIG), so this has to poll.
+#[cfg(unix)]
 async fn watch_parent() {
     let Some(expected) = env::var("VIBEBUDDY_PARENT_PID")
         .ok()
@@ -715,6 +716,34 @@ async fn watch_parent() {
             std::process::exit(0);
         }
     }
+}
+
+/// Windows never re-parents an orphan, so the parent pid can't tell that the app is gone. Instead a thread holds a
+/// handle on the app's process from the start, which also keeps a reused pid from passing for the app, and waits on it.
+#[cfg(windows)]
+async fn watch_parent() {
+    use windows_sys::Win32::Foundation::CloseHandle;
+    use windows_sys::Win32::System::Threading::{INFINITE, OpenProcess, PROCESS_SYNCHRONIZE, WaitForSingleObject};
+    let Some(expected) = env::var("VIBEBUDDY_PARENT_PID")
+        .ok()
+        .and_then(|value| value.parse::<u32>().ok())
+    else {
+        return;
+    };
+    // A plain thread rather than the runtime's blocking pool, which would hold up the runtime's shutdown.
+    std::thread::spawn(move || {
+        // SAFETY: OpenProcess takes no pointers; a null handle means the process is already gone.
+        let handle = unsafe { OpenProcess(PROCESS_SYNCHRONIZE, 0, expected) };
+        if !handle.is_null() {
+            // SAFETY: the handle is open until CloseHandle, which is called once.
+            unsafe {
+                WaitForSingleObject(handle, INFINITE);
+                CloseHandle(handle);
+            }
+        }
+        info!(expected, "the supervising app is gone, exiting too");
+        std::process::exit(0);
+    });
 }
 
 /// The daemon's build identifier: the git description plus the binary's own timestamp.

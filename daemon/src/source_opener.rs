@@ -337,6 +337,7 @@ fn title_of(listing: &str, id: &str) -> Option<String> {
 
 /// Writes an OSC 2 title sequence to the tty. Control characters are dropped so a title read back from the
 /// terminal can't end the sequence early and smuggle in one of its own.
+#[cfg(unix)]
 fn set_title(tty: &str, title: &str) -> Result<(), String> {
     use std::io::Write;
     use std::os::unix::fs::OpenOptionsExt;
@@ -347,6 +348,11 @@ fn set_title(tty: &str, title: &str) -> Result<(), String> {
         .open(format!("/dev/{tty}"))
         .and_then(|mut device| device.write_all(format!("\x1b]2;{title}\x07").as_bytes()))
         .map_err(|error| format!("cannot write to {tty}: {error}"))
+}
+
+#[cfg(windows)]
+fn set_title(_tty: &str, _title: &str) -> Result<(), String> {
+    Err("no ttys on Windows".to_owned())
 }
 
 /// `ttys016`: a pseudo-terminal name, nothing that could point elsewhere under /dev.
@@ -460,6 +466,7 @@ fn valid_tmux_pane(pane: &str) -> bool {
 }
 
 /// The socket path comes from the hook; only a socket this user owns is handed to tmux.
+#[cfg(unix)]
 fn check_own_socket(socket: &str) -> Result<(), String> {
     use std::os::unix::fs::{FileTypeExt, MetadataExt};
     let metadata = std::fs::metadata(socket).map_err(|error| format!("cannot read tmux socket: {error}"))?;
@@ -469,6 +476,11 @@ fn check_own_socket(socket: &str) -> Result<(), String> {
     } else {
         Err("not a tmux socket of this user".to_owned())
     }
+}
+
+#[cfg(windows)]
+fn check_own_socket(_socket: &str) -> Result<(), String> {
+    Err("no tmux on Windows".to_owned())
 }
 
 /// Runs a fixed AppleScript. The first run against an app asks the user for Automation access; until they answer,

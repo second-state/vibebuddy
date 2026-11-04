@@ -1658,13 +1658,24 @@ fn notify_new_firmware(status: &Status) {
     }
 }
 
-/// The daemon's XDG directories (see `daemon/src/config.rs`), where it keeps state and config and the hook its log.
+/// The daemon's directories (see `daemon/src/config.rs`), where it keeps state and config and the hook its log.
 fn state_dir() -> Option<std::path::PathBuf> {
-    xdg_dir("XDG_STATE_HOME", ".local/state")
+    app_dir("XDG_STATE_HOME", ".local/state", "LOCALAPPDATA")
 }
 
 fn config_dir() -> Option<std::path::PathBuf> {
-    xdg_dir("XDG_CONFIG_HOME", ".config")
+    app_dir("XDG_CONFIG_HOME", ".config", "APPDATA")
+}
+
+/// `%APPDATA%\VibeBuddy` or `%LOCALAPPDATA%\VibeBuddy` on Windows; the XDG directory elsewhere.
+fn app_dir(variable: &str, default: &str, windows_variable: &str) -> Option<std::path::PathBuf> {
+    if cfg!(windows) {
+        return std::env::var_os(windows_variable)
+            .map(std::path::PathBuf::from)
+            .filter(|dir| dir.is_absolute())
+            .map(|dir| dir.join("VibeBuddy"));
+    }
+    xdg_dir(variable, default)
 }
 
 /// Read from the shell's own config, which `omarchy plugin enable` and `disable` rewrite.
@@ -1680,7 +1691,7 @@ fn xdg_dir(variable: &str, default: &str) -> Option<std::path::PathBuf> {
     std::env::var_os(variable)
         .map(std::path::PathBuf::from)
         .filter(|dir| dir.is_absolute())
-        .or_else(|| std::env::var_os("HOME").map(|home| std::path::PathBuf::from(home).join(default)))
+        .or_else(|| std::env::home_dir().map(|home| home.join(default)))
         .map(|dir| dir.join("vibebuddy"))
 }
 
@@ -1693,7 +1704,7 @@ fn user_dir(kind: &str, fallback: &str) -> Result<std::path::PathBuf, String> {
         .map(|output| String::from_utf8_lossy(&output.stdout).trim().to_owned())
         .filter(|dir| !dir.is_empty())
         .map(std::path::PathBuf::from)
-        .or_else(|| std::env::var_os("HOME").map(|home| std::path::PathBuf::from(home).join(fallback)))
+        .or_else(|| std::env::home_dir().map(|home| home.join(fallback)))
         .ok_or_else(|| "HOME is not set".to_owned())
 }
 
