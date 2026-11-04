@@ -2532,7 +2532,7 @@ impl App {
         (board == Some("xggf-64x8")).then(|| {
             column![
                 text(tr("XGGF buttons", &[])),
-                text(tr("Left/K0: microphone or stop recording; hold to identify.", &[])).size(13),
+                text(tr("Left/K0: start, pause or resume on Pomodoro; stop recording; hold to identify. Use MIC in the menu for the microphone.", &[])).size(13),
                 text(tr("Middle/K1: cycle pages; hold for the menu.", &[])).size(13),
                 text(tr("Right/K2: open the Agent source; hold to mute.", &[])).size(13),
                 text(tr("Hold until the panel shows LONG for long actions.", &[])).size(13),
