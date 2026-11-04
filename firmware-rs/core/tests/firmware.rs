@@ -452,7 +452,7 @@ fn bad_lines_are_reported() {
 #[test]
 fn the_tally_and_volume_survive_a_reboot() {
     let (mut firmware, mut board, _) = booted(blank_flash());
-    let lines = send(&mut firmware, &mut board, r#"{"version":1,"event":"device.heartbeat","build":"def","hour":14,"day":20260926}"#);
+    let lines = send(&mut firmware, &mut board, r#"{"version":1,"event":"device.heartbeat","build":"def","hour":14,"minute":37,"day":20260926}"#);
     assert_eq!(lines, ["CLOCK HOUR 14", "POMODORO TODAY 0 0S DAY 20260926"]);
     // The same hour and the same day are not reported again.
     assert!(send(&mut firmware, &mut board, r#"{"version":1,"event":"device.heartbeat","hour":14,"day":20260926}"#).is_empty());
