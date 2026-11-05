@@ -90,7 +90,7 @@ systemctl --user enable --now vibebuddyd && vibebuddy-hook install
 
 适用于 x86_64 的 Windows 10 和 11。从[最新 Release](https://github.com/second-state/vibebuddy/releases/latest) 下载 `VibeBuddy-<版本>-windows-x86_64-setup.exe` 并运行。安装程序还没有签名，所以 SmartScreen 会先弹出警告：点“更多信息”，再点“仍要运行”。它只为你自己安装，不需要管理员权限，装到 `%LOCALAPPDATA%\Programs\VibeBuddy`，在开始菜单里加上 VibeBuddy，登录时自动启动（安装程序最后一页有个勾选框），并给这台电脑上已有的 Agent 接上 Hook。升级时运行新版本的安装程序即可；在“设置 → 应用”里卸载，Hook 也会一起撤掉。
 
-App 是通知区域里的一个图标（Kore；单击打开设置，右键打开菜单），加上和 Linux 一样的设置窗口。和 Linux 不同，App 自己运行 daemon，和 Mac App 一样，所以退出 App 后盒子就离线了。Windows 10 和 11 不用给盒子装驱动。配置在 `%APPDATA%\VibeBuddy`，统计数据和 daemon 的日志在 `%LOCALAPPDATA%\VibeBuddy`，盒子断开 30 秒后会弹出通知。Windows 上暂时还没有的：K2 不能切回终端窗口；语音指令要开启开发者模式（Codex 的登录信息是用符号链接接过去的）；角色试听不能播放。
+App 是通知区域里的一个图标（Kore；单击打开设置，右键打开菜单），加上和 Linux 一样的设置窗口。和 Linux 不同，App 自己运行 daemon，和 Mac App 一样，所以退出 App 后盒子就离线了。Windows 10 和 11 不用给盒子装驱动。配置在 `%APPDATA%\VibeBuddy`，统计数据和 daemon 的日志在 `%LOCALAPPDATA%\VibeBuddy`，盒子断开 30 秒后会弹出通知。K2 会切回会话所在的窗口：Windows Terminal 窗口、控制台窗口或编辑器（开了多个 Windows Terminal 窗口时切到最前面的那个，分不出标签页）。Windows 上暂时还没有的：语音指令要开启开发者模式（Codex 的登录信息是用符号链接接过去的）；角色试听不能播放。
 
 ## 工作原理
 

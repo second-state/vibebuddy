@@ -21,7 +21,8 @@
 //! of its own. Inside tmux that tty belongs to a pane, so the tmux socket and pane are reported instead.
 //!
 //! Outside macOS there is no such variable, so the hook reports its ancestor pids instead and leaves
-//! finding their window to the daemon, which asks the compositor when K2 is pressed.
+//! finding their window to the daemon, which asks the compositor (Linux) or the window manager (Windows) when K2
+//! is pressed.
 
 use std::collections::HashMap;
 use std::process::Command;
@@ -202,14 +203,61 @@ fn ancestor_pids() -> Vec<u32> {
     pids
 }
 
-/// Windows has no `/proc`; until the hook walks a Toolhelp32 snapshot there, it reports no chain.
+/// On Windows the chain comes from a Toolhelp32 snapshot. The terminal is often not in it (Windows 11 hands consoles
+/// to Windows Terminal, and the shell's parent is then a service host); the daemon finds the window through the
+/// console these processes share instead.
 #[cfg(windows)]
 fn ancestor_pids() -> Vec<u32> {
-    Vec::new()
+    chain_from(&windows_parents(), std::process::id())
+}
+
+/// Every process's parent, from a Toolhelp32 snapshot.
+#[cfg(windows)]
+fn windows_parents() -> HashMap<u32, u32> {
+    use windows_sys::Win32::Foundation::{CloseHandle, INVALID_HANDLE_VALUE};
+    use windows_sys::Win32::System::Diagnostics::ToolHelp::{
+        CreateToolhelp32Snapshot, PROCESSENTRY32W, Process32FirstW, Process32NextW, TH32CS_SNAPPROCESS,
+    };
+    let mut parents = HashMap::new();
+    // SAFETY: the snapshot handle is checked and closed here; `entry` carries its own size, as the API requires.
+    unsafe {
+        let snapshot = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
+        if snapshot == INVALID_HANDLE_VALUE {
+            return parents;
+        }
+        let mut entry: PROCESSENTRY32W = std::mem::zeroed();
+        entry.dwSize = std::mem::size_of::<PROCESSENTRY32W>() as u32;
+        let mut more = Process32FirstW(snapshot, &mut entry) != 0;
+        while more {
+            parents.insert(entry.th32ProcessID, entry.th32ParentProcessID);
+            more = Process32NextW(snapshot, &mut entry) != 0;
+        }
+        CloseHandle(snapshot);
+    }
+    parents
+}
+
+/// The ancestors of `pid`, nearest first, after 16 levels at most. Windows reuses pids and keeps a parent's id after
+/// it exits, so a recorded parent can be a newer, unrelated process, and the chain can even loop: it stops there.
+#[cfg(any(windows, test))]
+fn chain_from(parents: &HashMap<u32, u32>, pid: u32) -> Vec<u32> {
+    let mut pids = Vec::new();
+    let mut current = pid;
+    while pids.len() < 16 {
+        let Some(&parent) = parents.get(&current) else { break };
+        // 0 is the idle process and 4 the kernel; neither owns a window.
+        if parent <= 4 || parent == pid || pids.contains(&parent) {
+            break;
+        }
+        pids.push(parent);
+        current = parent;
+    }
+    pids
 }
 
 /// The parent pid in `/proc/<pid>/stat`. The command name in parentheses may hold spaces and
 /// parentheses itself, so fields are counted after the last `)`.
+#[cfg(any(unix, test))]
 fn parent_from_stat(stat: &str) -> Option<u32> {
     let (_, rest) = stat.rsplit_once(')')?;
     rest.split_whitespace().nth(1)?.parse().ok()
@@ -265,6 +313,16 @@ mod tests {
         assert_eq!(parent_from_stat("3620 (claude) S 3534 3620 3534 34816"), Some(3534));
         assert_eq!(parent_from_stat("42 (a) b (c)) R 7 42 42 0"), Some(7));
         assert_eq!(parent_from_stat("garbage"), None);
+    }
+
+    #[test]
+    fn the_windows_chain_stops_at_the_kernel_and_at_a_loop() {
+        let parents = HashMap::from([(30, 20), (20, 10), (10, 4), (4, 0)]);
+        assert_eq!(chain_from(&parents, 30), vec![20, 10]);
+        // A reused pid can point back down the chain.
+        let looping = HashMap::from([(30, 20), (20, 10), (10, 20)]);
+        assert_eq!(chain_from(&looping, 30), vec![20, 10]);
+        assert_eq!(chain_from(&HashMap::new(), 30), Vec::<u32>::new());
     }
 
     #[test]
