@@ -1,5 +1,5 @@
 //! Navigates from an aggregated activity back to its source window: through LaunchServices on the Mac, through
-//! the compositor (Hyprland) on Linux.
+//! the compositor (Hyprland) on Linux, and through the window manager's own calls on Windows.
 //!
 //! All arguments go straight to the process API, never through a shell. Source data comes from hooks and is still treated
 //! as untrusted input: Codex thread ids, Claude session ids and GitHub repos are narrowed to a safe character set first.
@@ -220,9 +220,12 @@ fn command_for(source: &ActivitySource, desktop: Option<&str>) -> Result<Command
             if !valid_repo(repo) {
                 return Err("invalid GitHub repo".to_owned());
             }
-            Ok(CommandSpec {
-                program: if cfg!(target_os = "macos") { "/usr/bin/open" } else { "xdg-open" },
-                args: vec![format!("https://github.com/{repo}/actions/runs/{run_id}")],
+            let url = format!("https://github.com/{repo}/actions/runs/{run_id}");
+            // On Windows `explorer.exe <url>` exits with 1 even when it works, so the URL handler is called directly.
+            Ok(if cfg!(windows) {
+                CommandSpec { program: "rundll32.exe", args: vec!["url.dll,FileProtocolHandler".to_owned(), url] }
+            } else {
+                CommandSpec { program: if cfg!(target_os = "macos") { "/usr/bin/open" } else { "xdg-open" }, args: vec![url] }
             })
         }
     }
@@ -519,6 +522,7 @@ fn activate(bundle_id: &str) -> Result<CommandSpec, String> {
 
 /// Focuses the window that owns the nearest of the agent's ancestors. Only Hyprland is supported: it's the one
 /// compositor here, and it can both list windows with their pids and focus one by address.
+#[cfg(not(windows))]
 async fn focus_window(pids: &[u32]) -> Result<String, String> {
     let clients = run_hyprctl(&["clients", "-j"]).await?;
     let address = window_for(&clients, pids)
@@ -535,7 +539,102 @@ async fn focus_window(pids: &[u32]) -> Result<String, String> {
     Ok(target)
 }
 
+/// Brings forward the window of the nearest of the agent's ancestors that has one: a window it owns, or else the
+/// window of the console it runs in. The console matters because Windows Terminal is often not in the chain at all.
+/// A process owning several windows (Windows Terminal runs them all in one) gives the one nearest the front.
+#[cfg(windows)]
+async fn focus_window(pids: &[u32]) -> Result<String, String> {
+    let pids = pids.to_vec();
+    tokio::task::spawn_blocking(move || {
+        let window = windows_focus::window_for(&pids)
+            .ok_or_else(|| "session has no host window (SSH or a background process)".to_owned())?;
+        windows_focus::bring_forward(window)?;
+        Ok(format!("window:{window:#x}"))
+    })
+    .await
+    .map_err(|error| error.to_string())?
+}
+
+#[cfg(windows)]
+mod windows_focus {
+    use windows_sys::Win32::Foundation::{HWND, LPARAM};
+    use windows_sys::Win32::System::Console::{AttachConsole, FreeConsole, GetConsoleWindow};
+    use windows_sys::Win32::UI::Input::KeyboardAndMouse::{KEYEVENTF_KEYUP, VK_MENU, keybd_event};
+    use windows_sys::Win32::UI::WindowsAndMessaging::{
+        EnumWindows, GA_ROOTOWNER, GW_OWNER, GetAncestor, GetForegroundWindow, GetWindow, GetWindowThreadProcessId,
+        IsIconic, IsWindowVisible, SW_RESTORE, SetForegroundWindow, ShowWindow,
+    };
+
+    /// The visible, unowned windows and their processes, front to back.
+    fn top_level_windows() -> Vec<(usize, u32)> {
+        unsafe extern "system" fn collect(window: HWND, list: LPARAM) -> windows_sys::core::BOOL {
+            // SAFETY: `list` is the Vec that `top_level_windows` passes in, alive for the whole EnumWindows call.
+            let list = unsafe { &mut *(list as *mut Vec<(usize, u32)>) };
+            // SAFETY: `window` comes from EnumWindows; a stale one only makes the calls fail.
+            unsafe {
+                if IsWindowVisible(window) != 0 && GetWindow(window, GW_OWNER).is_null() {
+                    let mut pid = 0;
+                    GetWindowThreadProcessId(window, &mut pid);
+                    list.push((window as usize, pid));
+                }
+            }
+            1
+        }
+        let mut list: Vec<(usize, u32)> = Vec::new();
+        // SAFETY: `collect` only uses `list` during the call.
+        unsafe { EnumWindows(Some(collect), &raw mut list as LPARAM) };
+        list
+    }
+
+    pub fn window_for(pids: &[u32]) -> Option<usize> {
+        let windows = top_level_windows();
+        pids.iter().find_map(|&pid| {
+            windows.iter().find(|(_, owner)| *owner == pid).map(|(window, _)| *window).or_else(|| console_window(pid))
+        })
+    }
+
+    /// The visible window of the console `pid` runs in: Windows Terminal's window, or the console window itself in a
+    /// classic console. The only way to ask is to join that console for a moment. The daemon's own output goes to a
+    /// file, not a console, so leaving its own (windowless) console changes nothing for it.
+    fn console_window(pid: u32) -> Option<usize> {
+        // SAFETY: plain calls; a process that is gone or has no console makes AttachConsole fail.
+        unsafe {
+            FreeConsole();
+            if AttachConsole(pid) == 0 {
+                return None;
+            }
+            let console = GetConsoleWindow();
+            let window = if console.is_null() { console } else { GetAncestor(console, GA_ROOTOWNER) };
+            FreeConsole();
+            (!window.is_null() && IsWindowVisible(window) != 0).then_some(window as usize)
+        }
+    }
+
+    /// Windows lets a process take the foreground only in some cases, and a background daemon usually isn't one
+    /// while the user types elsewhere. A key press counts as input from this process, so after a tap of Alt the
+    /// second try is allowed.
+    pub fn bring_forward(window: usize) -> Result<(), String> {
+        let window = window as HWND;
+        // SAFETY: `window` came from EnumWindows just before; a window closed since only makes the calls fail.
+        unsafe {
+            if IsIconic(window) != 0 {
+                ShowWindow(window, SW_RESTORE);
+            }
+            if SetForegroundWindow(window) != 0 && GetForegroundWindow() == window {
+                return Ok(());
+            }
+            keybd_event(VK_MENU as u8, 0, 0, 0);
+            keybd_event(VK_MENU as u8, 0, KEYEVENTF_KEYUP, 0);
+            if SetForegroundWindow(window) != 0 {
+                return Ok(());
+            }
+        }
+        Err("Windows did not let the window come to the front".to_owned())
+    }
+}
+
 /// hyprctl reports dispatch errors on stdout, sometimes with a zero exit code; a dispatch that worked says `ok`.
+#[cfg_attr(windows, allow(dead_code))]
 async fn run_hyprctl(args: &[&str]) -> Result<String, String> {
     let output = tokio::time::timeout(OPEN_TIMEOUT, Command::new("hyprctl").args(args).output())
         .await
@@ -552,6 +651,7 @@ async fn run_hyprctl(args: &[&str]) -> Result<String, String> {
 
 /// Picks the window owned by the nearest ancestor. When one process owns several windows (a single-instance
 /// terminal), the first one Hyprland lists wins: pids alone can't tell them apart.
+#[cfg_attr(windows, allow(dead_code))]
 fn window_for(clients_json: &str, pids: &[u32]) -> Option<String> {
     #[derive(Deserialize)]
     struct Client {
@@ -568,6 +668,7 @@ fn window_for(clients_json: &str, pids: &[u32]) -> Option<String> {
 }
 
 /// Hyprland window addresses look like `0x618656fe7aa0`; anything else never reaches the dispatcher.
+#[cfg_attr(windows, allow(dead_code))]
 fn valid_address(address: &str) -> bool {
     address
         .strip_prefix("0x")
@@ -1126,8 +1227,8 @@ mod tests {
         .expect("canonical repo name should open");
 
         assert_eq!(
-            spec.args,
-            ["https://github.com/longzhi/vibe-buddy/actions/runs/42"]
+            spec.args.last().map(String::as_str),
+            Some("https://github.com/longzhi/vibe-buddy/actions/runs/42")
         );
     }
 }
