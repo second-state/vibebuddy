@@ -120,6 +120,10 @@ fn main() {
                 None => return,
             }
         }
+        "kimi" => match cli_agents::kimi_payload(&source) {
+            Some(payload) => (cli_agents::ENDPOINT, payload),
+            None => return,
+        },
         "copilot" => match std::env::args().nth(2).and_then(|event| cli_agents::copilot_payload(&event, &source)) {
             Some(payload) => (cli_agents::ENDPOINT, payload),
             None => return,

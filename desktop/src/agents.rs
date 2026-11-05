@@ -9,7 +9,7 @@ use serde::Deserialize;
 /// One agent, as `vibebuddy-hook status` reports it.
 #[derive(Clone, Debug, Deserialize, PartialEq)]
 pub struct Setup {
-    /// The hook's argument for it: codex, claude, opencode, copilot, pi.
+    /// The hook's argument for it: codex, claude, opencode, copilot, pi, kimi.
     pub agent: String,
     pub name: String,
     /// Its config directory exists, so it has run on this machine.

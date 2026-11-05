@@ -71,6 +71,7 @@ public struct BoxPicture: Equatable {
         case "opencode": "oc"
         case "copilot": "gh"
         case "pi": "pi"
+        case "kimi": "api"
         default: "api"
         }
     }

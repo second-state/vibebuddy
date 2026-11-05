@@ -610,6 +610,7 @@
 "Only {address} goes in braces: it is where the form of address is said." = "花括号里只能写 {address}：那是说出称呼的位置。";
 "Needs input" = "需要你处理";
 "Failed" = "失败";
+"Could not read Kimi Code CLI hook configuration. Check config.toml and try again." = "无法读取 Kimi Code CLI 的 Hook 配置。请检查 config.toml 后重试。";
 "Focus ended" = "专注结束";
 "Break ended" = "休息结束";
 "First done of the day" = "当天第一次完成";

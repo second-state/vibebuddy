@@ -2,7 +2,7 @@
 
 English | [简体中文](README.zh-CN.md)
 
-VibeBuddy is a desk pet for your AI coding agents. It lives in a small ESP32-S3 box next to your keyboard and keeps an eye on Codex, Claude Code, OpenCode, GitHub Copilot CLI, Pi and your GitHub Actions runs, so you don't have to. When an agent needs you, finishes, or fails, the buddy tells you with an animation, a task card and a short spoken line.
+VibeBuddy is a desk pet for your AI coding agents. It lives in a small ESP32-S3 box next to your keyboard and keeps an eye on Codex, Claude Code, OpenCode, GitHub Copilot CLI, Pi, Kimi Code CLI and your GitHub Actions runs, so you don't have to. When an agent needs you, finishes, or fails, the buddy tells you with an animation, a task card and a short spoken line.
 
 The buddy is an original character. Codex was the first agent it supported, but the device protocol isn't tied to any one client: any local program or script can send it events.
 
@@ -122,6 +122,9 @@ The hook is a Rust binary in [`hook/`](hook/) (`vibebuddy-hook codex` / `vibebud
 - GitHub Copilot CLI: a hooks file of VibeBuddy's own at `~/.copilot/hooks/vibebuddy.json`. Copilot passes no reply at the end of a turn, so a question left at the end is announced as done.
 - ZCode: a managed local plugin registered in `~/.zcode/cli/config.json`. [Setup and limitations](docs/zcode-adapter.md).
 - Pi (1.1.0 or later): an extension of VibeBuddy's own at `~/.pi/agent/extensions/vibebuddy.js`, which hands each event to the hook. A dialog an extension opens mid-run counts as waiting on you.
+- Kimi Code CLI: hook entries in `~/.kimi-code/config.toml` (or `KIMI_CODE_HOME/config.toml`). Permission requests are reported as needs input; a conversational question at the end of a turn is reported as done. K2 focuses the host when available, without selecting a specific Kimi session.
+
+For Kimi setup, config safety and tested-version limits, see [Kimi Adapter](docs/kimi-adapter.md).
 
 OpenCode's, Copilot's and Pi's files belong to VibeBuddy alone: connecting writes the whole file and removing deletes it, without touching your own config.
 

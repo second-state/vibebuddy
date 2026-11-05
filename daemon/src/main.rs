@@ -2190,6 +2190,8 @@ async fn post_resident_say(State(state): State<AppState>, Json(request): Json<Sa
 mod tests {
     use std::sync::Mutex;
 
+    use serde_json::{Value, json};
+
     use super::*;
 
     #[derive(Default)]

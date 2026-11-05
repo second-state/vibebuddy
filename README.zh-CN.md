@@ -122,6 +122,9 @@ Hook 是一个 Rust 二进制 [`hook/`](hook/)（`vibebuddy-hook codex` / `vibeb
 - GitHub Copilot CLI：VibeBuddy 自己的 hooks 文件 `~/.copilot/hooks/vibebuddy.json`。Copilot 在一轮结束时不给出回复内容，所以结尾留了问题的一轮也会播报为完成。
 - ZCode：注册在 `~/.zcode/cli/config.json` 中、由 VibeBuddy 管理的本地插件。[设置与限制](docs/zcode-adapter.md)。
 - Pi（1.1.0 及以上）：VibeBuddy 自己的扩展 `~/.pi/agent/extensions/vibebuddy.js`，把每个事件交给 hook。运行中扩展弹出的对话框算作在等你。
+- Kimi Code CLI：在 `~/.kimi-code/config.toml`（或 `KIMI_CODE_HOME/config.toml`）中添加 hook。权限请求会显示为需要输入；一轮回复末尾的对话式问题会显示为完成。K2 在可以时切回所在窗口，但不会选择特定的 Kimi 会话。
+
+Kimi 的配置步骤、配置安全和已验证版本限制见 [Kimi Adapter](docs/kimi-adapter.md)。
 
 OpenCode、Copilot 和 Pi 的这几个文件只属于 VibeBuddy：接入时整份写入，移除时直接删除，不动你自己的配置。
 

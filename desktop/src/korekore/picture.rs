@@ -109,6 +109,7 @@ pub fn icon_for_agent(agent: &str) -> &'static str {
         "opencode" => "oc",
         "copilot" => "gh",
         "pi" => "pi",
+        "kimi" => "api",
         _ => "api",
     }
 }

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Installs VibeBuddy for the current Linux user: the binaries in ~/.local/bin, the daemon as a systemd user service,
 # the tray app in the launcher and at login, the hooks for whichever agents this machine has (Claude Code, Codex,
-# OpenCode, GitHub Copilot CLI, Pi), and the Character packs the app offers to write to the box. Run it again to upgrade.
+# OpenCode, GitHub Copilot CLI, Pi, Kimi Code CLI), and the Character packs the app offers to write to the box. Run it again to upgrade.
 #
 # It works in two places. In an unpacked release (VibeBuddy-vX.Y.Z-linux-x86_64.tar.gz) everything is prebuilt and
 # nothing is downloaded. In a source checkout (packaging/linux/install.sh) it builds with cargo.

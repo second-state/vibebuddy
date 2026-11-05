@@ -5,8 +5,8 @@ use serde::Deserialize;
 use vibebuddy_protocol::Event;
 
 use crate::activity::{
-    ActivityId, ActivitySource, ActivityStatus, ActivityTracker, Surface, TmuxPane, card_title, display_title,
-    project_name,
+    ActivityId, ActivitySource, ActivityStatus, ActivityTracker, Surface, TmuxPane, card_title,
+    display_title, project_name,
 };
 use crate::session_titles::git_branch;
 
@@ -56,8 +56,16 @@ pub fn apply(tracker: &mut ActivityTracker, hook: AgentHook) -> Option<Event> {
     let id = activity_id(&hook);
     let cwd = hook.cwd.as_deref();
     let project = project_name(cwd);
-    let title = card_title(prefix, &[cwd.and_then(git_branch)], project.as_deref(), fallback);
-    tracker.note_project(&id, &display_title("", project.as_deref().unwrap_or(fallback), fallback));
+    let title = card_title(
+        prefix,
+        &[cwd.and_then(git_branch)],
+        project.as_deref(),
+        fallback,
+    );
+    tracker.note_project(
+        &id,
+        &display_title("", project.as_deref().unwrap_or(fallback), fallback),
+    );
     let source = ActivitySource::Cli {
         agent: hook.agent.clone(),
         session_id: hook.session_id.clone(),
@@ -80,7 +88,9 @@ pub fn apply(tracker: &mut ActivityTracker, hook: AgentHook) -> Option<Event> {
             tracker.observe(&id, &title, ActivityStatus::Working)
         }
         "needs_input" => tracker.require_input(&id, &title),
-        "done" if hook.response_kind.as_deref() == Some("input_required") => tracker.require_input(&id, &title),
+        "done" if hook.response_kind.as_deref() == Some("input_required") => {
+            tracker.require_input(&id, &title)
+        }
         "done" => tracker.finish(&id, &title),
         // Interrupted or failed: neither a success nor something to wait on.
         "stopped" => tracker.discard(&id, "STOPPED"),
@@ -122,7 +132,10 @@ mod tests {
         let done = apply(&mut tracker, hook("opencode", "done", Some("msg_1"))).expect("announced");
         assert_eq!(done.event, "task.done");
         // OpenCode reports idle again without a new prompt: nothing more to say.
-        assert!(apply(&mut tracker, hook("opencode", "done", Some("msg_1"))).is_none_or(|event| event.event != "task.done"));
+        assert!(
+            apply(&mut tracker, hook("opencode", "done", Some("msg_1")))
+                .is_none_or(|event| event.event != "task.done")
+        );
     }
 
     #[test]

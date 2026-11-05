@@ -344,7 +344,8 @@ struct KorekoreOnboarding: View {
         if installed { return String(localized: "connected") }
         if agent.ownsFile { return String(localized: "a file of korekore's own") }
         let path = HookInstaller.configURL(for: agent).path.replacingOccurrences(of: FileManager.default.homeDirectoryForCurrentUser.path, with: "~")
-        return String(localized: "\(path) · \(agent.events.count) events")
+        // Kimi's events are the hook binary's to choose, so the Mac has no count to show.
+        return agent.events.isEmpty ? path : String(localized: "\(path) · \(agent.events.count) events")
     }
 
     /// Each agent's change is shown before it's written, one after the other.

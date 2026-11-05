@@ -90,7 +90,7 @@ struct HookInstaller {
     @discardableResult
     static func migrateLegacyCommands() -> [HookAgent] {
         var rewritten: [HookAgent] = []
-        for agent in HookAgent.allCases where !agent.ownsFile {
+        for agent in HookAgent.allCases where !agent.ownsFile && agent != .kimi {
             let url = configURL(for: agent)
             let before = readConfig(url)
             guard let hooks = before["hooks"] as? [String: Any] else { continue }
@@ -123,6 +123,7 @@ struct HookInstaller {
     static func removePlan(for agent: HookAgent) -> Plan {
         if agent == .zcode { return zcodePlan(installing: false) }
         let url = configURL(for: agent)
+        if agent == .kimi { return kimiPlan(url: url, installing: false) }
         if agent.ownsFile { return ownedFilePlan(agent, url: url, after: nil) }
         let before = readConfig(url)
         return mergePlan(agent, url: url, before: before, after: HookConfig.removed(from: before))

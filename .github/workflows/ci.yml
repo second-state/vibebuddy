@@ -29,6 +29,12 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - name: Test
         run: cargo test --workspace --locked
+      - name: Kimi hook smoke
+        # The hook as Kimi runs it, against a loopback receiver. Needs no Kimi CLI: the Kimi-backed smokes
+        # (hook/tests/kimi_cli_smoke.py, kimi_daemon_smoke.py) run by hand, see docs/kimi-adapter.md.
+        run: |
+          cargo build --locked -p vibebuddy-hook
+          python3 hook/tests/kimi_smoke.py target/debug/vibebuddy-hook
       - name: Clippy
         # Errors fail the check; existing warnings are reported, not fatal.
         run: cargo clippy --workspace --all-targets --locked
