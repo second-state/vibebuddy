@@ -131,6 +131,8 @@ enum Message {
     PlayLine,
     /// Which set of screens the box draws (ADR-0021).
     SetScreens(BoxScreens),
+    /// The decoration the box draws over its screens (ADR-0022).
+    SetDecoration(BoxDecoration),
     /// The user says which of several devices is the box, by its USB serial number.
     ChooseBox(String),
     /// Forget another computer on the box, by its key.
@@ -867,6 +869,7 @@ impl App {
                 return Task::perform(client::set_volume(level, true), Message::Done);
             }
             Message::SetScreens(screens) => return Task::perform(client::set_screens(screens.0), Message::Done),
+            Message::SetDecoration(decoration) => return Task::perform(client::set_decoration(decoration.0), Message::Done),
             Message::ChooseBox(usb_serial) => return Task::perform(client::choose_box(usb_serial), Message::Done),
             Message::Unpair(key) => return Task::perform(client::unpair(key), Message::Done),
             Message::TakeOver => return Task::perform(client::take_over(), Message::Done),
@@ -1638,6 +1641,28 @@ impl std::fmt::Display for BoxScreens {
             "robot" => f.write_str(&tr("Robot", &[])),
             other => f.write_str(other),
         }
+    }
+}
+
+/// One entry of the decoration picker: `off`, `leaves` or `snow` (ADR-0022).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct BoxDecoration(&'static str);
+
+impl BoxDecoration {
+    const ALL: [BoxDecoration; 3] = [BoxDecoration("off"), BoxDecoration("leaves"), BoxDecoration("snow")];
+
+    fn of(name: &str) -> Option<BoxDecoration> {
+        Self::ALL.into_iter().find(|decoration| decoration.0 == name)
+    }
+}
+
+impl std::fmt::Display for BoxDecoration {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&match self.0 {
+            "leaves" => tr("Falling leaves", &[]),
+            "snow" => tr("Snow", &[]),
+            _ => tr("Off", &[]),
+        })
     }
 }
 

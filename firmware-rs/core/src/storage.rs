@@ -7,6 +7,7 @@
 //! records, so flash does not wear. When the first boot finds no valid record (the old NVS pages
 //! are still there), it is treated as a brand-new device and erasing starts from the first sector.
 
+use crate::decoration::Decoration;
 use crate::display::Screens;
 use crate::pomodoro::Tally;
 use crate::voice_pack::crc32;
@@ -58,17 +59,23 @@ pub fn find_partition(flash: &mut dyn Flash, label: &str) -> Option<Region> {
     None
 }
 
-/// What the device remembers itself: today's pomodoro tally, the volume and which screens it draws.
+/// What the device remembers itself: today's pomodoro tally, the volume, which screens it draws and the decoration
+/// over them.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Settings {
     pub tally: Tally,
     pub volume: u32,
     pub screens: Screens,
+    pub decoration: Decoration,
 }
 
 /// Word 6 of a record: 1 for the korekore screens. Records from before it hold 0xFFFFFFFF there, which reads as the
 /// robot's, and firmware from before it ignores the word (the CRC covers it either way).
 const SCREENS_KOREKORE: u32 = 1;
+/// The decoration (ADR-0022) takes the second byte of word 6, as `Decoration::code`; the record has no word left.
+/// Firmware from before it then reads a decorated korekore record as the robot's, which only matters after a
+/// rollback. An erased word reads as no decoration.
+const DECORATION_SHIFT: u32 = 8;
 
 const RECORD_BYTES: u32 = 32;
 const RECORD_MAGIC: u32 = u32::from_le_bytes(*b"VBS1");
@@ -89,7 +96,7 @@ fn encode(settings: &Settings, sequence: u32) -> [u8; RECORD_BYTES as usize] {
         settings.tally.completed,
         settings.tally.focus_s,
         settings.volume,
-        if settings.screens == Screens::Korekore { SCREENS_KOREKORE } else { 0 },
+        (if settings.screens == Screens::Korekore { SCREENS_KOREKORE } else { 0 }) | settings.decoration.code() << DECORATION_SHIFT,
     ];
     for (index, word) in words.iter().enumerate() {
         record[index * 4..index * 4 + 4].copy_from_slice(&word.to_le_bytes());
@@ -105,8 +112,9 @@ fn decode(record: &[u8; RECORD_BYTES as usize]) -> Option<(u32, Settings)> {
         return None;
     }
     let tally = Tally { day: word(2), completed: word(3), focus_s: word(4) };
-    let screens = if word(6) == SCREENS_KOREKORE { Screens::Korekore } else { Screens::Robot };
-    Some((word(1), Settings { tally, volume: word(5), screens }))
+    let screens = if word(6) & 0xFF == SCREENS_KOREKORE { Screens::Korekore } else { Screens::Robot };
+    let decoration = Decoration::from_code(word(6) >> DECORATION_SHIFT & 0xFF);
+    Some((word(1), Settings { tally, volume: word(5), screens, decoration }))
 }
 
 impl SettingsStore {
@@ -221,7 +229,7 @@ pub(crate) mod tests {
     const NVS: Region = Region { offset: 0x9000, size: 0x6000 };
 
     fn settings(completed: u32) -> Settings {
-        Settings { tally: Tally { day: 20260926, completed, focus_s: completed * 1500 }, volume: 65, screens: Screens::Robot }
+        Settings { tally: Tally { day: 20260926, completed, focus_s: completed * 1500 }, volume: 65, screens: Screens::Robot, decoration: Decoration::Off }
     }
 
     #[test]
@@ -237,6 +245,17 @@ pub(crate) mod tests {
         let crc = crc32(0, &old[..28]);
         old[28..].copy_from_slice(&crc.to_le_bytes());
         assert_eq!(decode(&old), Some((9, settings(4))));
+    }
+
+    #[test]
+    fn the_decoration_is_kept_beside_the_screens() {
+        let mut flash = MemoryFlash::new(0x10000);
+        let (mut store, _) = SettingsStore::open(&mut flash, NVS).unwrap();
+        for screens in [Screens::Robot, Screens::Korekore] {
+            let snow = Settings { screens, decoration: Decoration::Snow, ..settings(3) };
+            store.save(&mut flash, &snow).unwrap();
+            assert_eq!(SettingsStore::open(&mut flash, NVS).unwrap().1, Some(snow));
+        }
     }
 
     #[test]

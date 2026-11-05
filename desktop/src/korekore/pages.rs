@@ -14,7 +14,7 @@ use super::picture::BoxPicture;
 use super::{sprites, theme, view};
 use crate::i18n::{UiLanguage, tr};
 use crate::status::{self, OperationKind, OperationState};
-use crate::{AddressChoice, BUILTIN, BoxScreens, CUSTOM, Lender, Message, ROBOT, agents, assets, client, config_dir, short_time, wifi_failure};
+use crate::{AddressChoice, BUILTIN, BoxDecoration, BoxScreens, CUSTOM, Lender, Message, ROBOT, agents, assets, client, config_dir, short_time, wifi_failure};
 
 /// Leaves room for the scroll bar and the cards' shadows.
 pub(super) fn page<'a>(content: impl Into<Element<'a, Message>>) -> Element<'a, Message> {
@@ -679,12 +679,28 @@ impl crate::App {
                 row![small(tr("Box screens", &[])), Space::new().width(Length::Fill), value].align_y(Alignment::Center).into()
             }
         };
+        // The decoration over either set of screens (ADR-0022). Firmware too old for the screens is too old for this as
+        // well, and already has its note.
+        let decoration: Element<'_, Message> = match device.and_then(|device| device.decoration.as_deref()) {
+            None if online && device.is_some_and(|device| device.screens.is_some()) => {
+                note(tr("Update the box's firmware to choose a decoration.", &[]))
+            }
+            decoration => {
+                let current = decoration.and_then(BoxDecoration::of);
+                let value: Element<'_, Message> = match current {
+                    Some(current) if online && !busy => picker(BoxDecoration::ALL.to_vec(), Some(current), Message::SetDecoration),
+                    _ => text(current.map_or_else(|| "—".to_owned(), |current| current.to_string())).font(pixel(13.0).0).size(pixel(13.0).1).color(theme::INK).into(),
+                };
+                row![small(tr("Decoration", &[])), Space::new().width(Length::Fill), value].align_y(Alignment::Center).into()
+            }
+        };
         let the_box = card(
             column![
                 heading(tr("The box", &[])),
                 column![small(tr("Link", &[])), text(link).font(pixel(13.0).0).size(pixel(13.0).1).color(theme::INK)].spacing(2),
                 column![small(tr("Firmware", &[])), firmware].spacing(2),
                 screens,
+                decoration,
             ]
             .push(device.filter(|device| !device.connected).and_then(status::Device::relay_refusal).map(|why| text(why).font(regular()).size(12).color(theme::KORE_PINK_TEXT)))
             .push(Space::new().height(Length::Fill))

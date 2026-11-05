@@ -64,6 +64,13 @@ struct DaemonClient {
         guard code == 202 else { throw DaemonError(message: DaemonClient.message(in: data) ?? String(localized: "Changing the box screens was rejected (\(code))")) }
     }
 
+    /// `name` is `off`, `leaves` or `snow`; the box reports a DECORATION line once it has stored it, which is when the status follows.
+    func setDecoration(_ name: String) async throws {
+        let body = try JSONSerialization.data(withJSONObject: ["name": name])
+        let (code, data) = try await post("/v1/device/decoration", body: body, contentType: "application/json")
+        guard code == 202 else { throw DaemonError(message: DaemonClient.message(in: data) ?? String(localized: "Changing the decoration was rejected (\(code))")) }
+    }
+
     /// The daemon remembers the choice and connects to that device on its next look around.
     func chooseBox(usbSerial: String) async throws {
         let body = try JSONSerialization.data(withJSONObject: ["usb_serial": usbSerial])

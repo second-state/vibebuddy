@@ -52,6 +52,9 @@ pub struct DeviceState {
     /// Which set of screens the box draws, `robot` or `korekore` (ADR-0021), stored on the device; None from firmware that
     /// predates the choice.
     pub screens: Option<String>,
+    /// The decoration the box draws over its screens, `off`, `leaves` or `snow` (ADR-0022), stored on the device; None
+    /// from firmware that predates decorations.
+    pub decoration: Option<String>,
     /// The connected port's USB serial number, which tells this device from another ESP32-S3.
     pub usb_serial: Option<String>,
     /// The box's public key, its id on the Relay (ADR-0012); None for firmware that can't pair.
@@ -143,6 +146,7 @@ impl DeviceState {
                 self.voice = None;
                 self.volume = None;
                 self.screens = None;
+                self.decoration = None;
                 self.box_key = None;
                 self.paired = false;
                 self.paired_computers.clear();
@@ -182,6 +186,7 @@ impl DeviceState {
                 self.voice = None;
                 self.volume = None;
                 self.screens = None;
+                self.decoration = None;
                 self.box_key = None;
                 self.paired = false;
                 self.paired_computers.clear();
@@ -306,6 +311,11 @@ impl DeviceState {
                     let screens = screens.trim().to_ascii_lowercase();
                     if screens == "robot" || screens == "korekore" {
                         self.screens = Some(screens);
+                    }
+                } else if let Some(decoration) = line.strip_prefix("DECORATION ") {
+                    let decoration = decoration.trim().to_ascii_lowercase();
+                    if crate::DECORATIONS.contains(&decoration.as_str()) {
+                        self.decoration = Some(decoration);
                     }
                 }
             }
@@ -459,6 +469,8 @@ mod tests {
         assert!(!state.apply(&line("VOLUME ERROR")), "an error does not change the volume");
         assert!(state.apply(&line("SCREENS KOREKORE")));
         assert!(!state.apply(&line("SCREENS ERROR")), "an unknown style does not change the screens");
+        assert!(state.apply(&line("DECORATION SNOW")));
+        assert!(!state.apply(&line("DECORATION ERROR")), "an unknown decoration does not change it");
         assert_eq!(
             state,
             DeviceState {
@@ -478,6 +490,7 @@ mod tests {
                 voice: Some("builtin".to_owned()),
                 volume: Some(65),
                 screens: Some("korekore".to_owned()),
+                decoration: Some("snow".to_owned()),
                 usb_serial: None,
                 box_key: None,
                 paired: false,
@@ -692,13 +705,13 @@ mod tests {
     fn a_new_connection_forgets_everything_the_previous_device_said() {
         let mut state = DeviceState::default();
         state.apply(&DeviceMessage::Connected { port: "/dev/cu.x".to_owned(), bridge: false, usb_serial: None });
-        for said in ["MODE DUTY", "VOICES ahu", "VOLUME 50", "SCREENS ROBOT"] {
+        for said in ["MODE DUTY", "VOICES ahu", "VOLUME 50", "SCREENS ROBOT", "DECORATION LEAVES"] {
             state.apply(&line(said));
         }
         state.apply(&DeviceMessage::Disconnected);
         state.apply(&DeviceMessage::Connected { port: "/dev/cu.y".to_owned(), bridge: false, usb_serial: None });
         assert_eq!((state.mode.as_deref(), state.voice.as_deref(), state.volume), (None, None, None));
-        assert_eq!(state.screens, None);
+        assert_eq!((state.screens.as_deref(), state.decoration.as_deref()), (None, None));
     }
 
     #[test]

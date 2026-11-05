@@ -14,6 +14,7 @@ use vibebuddy_protocol::{Event, ProtocolError, VERSION};
 use crate::audio::{ES8311_ADDRESS, Occasion, SAMPLE_RATE, Sound, clamp_volume, VOLUME_DEFAULT};
 use crate::mic;
 use crate::buttons::{ButtonEvent, Buttons, Levels};
+use crate::decoration::Decoration;
 use crate::display::{Display, LinkPath, MAX_STATS, MAX_TASKS, Mode, Panel, PanelKind, SNAPSHOT_LINE_BYTES, Scene, Screen, Screens, Snapshot, State, Target, TaskInput, Tone};
 use crate::leisure::{Leisure, Tier};
 use crate::menu::{self, Action as MenuAction, ComputersRow, Context as MenuContext, Menu, Row, View};
@@ -473,6 +474,7 @@ impl Firmware {
         // Restore yesterday's record too: whether the day changed is only known once a heartbeat brings the date.
         let settings_region = find_partition(board.flash(), "nvs");
         let mut screens = Screens::Robot;
+        let mut decoration = Decoration::Off;
         let loaded = settings_region.map(|region| SettingsStore::open(board.flash(), region));
         match loaded {
             Some(Ok((store, found))) => {
@@ -480,6 +482,7 @@ impl Firmware {
                 if let Some(settings) = found {
                     self.volume = clamp_volume(settings.volume);
                     screens = settings.screens;
+                    decoration = settings.decoration;
                 }
                 self.pomodoro.restore_tally(tally);
                 self.settings = Some(store);
@@ -493,6 +496,7 @@ impl Firmware {
         let display_ok = board.init_display() && self.display.start(board, &scene!(self, now)).is_ok();
         if display_ok {
             self.display.set_screens(board, &scene!(self, now), screens);
+            self.display.set_decoration(board, &scene!(self, now), decoration);
         }
         if display_ok {
             Self::write_value_line(board, "DISPLAY READY BUILD ", &self.build);
@@ -976,8 +980,29 @@ impl Firmware {
         self.announce_screens(board);
     }
 
+    /// Which decoration the box draws over its screens (ADR-0022): reported after a change, and on hello.
+    fn announce_decoration<B: Board>(&self, board: &mut B) {
+        Self::write_value_line(board, "DECORATION ", self.display.decoration().name());
+    }
+
+    /// Draws, saves and reports the decoration the app picked. An unknown one changes nothing.
+    fn set_decoration<B: Board>(&mut self, board: &mut B, name: Option<&str>, now: u32) {
+        if let Some(name) = name {
+            match Decoration::parse(name) {
+                Some(decoration) => {
+                    self.display.set_decoration(board, &scene!(self, now), decoration);
+                    if !self.save_settings(board) {
+                        Self::write_literal(board, "DECORATION SAVE ERROR\n");
+                    }
+                }
+                None => Self::write_literal(board, "DECORATION ERROR\n"),
+            }
+        }
+        self.announce_decoration(board);
+    }
+
     fn save_settings<B: Board>(&mut self, board: &mut B) -> bool {
-        let settings = Settings { tally: self.pomodoro.tally(), volume: self.volume, screens: self.display.screens() };
+        let settings = Settings { tally: self.pomodoro.tally(), volume: self.volume, screens: self.display.screens(), decoration: self.display.decoration() };
         match self.settings.as_mut() {
             Some(store) => store.save(board.flash(), &settings).is_ok(),
             None => false,
@@ -1993,6 +2018,8 @@ impl Firmware {
             }
             // Which screens the box draws, robot or korekore (ADR-0021); without a style it is just a query.
             "device.screens" => self.set_screens(board, string(fields, "style"), now),
+            // The decoration over the screens, off, leaves or snow (ADR-0022); without a name it is just a query.
+            "device.decoration" => self.set_decoration(board, string(fields, "name"), now),
             // Voice commands (docs/protocol.md): the computer offers them, then answers each turn.
             "voice.available" => {
                 let on = fields.get("on") == Some(&Value::Bool(true));
@@ -2329,6 +2356,7 @@ impl Firmware {
         Self::write_value_line(board, "VOICES ", self.voices.current_id().as_bytes());
         self.announce_volume(board);
         self.announce_screens(board);
+        self.announce_decoration(board);
         self.announce_touch(board);
     }
 

@@ -18,6 +18,7 @@ pub mod audio;
 pub mod buttons;
 pub mod canvas;
 pub mod character_pack;
+pub mod decoration;
 pub mod display;
 pub mod firmware;
 pub mod font;

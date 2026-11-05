@@ -10,6 +10,7 @@ use alloc::vec::Vec;
 
 use crate::agent_icon::AgentIcon;
 use crate::canvas::{Canvas, FRAME_BYTES, HEIGHT, WIDTH, half_bright};
+use crate::decoration::{self, Decoration};
 use crate::font;
 use crate::leisure::{self, Skit};
 use crate::look::{self, Look};
@@ -297,6 +298,11 @@ pub struct Display {
     tasks_total: usize,
     /// The robot's screens or korekore's (ADR-0021); kept by the firmware across restarts.
     screens: Screens,
+    /// Drawn over either set of screens (ADR-0022); kept by the firmware across restarts.
+    decoration: Decoration,
+    /// The time the decoration was last drawn at, which it stays at while it holds still, and when it moves next.
+    decoration_t: u32,
+    decoration_at: u32,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -915,6 +921,9 @@ impl Display {
             page_turn_at: 0,
             tasks_total: 0,
             screens: Screens::Robot,
+            decoration: Decoration::Off,
+            decoration_t: 0,
+            decoration_at: 0,
         }
     }
 
@@ -1304,6 +1313,7 @@ impl Display {
             Mode::Leisure => self.draw_leisure_scene(&mut canvas, scene, &leisure),
             Mode::Duty => self.draw_pet_scene(&mut canvas, scene, label, status_color),
         }
+        self.draw_decoration(&mut canvas, scene);
         if dim {
             canvas.dim();
         }
@@ -1551,6 +1561,48 @@ impl Display {
     }
 
     /// Redraws immediately. After a key press changes the pomodoro, don't wait for the next animation frame.
+    /// Which decoration the box draws over its screens.
+    pub fn decoration(&self) -> Decoration {
+        self.decoration
+    }
+
+    /// Draws `decoration` over the screens from now on; redraws on a change.
+    pub fn set_decoration(&mut self, screen: &mut dyn Screen, scene: &Scene, decoration: Decoration) {
+        if self.decoration == decoration {
+            return;
+        }
+        self.decoration = decoration;
+        if self.ready {
+            let _ = self.render(screen, scene);
+        }
+    }
+
+    /// Whether the decoration moves now. It holds still while something needs the user, so the only motion is the
+    /// buddy asking; and while the menu is up or the screen is dimmed for the night.
+    fn decoration_moves(&self, scene: &Scene) -> bool {
+        self.decoration != Decoration::Off
+            && self.panel.is_none()
+            && !self.needs_input()
+            && !(self.mode == Mode::Leisure && scene.leisure.view(scene.now_ms).dim)
+    }
+
+    fn needs_input(&self) -> bool {
+        self.state == State::InputRequired || self.tasks.iter().any(|task| task.state == State::InputRequired)
+    }
+
+    /// The decoration over the finished screen, before dimming, the menu and the tap outline: the same drawing
+    /// whichever set of screens is up.
+    fn draw_decoration(&mut self, canvas: &mut Canvas, scene: &Scene) {
+        if self.decoration == Decoration::Off {
+            return;
+        }
+        if self.decoration_moves(scene) {
+            self.decoration_t = scene.now_ms;
+        }
+        self.decoration_at = scene.now_ms.wrapping_add(decoration::FRAME_MS);
+        decoration::draw(canvas, self.decoration, self.decoration_t);
+    }
+
     pub fn refresh(&mut self, screen: &mut dyn Screen, scene: &Scene) {
         if self.ready {
             let _ = self.render(screen, scene);
@@ -1603,6 +1655,10 @@ impl Display {
             let _ = self.render(screen, scene);
         }
         if (now.wrapping_sub(self.next_animation_at) as i32) < 0 {
+            // Between the screens' own frames, a moving decoration still needs its own.
+            if self.decoration_moves(scene) && now.wrapping_sub(self.decoration_at) as i32 >= 0 {
+                let _ = self.render(screen, scene);
+            }
             return;
         }
         self.animation_frame = self.animation_frame.wrapping_add(1);

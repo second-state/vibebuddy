@@ -1,5 +1,5 @@
 ---
-status: proposed
+status: accepted
 ---
 
 # Decorations are one overlay for every set of box screens
@@ -9,8 +9,8 @@ On 2026-11-04 Michael asked for holiday themes the App writes to the box: backgr
 So a decoration is a third thing beside the Character and the box screens, and it uses only what doesn't depend on the layout:
 
 - **Kinds.** Things that fall or drift over the whole screen (snow, leaves) and things that run along its edges (a string of lights, a frame of holly). Nothing that sits at a place a layout gives meaning to: no hats on the buddy, no new backgrounds, no recoloured cards.
-- **One drawing for every set of box screens.** The box draws the decoration last, over the finished 320×240 frame, whichever set drew it. Both sets render a full frame and flush it whole (`canvas.rs`, `lcd.rs`), so there is one place to add it. A new set of box screens gets every decoration for free.
-- **It never hides what the screen means.** It leaves the top 4 rows alone, where both sets draw the state colour (4 rows on the robot screens, 3 on korekore). It doesn't use the state colours (ready blue, working orange, needs input yellow, done green, failed red) as a main colour, since korekore fills the whole screen with some of them: Christmas lights are warm white and gold with small dots of other colours, not red and green bulbs. Falling things are small and sparse enough that text and task cards stay readable under them. While the box needs input, it stops moving, so the only motion on the screen is the buddy asking.
+- **One drawing for every set of box screens.** The box draws the decoration over the finished 320×240 frame, whichever set drew it, before the night dimming, the menu and the tap outline (`decoration.rs`). Both sets render a full frame and flush it whole (`canvas.rs`, `lcd.rs`), so there is one place to add it. A new set of box screens gets every decoration for free.
+- **It never hides what the screen means.** It leaves the top 4 rows alone, where both sets draw the state colour (4 rows on the robot screens, 3 on korekore). It doesn't use the state colours (ready blue, working orange, needs input yellow, done green, failed red) as a main colour, since korekore fills the whole screen with some of them: Christmas lights are warm white and gold with small dots of other colours, not red and green bulbs. A flake or leaf that would touch anything but plain ground (text, an edge, an icon) isn't drawn in that frame, so it seems to pass behind it and text stays whole; this looks at the pixels, not at either layout. While the box needs input, it stops moving, so the only motion on the screen is the buddy asking.
 - **In the firmware, picked by a command.** Like the box screens, each decoration is compiled in and switched over the link, and the box keeps the choice across restarts. Off is the default. Turning one on doesn't write the Character pack or flash anything.
 - **Not tied to a Character or a date.** Pip with no snow and the robot with snow are both fine. The App doesn't turn a decoration on by the calendar; the user picks it, as with a Character.
 
@@ -23,7 +23,7 @@ So a decoration is a third thing beside the Character and the box screens, and i
 
 ## Consequences
 
-- The firmware gets a decoration step after each set's frame and before the flush, a `decoration` field in the status, and a command to set it, the way `device.screens` works. The robot and korekore pixel tests stay the same with the decoration off, and new pinned pixels cover each decoration on both sets.
-- Animation means more full-frame flushes while a decoration moves. The rate is checked on the box, and the decoration stops while the screen is dimmed for the night.
+- The firmware gets a decoration step after each set's frame, a `device.decoration` command and a `DECORATION` line, the way `device.screens` works (docs/protocol.md). The settings record has no free word, so the decoration takes the second byte of the screens word; firmware from before it reads a decorated korekore record as the robot's, which only matters after a rollback. The robot and korekore pixels stay the same with the decoration off. `cargo run -p vibebuddy-firmware-core --example decoration_preview -- <dir>` draws each decoration on both sets.
+- A moving decoration redraws the frame every 150 ms between the screens' own frames, without speeding up the buddy's animation. The rate is checked on the box. It holds still while the menu is up, while the box needs input, and while the screen is dimmed for the night.
 - The Mac app and the Linux app both get a decoration picker on the Device page, off while the box is away or runs firmware that doesn't report a decoration, with zh-Hans strings on both sides.
 - The first two decorations are Leaves (falling autumn leaves, for Thanksgiving 2026 on 11-26) and Snow (for Christmas). Both ship in one firmware release and one App release about a week before Thanksgiving, and that App release also carries Tom and Pip. Lights come after.

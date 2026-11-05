@@ -170,6 +170,11 @@ struct KorekoreDevicePage: View {
                 if connected, device?.screens == nil {
                     KNote(String(localized: "Update the box's firmware to choose its screens."))
                 }
+                field(String(localized: "Decoration")) { decorationChoice }
+                // Firmware too old for the screens is too old for this as well, and already has its note.
+                if connected, device?.screens != nil, device?.decoration == nil {
+                    KNote(String(localized: "Update the box's firmware to choose a decoration."))
+                }
                 Spacer(minLength: 8)
                 if model.firmwareUpdateAvailable, connected, !canFlash {
                     KNote(String(localized: "Plug in the cable to update the box's firmware."))
@@ -194,6 +199,18 @@ struct KorekoreDevicePage: View {
         if let screens = device?.screens {
             KMenu(selection: screens, options: [("robot", String(localized: "Robot")), ("korekore", "korekore")]) { style in
                 if style != screens { model.setScreens(style) }
+            }
+            .disabled(model.operationRunning || !connected)
+        } else {
+            Text(verbatim: "—")
+        }
+    }
+
+    /// The decoration the box draws over either set of screens (ADR-0022), as the box last said.
+    @ViewBuilder private var decorationChoice: some View {
+        if let decoration = device?.decoration {
+            KMenu(selection: decoration, options: [("off", String(localized: "Off")), ("leaves", String(localized: "Falling leaves")), ("snow", String(localized: "Snow"))]) { name in
+                if name != decoration { model.setDecoration(name) }
             }
             .disabled(model.operationRunning || !connected)
         } else {
