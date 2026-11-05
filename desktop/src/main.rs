@@ -1,8 +1,10 @@
 //! `vibebuddy-desktop`: VibeBuddy's tray icon and settings window outside macOS, the counterpart of the Mac
-//! app's menu bar icon and settings window. It is only a client of `vibebuddyd`: systemd supervises the
-//! daemon here, so quitting the app leaves the box online.
+//! app's menu bar icon and settings window. It is only a client of `vibebuddyd`. On Linux systemd supervises the
+//! daemon, so quitting the app leaves the box online; on Windows the app supervises it, as the Mac app does.
 
-// The tray exists only on Linux; other builds are for working on the window.
+// No console window behind the app on Windows.
+#![cfg_attr(windows, windows_subsystem = "windows")]
+// The tray exists only on Linux and Windows; macOS builds are for working on the window.
 #![cfg_attr(not(target_os = "linux"), allow(dead_code))]
 
 mod agents;
@@ -20,6 +22,10 @@ mod preview;
 mod status;
 #[cfg(target_os = "linux")]
 mod tray;
+#[cfg(windows)]
+mod tray_windows;
+#[cfg(windows)]
+mod windows;
 
 use std::time::{Duration, SystemTime};
 
@@ -27,7 +33,7 @@ use iced::widget::image;
 use iced::{Element, Subscription, Task, Theme, window};
 
 use i18n::{UiLanguage, tr};
-#[cfg(target_os = "linux")]
+#[cfg(any(target_os = "linux", windows))]
 use status::MenuState;
 use status::{Config, Status};
 
@@ -45,12 +51,29 @@ const SETTINGS: &str = "--settings";
 #[cfg(target_os = "linux")]
 static INSTANCE: std::sync::Mutex<Option<std::os::unix::net::UnixListener>> = std::sync::Mutex::new(None);
 
+/// The tray icon's events, made on the main thread and handed to the subscription that reads them.
+#[cfg(windows)]
+static TRAY_EVENTS: std::sync::Mutex<Option<futures::channel::mpsc::UnboundedReceiver<tray_windows::TrayEvent>>> =
+    std::sync::Mutex::new(None);
+
 fn main() -> iced::Result {
     #[cfg(target_os = "linux")]
     match instance::claim(std::env::args().any(|arg| arg == RESTARTED)) {
         instance::Claim::First(listener) => *INSTANCE.lock().unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(listener),
         instance::Claim::HandedOff => return Ok(()),
         instance::Claim::Unavailable => {}
+    }
+    #[cfg(windows)]
+    {
+        if let windows::Claim::HandedOff = windows::claim(std::env::args().any(|arg| arg == RESTARTED)) {
+            return Ok(());
+        }
+        windows::supervise_daemon();
+        // On the main thread, whose window loop iced runs: the icon's messages arrive there.
+        match tray_windows::create() {
+            Ok(events) => *TRAY_EVENTS.lock().unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(events),
+            Err(error) => eprintln!("vibebuddy-desktop: no tray icon ({error}); opening the window instead"),
+        }
     }
     let mut app = iced::daemon(App::boot, App::update, App::view)
         .title(App::title)
@@ -508,12 +531,12 @@ impl App {
         let restarted = std::env::args().any(|arg| arg == RESTARTED || arg == SETTINGS);
         let first = first_launch();
         // The install script connected the agents and set up the start at login; the guide is for what it couldn't.
-        app.guide = (first && cfg!(target_os = "linux")).then_some(0);
+        app.guide = (first && cfg!(any(target_os = "linux", windows))).then_some(0);
         #[cfg(debug_assertions)]
         {
             app.guide = std::env::var("VIBEBUDDY_KOREKORE_GUIDE").ok().and_then(|page| page.parse().ok()).or(app.guide);
         }
-        let open = first || restarted || !cfg!(target_os = "linux");
+        let open = first || restarted || !cfg!(any(target_os = "linux", windows)) || no_tray();
         let task = if open { Task::done(Message::OpenSettings) } else { Task::none() };
         (app, task)
     }
@@ -534,7 +557,9 @@ impl App {
             if self.plugin { Subscription::none() } else { Subscription::run(run_tray) },
             Subscription::run(run_instance),
         );
-        #[cfg(not(target_os = "linux"))]
+        #[cfg(windows)]
+        let (tray, instance) = (Subscription::run(run_tray_windows), Subscription::run(run_instance_windows));
+        #[cfg(not(any(target_os = "linux", windows)))]
         let (tray, instance) = (Subscription::none(), Subscription::none());
         // Only while the Conversation tab is in an open window: the history is read again when it changed.
         let conversation = if self.settings.is_some() && self.tab == Tab::Conversation {
@@ -719,17 +744,17 @@ impl App {
                 }
             }
             Message::OpenCodexInstallPage => {
-                if let Err(error) = launch("xdg-open", &[std::ffi::OsStr::new(CODEX_INSTALL_PAGE)]) {
+                if let Err(error) = open_target(std::ffi::OsStr::new(CODEX_INSTALL_PAGE)) {
                     self.notice = Some(Err(error));
                 }
             }
             Message::OpenClaudeInstallPage => {
-                if let Err(error) = launch("xdg-open", &[std::ffi::OsStr::new(CLAUDE_INSTALL_PAGE)]) {
+                if let Err(error) = open_target(std::ffi::OsStr::new(CLAUDE_INSTALL_PAGE)) {
                     self.notice = Some(Err(error));
                 }
             }
             Message::OpenAnthropicConsole => {
-                if let Err(error) = launch("xdg-open", &[std::ffi::OsStr::new(ANTHROPIC_CONSOLE)]) {
+                if let Err(error) = open_target(std::ffi::OsStr::new(ANTHROPIC_CONSOLE)) {
                     self.notice = Some(Err(error));
                 }
             }
@@ -774,13 +799,13 @@ impl App {
             }
             Message::CheckForUpdatesNow => return Task::perform(client::check_for_updates(), Message::Done),
             Message::OpenReleases => {
-                if let Err(error) = launch("xdg-open", &[std::ffi::OsStr::new(RELEASES_PAGE)]) {
+                if let Err(error) = open_target(std::ffi::OsStr::new(RELEASES_PAGE)) {
                     self.notice = Some(Err(error));
                 }
             }
             Message::ReportProblem => {
                 let url = issue_url(&self.diagnostics_summary());
-                if let Err(error) = launch("xdg-open", &[std::ffi::OsStr::new(url.as_str())]) {
+                if let Err(error) = open_target(std::ffi::OsStr::new(url.as_str())) {
                     self.notice = Some(Err(error));
                 }
             }
@@ -1242,8 +1267,11 @@ impl App {
                 return Task::batch([Task::done(Message::OpenSettings), Task::done(Message::CheckForUpdatesNow)]);
             }
             Message::StartDaemon => {
-                let args = ["--user", "restart", "vibebuddyd"].map(std::ffi::OsStr::new);
-                if let Err(error) = launch("systemctl", &args) {
+                #[cfg(windows)]
+                let result = windows::restart_daemon();
+                #[cfg(not(windows))]
+                let result = launch("systemctl", &["--user", "restart", "vibebuddyd"].map(std::ffi::OsStr::new));
+                if let Err(error) = result {
                     self.notice = Some(Err(error));
                 }
             }
@@ -1295,13 +1323,17 @@ impl App {
             }
             Message::Notice(result) => self.notice = Some(result),
             Message::OpenLogsFolder => {
-                if let Err(error) = state_dir().ok_or("HOME is not set".to_owned()).and_then(|dir| launch("xdg-open", &[dir.as_os_str()])) {
+                if let Err(error) = state_dir().ok_or("HOME is not set".to_owned()).and_then(|dir| open_target(dir.as_os_str())) {
                     self.notice = Some(Err(error));
                 }
             }
             Message::ShowDaemonLog => {
-                let args = ["journalctl", "--user", "-u", "vibebuddyd", "-f"].map(std::ffi::OsStr::new);
-                if let Err(error) = launch("xdg-terminal-exec", &args) {
+                // Windows has no journal: the daemon this app started writes to a file.
+                #[cfg(windows)]
+                let result = windows::daemon_log().ok_or("no state directory".to_owned()).and_then(|log| open_target(log.as_os_str()));
+                #[cfg(not(windows))]
+                let result = launch("xdg-terminal-exec", &["journalctl", "--user", "-u", "vibebuddyd", "-f"].map(std::ffi::OsStr::new));
+                if let Err(error) = result {
                     self.notice = Some(Err(error));
                 }
             }
@@ -1312,7 +1344,7 @@ impl App {
             }
             Message::SignIn => return Task::perform(client::sign_in(), Message::SignInUrl),
             Message::SignInUrl(result) => {
-                match result.and_then(|url| launch("xdg-open", &[std::ffi::OsStr::new(&url)])) {
+                match result.and_then(|url| open_target(std::ffi::OsStr::new(&url))) {
                     Ok(()) => self.signing_in = true,
                     Err(error) => {
                         self.signing_in = false;
@@ -1429,6 +1461,8 @@ impl App {
             })
             .discard();
         }
+        #[cfg(windows)]
+        tray_windows::update(&MenuState::derive(self.status.as_ref()), &korekore::picture::BoxPicture::derive(self.status.as_ref()));
         Task::none()
     }
 
@@ -1486,6 +1520,14 @@ fn issue_url(summary: &str) -> reqwest::Url {
 }
 
 /// Starts a desktop helper and lets it run on its own.
+/// A link in the browser, or a folder or file in its usual app.
+fn open_target(target: &std::ffi::OsStr) -> Result<(), String> {
+    #[cfg(windows)]
+    return windows::open(target);
+    #[cfg(not(windows))]
+    launch("xdg-open", &[target])
+}
+
 fn launch(program: &str, args: &[&std::ffi::OsStr]) -> Result<(), String> {
     std::process::Command::new(program)
         .args(args)
@@ -1504,12 +1546,19 @@ async fn export_diagnostics(summary: String, config: Option<Config>) -> Result<S
     let target = user_dir("DOWNLOAD", "Downloads")?.join(format!("vibe-buddy-diagnostics-{seconds}"));
     let fail = |error: std::io::Error| format!("{}: {error}", target.display());
     tokio::fs::create_dir_all(&target).await.map_err(fail)?;
-    let journal = tokio::process::Command::new("journalctl")
-        .args(["--user", "-u", "vibebuddyd", "--since", "-2d", "--no-pager", "-o", "short-iso"])
-        .output()
-        .await
-        .map_err(|error| format!("cannot run journalctl: {error}"))?;
-    tokio::fs::write(target.join("vibebuddyd.log"), journal.stdout).await.map_err(fail)?;
+    #[cfg(windows)]
+    if let Some(log) = windows::daemon_log().filter(|path| path.is_file()) {
+        tokio::fs::copy(log, target.join("vibebuddyd.log")).await.map_err(fail)?;
+    }
+    #[cfg(not(windows))]
+    {
+        let journal = tokio::process::Command::new("journalctl")
+            .args(["--user", "-u", "vibebuddyd", "--since", "-2d", "--no-pager", "-o", "short-iso"])
+            .output()
+            .await
+            .map_err(|error| format!("cannot run journalctl: {error}"))?;
+        tokio::fs::write(target.join("vibebuddyd.log"), journal.stdout).await.map_err(fail)?;
+    }
     if let Some(hooks) = state_dir().map(|dir| dir.join("codex-hooks.log")).filter(|path| path.is_file()) {
         tokio::fs::copy(hooks, target.join("codex-hooks.log")).await.map_err(fail)?;
     }
@@ -1518,7 +1567,7 @@ async fn export_diagnostics(summary: String, config: Option<Config>) -> Result<S
         tokio::fs::write(target.join("config.json"), text).await.map_err(fail)?;
     }
     tokio::fs::write(target.join("summary.txt"), summary).await.map_err(fail)?;
-    launch("xdg-open", &[target.as_os_str()])?;
+    open_target(target.as_os_str())?;
     Ok(tr("Saved to %@", &[&target.display()]))
 }
 
@@ -1615,6 +1664,17 @@ fn autostart_entry() -> Option<std::path::PathBuf> {
     Some(config_dir()?.parent()?.join("autostart/vibebuddy.desktop"))
 }
 
+#[cfg(windows)]
+fn launch_at_login() -> bool {
+    windows::launch_at_login()
+}
+
+#[cfg(windows)]
+fn set_launch_at_login(enabled: bool) -> Result<(), String> {
+    windows::set_launch_at_login(enabled)
+}
+
+#[cfg(not(windows))]
 fn launch_at_login() -> bool {
     match autostart_entry().and_then(|path| std::fs::read_to_string(path).ok()) {
         Some(entry) => !entry.lines().any(|line| line.trim() == "Hidden=true"),
@@ -1622,6 +1682,7 @@ fn launch_at_login() -> bool {
     }
 }
 
+#[cfg(not(windows))]
 fn set_launch_at_login(enabled: bool) -> Result<(), String> {
     let path = autostart_entry().ok_or("HOME is not set")?;
     let exe = std::env::current_exe().map_err(|error| error.to_string())?;
@@ -1653,7 +1714,11 @@ fn notify_new_firmware(status: &Status) {
     let title = tr("Box firmware %@ is available", &[&offer.version]);
     // As the korekore canvas words it ("SYSTEM NOTIFICATIONS").
     let body = tr("Update it from Settings › Device.", &[]);
-    if let Err(error) = launch("notify-send", &["--app-name=VibeBuddy".as_ref(), title.as_ref(), body.as_ref()]) {
+    #[cfg(windows)]
+    let result = windows::notify(&title, &body);
+    #[cfg(not(windows))]
+    let result = launch("notify-send", &["--app-name=VibeBuddy".as_ref(), title.as_ref(), body.as_ref()]);
+    if let Err(error) = result {
         eprintln!("vibebuddy-desktop: {error}");
     }
 }
@@ -1821,6 +1886,54 @@ fn run_instance() -> impl futures::Stream<Item = Message> {
         };
         while listener.accept().await.is_ok() {
             let _ = output.send(Message::OpenSettings).await;
+        }
+    })
+}
+
+/// The tray icon couldn't be made on Windows: the window is the only way in, so it opens.
+fn no_tray() -> bool {
+    #[cfg(windows)]
+    return TRAY_EVENTS.lock().unwrap_or_else(|poisoned| poisoned.into_inner()).is_none();
+    #[cfg(not(windows))]
+    false
+}
+
+#[cfg(windows)]
+fn run_tray_windows() -> impl futures::Stream<Item = Message> {
+    use futures::StreamExt;
+    use tray_windows::TrayEvent;
+
+    let events = TRAY_EVENTS.lock().unwrap_or_else(|poisoned| poisoned.into_inner()).take();
+    futures::stream::iter(events).flatten().map(|event| match event {
+        TrayEvent::OpenSettings => Message::OpenSettings,
+        TrayEvent::RestartDaemon => Message::StartDaemon,
+        TrayEvent::CheckForUpdates => Message::CheckFromMenu,
+        TrayEvent::ReportProblem => Message::ReportProblem,
+        TrayEvent::Quit => Message::Quit,
+    })
+}
+
+/// Another copy started (the Start menu, while this one runs) opens this pipe: show Settings, as on Linux.
+#[cfg(windows)]
+fn run_instance_windows() -> impl futures::Stream<Item = Message> {
+    use futures::SinkExt;
+    use tokio::net::windows::named_pipe::ServerOptions;
+
+    iced::stream::channel(4, async |mut output| {
+        let name = windows::instance_pipe();
+        let mut first = true;
+        loop {
+            let server = match ServerOptions::new().first_pipe_instance(first).create(&name) {
+                Ok(server) => server,
+                Err(error) => {
+                    eprintln!("vibebuddy-desktop: cannot listen for other copies ({error})");
+                    return;
+                }
+            };
+            first = false;
+            if server.connect().await.is_ok() {
+                let _ = output.send(Message::OpenSettings).await;
+            }
         }
     })
 }

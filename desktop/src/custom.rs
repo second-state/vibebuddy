@@ -68,14 +68,14 @@ pub fn write(path: &Path, bytes: &[u8]) {
 /// Asks for one to four drawings through the desktop's file chooser and decodes them, in file name
 /// order (normal, eyes closed, happy, sad). Ok(None) when the user cancels.
 pub async fn choose_drawings() -> Result<Option<Vec<Image>>, String> {
-    #[cfg(target_os = "linux")]
+    #[cfg(any(target_os = "linux", windows))]
     let files = rfd::AsyncFileDialog::new().add_filter("Images", &["png", "jpg", "jpeg"]).pick_files().await;
-    #[cfg(not(target_os = "linux"))]
+    #[cfg(not(any(target_os = "linux", windows)))]
     let files: Option<Vec<PathBuf>> = None;
     let Some(files) = files else { return Ok(None) };
-    #[cfg(target_os = "linux")]
+    #[cfg(any(target_os = "linux", windows))]
     let mut paths: Vec<PathBuf> = files.iter().map(|file| file.path().to_path_buf()).collect();
-    #[cfg(not(target_os = "linux"))]
+    #[cfg(not(any(target_os = "linux", windows)))]
     let mut paths = files;
     paths.sort();
     if !(1..=4).contains(&paths.len()) {
