@@ -16,14 +16,13 @@
 #include "lwip/inet.h"
 #include "nvs.h"
 #include "nvs_flash.h"
+#include "pair_store.h"
 #include "mdns.h"
 
-typedef struct Bridge Bridge;
 typedef void (*bridge_callback)(void *, unsigned, unsigned, const unsigned char *, size_t);
 extern Bridge *vb_link_new(const unsigned char *seed);
-extern bool vb_link_pair(Bridge *, const unsigned char *, size_t, const unsigned char *, size_t);
-extern bool vb_link_valid_key(const unsigned char *, size_t);
-extern bool vb_link_unpair(Bridge *, const unsigned char *, size_t, unsigned, bridge_callback, void *);
+extern bool vb_link_pairing(Bridge *, const unsigned char *, size_t, bool, unsigned, bool (*)(void *, const unsigned char *, size_t), void *, bridge_callback, void *);
+extern unsigned vb_link_paired_count(const Bridge *);
 extern long vb_link_public(const Bridge *, unsigned char *, size_t);
 extern void vb_lan_open(Bridge *, unsigned, const unsigned char *, unsigned, bridge_callback, void *);
 extern void vb_lan_receive(Bridge *, unsigned, const unsigned char *, size_t, unsigned, bridge_callback, void *);
@@ -37,14 +36,12 @@ extern long vb_lan_send(Bridge *, const unsigned char *, size_t, unsigned char *
  * waiting less turns routine backpressure into a link teardown that loses whatever was in flight.
  * The wait drains the microphone in slices (WAIT_SLICE_MS) so patience cannot starve acquisition,
  * whose DMA hold is far smaller than this bound; the audio ring covers the stalled emission. */
-enum { MAX_PAIRS = 16, KEY_LENGTH = 43, PORT = 7340, BUFFER = 8192, SEND_TIMEOUT_MS = 4000, WAIT_SLICE_MS = 40 };
+enum { KEY_LENGTH = 43, PORT = 7340, BUFFER = 8192, SEND_TIMEOUT_MS = 4000, WAIT_SLICE_MS = 40 };
 enum { CLOSE_NONE, CLOSE_PROTOCOL, CLOSE_INPUT_OVERFLOW, CLOSE_PEER_EOF, CLOSE_RECEIVE, CLOSE_SEND, CLOSE_ENCRYPT, CLOSE_WIFI };
 enum { SEND_NONE, SEND_PAYLOAD, SEND_NEWLINE };
 static Bridge *bridge;
 static nvs_handle_t store;
-static char public_key[44], keys[MAX_PAIRS][44], ssid[33], password[65];
-static char names[MAX_PAIRS][33];
-static unsigned pair_count;
+static char public_key[44], ssid[33], password[65];
 static int listener = -1, client = -1;
 static bool peer, close_pending;
 static unsigned close_reason;
@@ -81,13 +78,6 @@ static int current_rssi(void)
 }
 static bool store_blob(const char *key, const void *data, size_t len)
 { return nvs_set_blob(store, key, data, len) == ESP_OK && nvs_commit(store) == ESP_OK; }
-static bool store_pairs(void)
-{
-    if (pair_count) return nvs_set_blob(store, "pairs", keys, pair_count * sizeof(keys[0])) == ESP_OK &&
-        nvs_set_blob(store, "names", names, pair_count * sizeof(names[0])) == ESP_OK && nvs_commit(store) == ESP_OK;
-    esp_err_t a = nvs_erase_key(store, "pairs"), b = nvs_erase_key(store, "names");
-    return (a == ESP_OK || a == ESP_ERR_NVS_NOT_FOUND) && (b == ESP_OK || b == ESP_ERR_NVS_NOT_FOUND) && nvs_commit(store) == ESP_OK;
-}
 static void set_peer(bool value)
 {
     if (peer == value) return;
@@ -191,6 +181,14 @@ static void bridge_output(void *context, unsigned kind, unsigned conn, const uns
             memcpy(pending_line, bytes, len); pending_line[len] = 0; pending = true; break;
         case 5: set_peer(true); break;
         case 6: set_peer(false); break;
+        /* A reply to a pairing command: for the cable, and for the peer too if that is where the line came from. */
+        case 7: case 8:
+            fwrite(bytes, 1, len, stdout); fputc('\n', stdout);
+            if (kind == 8) {
+                char line[64]; snprintf(line, sizeof(line), "%.*s", (int)len, (const char *)bytes);
+                wifi_link_report(line);
+            }
+            break;
     }
 }
 
@@ -222,7 +220,7 @@ link_status_info wifi_link_get_status(void)
 {
     link_status_info result = {0};
     memcpy(result.ssid, ssid, sizeof(result.ssid));
-    result.paired_count = pair_count;
+    result.paired_count = bridge ? vb_link_paired_count(bridge) : 0;
     result.lan_active = peer && client >= 0;
     esp_netif_ip_info_t ip;
     if (station && esp_netif_get_ip_info(station, &ip) == ESP_OK && ip.ip.addr != 0) {
@@ -382,7 +380,7 @@ bool wifi_link_init(void)
         /* The first experimental build used the RNG before enabling its
          * entropy source. Never silently change an identity that has pairs. */
         size_t pair_len = 0;
-        esp_err_t pairs = nvs_get_blob(store, "pairs", NULL, &pair_len);
+        esp_err_t pairs = pair_store_probe(store, &pair_len);
         if (pairs == ESP_OK && pair_len) { puts("IDENTITY MIGRATION REQUIRED"); return false; }
         if (pairs != ESP_OK && pairs != ESP_ERR_NVS_NOT_FOUND) return false;
         bootloader_random_enable();
@@ -392,18 +390,7 @@ bool wifi_link_init(void)
     } else if (seed_error != ESP_OK || len != sizeof(seed)) return false;
     bridge = vb_link_new(seed); memset(seed, 0, sizeof(seed));
     if (!bridge || vb_link_public(bridge, (unsigned char *)public_key, sizeof(public_key) - 1) != KEY_LENGTH) return false;
-    len = sizeof(keys);
-    esp_err_t pairs_error = nvs_get_blob(store, "pairs", keys, &len);
-    if (pairs_error == ESP_OK && len % sizeof(keys[0]) == 0 && len <= sizeof(keys)) {
-        pair_count = len / sizeof(keys[0]);
-        size_t names_len = sizeof(names);
-        esp_err_t names_error = nvs_get_blob(store, "names", names, &names_len);
-        if (names_error != ESP_ERR_NVS_NOT_FOUND && (names_error != ESP_OK || names_len != pair_count * sizeof(names[0]))) return false;
-        for (unsigned i = 0; i < pair_count; ++i) {
-            keys[i][43] = 0; names[i][32] = 0;
-            if (!vb_link_pair(bridge, (const unsigned char *)keys[i], strlen(keys[i]), (const unsigned char *)names[i], strlen(names[i]))) return false;
-        }
-    } else if (pairs_error != ESP_ERR_NVS_NOT_FOUND) return false;
+    if (!pair_store_load(bridge, &store)) return false;
     len = sizeof(ssid); if (nvs_get_str(store, "ssid", ssid, &len) != ESP_OK) ssid[0] = 0;
     len = sizeof(password); if (nvs_get_str(store, "password", password, &len) != ESP_OK) password[0] = 0;
     if (esp_netif_init() != ESP_OK || esp_event_loop_create_default() != ESP_OK) return false;
@@ -439,52 +426,17 @@ bool wifi_link_init(void)
 static const char *string_field(const cJSON *root, const char *name)
 { const cJSON *value = cJSON_GetObjectItemCaseSensitive(root, name); return cJSON_IsString(value) ? value->valuestring : NULL; }
 
+bool wifi_link_pairing_event(const char *line, const char *event, bool usb)
+{
+    if (strcmp(event, "device.pair") && strcmp(event, "device.unpair") && strcmp(event, "device.pairs")) return false;
+    if (!bridge) { puts("PAIR UNAVAILABLE"); return true; }
+    return vb_link_pairing(bridge, (const unsigned char *)line, strlen(line), usb, milliseconds(),
+                           pair_store_save, &store, bridge_output, NULL);
+}
+
 bool wifi_link_usb_event(const char *event, const cJSON *root)
 {
     if (!bridge) return false;
-    if (!strcmp(event, "device.pair")) {
-        const char *key = string_field(root, "key");
-        const char *name = string_field(root, "name");
-        if (!name || strlen(name) > 32 || strchr(name, '\n') || strchr(name, '\r')) name = "";
-        if (!key || strlen(key) != KEY_LENGTH || !vb_link_valid_key((const unsigned char *)key, KEY_LENGTH)) { puts("PAIR INVALID"); return true; }
-        unsigned i = 0; while (i < pair_count && strcmp(keys[i], key)) ++i;
-        if (i == pair_count && pair_count == MAX_PAIRS) { puts("PAIR FULL"); return true; }
-        if (i == pair_count) {
-            memcpy(keys[i], key, 44); strcpy(names[i], name); ++pair_count;
-            if (!store_pairs()) {
-                --pair_count;
-                puts("LINK SAVE ERROR"); return true;
-            }
-        } else if (strcmp(names[i], name)) {
-            char old[33]; memcpy(old, names[i], sizeof(old)); strcpy(names[i], name);
-            if (!store_pairs()) { memcpy(names[i], old, sizeof(old)); puts("LINK SAVE ERROR"); return true; }
-        }
-        if (!vb_link_pair(bridge, (const unsigned char *)key, KEY_LENGTH, (const unsigned char *)name, strlen(name))) { puts("PAIR INVALID"); return true; }
-        printf("PAIRED %s\n", key); return true;
-    }
-    if (!strcmp(event, "device.pairs")) {
-        printf("PAIRS %u\n", pair_count);
-        for (unsigned i = 0; i < pair_count; ++i) printf("PAIR %s %s\n", keys[i], names[i]);
-        return true;
-    }
-    if (!strcmp(event, "device.unpair")) {
-        const char *key = string_field(root, "key");
-        if (!key || strlen(key) != KEY_LENGTH) { puts("PAIR INVALID"); return true; }
-        unsigned i = 0; while (i < pair_count && strcmp(keys[i], key)) ++i;
-        if (i < pair_count) {
-            char old[44], old_name[33]; memcpy(old, keys[i], sizeof(old)); memcpy(old_name, names[i], sizeof(old_name));
-            memmove(keys[i], keys[i + 1], (pair_count - i - 1) * sizeof(keys[0]));
-            memmove(names[i], names[i + 1], (pair_count - i - 1) * sizeof(names[0])); --pair_count;
-            if (!store_pairs()) {
-                memmove(keys[i + 1], keys[i], (pair_count - i) * sizeof(keys[0]));
-                memmove(names[i + 1], names[i], (pair_count - i) * sizeof(names[0]));
-                memcpy(keys[i], old, sizeof(old)); memcpy(names[i], old_name, sizeof(old_name)); ++pair_count;
-                puts("LINK SAVE ERROR"); return true;
-            }
-            vb_link_unpair(bridge, (const unsigned char *)key, KEY_LENGTH, milliseconds(), bridge_output, NULL);
-        }
-        printf("UNPAIRED %s\n", key); return true;
-    }
     if (!strcmp(event, "device.wifi.scan")) {
         if (scan_pending) return true;
         scan_pending = true;

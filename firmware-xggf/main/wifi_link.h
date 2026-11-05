@@ -13,6 +13,8 @@ bool wifi_link_configured(void);
 bool wifi_link_online(void);
 link_status_info wifi_link_get_status(void);
 bool wifi_link_usb_event(const char *event, const cJSON *root);
+/* Pairing commands, with the box's rules and replies. True if the line was one. */
+bool wifi_link_pairing_event(const char *line, const char *event, bool usb);
 void wifi_link_usb_activity(void);
 void wifi_link_tick(wifi_line_handler handler, void *context);
 void wifi_link_report(const char *line);

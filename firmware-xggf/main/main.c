@@ -371,6 +371,10 @@ static void receive_line(void *context, char *input, bool usb)
         status_transport_update(model, usb);
         bool hello = strcmp(event->valuestring, "device.hello") == 0;
         if (usb) wifi_link_usb_activity();
+        if (wifi_link_pairing_event(input, event->valuestring, usb)) {
+            cJSON_Delete(root);
+            return;
+        }
         bool handled = usb && wifi_link_usb_event(event->valuestring, root);
         if (!handled && strcmp(event->valuestring, "device.audio.start") == 0) {
             const cJSON *rate = cJSON_GetObjectItemCaseSensitive(root, "sample_rate");

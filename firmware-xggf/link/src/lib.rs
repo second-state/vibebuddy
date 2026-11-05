@@ -12,6 +12,8 @@ use core::panic::PanicInfo;
 use core::slice;
 use vibebuddy_firmware_core::{lan, link, noise};
 
+pub mod pairing;
+
 #[cfg(target_os = "none")]
 unsafe extern "C" {
     fn posix_memalign(ptr: *mut *mut c_void, alignment: usize, size: usize) -> c_int;
@@ -52,31 +54,6 @@ pub unsafe extern "C" fn vb_link_new(seed: *const u8) -> *mut Bridge {
     if seed.is_null() { return core::ptr::null_mut(); }
     let mut bytes = [0; 32]; bytes.copy_from_slice(unsafe { slice::from_raw_parts(seed, 32) });
     Box::into_raw(Box::new(Bridge { link: link::Link::new(bytes), session: None, lan: lan::Lan::new(), sealer: None }))
-}
-
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn vb_link_pair(bridge: *mut Bridge, key: *const u8, key_len: usize, name: *const u8, name_len: usize) -> bool {
-    let Some(bridge) = (unsafe { bridge.as_mut() }) else { return false };
-    if key.is_null() { return false; }
-    let Some(key) = core::str::from_utf8(unsafe { slice::from_raw_parts(key, key_len) }).ok().and_then(link::decode_key) else { return false };
-    if name.is_null() { return false; }
-    let Ok(name) = core::str::from_utf8(unsafe { slice::from_raw_parts(name, name_len) }) else { return false };
-    bridge.link.pair(key, name).is_ok()
-}
-
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn vb_link_valid_key(key: *const u8, len: usize) -> bool {
-    !key.is_null() && core::str::from_utf8(unsafe { slice::from_raw_parts(key, len) }).ok().and_then(link::decode_key).is_some()
-}
-
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn vb_link_unpair(bridge: *mut Bridge, key: *const u8, key_len: usize, now: u32, callback: Callback, context: *mut c_void) -> bool {
-    let Some(bridge) = (unsafe { bridge.as_mut() }) else { return false };
-    if key.is_null() { return false; }
-    let Some(key) = core::str::from_utf8(unsafe { slice::from_raw_parts(key, key_len) }).ok().and_then(link::decode_key) else { return false };
-    let changed = bridge.link.unpair(&key);
-    let result = bridge.lan.unpaired(&key, now); outputs(bridge, result, callback, context);
-    changed
 }
 
 #[unsafe(no_mangle)]
@@ -182,6 +159,13 @@ mod tests {
         let list = unsafe { &mut *(ctx as *mut Captured) };
         list.push((kind, unsafe { slice::from_raw_parts(data, len) }.into()));
     }
+    unsafe extern "C" fn saved(_: *mut c_void, _: *const u8, _: usize) -> bool { true }
+    fn pair_for_test(bridge: *mut Bridge, key: &str) {
+        let line = format!(r#"{{"version":1,"event":"device.pair","key":"{key}","name":"test"}}"#);
+        let mut captured = Captured::new();
+        assert!(unsafe { pairing::vb_link_pairing(bridge, line.as_ptr(), line.len(), true, 0, saved, core::ptr::null_mut(), collect, (&mut captured as *mut Captured).cast()) });
+        assert_eq!(captured, [(7, format!("PAIRED {key}").into_bytes())]);
+    }
 
     #[test]
     fn c_bridge_authenticates_and_carries_encrypted_notifications() {
@@ -189,7 +173,7 @@ mod tests {
         let bridge = unsafe { vb_link_new(box_seed.as_ptr()) };
         let computer = ed25519_dalek::SigningKey::from_bytes(&computer_seed).verifying_key().to_bytes();
         let key = link::encode_key(&computer);
-        assert!(unsafe { vb_link_pair(bridge, key.as_ptr(), key.len(), b"test".as_ptr(), 4) });
+        pair_for_test(bridge, &key);
         let box_key = unsafe { &*bridge }.link.public_key();
         let mut captured = Captured::new(); let ctx = (&mut captured as *mut Captured).cast();
         unsafe { vb_lan_open(bridge, 1, [4u8;32].as_ptr(), 100, collect, ctx) };
@@ -219,6 +203,57 @@ mod tests {
         assert_eq!(captured, [(4, event.to_vec())]); captured.clear();
         unsafe { vb_lan_receive(bridge, 2, encrypted.as_ptr(), encrypted.len(), 20003, collect, ctx) };
         assert!(captured.iter().any(|e| e.0 == 3), "a replay closes the connection");
+        unsafe { drop(Box::from_raw(bridge)) };
+    }
+
+    /// A bridge with a computer paired and linked over Wi-Fi, and that computer's key.
+    fn linked(computer_seed: [u8; 32]) -> (*mut Bridge, alloc::string::String) {
+        let bridge = unsafe { vb_link_new([1u8; 32].as_ptr()) };
+        let computer = ed25519_dalek::SigningKey::from_bytes(&computer_seed).verifying_key().to_bytes();
+        let key = link::encode_key(&computer);
+        pair_for_test(bridge, &key);
+        let box_key = unsafe { &*bridge }.link.public_key();
+        let mut captured = Captured::new();
+        let ctx = (&mut captured as *mut Captured).cast();
+        unsafe { vb_lan_open(bridge, 1, [4u8; 32].as_ptr(), 100, collect, ctx) };
+        let (_, first) = noise::Initiator::start(computer_seed, &box_key, [3; 32], br#"{"takeover":false}"#).unwrap();
+        let first = format!("{first}\n");
+        captured.clear();
+        unsafe { vb_lan_receive(bridge, 1, first.as_ptr(), first.len(), 101, collect, ctx) };
+        assert!(captured.iter().any(|event| event.0 == 5), "the computer links");
+        (bridge, key)
+    }
+
+    #[test]
+    fn pairing_over_the_network_is_refused_and_changes_nothing() {
+        let (bridge, key) = linked([2; 32]);
+        let other = link::encode_key(&[9; 32]);
+        for line in [
+            format!(r#"{{"version":1,"event":"device.pair","key":"{other}","name":"intruder"}}"#),
+            format!(r#"{{"version":1,"event":"device.unpair","key":"{key}"}}"#),
+            r#"{"version":1,"event":"device.pairs"}"#.into(),
+        ] {
+            let mut captured = Captured::new();
+            let handled = unsafe { pairing::vb_link_pairing(bridge, line.as_ptr(), line.len(), false, 200, saved, core::ptr::null_mut(), collect, (&mut captured as *mut Captured).cast()) };
+            assert!(handled);
+            assert_eq!(captured, [(8, b"ERROR cable_only".to_vec())], "{line}");
+            assert_eq!(unsafe { pairing::vb_link_paired_count(bridge) }, 1, "{line}");
+            assert!(unsafe { &*bridge }.lan.linked_key().is_some(), "the link stays up: {line}");
+        }
+        unsafe { drop(Box::from_raw(bridge)) };
+    }
+
+    #[test]
+    fn unpairing_a_linked_computer_tells_it_and_closes_the_link_after_the_reply() {
+        let (bridge, key) = linked([2; 32]);
+        let mut sent = Captured::new();
+        let line = format!(r#"{{"version":1,"event":"device.unpair","key":"{key}"}}"#);
+        assert!(unsafe { pairing::vb_link_pairing(bridge, line.as_ptr(), line.len(), true, 200, saved, core::ptr::null_mut(), collect, (&mut sent as *mut Captured).cast()) });
+        let kinds: Vec<u32> = sent.iter().map(|event| event.0).collect();
+        assert_eq!(sent[0], (7, format!("UNPAIRED {key}").into_bytes()));
+        assert_eq!(kinds[1..], [2, 3, 6], "told, closed, and no peer any more");
+        assert_eq!(unsafe { pairing::vb_link_paired_count(bridge) }, 0);
+        assert!(unsafe { &*bridge }.lan.linked_key().is_none());
         unsafe { drop(Box::from_raw(bridge)) };
     }
 

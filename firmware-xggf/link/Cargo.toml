@@ -11,6 +11,8 @@ crate-type = ["staticlib", "rlib"]
 
 [dependencies]
 vibebuddy-firmware-core = { path = "../../firmware-rs/core" }
+vibebuddy-protocol = { path = "../../protocol", default-features = false }
+serde_json = { version = "1", default-features = false, features = ["alloc"] }
 
 [features]
 fast-clock = ["vibebuddy-firmware-core/fast-clock"]
