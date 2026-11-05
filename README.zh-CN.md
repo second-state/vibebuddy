@@ -47,7 +47,7 @@ VibeBuddy 是给 AI 编程 Agent 配的桌面宠物。它住在键盘旁一个�
 ## 需要准备
 
 - **盒子：** 一台 VibeBuddy（ESP32-S3，16 MB Flash，8 MB PSRAM），带 LCD、扬声器和三个按键。一根 USB-C 线同时供电、烧录和传事件。可以直接[购买成品](https://vibekeys.dev/vibebuddy.html?utm_source=github&utm_medium=readme&utm_campaign=vibe-buddy-launch)，组装和刷机都已完成；想自己做，硬件说明见 [`docs/hardware.md`](docs/hardware.md)。
-- **一台 Mac：** Apple 芯片，macOS 14 或更新；也可以是一台 Linux 机器（实验性，见下文）。
+- **一台 Mac：** Apple 芯片，macOS 14 或更新；也可以是一台 Linux 或 Windows 机器（实验性，见下文）。
 - **至少一个 Agent：** Codex 或 Claude Code。GitHub Actions 用的是你已经登录好的 `gh` 命令行。
 
 ## 上手
@@ -85,6 +85,12 @@ systemctl --user enable --now vibebuddyd && vibebuddy-hook install
 等 AUR 重新开放注册后，它会以 `vibebuddy-bin` 上架。想从源码编译的话，在装好 Rust 工具链的仓库里运行 `packaging/linux/install.sh`，它会编译所有程序。两种方式都一样：脚本把程序装进 `~/.local/bin`，把 `vibebuddyd` 注册成 systemd 用户服务，把 VibeBuddy App 放进启动器并设为登录时启动，再给本机有的 Claude Code 和 Codex 加上 Hook（Codex 之后需要你在 `/hooks` 里信任它们）。升级时重新运行即可。daemon 要在 `/dev/ttyACM*` 所属的组里（Arch 是 `uucp`，Debian 和 Ubuntu 是 `dialout`），不在的话脚本会提示。配置放在 `~/.config/vibebuddy`，统计放在 `~/.local/state/vibebuddy`；盒子断开 30 秒后会通过 `notify-send` 弹一条桌面通知。
 
 在 Hyprland 上，K2 会切回会话所在的终端窗口，不管它在哪个工作区；跑在 tmux 里的会话，会先把你的 tmux 客户端切到它所在的 pane。通过 SSH 的会话没有窗口可回。App 是一个托盘图标（Kore，点一下打开设置）加一个设置窗口，页面和 Mac 版一样，也是同样的 korekore 风格。它只是个客户端：退出它，daemon 和盒子照常在线。设备页点「刷新」能看到盒子当前的屏幕，「保存图片」会存进你的图片文件夹。角色页列出脚本装好的角色，每个都能试听，选中的会写进盒子；Agents 页显示每个 Agent 的 hook 状态，连接、修复或移除前会先给你看要写的内容；daemon 下载好更新的固件后，设备页会提供更新（每个版本发一次通知），也能从文件刷入固件 zip，和 Mac 上一样。通用页有「登录时启动」开关。首次启动会在设置窗口里打开一个简短的引导：找到盒子（找不到时给出排查提示，出厂盒子可以刷入 VibeBuddy 固件）、挑一个角色、让盒子连上 Wi-Fi。接入 Agent 和登录时启动脚本已经做了，所以引导里没有这两步。App 运行时再次启动它，会打开设置窗口。Omarchy 把托盘图标收在状态栏箭头后面的抽屉里，所以 App 第一次运行时会把它的图标固定（Pin）到状态栏上；之后你在那里（右键那个箭头）取消固定或隐藏它，App 不会再改回来。在 Omarchy 4 上，脚本还会装上 VibeBuddy 的[顶栏插件](https://github.com/second-state/omarchy-vibebuddy-plugin)（用 pacman 包安装的话，自己运行 `omarchy plugin add https://github.com/second-state/omarchy-vibebuddy-plugin --enable`）：顶栏上显示氛围小助手的脸，点开是盒子状态、当日战绩和音量。插件在顶栏上时，App 不再显示自己的托盘图标；停用插件，托盘图标会回来。和 Mac 版一样，可以在「通用 → 语言」里改用和系统不同的语言。想让设置窗口在 Omarchy 上浮动显示，在 `~/.config/hypr/hyprland.lua` 里加一行 `o.window("^vibebuddy$", { float = true, center = true, tag = "-default-opacity", opacity = "1.0 1.0" })`：浮动、居中、不透明，大小按 App 自己要的来。用 Omarchy 自带的 `floating-window` 标签的话，窗口会被固定成 875 × 600；和所有 Hyprland 窗口一样，按住 Super 拖动就能移动它。卸载时先运行 `vibebuddy-hook uninstall`，再运行 `systemctl --user disable --now vibebuddyd`，然后删掉脚本装的文件。
+
+### Windows（实验性）
+
+适用于 x86_64 的 Windows 10 和 11。从[最新 Release](https://github.com/second-state/vibebuddy/releases/latest) 下载 `VibeBuddy-<版本>-windows-x86_64-setup.exe` 并运行。安装程序还没有签名，所以 SmartScreen 会先弹出警告：点“更多信息”，再点“仍要运行”。它只为你自己安装，不需要管理员权限，装到 `%LOCALAPPDATA%\Programs\VibeBuddy`，在开始菜单里加上 VibeBuddy，登录时自动启动（安装程序最后一页有个勾选框），并给这台电脑上已有的 Agent 接上 Hook。升级时运行新版本的安装程序即可；在“设置 → 应用”里卸载，Hook 也会一起撤掉。
+
+App 是通知区域里的一个图标（Kore；单击打开设置，右键打开菜单），加上和 Linux 一样的设置窗口。和 Linux 不同，App 自己运行 daemon，和 Mac App 一样，所以退出 App 后盒子就离线了。Windows 10 和 11 不用给盒子装驱动。配置在 `%APPDATA%\VibeBuddy`，统计数据和 daemon 的日志在 `%LOCALAPPDATA%\VibeBuddy`，盒子断开 30 秒后会弹出通知。Windows 上暂时还没有的：K2 不能切回终端窗口；语音指令要开启开发者模式（Codex 的登录信息是用符号链接接过去的）；角色试听不能播放。
 
 ## 工作原理
 
@@ -147,9 +153,9 @@ curl -H 'content-type: application/json' \
 App 和盒子固件分开发布，VibeBuddy 会检查两者有没有新版本（[ADR-0010](docs/adr/0010-firmware-and-app-release-separately-behind-an-update-manifest.md)）。除了中转（见下一节），这是它唯一会联网的地方：
 
 - **什么时候**：启动时、每天一次，以及你在设置 → 通用里点「立即检查」时。
-- **发送什么**：你的平台（`macos-arm64` 或 `linux-x86_64`）、App 版本和盒子的固件版本。别的都不发：没有任何标识，没有 Hook 数据，不涉及你的 Agent 和项目。在 Mac 上，Sparkle 还会拉取 App 的更新源，带上常规的 User-Agent（App 名称和版本），它的系统信息收集保持关闭。
+- **发送什么**：你的平台（`macos-arm64`、`linux-x86_64` 或 `windows-x86_64`）、App 版本和盒子的固件版本。别的都不发：没有任何标识，没有 Hook 数据，不涉及你的 Agent 和项目。在 Mac 上，Sparkle 还会拉取 App 的更新源，带上常规的 User-Agent（App 名称和版本），它的系统信息收集保持关闭。
 - **从哪里**：`https://updates.korekore.ai/vibebuddy/manifest.json` 上的一份签名发布清单（Sparkle 的 `appcast.xml` 就在旁边），由 Cloudflare 提供。下载本身来自 GitHub Releases。
-- **之后会怎样**：不经你同意什么都不会安装。Mac 上有新 App 时会弹出 Sparkle 的窗口，你可以安装、稍后或跳过；Linux 上通用页会说明怎么升级。更新的固件会在后台下载并校验，然后设置 → 设备会用一个按钮提示你更新。
+- **之后会怎样**：不经你同意什么都不会安装。Mac 上有新 App 时会弹出 Sparkle 的窗口，你可以安装、稍后或跳过；Linux 和 Windows 上通用页会说明怎么升级。更新的固件会在后台下载并校验，然后设置 → 设备会用一个按钮提示你更新。
 - **怎么关掉**：设置 → 通用 →「检查更新」。从源码编译的默认关闭；Releases 页面上的构建默认开启。
 
 ### Wi-Fi 和中转
@@ -172,7 +178,7 @@ App 和盒子固件分开发布，VibeBuddy 会检查两者有没有新版本（
 
 ```text
 app/       # macOS 菜单栏 App（SwiftPM）
-desktop/   # Linux 托盘 App 和设置窗口（iced）
+desktop/   # Linux 和 Windows 的托盘 App 和设置窗口（iced）
 daemon/    # vibebuddyd
 hook/      # vibebuddy-hook，Codex 与 Claude Code 的 Hook
 protocol/  # VibeBuddy Protocol 类型与编解码
@@ -266,16 +272,16 @@ daemon 平时由 App 看管。没有 App 的开发机可以用 [`packaging/com.v
 
 ### 发布
 
-发布由 CI 完成。App 和固件分开发布（ADR-0010）。[`release-app`](.github/workflows/release-app.yml) 分别在 Apple 芯片的 runner 上构建 Mac App（用 `app/scripts/make-dmg.sh` 打成 DMG）、在 Ubuntu 22.04 上构建 Linux 包（`packaging/linux/make-tarball.sh`），两边都跑测试。
+发布由 CI 完成。App 和固件分开发布（ADR-0010）。[`release-app`](.github/workflows/release-app.yml) 分别在 Apple 芯片的 runner 上构建 Mac App（用 `app/scripts/make-dmg.sh` 打成 DMG）、在 Ubuntu 22.04 上构建 Linux 包（`packaging/linux/make-tarball.sh`）、用 Inno Setup 构建 Windows 安装程序（`packaging/windows/make-installer.sh`），每个平台都跑测试。
 
 - main 上动到装包内容（`app/`、`daemon/`、`desktop/`、`hook/`、`protocol/`、`voices/`、`packaging/`）的提交只出保留 7 天的 artifact 供自测。
-- 打 `vX.Y.Z` 标签才公证并发 GitHub Release，同一个 Release 里有 DMG 和 Linux 包。标签必须与 `Cargo.toml` 的 `version` 一致，否则构建失败。
+- 打 `vX.Y.Z` 标签才公证并发 GitHub Release，同一个 Release 里有 DMG、Linux 包和 Windows 安装程序。标签必须与 `Cargo.toml` 的 `version` 一致，否则构建失败。
 - 发版前先写 `docs/releases/vX.Y.Z.md`：用几条要点说这个版本做了什么。它是发布说明的开头，CI 会在后面接上下载说明。旁边再放一份 `vX.Y.Z.zh-Hans.md`，App 就显示中文说明；没有时显示英文。
 - 然后发版一条命令：在干净的 main 上 `just release 0.3.0`，它检查那份文件，更新 `Cargo.toml` 和两份锁文件里的版本号，提交、打标签、推送。
 - [`release-firmware`](.github/workflows/release-firmware.yml) 在 Linux 上构建固件。打 `firmware-vX.Y.Z` 标签会发一个单独的 Release（不标为最新版），里面是 `VibeBuddy-firmware-vX.Y.Z.zip`：固件三件套、`build.txt`、`version.txt` 和固件自己的许可证声明。daemon 下载的就是这个 zip，任何人也可以在设置 → 设备「从文件刷入…」里选它。标签必须与 `firmware-rs/device/Cargo.toml` 的 `version` 一致。
 - 固件发版前先写 `docs/releases/firmware-vX.Y.Z.md`：开头用 front matter 写明它能配合的最低 App 版本（两行 `---` 之间写 `min_app: 0.4.0`），然后写它做了什么。`just release-firmware 0.3.3` 检查那份文件，改版本号，提交、打标签、推送。
 - App 和固件一起发时，先把两边的发布说明都提交，再打任何一个标签。每次发布的清单任务都检出自己的标签，并且要求每个已发布的 release 都有说明；固件 Release 的说明若晚于 App 标签提交，App 的清单任务就会失败（v0.4.1 就是这样；从 main 手动重跑 `update-manifest` 即可恢复）。
-- Mac 出 arm64，Linux 出 x86_64。AUR 包还没上架（见上文）：`packaging/aur/` 里的打包文件还停在 0.3.2，上架之前发布后不用管它。[second-state/homebrew-tap](https://github.com/second-state/homebrew-tap) 里的 Homebrew cask 会在一小时内自动跟上新版本。
+- Mac 出 arm64，Linux 和 Windows 出 x86_64。Windows 安装程序还没有代码签名。AUR 包还没上架（见上文）：`packaging/aur/` 里的打包文件还停在 0.3.2，上架之前发布后不用管它。[second-state/homebrew-tap](https://github.com/second-state/homebrew-tap) 里的 Homebrew cask 会在一小时内自动跟上新版本。
 
 仓库配齐五个签名 secrets 后用 Developer ID 签名并公证，下载即可打开；没配时退回 ad-hoc 签名，首次打开要在「隐私与安全性」里放行。secrets 用 [`tools/setup-release-signing.sh`](tools/setup-release-signing.sh) 配：它带着走完申请证书、打包 p12、生成 App 专用密码，并逐项验证后写进 GitHub。
 

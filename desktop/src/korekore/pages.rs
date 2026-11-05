@@ -1047,8 +1047,15 @@ impl crate::App {
                 theme::STROKE_BASE,
             )
         });
-        // No self-update here: a new release is installed by rerunning its install.sh, as the README says.
-        let upgrade = updates.and_then(|updates| updates.app.as_ref()).map(|_| note(tr("To upgrade, download the new release and run its install.sh again.", &[])));
+        // No self-update here: a new release is installed by rerunning its install.sh, or its installer on Windows, as
+        // the README says.
+        let upgrade = updates.and_then(|updates| updates.app.as_ref()).map(|_| {
+            note(if cfg!(windows) {
+                tr("To upgrade, download the new release's installer and run it.", &[])
+            } else {
+                tr("To upgrade, download the new release and run its install.sh again.", &[])
+            })
+        });
         let mut settings = vec![
             setting(tr("Language", &[]), picker(UiLanguage::ALL.to_vec(), Some(self.language), Message::PickLanguage)),
             setting(tr("Launch at login", &[]), switch(self.launch_at_login, Some(Message::LaunchAtLogin(!self.launch_at_login)))),
