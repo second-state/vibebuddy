@@ -140,6 +140,20 @@ fn catalog() -> Vec<Voice> {
             "An upbeat Bay Area engineer who cheers you on, sometimes in Chinese.",
             Language::English,
         ),
+        voice(
+            "tom",
+            "Tom".to_owned(),
+            tr("English · Midwest accent", &[]),
+            "A cozy Thanksgiving turkey, thankful for everything, you most of all.",
+            Language::English,
+        ),
+        voice(
+            "pip",
+            "Pip".to_owned(),
+            tr("English · Christmas snowman", &[]),
+            "A bubbly little snowman who thinks winter is the best thing ever.",
+            Language::English,
+        ),
     ]
 }
 

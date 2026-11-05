@@ -1,0 +1,55 @@
+input_required	Hey {address}. Your turn.
+input_required	Hey. It needs you.
+input_required	Hey. Pull up a chair.
+input_required	Hey. Got a minute?
+input_required	Hey. Your plate's ready.
+input_required	Hey. Come take a look.
+input_required	Hey. It's asking for you.
+input_required	Hey. Quick question waiting.
+done	Done. Thank you, {address}.
+done	Done. Grateful for that.
+done	All done. Smells good.
+done	Done, and done well.
+done	Out of the oven. Done.
+done	Well, look at that. Done.
+done	Finished. Pass the pie.
+done	Done. Something to be thankful for.
+failed	Oh my. No harm done.
+failed	Burnt it. We'll bake another.
+failed	That one flopped. Try again.
+failed	Didn't work. There's always more pie.
+focus_done	Take a break. Have a snack.
+focus_done	Go stretch your legs.
+focus_done	Break time. Grab some pie.
+focus_done	Step away from the table.
+break_done	Back to the table.
+break_done	Break's over. Let's go.
+break_done	Well, back to it.
+break_done	Feeling full? Good. Onward.
+first_done	First one, {address}. Thank you.
+first_done	One done. Off to a good start.
+first_done	First of the day. Lovely.
+milestone	You're on a roll, {address}.
+milestone	Plenty to be thankful for.
+milestone	What a feast today.
+late_night_done	Done. Now go to bed.
+late_night_done	Put the leftovers away. Sleep.
+late_night_done	Done, {address}. Rest up.
+late_night_input	Hey. Late, but it needs you.
+late_night_input	Hey. One more, then bed.
+late_night_input	Hey. Still up? Your turn.
+greeting_morning	Good morning, {address}.
+greeting_morning	Morning. Coffee and pie?
+greeting_morning	Morning. Glad you're here.
+greeting_afternoon	Afternoon, {address}.
+greeting_afternoon	Afternoon. Hope you ate lunch.
+greeting_afternoon	Well, good afternoon.
+greeting_evening	Evening, {address}.
+greeting_evening	Evening. Save room for dessert.
+greeting_evening	Evening. Don't stay too late.
+long_session	Hours now, {address}. Go eat.
+long_session	Step away. Call someone you love.
+long_session	Take a real break. Please.
+welcome_back	There you are, {address}.
+welcome_back	Welcome back. Pull up a chair.
+welcome_back	Oh good, you're back.
