@@ -37,6 +37,8 @@ const BAUD_SETTLE: Duration = Duration::from_millis(20);
 const BAUD_TRIES: u32 = 3;
 const RECONNECT_DELAY: Duration = Duration::from_millis(500);
 const CONNECT_SETTLE_DELAY: Duration = Duration::from_millis(1_500);
+/// After an empty read on Windows, so a port that keeps reading empty doesn't spin.
+const EMPTY_READ_PAUSE: Duration = Duration::from_millis(50);
 /// While linked over the network, how often to look for the box on the cable.
 const CABLE_CHECK_EVERY: Duration = Duration::from_secs(2);
 /// While linked through the Relay, how often to see whether the box answers on the local network.
@@ -865,6 +867,10 @@ async fn run_session<P: AsyncRead + AsyncWrite + Unpin>(
             }
             result = port.read(&mut read_buffer) => {
                 match result {
+                    // Windows sometimes ends a read with no bytes while the box is still there; only a port that is gone is closed.
+                    Ok(0) if cfg!(windows) && port_listed(port_name) => {
+                        tokio::time::sleep(EMPTY_READ_PAUSE).await;
+                    }
                     Ok(0) => {
                         warn!(port = %port_name, "link closed, reconnecting");
                         return SessionEnd::Reconnect;
@@ -1065,8 +1071,13 @@ fn is_supported_usb_port(vid: u16, pid: u16) -> bool {
     )
 }
 
+/// DTR on, as macOS and Linux set it on open: Windows leaves it off, and the box then often stays silent.
 fn open_port(port_name: &str) -> tokio_serial::Result<SerialStream> {
-    tokio_serial::new(port_name, BAUD_RATE).open_native_async()
+    tokio_serial::new(port_name, BAUD_RATE).dtr_on_open(true).open_native_async()
+}
+
+fn port_listed(port_name: &str) -> bool {
+    tokio_serial::available_ports().is_ok_and(|ports| ports.iter().any(|port| port.port_name == port_name))
 }
 
 pub fn serials_equal(actual: &str, expected: &str) -> bool {
