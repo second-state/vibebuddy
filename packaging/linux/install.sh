@@ -6,7 +6,8 @@
 # It works in two places. In an unpacked release (VibeBuddy-vX.Y.Z-linux-x86_64.tar.gz) everything is prebuilt and
 # nothing is downloaded. In a source checkout (packaging/linux/install.sh) it builds with cargo.
 #
-# To remove: `vibebuddy-hook uninstall`, `systemctl --user disable --now vibebuddyd`, then delete the files it installs.
+# To remove: `vibebuddy-hook uninstall`, `systemctl --user disable --now vibebuddyd`, then delete the files it installs,
+# and /etc/udev/rules.d/70-vibebuddy.rules if you let it add that.
 set -euo pipefail
 
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -86,23 +87,8 @@ if systemctl --user show-environment | grep -q '^WAYLAND_DISPLAY='; then
     systemd-run --user --collect --quiet "${bin}/vibebuddy-desktop"
 fi
 
-# The box shows up as /dev/ttyACM*, owned by uucp on Arch and dialout on Debian and Ubuntu.
-# getent fails when either group is missing, and each distro has only one of them.
-serial_group="$({ getent group uucp dialout || true; } | head -n1 | cut -d: -f1)"
-if [[ -n "${serial_group}" ]]; then
-    gid="$(getent group "${serial_group}" | cut -d: -f3)"
-    status="/proc/$(systemctl --user show -p MainPID --value vibebuddyd.service)/status"
-    if ! id -nG | tr ' ' '\n' | grep -qx "${serial_group}"; then
-        echo
-        echo "You are not in the ${serial_group} group, so the daemon cannot open the box. Run this, then reboot:"
-        echo "  sudo usermod -aG ${serial_group} ${USER}"
-    # The daemon inherits its groups from the systemd user manager, which only picks up a new group when it restarts.
-    elif [[ -r "${status}" ]] && ! grep '^Groups:' "${status}" | grep -qw "${gid}"; then
-        echo
-        echo "You are in ${serial_group}, but your systemd user session started before you were added,"
-        echo "so the daemon cannot open the box yet. Reboot (or log out of every session) once."
-    fi
-fi
+# Last, so that its question isn't scrolled away. Everything above is in place whatever the answer is.
+bash "${share}/serial-access.sh" || echo "Could not check access to the box's USB port; see README.md."
 
 echo
 echo "Installed. Daemon log: journalctl --user -u vibebuddyd -f"

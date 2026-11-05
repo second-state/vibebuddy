@@ -46,7 +46,7 @@ Status key: **same**; **differs** (both do it, by a different mechanism or with 
 | XGGF Pomodoro controls and MIC menu guidance | yes | yes | shared English keys and Chinese translations; timer runs on device |
 | XGGF VOLUME and chimes | device menu | device menu | persisted locally; K2 mute applies to all buzzer tones |
 | XGGF clock | daemon heartbeat | daemon heartbeat | local hour/minute/date; experimental RTC writes gated |
-| Device: several boards plugged in ("This is the box"), the port pin notice, cable help | yes; the help also mentions macOS's accessory permission | yes; the help also points to "Permission denied" in the daemon log (the serial group) | same, each with its platform's hint |
+| Device: several boards plugged in ("This is the box"), the port pin notice, cable help | yes; the help also mentions macOS's accessory permission | yes; the help also points to "Permission denied" in the daemon log (the udev rule or the serial group) | same, each with its platform's hint |
 | Advanced: daemon status, Open logs folder, Restart daemon, Export diagnostics, config path | yes; restart works while down | yes, plus Show daemon log (in `xdg-terminal-exec`, else GNOME Terminal, Konsole, Xfce Terminal or xterm); restart uses systemd while up or down, as the tray does, and reports errors. A daemon that doesn't run as the service (started by hand, say) gets "start it again the way you started it" from Restart and "its log isn't in the journal" from Show daemon log, and its own restart endpoint refuses, since exiting would only stop it | Linux has one more |
 | First-run guide | includes connecting agents and launch at login | Welcome, Find the box, Pick a character, Wi-Fi, Done (`install.sh` already connected agents and set autostart; `docs/app.md`) | differs, by design |
 
@@ -99,7 +99,7 @@ pane (`Surface::Window`); it never reports a desktop session ID (`desktop_sessio
 | Area | Mac | Linux | Status |
 |---|---|---|---|
 | Finding the box | by USB vendor and product ID (Espressif native USB, QinHeng CH343), preferring `/dev/cu.*` | the same ID match, any port name (`/dev/ttyACM*`) | same |
-| Port access | macOS may ask to allow the accessory | the user must be in the group that owns the port (`uucp` or `dialout`); `install.sh` says so, and the app's help points to the daemon log | differs, by design |
+| Port access | macOS may ask to allow the accessory | a udev rule gives the user logged in at the seat access; `install.sh` offers to install it through `sudo` and the pacman package ships it. Whoever declines, or only reaches the computer over SSH, joins the group that owns the port (`dialout`, or `uucp` on Arch) instead, and the app's help points to the daemon log | differs, by design |
 | Config and state | `~/Library/Application Support/VibeBuddy` | XDG: `~/.config/vibebuddy`, `~/.local/state/vibebuddy` | differs, by design |
 | Release artefact | DMG, Homebrew cask; Developer ID and notarisation when the secrets are set; Sparkle's EdDSA appcast | tarball with `install.sh`, pacman package | differs, by design |
 | Update manifest | Ed25519-signed, key `macos-arm64` | the same manifest, key `linux-x86_64`, with the tarball's SHA-256; nothing checks it on a manual download | same manifest |

@@ -18,7 +18,7 @@ mkdir -p "${stage}/bin" "${stage}/share/voices"
 for binary in vibebuddyd vibebuddy-hook vibebuddy-desktop; do
     install -m755 "${repo}/target/release/${binary}" "${stage}/bin/${binary}"
 done
-for file in vibebuddyd.service vibebuddy.desktop vibebuddy.svg 70-vibebuddy.rules; do
+for file in vibebuddyd.service vibebuddy.desktop vibebuddy.svg 70-vibebuddy.rules serial-access.sh; do
     install -m644 "${repo}/packaging/linux/${file}" "${stage}/share/${file}"
 done
 # The robot with the built-in voice's five lines; the app writes it when nothing else lends its voice.

@@ -204,7 +204,9 @@ Anything that relies on what a host process happens to provide "in passing", suc
 
 On 2026-10-01, bringing up Linux on Omarchy, the user was added to `uucp` so the daemon could open `/dev/ttyACM0`. A daemon started from a fresh SSH login talked to the box fine; the same binary started by `systemctl --user` got `Permission denied`. The systemd user manager had started at boot, before the `usermod`, and every service it launches inherits its group list, not the one in `/etc/group`. Only a reboot, or logging out of every session, restarts it.
 
-The installer had checked `id -nG` in its own shell, which was the one place guaranteed to look healthy. When a permission comes from a group, check the process that actually needs it (`Groups:` in `/proc/<pid>/status`), not the shell that installed it. The same install run also died silently because `getent group uucp dialout` fails when either group is missing, and under `pipefail` that ended the script before any message was printed; each distro has only one of the two.
+The installer had checked `id -nG` in its own shell, which was the one place guaranteed to look healthy. When a permission comes from a group, check the process that actually needs it (`Groups:` in `/proc/<pid>/status`), not the shell that installed it. The same install run also died silently because `getent group uucp dialout` fails when either group is missing, and under `pipefail` that ended the script before any message was printed.
+
+The fix for that assumed each distro has only one of the two, and that was wrong too. Debian and Ubuntu have both, and `dialout` owns the port, so asking for `uucp` first told Ubuntu users to join a group that gave them nothing. Nobody saw it because the bring-up was on Arch, which only has `uucp`. Run a check meant for several distros on more than the one in front of you.
 
 ## A command-line tool can change its language under you and still exit cleanly
 

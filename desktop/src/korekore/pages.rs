@@ -717,7 +717,7 @@ impl crate::App {
                 column![
                     row![badge(&sprites::KORE_SLEEP, true, theme::INK), heading(tr("Box not found", &[]))].spacing(10).align_y(Alignment::Center),
                     note(tr("Not showing up? Use a cable that carries data, not just power.", &[])),
-                    note(tr("If the daemon log on the Advanced tab says “Permission denied”, your account can't open the box's port yet: restart the computer once, then replug the box.", &[])),
+                    note(tr("If the daemon log on the Advanced tab says “Permission denied”, your account can't open the box's port yet: run install.sh again and accept the udev rule. If you joined the serial group instead, restart the computer once, then replug the box.", &[])),
                     note(tr("Still nothing? Hold K0 on the box while you plug in the cable. The box starts in download mode with a dark screen, ready to be flashed with VibeBuddy firmware.", &[])),
                 ]
                 .spacing(8),

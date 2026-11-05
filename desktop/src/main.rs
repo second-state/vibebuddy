@@ -2330,7 +2330,7 @@ impl App {
             column![
                 text(tr("Not showing up? Use a cable that carries data, not just power.", &[])).size(13),
                 text(tr(
-                    "If the daemon log on the Advanced tab says “Permission denied”, your account can't open the box's port yet: restart the computer once, then replug the box.",
+                    "If the daemon log on the Advanced tab says “Permission denied”, your account can't open the box's port yet: run install.sh again and accept the udev rule. If you joined the serial group instead, restart the computer once, then replug the box.",
                     &[]
                 ))
                 .size(13),
