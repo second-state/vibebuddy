@@ -1,4 +1,5 @@
-//! Outside macOS there is no app to say the box is gone, so the daemon says it with `notify-send`.
+//! Outside macOS there is no app to say the box is gone, so the daemon says it: with `notify-send` on Linux, a toast
+//! on Windows.
 //! Same rule as the app: once, after 30 seconds without the box, and again only after it has come back.
 
 use std::time::{Duration, Instant};
@@ -45,16 +46,41 @@ pub(crate) async fn watch(state: crate::AppState) {
         ticker.tick().await;
         let connected = state.device.lock().await.connected;
         let enabled = state.config.lock().await.notify_link;
-        if alert.check(connected, enabled, Instant::now()) {
-            let result = Command::new("notify-send")
-                .args(["--app-name=VibeBuddy", TITLE, BODY])
-                .status()
-                .await;
-            if let Err(error) = result {
-                warn!(%error, "cannot run notify-send to report the lost link");
-            }
+        if alert.check(connected, enabled, Instant::now())
+            && let Err(error) = notify().status().await
+        {
+            warn!(%error, "cannot show the notification about the lost link");
         }
     }
+}
+
+#[cfg(not(windows))]
+fn notify() -> Command {
+    let mut command = Command::new("notify-send");
+    command.args(["--app-name=VibeBuddy", TITLE, BODY]);
+    command
+}
+
+/// Windows PowerShell shows the toast, under its own app id: an app needs an installed shortcut for one of its own.
+/// The text goes in through the environment, so nothing in it is read as script.
+#[cfg(windows)]
+fn notify() -> Command {
+    const SCRIPT: &str = "$m = [Windows.UI.Notifications.ToastNotificationManager, Windows.UI.Notifications, ContentType = WindowsRuntime]; \
+        $x = $m::GetTemplateContent([Windows.UI.Notifications.ToastTemplateType]::ToastText02); \
+        $t = $x.GetElementsByTagName('text'); \
+        [void]$t.Item(0).AppendChild($x.CreateTextNode($env:VIBEBUDDY_TITLE)); \
+        [void]$t.Item(1).AppendChild($x.CreateTextNode($env:VIBEBUDDY_BODY)); \
+        $id = '{1AC14E77-02E7-4E5D-B744-2EB1AE5198B7}\\WindowsPowerShell\\v1.0\\powershell.exe'; \
+        $m::CreateToastNotifier($id).Show([Windows.UI.Notifications.ToastNotification]::new($x))";
+    // No console window flashes up for it.
+    const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+    let mut command = Command::new("powershell.exe");
+    command
+        .args(["-NoProfile", "-NonInteractive", "-Command", SCRIPT])
+        .env("VIBEBUDDY_TITLE", TITLE)
+        .env("VIBEBUDDY_BODY", BODY)
+        .creation_flags(CREATE_NO_WINDOW);
+    command
 }
 
 #[cfg(test)]
