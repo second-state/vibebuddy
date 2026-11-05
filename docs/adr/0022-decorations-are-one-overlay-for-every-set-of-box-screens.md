@@ -26,4 +26,4 @@ So a decoration is a third thing beside the Character and the box screens, and i
 - The firmware gets a decoration step after each set's frame and before the flush, a `decoration` field in the status, and a command to set it, the way `device.screens` works. The robot and korekore pixel tests stay the same with the decoration off, and new pinned pixels cover each decoration on both sets.
 - Animation means more full-frame flushes while a decoration moves. The rate is checked on the box, and the decoration stops while the screen is dimmed for the night.
 - The Mac app and the Linux app both get a decoration picker on the Device page, off while the box is away or runs firmware that doesn't report a decoration, with zh-Hans strings on both sides.
-- Thanksgiving 2026 (11-26) is too close for a firmware release. The first decoration is Snow, aimed at early December, with lights after it.
+- The first two decorations are Leaves (falling autumn leaves, for Thanksgiving 2026 on 11-26) and Snow (for Christmas). Both ship in one firmware release and one App release about a week before Thanksgiving, and that App release also carries Tom and Pip. Lights come after.
