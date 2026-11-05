@@ -47,7 +47,7 @@ Pomodoro runs entirely on the box: its timer and today's tally keep going withou
 ## What you need
 
 - **The box:** a VibeBuddy (ESP32-S3, 16 MB flash, 8 MB PSRAM), with LCD, speaker and three buttons. One USB-C cable powers it, flashes it and carries events. [Order one](https://vibekeys.dev/vibebuddy.html?utm_source=github&utm_medium=readme&utm_campaign=vibe-buddy-launch) that ships assembled and flashed, or see [`docs/hardware.md`](docs/hardware.md) to build your own.
-- **A Mac** with Apple silicon and macOS 14 or later, or a Linux machine (experimental, see below).
+- **A Mac** with Apple silicon and macOS 14 or later, or a Linux or Windows machine (experimental, see below).
 - **At least one agent:** Codex or Claude Code. GitHub Actions support uses the `gh` CLI you're already signed in to.
 
 ## Getting started
@@ -85,6 +85,12 @@ systemctl --user enable --now vibebuddyd && vibebuddy-hook install
 It will be on the AUR as `vibebuddy-bin` once AUR registration reopens. To build from source instead, run `packaging/linux/install.sh` in a checkout with a Rust toolchain; it builds everything. Either way, the script installs the binaries into `~/.local/bin`, runs `vibebuddyd` as a systemd user service, puts the VibeBuddy app in the launcher and at login, and adds the hooks to Claude Code and Codex, whichever this machine has (Codex then wants you to trust them in `/hooks`). Run it again to upgrade. The daemon needs to be in the group that owns `/dev/ttyACM*` (`uucp` on Arch, `dialout` on Debian and Ubuntu); the script tells you if it isn't. Config lives in `~/.config/vibebuddy`, stats in `~/.local/state/vibebuddy`, and when the box is gone for 30 seconds you get a desktop notification through `notify-send`.
 
 On Hyprland, K2 brings back the terminal window the session runs in, on whatever workspace it is; inside tmux it first switches your tmux client to the session's pane. A session over SSH has no window to go back to. The app is a tray icon (Kore; click it for settings) plus a settings window with the same pages as on the Mac, in the same korekore look. It is only a client: quitting it leaves the daemon, and the box, running. Device → Refresh shows what the box's screen shows, and Save image puts it in your Pictures folder. Character lists the Characters the script installed, plays a preview of each, and writes the one you pick to the box; Agents shows each agent's hook and connects, repairs or removes it after showing what it will write; Device offers newer firmware once the daemon has downloaded it (with a notification, once per version) and flashes a firmware zip from a file, as on the Mac. General has Launch at login. The first launch opens a short guide in the settings window: find the box (with help when it doesn't show up, and VibeBuddy firmware for a factory box), pick a character, and put the box on Wi-Fi. The script has already connected the agents and set up the start at login, so those pages are left out. Launching the app again while it runs opens the settings window. Omarchy keeps tray icons in a drawer behind the bar's chevron, so the app pins its icon to the bar the first time it runs; unpin or hide it there (right-click the chevron) and it stays that way. On Omarchy 4 the script also adds VibeBuddy's [bar plugin](https://github.com/second-state/omarchy-vibebuddy-plugin) (with the pacman package, run `omarchy plugin add https://github.com/second-state/omarchy-vibebuddy-plugin --enable` yourself): the face in the bar, with a panel for the box's status, today's stats and the volume. While the plugin is in the bar the app leaves out its tray icon, and brings it back if you disable the plugin. General → Language overrides the system language, as on the Mac. To make the settings window float on Omarchy, add `o.window("^vibebuddy$", { float = true, center = true, tag = "-default-opacity", opacity = "1.0 1.0" })` to `~/.config/hypr/hyprland.lua`: floating, centred and opaque, at the size the app asks for. Omarchy's own `floating-window` tag would pin it to 875 × 600 instead; like every Hyprland window it moves with Super + drag. To remove everything, run `vibebuddy-hook uninstall`, then `systemctl --user disable --now vibebuddyd`, then delete the files the script installed.
+
+### Windows (experimental)
+
+For x86_64 Windows 10 and 11. Download `VibeBuddy-<version>-windows-x86_64-setup.exe` from the [latest release](https://github.com/second-state/vibebuddy/releases/latest) and run it. The installer isn't signed yet, so SmartScreen warns first: choose More info, then Run anyway. It installs for you alone, with no admin prompt, into `%LOCALAPPDATA%\Programs\VibeBuddy`, adds VibeBuddy to the Start menu, starts it at login (a box on the installer's last page) and adds the hooks to the agents this computer has. Run a newer installer to upgrade; uninstall from Settings → Apps, which also takes the hooks out.
+
+The app is a notification area icon (Kore; click it for settings, right-click for the menu) plus the same settings window as on Linux. Unlike on Linux, the app runs the daemon itself, as the Mac app does, so quitting it takes the box offline. Windows 10 and 11 need no driver for the box. Config lives in `%APPDATA%\VibeBuddy`, stats and the daemon's log in `%LOCALAPPDATA%\VibeBuddy`, and when the box is gone for 30 seconds you get a notification. Not on Windows yet: K2 doesn't bring back the terminal window, voice commands need Developer Mode (Codex's sign-in is linked with a symlink), and Character previews don't play.
 
 ## How it works
 
@@ -147,9 +153,9 @@ See [`docs/protocol.md`](docs/protocol.md) for the events.
 The App and the box's firmware are released separately, and VibeBuddy looks for new versions of both ([ADR-0010](docs/adr/0010-firmware-and-app-release-separately-behind-an-update-manifest.md)). Apart from the Relay (next section), this is the only time it contacts anything on the internet:
 
 - **When**: when it starts, once a day, and when you click Check now in Settings → General.
-- **What it sends**: your platform (`macos-arm64` or `linux-x86_64`), the App's version and the box's firmware version. Nothing else: no ID, no hook data, nothing about your agents or projects. On the Mac, Sparkle also fetches the App's update feed, sending the usual User-Agent with the App's name and version; its system profiling stays off.
+- **What it sends**: your platform (`macos-arm64`, `linux-x86_64` or `windows-x86_64`), the App's version and the box's firmware version. Nothing else: no ID, no hook data, nothing about your agents or projects. On the Mac, Sparkle also fetches the App's update feed, sending the usual User-Agent with the App's name and version; its system profiling stays off.
 - **Where**: a signed list of releases at `https://updates.korekore.ai/vibebuddy/manifest.json` (and Sparkle's `appcast.xml` next to it), served by Cloudflare. The downloads themselves come from GitHub Releases.
-- **What happens**: nothing is installed without you. A new App opens Sparkle's window on the Mac, where you can install, wait or skip; on Linux, General says how to upgrade. Newer firmware is downloaded and checked in the background, then Settings → Device offers it with a button.
+- **What happens**: nothing is installed without you. A new App opens Sparkle's window on the Mac, where you can install, wait or skip; on Linux and Windows, General says how to upgrade. Newer firmware is downloaded and checked in the background, then Settings → Device offers it with a button.
 - **Turning it off**: Settings → General → Check for updates. Builds from source have it off by default; the builds on the Releases page have it on.
 
 ### Wi-Fi and the Relay
@@ -172,7 +178,7 @@ Everyday tasks live in the [`justfile`](justfile); run `just` to list them. See 
 
 ```text
 app/       # the macOS menu bar app (SwiftPM)
-desktop/   # the Linux tray app and settings window (iced)
+desktop/   # the Linux and Windows tray app and settings window (iced)
 daemon/    # vibebuddyd
 hook/      # vibebuddy-hook, the Codex and Claude Code hook
 protocol/  # VibeBuddy Protocol types and codec
@@ -266,16 +272,16 @@ When sending through the box's CH343 UART bridge, the daemon writes in line-rate
 
 ### Releases
 
-CI builds releases. The App and the firmware release separately (ADR-0010). [`release-app`](.github/workflows/release-app.yml) builds the Mac app on an Apple silicon runner (packed into a DMG with `app/scripts/make-dmg.sh`) and the Linux tarball on Ubuntu 22.04 (`packaging/linux/make-tarball.sh`), testing on both.
+CI builds releases. The App and the firmware release separately (ADR-0010). [`release-app`](.github/workflows/release-app.yml) builds the Mac app on an Apple silicon runner (packed into a DMG with `app/scripts/make-dmg.sh`) the Linux tarball on Ubuntu 22.04 (`packaging/linux/make-tarball.sh`) and the Windows installer with Inno Setup (`packaging/windows/make-installer.sh`), testing on each.
 
 - Commits on main that touch what goes into the packages (`app/`, `daemon/`, `desktop/`, `hook/`, `protocol/`, `voices/`, `packaging/`) only produce test artifacts kept for 7 days.
-- A `vX.Y.Z` tag notarizes the app and publishes one GitHub Release with the DMG and the Linux tarball. The tag must match `version` in `Cargo.toml`, or the build fails.
+- A `vX.Y.Z` tag notarizes the app and publishes one GitHub Release with the DMG, the Linux tarball and the Windows installer. The tag must match `version` in `Cargo.toml`, or the build fails.
 - Before releasing, write `docs/releases/vX.Y.Z.md`: a few bullets on what the version does. It opens the release notes, and CI adds the downloads after it. A `vX.Y.Z.zh-Hans.md` next to it gives the Chinese notes the App shows; without one it shows the English.
 - Then releasing is one command on a clean main: `just release 0.3.0` checks that file, updates the versions in `Cargo.toml` and both lockfiles, commits, tags and pushes.
 - [`release-firmware`](.github/workflows/release-firmware.yml) builds the firmware on Linux. A `firmware-vX.Y.Z` tag publishes its own Release, never marked latest, with `VibeBuddy-firmware-vX.Y.Z.zip`: the three images, `build.txt`, `version.txt` and the firmware's license notices. That zip is what the daemon downloads, and anyone can flash it from Settings → Device → Flash from file…. The tag must match `version` in `firmware-rs/device/Cargo.toml`.
 - Before a firmware release, write `docs/releases/firmware-vX.Y.Z.md`: front matter naming the oldest App it runs with (`min_app: 0.4.0` between two `---` lines), then what it does. `just release-firmware 0.3.3` checks that file, bumps the version, commits, tags and pushes.
 - Releasing the App and the firmware together: commit both sets of notes before either tag. Each release's manifest job checks out its own tag and needs notes for every published release, so a firmware Release whose notes came after the App's tag fails the App's manifest (v0.4.1 did; rerun `update-manifest` by hand from main to recover).
-- Builds are arm64 for the Mac and x86_64 for Linux. The AUR package isn't published yet (see above): its source in `packaging/aur/` is still at 0.3.2, and nothing needs updating there after a release until it is. The Homebrew cask in [second-state/homebrew-tap](https://github.com/second-state/homebrew-tap) follows new releases on its own within the hour.
+- Builds are arm64 for the Mac and x86_64 for Linux and Windows. The Windows installer isn't code-signed yet. The AUR package isn't published yet (see above): its source in `packaging/aur/` is still at 0.3.2, and nothing needs updating there after a release until it is. The Homebrew cask in [second-state/homebrew-tap](https://github.com/second-state/homebrew-tap) follows new releases on its own within the hour.
 
 With the five signing secrets set on the repository, releases are signed with a Developer ID and notarized, so they open straight after download. Without them the build falls back to ad-hoc signing, and the first launch has to be allowed under Privacy & Security. [`tools/setup-release-signing.sh`](tools/setup-release-signing.sh) sets the secrets up: it walks you through requesting the certificate, packing the p12 and creating an app-specific password, then checks each one before writing it to GitHub.
 

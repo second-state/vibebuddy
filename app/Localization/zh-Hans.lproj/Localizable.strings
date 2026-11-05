@@ -184,6 +184,7 @@
 "Check again" = "再检查一次";
 "Releases" = "发布页";
 "To upgrade, download the new release and run its install.sh again." = "升级方法：下载新版本，再运行一次它的 install.sh。";
+"To upgrade, download the new release's installer and run it." = "升级方法：下载新版本的安装程序并运行。";
 "Install %@…" = "安装 %@…";
 "Allow…" = "允许…";
 "Allowed" = "已允许";

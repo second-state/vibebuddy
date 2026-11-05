@@ -28,7 +28,11 @@ pub struct Asset {
 }
 
 /// The App's package per platform: release-app.yml names it `VibeBuddy-<tag><suffix>`.
-const APP_ASSETS: [(&str, &str); 2] = [("macos-arm64", "-arm64.dmg"), ("linux-x86_64", "-linux-x86_64.tar.gz")];
+const APP_ASSETS: [(&str, &str); 3] = [
+    ("macos-arm64", "-arm64.dmg"),
+    ("linux-x86_64", "-linux-x86_64.tar.gz"),
+    ("windows-x86_64", "-windows-x86_64-setup.exe"),
+];
 
 const FIRMWARE_TAG: &str = "firmware-v";
 
@@ -151,7 +155,7 @@ mod tests {
     fn releases() -> Vec<Release> {
         vec![
             release("firmware-v0.4.0", &["VibeBuddy-firmware-v0.4.0.zip"]),
-            release("v0.4.0", &["VibeBuddy-v0.4.0-arm64.dmg"]),
+            release("v0.4.0", &["VibeBuddy-v0.4.0-arm64.dmg", "VibeBuddy-v0.4.0-windows-x86_64-setup.exe"]),
             release("firmware-v0.3.3", &["VibeBuddy-firmware-v0.3.3.zip"]),
             release("v0.3.2", &["VibeBuddy-v0.3.2-arm64.dmg", "VibeBuddy-v0.3.2-linux-x86_64.tar.gz", "VibeBuddy-firmware-v0.3.2.zip"]),
         ]
@@ -164,6 +168,7 @@ mod tests {
         assert_eq!(manifest.app["macos-arm64"].url, "https://github.com/x/y/releases/download/v0.4.0/VibeBuddy-v0.4.0-arm64.dmg");
         // v0.4.0 shipped no Linux package; the last one that did is still offered.
         assert_eq!(manifest.app["linux-x86_64"].version, "0.3.2");
+        assert_eq!(manifest.app["windows-x86_64"].version, "0.4.0");
         let firmware: Vec<(&str, &str)> = manifest.firmware.iter().map(|f| (f.download.version.as_str(), f.min_app.as_str())).collect();
         // The firmware zips bundled in App releases before ADR-0010 aren't firmware releases.
         assert_eq!(firmware, [("0.4.0", "0.4.0"), ("0.3.3", "0.3.2")]);

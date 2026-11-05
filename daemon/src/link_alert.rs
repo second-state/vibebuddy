@@ -61,7 +61,8 @@ fn notify() -> Command {
     command
 }
 
-/// Windows PowerShell shows the toast, under its own app id: an app needs an installed shortcut for one of its own.
+/// Windows PowerShell shows the toast: under VibeBuddy's app id once the installer's Start menu shortcut carries it,
+/// else under PowerShell's own, since an app needs an installed shortcut for an id of its own.
 /// The text goes in through the environment, so nothing in it is read as script.
 #[cfg(windows)]
 fn notify() -> Command {
@@ -70,7 +71,8 @@ fn notify() -> Command {
         $t = $x.GetElementsByTagName('text'); \
         [void]$t.Item(0).AppendChild($x.CreateTextNode($env:VIBEBUDDY_TITLE)); \
         [void]$t.Item(1).AppendChild($x.CreateTextNode($env:VIBEBUDDY_BODY)); \
-        $id = '{1AC14E77-02E7-4E5D-B744-2EB1AE5198B7}\\WindowsPowerShell\\v1.0\\powershell.exe'; \
+        $id = if (Test-Path \"$env:APPDATA\\Microsoft\\Windows\\Start Menu\\Programs\\VibeBuddy.lnk\") { 'SecondState.VibeBuddy' } \
+            else { '{1AC14E77-02E7-4E5D-B744-2EB1AE5198B7}\\WindowsPowerShell\\v1.0\\powershell.exe' }; \
         $m::CreateToastNotifier($id).Show([Windows.UI.Notifications.ToastNotification]::new($x))";
     // No console window flashes up for it.
     const CREATE_NO_WINDOW: u32 = 0x0800_0000;
