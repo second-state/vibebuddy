@@ -6,7 +6,9 @@ import serial
 
 port = sys.argv[1]
 with serial.Serial(port, 115200, timeout=0.2) as link:
-    time.sleep(0.5)
+    # Opening native USB Serial/JTAG resets the ESP32-C3. Give app_main time to install its
+    # USB reader before sending hello; otherwise the command can be lost during startup.
+    time.sleep(2.5)
     link.reset_input_buffer()
 
     def send(event, **extra):

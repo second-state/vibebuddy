@@ -1,6 +1,7 @@
 """Run an isolated daemon against one explicitly selected physical device."""
 import json
 import os
+from pathlib import Path
 import subprocess
 import sys
 import tempfile
@@ -13,7 +14,9 @@ with tempfile.TemporaryDirectory(prefix="vibebuddy-xggf-smoke-") as directory:
     env = os.environ.copy()
     env.update(XDG_CONFIG_HOME=directory, XDG_STATE_HOME=directory,
                VIBEBUDDY_BIND="127.0.0.1:17331", VIBEBUDDY_SERIAL_PORT=port)
-    process = subprocess.Popen([daemon], env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    log_path = Path(directory) / "daemon.log"
+    log = log_path.open("w")
+    process = subprocess.Popen([daemon], env=env, stdout=log, stderr=log)
     try:
         base = "http://127.0.0.1:17331"
         deadline = time.monotonic() + 30
@@ -24,13 +27,15 @@ with tempfile.TemporaryDirectory(prefix="vibebuddy-xggf-smoke-") as directory:
                 with urllib.request.urlopen(base + "/v1/status", timeout=1) as response:
                     status = json.load(response)
                 device = status["device"]
-                if device.get("firmware_build") and device.get("unsupported_board") == "xggf-64x8":
+                if (device.get("firmware_build") and device.get("unsupported_board") == "xggf-64x8"
+                        and device.get("wifi_error")):
                     break
             except (urllib.error.URLError, TimeoutError):
                 pass
             if time.monotonic() >= deadline:
-                raise AssertionError("daemon did not identify the XGGF")
+                raise AssertionError("daemon did not identify the XGGF with Wi-Fi unavailable")
             time.sleep(0.25)
+        assert device["connected"] and not device["network"] and not device["relay"], device
         def post(path, data):
             request = urllib.request.Request(base + path, json.dumps(data).encode(), {"Content-Type": "application/json"})
             try:
@@ -39,8 +44,14 @@ with tempfile.TemporaryDirectory(prefix="vibebuddy-xggf-smoke-") as directory:
             except urllib.error.HTTPError as error:
                 return error.code
         assert post("/v1/events", {"version": 1, "event": "task.start"}) == 202
+        deadline = time.monotonic() + 10
+        while time.monotonic() < deadline and "STATE task.start" not in log_path.read_text():
+            if process.poll() is not None:
+                raise AssertionError("daemon exited before the device replied")
+            time.sleep(0.1)
+        assert "STATE task.start" in log_path.read_text(), "the device did not acknowledge task.start over USB"
         assert post("/v1/device/firmware", {"bootloader": "/missing", "partition_table": "/missing", "app": "/missing"}) == 409
-        print("PASS: daemon discovered XGGF, accepted an event and refused box firmware")
+        print("PASS: daemon linked over USB with Wi-Fi unavailable, received a device reply and refused box firmware")
     finally:
         process.terminate()
         try:
@@ -48,3 +59,4 @@ with tempfile.TemporaryDirectory(prefix="vibebuddy-xggf-smoke-") as directory:
         except subprocess.TimeoutExpired:
             process.kill()
             process.wait()
+        log.close()
