@@ -108,6 +108,10 @@ enum Message {
     TrayHost(bool),
     TrayHostCheck,
     PluginTick,
+    /// The next frame of the decorations' previews, while the Character page shows.
+    DecorationTick,
+    /// The pointer is on a decoration's button (its preview shows), or left it.
+    PointDecoration(Option<BoxDecoration>),
     OpenSettings,
     /// A page of the first-run guide, or (None) leave it for the tabs.
     Guide(Option<usize>),
@@ -131,6 +135,8 @@ enum Message {
     PlayLine,
     /// Which set of screens the box draws (ADR-0021).
     SetScreens(BoxScreens),
+    /// The decoration the box draws over its screens (ADR-0022).
+    SetDecoration(BoxDecoration),
     /// The user says which of several devices is the box, by its USB serial number.
     ChooseBox(String),
     /// Forget another computer on the box, by its key.
@@ -306,6 +312,10 @@ struct App {
     custom_problem: Option<String>,
     /// The robot's face for its card.
     robot_face: Option<image::Handle>,
+    /// Each decoration's preview over each set of box screens, keyed `<screens>-<decoration>`, and the frame up now.
+    decoration_frames: Vec<(&'static str, Vec<image::Handle>)>,
+    decoration_frame: usize,
+    decoration_pointed: Option<BoxDecoration>,
     /// The Characters made on this computer, each one's face, and the voices one can be made with (ADR-0020); asked
     /// when the daemon comes up and whenever a job changes state.
     made: Vec<making::MadeCharacter>,
@@ -462,6 +472,9 @@ impl App {
             lender: None,
             custom_problem: None,
             robot_face: None,
+            decoration_frames: decoration_frames(),
+            decoration_frame: 0,
+            decoration_pointed: None,
             made: Vec::new(),
             made_faces: Vec::new(),
             character_voices: Vec::new(),
@@ -568,8 +581,15 @@ impl App {
         } else {
             Subscription::none()
         };
+        // Only while the Character page is in an open window: the decorations' previews move.
+        let decorations = if self.settings.is_some() && self.tab == Tab::Sound {
+            iced::time::every(Duration::from_millis(DECORATION_FRAME_MS)).map(|_| Message::DecorationTick)
+        } else {
+            Subscription::none()
+        };
         Subscription::batch([
             Subscription::run(client::status_updates).map(Message::Daemon),
+            decorations,
             iced::time::every(Duration::from_secs(2)).map(|_| Message::PluginTick),
             window::close_events().map(Message::WindowClosed),
             tray,
@@ -631,6 +651,8 @@ impl App {
                     return Task::done(Message::OpenSettings);
                 }
             }
+            Message::DecorationTick => self.decoration_frame = self.decoration_frame.wrapping_add(1),
+            Message::PointDecoration(decoration) => self.decoration_pointed = decoration,
             Message::PluginTick => {
                 // The plugin can be enabled or disabled while the app runs: the tray icon gives way, or comes back
                 // when the subscription starts it again.
@@ -867,6 +889,7 @@ impl App {
                 return Task::perform(client::set_volume(level, true), Message::Done);
             }
             Message::SetScreens(screens) => return Task::perform(client::set_screens(screens.0), Message::Done),
+            Message::SetDecoration(decoration) => return Task::perform(client::set_decoration(decoration.0), Message::Done),
             Message::ChooseBox(usb_serial) => return Task::perform(client::choose_box(usb_serial), Message::Done),
             Message::Unpair(key) => return Task::perform(client::unpair(key), Message::Done),
             Message::TakeOver => return Task::perform(client::take_over(), Message::Done),
@@ -1638,6 +1661,65 @@ impl std::fmt::Display for BoxScreens {
             "robot" => f.write_str(&tr("Robot", &[])),
             other => f.write_str(other),
         }
+    }
+}
+
+/// How often the decorations' previews step: the box's own pace (decoration.rs).
+const DECORATION_FRAME_MS: u64 = 150;
+
+/// The decorations' previews as the firmware draws them (decorations/<screens>-<decoration>.png from
+/// tools/decoration-previews.sh: 320 × 240 frames side by side), cut into frames.
+fn decoration_frames() -> Vec<(&'static str, Vec<image::Handle>)> {
+    macro_rules! strip {
+        ($name:literal) => {
+            ($name, include_bytes!(concat!("../../decorations/", $name, ".png")).as_slice())
+        };
+    }
+    let strips = [
+        strip!("robot-off"),
+        strip!("robot-leaves"),
+        strip!("robot-snow"),
+        strip!("robot-lights"),
+        strip!("korekore-off"),
+        strip!("korekore-leaves"),
+        strip!("korekore-snow"),
+        strip!("korekore-lights"),
+    ];
+    strips
+        .into_iter()
+        .filter_map(|(name, bytes)| {
+            let strip = ::image::load_from_memory(bytes).ok()?.to_rgba8();
+            let frames = (0..strip.width() / 320)
+                .map(|index| {
+                    let frame = ::image::imageops::crop_imm(&strip, index * 320, 0, 320, 240).to_image();
+                    image::Handle::from_rgba(320, 240, frame.into_raw())
+                })
+                .collect();
+            Some((name, frames))
+        })
+        .collect()
+}
+
+/// One entry of the decoration picker: `off`, `leaves`, `snow` or `lights` (ADR-0022).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct BoxDecoration(&'static str);
+
+impl BoxDecoration {
+    const ALL: [BoxDecoration; 4] = [BoxDecoration("off"), BoxDecoration("leaves"), BoxDecoration("snow"), BoxDecoration("lights")];
+
+    fn of(name: &str) -> Option<BoxDecoration> {
+        Self::ALL.into_iter().find(|decoration| decoration.0 == name)
+    }
+}
+
+impl std::fmt::Display for BoxDecoration {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&match self.0 {
+            "leaves" => tr("Falling leaves", &[]),
+            "snow" => tr("Snow", &[]),
+            "lights" => tr("Lights", &[]),
+            _ => tr("Off", &[]),
+        })
     }
 }
 

@@ -48,6 +48,17 @@ enum Resources {
         NSImage(contentsOf: resourcesDirectory.appendingPathComponent("robot-face.png"))
     }
 
+    /// The frames of a decoration's preview over a set of box screens, as the firmware draws them
+    /// (decorations/<screens>-<name>.png from tools/decoration-previews.sh: 320 × 240 each, side by side); empty when
+    /// the bundle has none.
+    static func decorationFrames(_ name: String, screens: String) -> [NSImage] {
+        let url = resourcesDirectory.appendingPathComponent("decorations").appendingPathComponent("\(screens)-\(name).png")
+        guard let strip = NSImage(contentsOf: url)?.cgImage(forProposedRect: nil, context: nil, hints: nil) else { return [] }
+        return stride(from: 0, to: strip.width, by: 320).compactMap { x in
+            strip.cropping(to: CGRect(x: x, y: 0, width: 320, height: 240)).map { NSImage(cgImage: $0, size: NSSize(width: 320, height: 240)) }
+        }
+    }
+
     /// The lines of Character `id` said with a form of address (characters/<id>/address/<form>.bin).
     static func addressPack(_ id: String, form: String) -> VoicePack? {
         let url = resourcesDirectory.appendingPathComponent("voices").appendingPathComponent("\(id).\(form).bin")

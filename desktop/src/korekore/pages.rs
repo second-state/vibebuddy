@@ -14,7 +14,7 @@ use super::picture::BoxPicture;
 use super::{sprites, theme, view};
 use crate::i18n::{UiLanguage, tr};
 use crate::status::{self, OperationKind, OperationState};
-use crate::{AddressChoice, BUILTIN, BoxScreens, CUSTOM, Lender, Message, ROBOT, agents, assets, client, config_dir, short_time, wifi_failure};
+use crate::{AddressChoice, BUILTIN, BoxDecoration, BoxScreens, CUSTOM, Lender, Message, ROBOT, agents, assets, client, config_dir, short_time, wifi_failure};
 
 /// Leaves room for the scroll bar and the cards' shadows.
 pub(super) fn page<'a>(content: impl Into<Element<'a, Message>>) -> Element<'a, Message> {
@@ -162,13 +162,62 @@ impl crate::App {
         });
         let custom = (self.custom_look.is_some() || self.custom_problem.is_some() || current.as_deref() == Some(CUSTOM))
             .then(|| self.custom_look_card(current.as_deref() == Some(CUSTOM)));
-        let content = column![rows(std::iter::once(volume_row.into()).chain(address.map(Into::into)))]
+        let content = column![rows(std::iter::once(volume_row.into()).chain(address.map(Into::into))), self.decoration_card()]
             .push(progress)
             .push(job.and_then(|job| self.kk_making_row(job)))
             .push(grid)
             .push(custom)
             .spacing(14);
         scrollable(container(content).padding(Padding::ZERO.right(14).bottom(8))).id(CHARACTER_PAGE).into()
+    }
+
+    /// The decoration the box draws over its screens (ADR-0022), as a strip under the volume so it stays near the top
+    /// however many Characters there are: one preview playing the firmware's own frames over the box screens in use,
+    /// and a button for each decoration. Pointing at one previews it; clicking writes it. The one in use is the one
+    /// the box last said.
+    fn decoration_card(&self) -> Element<'_, Message> {
+        let device = self.status.as_ref().map(|status| &status.device);
+        let current = device.and_then(|device| device.decoration.as_deref());
+        let screens = device.and_then(|device| device.screens.as_deref()).unwrap_or("robot");
+        let can_pick = self.online() && !self.busy() && current.is_some();
+        let shown = self.decoration_pointed.map(|decoration| decoration.0).or(current).unwrap_or("off");
+        let key = format!("{screens}-{shown}");
+        let preview: Element<'_, Message> = match self.decoration_frames.iter().find(|(name, _)| *name == key) {
+            Some((_, frames)) if !frames.is_empty() => {
+                image(frames[self.decoration_frame % frames.len()].clone()).filter_method(image::FilterMethod::Nearest).width(160).height(120).into()
+            }
+            _ => Space::new().width(160).height(120).into(),
+        };
+        let preview = container(preview).padding(theme::STROKE_BASE).style(|_| container::Style {
+            border: Border { color: theme::INK, width: theme::STROKE_BASE, radius: theme::RADIUS_SM.into() },
+            ..container::Style::default()
+        });
+        let mut buttons = row![].spacing(6);
+        for decoration in BoxDecoration::ALL {
+            let in_use = current == Some(decoration.0);
+            let fill = if in_use { Fill::Ink } else { Fill::Paper };
+            // The one in use keeps its press, or it would draw greyed out; the box takes the same decoration again as
+            // no change.
+            let button = pill_sized(decoration.to_string(), fill, 13.0, can_pick.then_some(Message::SetDecoration(decoration)));
+            buttons = buttons.push(
+                iced::widget::mouse_area(button)
+                    .on_enter(Message::PointDecoration(Some(decoration)))
+                    .on_exit(Message::PointDecoration(None)),
+            );
+        }
+        // Firmware too old for the screens is too old for this as well; the Device page says how to update.
+        let below: Element<'_, Message> = if self.online() && current.is_none() {
+            note(tr("Update the box's firmware to choose a decoration.", &[]))
+        } else {
+            small(tr("Drawn over the box's screens, whatever Character it wears.", &[]))
+        };
+        card(
+            row![preview, column![text(tr("Decoration", &[])).font(bold()).size(13), buttons, below].spacing(8)]
+                .spacing(14)
+                .align_y(Alignment::Center),
+        )
+        .padding(Padding { top: 10.0, right: 14.0, bottom: 10.0, left: 10.0 })
+        .into()
     }
 
     pub(super) fn kore_card(&self) -> Element<'_, Message> {

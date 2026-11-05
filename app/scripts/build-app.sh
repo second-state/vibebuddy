@@ -96,6 +96,9 @@ echo "== Character packs"
 # The robot: the built-in voice's five lines as a pack without a look, and its face for the card.
 "${repo_root}/tools/make_voice_pack.py" "${repo_root}/voices/jessica" robot "${contents}/Resources/voices/robot.bin" >/dev/null
 cp "${repo_root}/characters/robot/face.png" "${contents}/Resources/robot-face.png"
+# The decorations' previews for the Character page (ADR-0022), drawn by tools/decoration-previews.sh.
+mkdir -p "${contents}/Resources/decorations"
+cp "${repo_root}"/decorations/*.png "${contents}/Resources/decorations/"
 # The korekore UI's fonts (ADR-0021), registered at launch.
 mkdir -p "${contents}/Resources/fonts"
 cp "${repo_root}"/fonts/korekore/*.ttf "${contents}/Resources/fonts/"

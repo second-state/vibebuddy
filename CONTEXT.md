@@ -100,6 +100,14 @@ _Avoid_: prompt (the firmware's old name for a clip), clip (the audio of a line)
 How a Character appears on screen. The default Character's look is the robot, drawn by the firmware; every other look is four still key frames (normal, eyes closed, happy, sad) carried in the Character pack, which the firmware moves and marks for each state.
 _Avoid_: skin, avatar, sprite (that is the image format)
 
+**Box screens (盒子界面)**:
+The set of screens the box draws everything with: the robot screens (the default) or the korekore screens. It sets the layout, fonts and frames, never who the buddy is: either set shows any Character. The user picks it in the App, and the box keeps it across restarts (ADR-0021).
+_Avoid_: theme, skin, style on its own (界面风格 is fine in talk, but the UI says box screens)
+
+**Decoration (装饰)**:
+A seasonal layer the box draws over whichever box screens it uses, such as falling snow, or lights on a pine garland around the edge of the screen. It uses only things that don't depend on the layout, so one decoration is designed once and works on every set of screens. It is separate from the Character: a decoration doesn't come with one, and a Character doesn't bring one. It never hides or changes what the screen means (ADR-0022).
+_Avoid_: theme, holiday skin, background (it is drawn over the screens, not under them)
+
 **Character pack (角色包)**:
 One Character bundled into a single pack: its look (unless it uses the built-in one), the audio of its lines and its name, written to a location on the device separate from the program. Changing Character means changing the Character pack, never the firmware, and the whole pack is written at once so look and voice never disagree. When the device has no Character pack, it uses the built-in default Character.
 _Avoid_: voice pack (the older pack that held only five lines), 语音包, 音色包, asset pack, skin pack
@@ -196,6 +204,8 @@ Fixed wording for the App's English UI and English logs. Use these words when wr
 | 播报音色 | announcement voice | Part of a character, never picked on its own; on its own, just say voice |
 | 内置音色 | built-in voice | Jessica (English), which ships with the firmware and speaks for the built-in default character |
 | 角色包 | character pack | |
+| 盒子界面 | box screens | Robot or korekore |
+| 装饰 | decoration | Off, Falling leaves, Snow or Lights (关 / 落叶 / 下雪 / 彩灯); never "theme" |
 | 音量 / 静音 | volume / mute | |
 | 模式 | mode | |
 | 值班 / 番茄钟 / 休闲 | On duty / Pomodoro / Leisure | Capitalized in the UI; duty / pomodoro / leisure in code and comments |

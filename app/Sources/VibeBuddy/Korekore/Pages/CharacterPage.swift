@@ -15,6 +15,7 @@ struct KorekoreCharacterPage: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 14) {
                 KorekoreVolumeCard(model: model)
+                KorekoreDecorationCard(model: model)
                 if let operation = model.operation, operation.kind == .voicePack {
                     writeProgress(operation)
                 }
@@ -177,6 +178,72 @@ struct KorekoreCharacterPage: View {
         .overlay(RoundedRectangle(cornerRadius: Theme.Radius.md)
             .strokeBorder(Theme.Colors.ink, style: StrokeStyle(lineWidth: Theme.Stroke.base, dash: [6, 4])))
         .contentShape(Rectangle())
+    }
+}
+
+/// The decoration the box draws over its screens (ADR-0022), as a strip under the volume so it stays near the top
+/// however many Characters there are: one preview playing the firmware's own frames over the box screens in use,
+/// and a button for each decoration. Pointing at one previews it; clicking writes it. The one in use is the one the
+/// box last said.
+struct KorekoreDecorationCard: View {
+    @ObservedObject var model: AppModel
+    @State private var pointed: String?
+
+    private static let choices = [
+        ("off", String(localized: "Off")), ("leaves", String(localized: "Falling leaves")),
+        ("snow", String(localized: "Snow")), ("lights", String(localized: "Lights")),
+    ]
+    /// Loaded once a set of screens: the strips don't change while the app runs.
+    @MainActor private static var frames: [String: [NSImage]] = [:]
+
+    private var device: DeviceState? { model.status?.device }
+    private var connected: Bool { device?.connected ?? false }
+    private var current: String? { device?.decoration }
+
+    var body: some View {
+        let shown = Self.frames(pointed ?? current ?? "off", screens: device?.screens ?? "robot")
+        KCard(padding: EdgeInsets(top: 10, leading: 10, bottom: 10, trailing: 14)) {
+            HStack(spacing: 14) {
+                TimelineView(.periodic(from: .now, by: 0.15)) { context in
+                    if !shown.isEmpty {
+                        let index = Int(context.date.timeIntervalSinceReferenceDate / 0.15) % shown.count
+                        Image(nsImage: shown[index]).resizable().interpolation(.none)
+                    }
+                }
+                .frame(width: 160, height: 120)
+                .clipShape(RoundedRectangle(cornerRadius: Theme.Radius.sm))
+                .overlay(RoundedRectangle(cornerRadius: Theme.Radius.sm).strokeBorder(Theme.Colors.ink, lineWidth: Theme.Stroke.base))
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("Decoration").font(.rounded(13, weight: 700))
+                    HStack(spacing: 6) {
+                        ForEach(Self.choices, id: \.0) { name, label in
+                            Button(label) { if name != current { model.setDecoration(name) } }
+                                .kButton(name == current ? .ink : .paper, size: 13)
+                                .onHover { inside in
+                                    if inside { pointed = name } else if pointed == name { pointed = nil }
+                                }
+                        }
+                    }
+                    .disabled(!connected || current == nil || model.operationRunning)
+                    // Firmware too old for the screens is too old for this as well; the Device page says how to update.
+                    if connected, current == nil {
+                        KNote(String(localized: "Update the box's firmware to choose a decoration."))
+                    } else {
+                        Text("Drawn over the box's screens, whatever Character it wears.")
+                            .font(.rounded(12, weight: 400)).foregroundStyle(Theme.Colors.muted)
+                    }
+                }
+                Spacer(minLength: 0)
+            }
+        }
+    }
+
+    @MainActor private static func frames(_ name: String, screens: String) -> [NSImage] {
+        let key = "\(screens)-\(name)"
+        if let loaded = frames[key] { return loaded }
+        let loaded = Resources.decorationFrames(name, screens: screens)
+        frames[key] = loaded
+        return loaded
     }
 }
 

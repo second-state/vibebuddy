@@ -801,6 +801,7 @@ fn app(state: AppState) -> Router {
         .route("/v1/device/identify", post(post_identify))
         .route("/v1/device/volume", post(post_volume))
         .route("/v1/device/screens", post(post_screens))
+        .route("/v1/device/decoration", post(post_decoration))
         .route("/v1/device/unpair", post(post_unpair))
         .route("/v1/device/takeover", post(post_takeover))
         .route("/v1/device/wifi", post(post_wifi))
@@ -1079,6 +1080,31 @@ async fn post_screens(
     }
     let mut event = device_command("device.screens");
     event.extra.insert("style".to_owned(), request.style.into());
+    post_event(State(state), Json(event)).await
+}
+
+/// The decorations the box can draw over its screens (ADR-0022).
+const DECORATIONS: [&str; 4] = ["off", "leaves", "snow", "lights"];
+
+#[derive(serde::Deserialize)]
+struct DecorationRequest {
+    name: String,
+}
+
+/// Choose the decoration the box draws over its screens. The box stores the choice and answers with a `DECORATION`
+/// line, and the status decoration follows it.
+async fn post_decoration(
+    State(state): State<AppState>,
+    Json(request): Json<DecorationRequest>,
+) -> (StatusCode, Json<ApiResponse>) {
+    if !DECORATIONS.contains(&request.name.as_str()) {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(ApiResponse { accepted: false, message: format!("name must be one of {}", DECORATIONS.join(", ")) }),
+        );
+    }
+    let mut event = device_command("device.decoration");
+    event.extra.insert("name".to_owned(), request.name.into());
     post_event(State(state), Json(event)).await
 }
 
@@ -2959,6 +2985,22 @@ mod tests {
         assert_eq!(status, StatusCode::BAD_REQUEST);
         assert!(!response.accepted);
         assert!(transport.events().is_empty());
+    }
+
+    #[tokio::test]
+    async fn choosing_a_decoration_sends_it_to_the_device_and_an_unknown_one_is_refused() {
+        let transport = Arc::new(RecordingTransport::default());
+        let request = DecorationRequest { name: "snow".to_owned() };
+        let (status, _) = post_decoration(State(test_state(transport.clone())), Json(request)).await;
+        assert_eq!(status, StatusCode::ACCEPTED);
+        let event = &transport.events()[0];
+        assert_eq!(event.event, "device.decoration");
+        assert_eq!(event.extra["name"], "snow");
+        let request = DecorationRequest { name: "Snow".to_owned() };
+        let (status, Json(response)) = post_decoration(State(test_state(transport.clone())), Json(request)).await;
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+        assert!(!response.accepted);
+        assert_eq!(transport.events().len(), 1);
     }
 
     fn no_query() -> axum::extract::Query<PackQuery> {

@@ -255,6 +255,9 @@ pub struct Device {
     pub volume: Option<u8>,
     /// Which set of screens the box draws, `robot` or `korekore` (ADR-0021); None from firmware that predates the choice.
     pub screens: Option<String>,
+    /// The decoration the box draws over its screens, `off`, `leaves`, `snow` or `lights` (ADR-0022); None from firmware that
+    /// predates decorations.
+    pub decoration: Option<String>,
     /// Linked over the local network or the Relay; `port` is then the box's or the Relay's address.
     pub network: bool,
     pub relay: bool,
@@ -468,8 +471,9 @@ mod tests {
 
     #[test]
     fn the_box_screens_parse() {
-        let device: Device = serde_json::from_str(r#"{"connected": true, "port": null, "bridge": false, "screens": "korekore"}"#).expect("device");
+        let device: Device = serde_json::from_str(r#"{"connected": true, "port": null, "bridge": false, "screens": "korekore", "decoration": "snow"}"#).expect("device");
         assert_eq!(device.screens.as_deref(), Some("korekore"));
+        assert_eq!(device.decoration.as_deref(), Some("snow"));
     }
 
     #[test]

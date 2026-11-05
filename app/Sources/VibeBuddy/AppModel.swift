@@ -172,6 +172,8 @@ final class AppModel: ObservableObject {
 
     func setScreens(_ style: String) { run { try await self.client.setScreens(style) } }
 
+    func setDecoration(_ name: String) { run { try await self.client.setDecoration(name) } }
+
     func chooseBox(usbSerial: String) { run { try await self.client.chooseBox(usbSerial: usbSerial) } }
 
     func unpair(key: String) { run { try await self.client.unpair(key: key) } }

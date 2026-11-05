@@ -7,6 +7,7 @@ use std::cell::Cell;
 use vibebuddy_firmware_core::audio::{Codec, Prompt, Sound};
 use vibebuddy_firmware_core::buttons::Levels;
 use vibebuddy_firmware_core::canvas::FRAME_BYTES;
+use vibebuddy_firmware_core::decoration;
 use vibebuddy_firmware_core::display::Screen;
 use vibebuddy_firmware_core::firmware::{AudioStatus, Board, Firmware, FrameAction, VolumeError, hold_line_byte};
 use vibebuddy_firmware_core::noise::Sealer;
@@ -510,6 +511,37 @@ fn the_box_screens_switch_and_survive_a_reboot() {
     assert_eq!(at(&board, 4, 150), robot);
 }
 
+#[test]
+fn the_decoration_switches_moves_holds_still_for_input_and_survives_a_reboot() {
+    let (mut firmware, mut board, _) = booted(blank_flash());
+    let plain = board.frame.clone();
+    assert_eq!(send(&mut firmware, &mut board, r#"{"version":1,"event":"device.decoration","name":"snow"}"#), ["DECORATION SNOW"]);
+    assert_ne!(board.frame, plain, "the snow is drawn at once");
+    // The state colour's rows are the screens' own.
+    assert_eq!(board.frame[..4 * 320 * 2], plain[..4 * 320 * 2]);
+    assert_eq!(send(&mut firmware, &mut board, r#"{"version":1,"event":"device.decoration","name":"tinsel"}"#), ["DECORATION ERROR", "DECORATION SNOW"]);
+    assert_eq!(send(&mut firmware, &mut board, r#"{"version":1,"event":"device.decoration"}"#), ["DECORATION SNOW"]);
+
+    // Idle, the screens draw twice a second; the snow moves in between.
+    let before = board.frame.clone();
+    board.advance(decoration::FRAME_MS);
+    firmware.poll(&mut board);
+    assert_ne!(board.frame, before, "the snow falls between the screens' own frames");
+
+    // While the box needs input, nothing but the buddy moves.
+    send(&mut firmware, &mut board, r#"{"version":1,"event":"agent.input_required","suppress_audio":true}"#);
+    let asking = board.frame.clone();
+    board.advance(decoration::FRAME_MS);
+    firmware.poll(&mut board);
+    assert_eq!(board.frame, asking, "the snow holds still while the box asks");
+
+    let flash = board.flash;
+    let (mut firmware, mut board, _) = booted(flash);
+    let lines = send(&mut firmware, &mut board, r#"{"version":1,"event":"device.hello"}"#);
+    assert!(lines.contains(&"DECORATION SNOW".to_owned()), "{lines:?}");
+    assert_eq!(send(&mut firmware, &mut board, r#"{"version":1,"event":"device.decoration","name":"off"}"#), ["DECORATION OFF"]);
+}
+
 fn encode_base64(bytes: &[u8]) -> String {
     const ALPHABET: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
     let mut out = String::new();
@@ -608,7 +640,7 @@ fn echo_reports_length_and_crc() {
 fn hello_repeats_the_static_state() {
     let (mut firmware, mut board, _) = booted(blank_flash());
     let lines = send(&mut firmware, &mut board, r#"{"version":1,"event":"device.hello"}"#);
-    assert_eq!(lines, ["DISPLAY READY BUILD abc1234 2026-09-26 10:00", "FIRMWARE VERSION 1.2.3", "TRANSFER 1", "LINK NOISE", BOX_KEY, RELAY_URL, "MODE DUTY", "VOICES builtin", "VOLUME 65", "SCREENS ROBOT", "TOUCH NONE"]);
+    assert_eq!(lines, ["DISPLAY READY BUILD abc1234 2026-09-26 10:00", "FIRMWARE VERSION 1.2.3", "TRANSFER 1", "LINK NOISE", BOX_KEY, RELAY_URL, "MODE DUTY", "VOICES builtin", "VOLUME 65", "SCREENS ROBOT", "DECORATION OFF", "TOUCH NONE"]);
 }
 
 #[test]

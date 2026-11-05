@@ -308,6 +308,7 @@ impl Display {
             Mode::Leisure => self.kk_leisure(&mut canvas, scene, &leisure),
             Mode::Duty => self.kk_duty(&mut canvas, scene),
         }
+        self.draw_decoration(&mut canvas, scene);
         if dim {
             canvas.dim();
         }

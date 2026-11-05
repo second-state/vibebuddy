@@ -77,6 +77,11 @@ pub async fn set_screens(style: &'static str) -> Result<(), String> {
     post("/v1/device/screens", Some(serde_json::json!({ "style": style }))).await
 }
 
+/// `name` is `off`, `leaves`, `snow` or `lights`; the box reports a DECORATION line once it has stored it, and the status follows.
+pub async fn set_decoration(name: &'static str) -> Result<(), String> {
+    post("/v1/device/decoration", Some(serde_json::json!({ "name": name }))).await
+}
+
 /// The daemon accepts the pack and writes it in the background; progress arrives in the status stream.
 /// `lender` (the Character lending a custom one its voice, persona and lines) and `address` (the form of address
 /// its lines carry) aren't in the pack; the daemon keeps them for the buddy's spoken replies.
