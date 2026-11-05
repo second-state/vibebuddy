@@ -162,56 +162,61 @@ impl crate::App {
         });
         let custom = (self.custom_look.is_some() || self.custom_problem.is_some() || current.as_deref() == Some(CUSTOM))
             .then(|| self.custom_look_card(current.as_deref() == Some(CUSTOM)));
-        let content = column![rows(std::iter::once(volume_row.into()).chain(address.map(Into::into)))]
+        let content = column![rows(std::iter::once(volume_row.into()).chain(address.map(Into::into))), self.decoration_card()]
             .push(progress)
             .push(job.and_then(|job| self.kk_making_row(job)))
             .push(grid)
             .push(custom)
-            .push(self.decoration_card())
             .spacing(14);
         scrollable(container(content).padding(Padding::ZERO.right(14).bottom(8))).id(CHARACTER_PAGE).into()
     }
 
-    /// The decoration the box draws over its screens (ADR-0022): a tile for each, playing the firmware's own frames
-    /// over the box screens it uses now. The one in use is the one the box last said.
+    /// The decoration the box draws over its screens (ADR-0022), as a strip under the volume so it stays near the top
+    /// however many Characters there are: one preview playing the firmware's own frames over the box screens in use,
+    /// and a button for each decoration. Pointing at one previews it; clicking writes it. The one in use is the one
+    /// the box last said.
     fn decoration_card(&self) -> Element<'_, Message> {
         let device = self.status.as_ref().map(|status| &status.device);
         let current = device.and_then(|device| device.decoration.as_deref());
         let screens = device.and_then(|device| device.screens.as_deref()).unwrap_or("robot");
         let can_pick = self.online() && !self.busy() && current.is_some();
-        let mut tiles = row![].spacing(10);
+        let shown = self.decoration_pointed.map(|decoration| decoration.0).or(current).unwrap_or("off");
+        let key = format!("{screens}-{shown}");
+        let preview: Element<'_, Message> = match self.decoration_frames.iter().find(|(name, _)| *name == key) {
+            Some((_, frames)) if !frames.is_empty() => {
+                image(frames[self.decoration_frame % frames.len()].clone()).filter_method(image::FilterMethod::Nearest).width(160).height(120).into()
+            }
+            _ => Space::new().width(160).height(120).into(),
+        };
+        let preview = container(preview).padding(theme::STROKE_BASE).style(|_| container::Style {
+            border: Border { color: theme::INK, width: theme::STROKE_BASE, radius: theme::RADIUS_SM.into() },
+            ..container::Style::default()
+        });
+        let mut buttons = row![].spacing(6);
         for decoration in BoxDecoration::ALL {
             let in_use = current == Some(decoration.0);
-            let key = format!("{screens}-{}", decoration.0);
-            let preview: Element<'_, Message> = match self.decoration_frames.iter().find(|(name, _)| *name == key) {
-                Some((_, frames)) if !frames.is_empty() => image(frames[self.decoration_frame % frames.len()].clone())
-                    .filter_method(image::FilterMethod::Nearest)
-                    .width(Length::Fill)
-                    .into(),
-                _ => Space::new().into(),
-            };
-            let (outline, stroke) = if in_use { (theme::KORE_PINK, theme::STROKE_BOLD) } else { (theme::INK, theme::STROKE_BASE) };
-            let tile = column![
-                container(preview).padding(stroke).style(move |_| container::Style {
-                    border: Border { color: outline, width: stroke, radius: theme::RADIUS_SM.into() },
-                    ..container::Style::default()
-                }),
-                row![text(decoration.to_string()).font(bold()).size(13).width(Length::Fill)]
-                    .push(in_use.then(|| tag(tr("In use", &[]), theme::KORE_PINK_TEXT)))
-                    .align_y(Alignment::Center),
-            ]
-            .spacing(6);
-            let tile = button(tile).padding(0).style(|_, _| button::Style::default()).on_press_maybe((can_pick && !in_use).then_some(Message::SetDecoration(decoration)));
-            tiles = tiles.push(container(tile).width(Length::FillPortion(1)));
+            let fill = if in_use { Fill::Ink } else { Fill::Paper };
+            // The one in use keeps its press, or it would draw greyed out; the box takes the same decoration again as
+            // no change.
+            let button = pill_sized(decoration.to_string(), fill, 13.0, can_pick.then_some(Message::SetDecoration(decoration)));
+            buttons = buttons.push(
+                iced::widget::mouse_area(button)
+                    .on_enter(Message::PointDecoration(Some(decoration)))
+                    .on_exit(Message::PointDecoration(None)),
+            );
         }
+        // Firmware too old for the screens is too old for this as well; the Device page says how to update.
+        let below: Element<'_, Message> = if self.online() && current.is_none() {
+            note(tr("Update the box's firmware to choose a decoration.", &[]))
+        } else {
+            small(tr("Drawn over the box's screens, whatever Character it wears.", &[]))
+        };
         card(
-            column![heading(tr("Decoration", &[])), small(tr("Drawn over the box's screens, whatever Character it wears.", &[])), tiles]
-                .push(
-                    // Firmware too old for the screens is too old for this as well; the Device page says how to update.
-                    (self.online() && current.is_none()).then(|| note(tr("Update the box's firmware to choose a decoration.", &[]))),
-                )
-                .spacing(10),
+            row![preview, column![text(tr("Decoration", &[])).font(bold()).size(13), buttons, below].spacing(8)]
+                .spacing(14)
+                .align_y(Alignment::Center),
         )
+        .padding(Padding { top: 10.0, right: 14.0, bottom: 10.0, left: 10.0 })
         .into()
     }
 

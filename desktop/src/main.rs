@@ -110,6 +110,8 @@ enum Message {
     PluginTick,
     /// The next frame of the decorations' previews, while the Character page shows.
     DecorationTick,
+    /// The pointer is on a decoration's button (its preview shows), or left it.
+    PointDecoration(Option<BoxDecoration>),
     OpenSettings,
     /// A page of the first-run guide, or (None) leave it for the tabs.
     Guide(Option<usize>),
@@ -313,6 +315,7 @@ struct App {
     /// Each decoration's preview over each set of box screens, keyed `<screens>-<decoration>`, and the frame up now.
     decoration_frames: Vec<(&'static str, Vec<image::Handle>)>,
     decoration_frame: usize,
+    decoration_pointed: Option<BoxDecoration>,
     /// The Characters made on this computer, each one's face, and the voices one can be made with (ADR-0020); asked
     /// when the daemon comes up and whenever a job changes state.
     made: Vec<making::MadeCharacter>,
@@ -471,6 +474,7 @@ impl App {
             robot_face: None,
             decoration_frames: decoration_frames(),
             decoration_frame: 0,
+            decoration_pointed: None,
             made: Vec::new(),
             made_faces: Vec::new(),
             character_voices: Vec::new(),
@@ -648,6 +652,7 @@ impl App {
                 }
             }
             Message::DecorationTick => self.decoration_frame = self.decoration_frame.wrapping_add(1),
+            Message::PointDecoration(decoration) => self.decoration_pointed = decoration,
             Message::PluginTick => {
                 // The plugin can be enabled or disabled while the app runs: the tray icon gives way, or comes back
                 // when the subscription starts it again.

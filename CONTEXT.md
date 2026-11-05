@@ -105,7 +105,7 @@ The set of screens the box draws everything with: the robot screens (the default
 _Avoid_: theme, skin, style on its own (界面风格 is fine in talk, but the UI says box screens)
 
 **Decoration (装饰)**:
-A seasonal layer the box draws over whichever box screens it uses, such as falling snow or a string of lights around the edge of the screen. It uses only things that don't depend on the layout, so one decoration is designed once and works on every set of screens. It is separate from the Character: a decoration doesn't come with one, and a Character doesn't bring one. It never hides or changes what the screen means (ADR-0022).
+A seasonal layer the box draws over whichever box screens it uses, such as falling snow, or lights on a pine garland around the edge of the screen. It uses only things that don't depend on the layout, so one decoration is designed once and works on every set of screens. It is separate from the Character: a decoration doesn't come with one, and a Character doesn't bring one. It never hides or changes what the screen means (ADR-0022).
 _Avoid_: theme, holiday skin, background (it is drawn over the screens, not under them)
 
 **Character pack (角色包)**:
@@ -205,7 +205,7 @@ Fixed wording for the App's English UI and English logs. Use these words when wr
 | 内置音色 | built-in voice | Jessica (English), which ships with the firmware and speaks for the built-in default character |
 | 角色包 | character pack | |
 | 盒子界面 | box screens | Robot or korekore |
-| 装饰 | decoration | Off, or a named one such as Snow; never "theme" |
+| 装饰 | decoration | Off, Falling leaves, Snow or Lights (关 / 落叶 / 下雪 / 彩灯); never "theme" |
 | 音量 / 静音 | volume / mute | |
 | 模式 | mode | |
 | 值班 / 番茄钟 / 休闲 | On duty / Pomodoro / Leisure | Capitalized in the UI; duty / pomodoro / leisure in code and comments |

@@ -15,6 +15,7 @@ struct KorekoreCharacterPage: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 14) {
                 KorekoreVolumeCard(model: model)
+                KorekoreDecorationCard(model: model)
                 if let operation = model.operation, operation.kind == .voicePack {
                     writeProgress(operation)
                 }
@@ -38,7 +39,6 @@ struct KorekoreCharacterPage: View {
                 if model.status?.device.voice == CustomCharacter.id || model.savedCustomCharacter != nil {
                     KorekoreCustomLook(model: model)
                 }
-                KorekoreDecorationCard(model: model)
             }
             .padding(.bottom, 8)
         }
@@ -181,10 +181,13 @@ struct KorekoreCharacterPage: View {
     }
 }
 
-/// The decoration the box draws over its screens (ADR-0022): a tile for each, playing the firmware's own frames over
-/// the box screens it uses now. The one in use is the one the box last said.
+/// The decoration the box draws over its screens (ADR-0022), as a strip under the volume so it stays near the top
+/// however many Characters there are: one preview playing the firmware's own frames over the box screens in use,
+/// and a button for each decoration. Pointing at one previews it; clicking writes it. The one in use is the one the
+/// box last said.
 struct KorekoreDecorationCard: View {
     @ObservedObject var model: AppModel
+    @State private var pointed: String?
 
     private static let choices = [
         ("off", String(localized: "Off")), ("leaves", String(localized: "Falling leaves")),
@@ -195,52 +198,44 @@ struct KorekoreDecorationCard: View {
 
     private var device: DeviceState? { model.status?.device }
     private var connected: Bool { device?.connected ?? false }
-    private var screens: String { device?.screens ?? "robot" }
+    private var current: String? { device?.decoration }
 
     var body: some View {
-        KCard {
-            VStack(alignment: .leading, spacing: 10) {
-                KHeading(String(localized: "Decoration"))
-                Text("Drawn over the box's screens, whatever Character it wears.")
-                    .font(.rounded(12, weight: 400)).foregroundStyle(Theme.Colors.muted)
-                HStack(alignment: .top, spacing: 10) {
-                    ForEach(Self.choices, id: \.0) { name, label in
-                        tile(name, label)
-                    }
-                }
-                // Firmware too old for the screens is too old for this as well; the Device page says how to update.
-                if connected, device?.decoration == nil {
-                    KNote(String(localized: "Update the box's firmware to choose a decoration."))
-                }
-            }
-        }
-    }
-
-    private func tile(_ name: String, _ label: String) -> some View {
-        let inUse = device?.decoration == name
-        let frames = Self.frames(name, screens: screens)
-        return Button { if !inUse { model.setDecoration(name) } } label: {
-            VStack(alignment: .leading, spacing: 6) {
+        let shown = Self.frames(pointed ?? current ?? "off", screens: device?.screens ?? "robot")
+        KCard(padding: EdgeInsets(top: 10, leading: 10, bottom: 10, trailing: 14)) {
+            HStack(spacing: 14) {
                 TimelineView(.periodic(from: .now, by: 0.15)) { context in
-                    if !frames.isEmpty {
-                        let index = Int(context.date.timeIntervalSinceReferenceDate / 0.15) % frames.count
-                        Image(nsImage: frames[index]).resizable().interpolation(.none).aspectRatio(4 / 3, contentMode: .fit)
+                    if !shown.isEmpty {
+                        let index = Int(context.date.timeIntervalSinceReferenceDate / 0.15) % shown.count
+                        Image(nsImage: shown[index]).resizable().interpolation(.none)
                     }
                 }
+                .frame(width: 160, height: 120)
                 .clipShape(RoundedRectangle(cornerRadius: Theme.Radius.sm))
-                .overlay(RoundedRectangle(cornerRadius: Theme.Radius.sm)
-                    .strokeBorder(inUse ? Theme.Colors.korePink : Theme.Colors.ink, lineWidth: inUse ? Theme.Stroke.bold : Theme.Stroke.base))
-                HStack(spacing: 5) {
-                    Text(verbatim: label).font(.rounded(13)).lineLimit(1)
-                    Spacer(minLength: 4)
-                    if inUse { KTag(String(localized: "In use"), color: Theme.Colors.korePinkText) }
+                .overlay(RoundedRectangle(cornerRadius: Theme.Radius.sm).strokeBorder(Theme.Colors.ink, lineWidth: Theme.Stroke.base))
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("Decoration").font(.rounded(13, weight: 700))
+                    HStack(spacing: 6) {
+                        ForEach(Self.choices, id: \.0) { name, label in
+                            Button(label) { if name != current { model.setDecoration(name) } }
+                                .kButton(name == current ? .ink : .paper, size: 13)
+                                .onHover { inside in
+                                    if inside { pointed = name } else if pointed == name { pointed = nil }
+                                }
+                        }
+                    }
+                    .disabled(!connected || current == nil || model.operationRunning)
+                    // Firmware too old for the screens is too old for this as well; the Device page says how to update.
+                    if connected, current == nil {
+                        KNote(String(localized: "Update the box's firmware to choose a decoration."))
+                    } else {
+                        Text("Drawn over the box's screens, whatever Character it wears.")
+                            .font(.rounded(12, weight: 400)).foregroundStyle(Theme.Colors.muted)
+                    }
                 }
+                Spacer(minLength: 0)
             }
-            .foregroundStyle(Theme.Colors.ink)
-            .contentShape(Rectangle())
         }
-        .buttonStyle(.plain)
-        .disabled(!connected || device?.decoration == nil || model.operationRunning)
     }
 
     @MainActor private static func frames(_ name: String, screens: String) -> [NSImage] {
