@@ -141,6 +141,98 @@ pub fn tray_icon(picture: &picture::BoxPicture, scale: u32) -> (u32, u32, Vec<u8
     (width, height, out)
 }
 
+/// The app's icon, as the Mac app shows it in the Dock (`KorekoreAppIcon`): Kore on a `sun` tile with an ink outline,
+/// on macOS's icon grid (a 824 px tile on a 1024 px canvas, corner radius 185). RGBA, `size` × `size`, each pixel
+/// the average of 8 × 8 samples, so the tile's edge is smooth and Kore stays sharp at whole sizes.
+pub fn app_icon(size: u32) -> Vec<u8> {
+    const SAMPLES: u32 = 8;
+    let geometry = AppIconGeometry::new();
+    let unit = 1024.0 / f64::from(size);
+    let mut out = Vec::with_capacity((size * size * 4) as usize);
+    for y in 0..size {
+        for x in 0..size {
+            // Premultiplied sums, so a half-covered edge pixel keeps its colour.
+            let mut sum = [0.0f64; 4];
+            for sy in 0..SAMPLES {
+                for sx in 0..SAMPLES {
+                    let px = (f64::from(x) + (f64::from(sx) + 0.5) / f64::from(SAMPLES)) * unit;
+                    let py = (f64::from(y) + (f64::from(sy) + 0.5) / f64::from(SAMPLES)) * unit;
+                    if let Some(rgb) = geometry.colour_at(px, py) {
+                        sum[0] += f64::from(rgb >> 16 & 0xFF);
+                        sum[1] += f64::from(rgb >> 8 & 0xFF);
+                        sum[2] += f64::from(rgb & 0xFF);
+                        sum[3] += 1.0;
+                    }
+                }
+            }
+            let covered = sum[3];
+            let alpha = covered / f64::from(SAMPLES * SAMPLES);
+            let channel = |value: f64| if covered > 0.0 { (value / covered).round() as u8 } else { 0 };
+            out.extend_from_slice(&[channel(sum[0]), channel(sum[1]), channel(sum[2]), (alpha * 255.0).round() as u8]);
+        }
+    }
+    out
+}
+
+/// Where the app icon's parts sit on the 1024 px canvas.
+struct AppIconGeometry {
+    /// Half the side of the path the outline is drawn along: the tile, inset by half the outline.
+    half: f64,
+    stroke: f64,
+    kore_scale: u32,
+    kore_left: u32,
+    kore_top: u32,
+}
+
+impl AppIconGeometry {
+    const CANVAS: f64 = 1024.0;
+    const TILE: f64 = 824.0;
+    const RADIUS: f64 = 185.0;
+
+    fn new() -> Self {
+        let kore = &sprites::KORE_NORMAL;
+        // The badge's 2 pt outline on its 46 pt height, scaled to the tile; Kore at a whole-pixel scale, about 70 %
+        // of the tile wide. Both as on the Mac.
+        let stroke = (Self::TILE * f64::from(theme::STROKE_BASE) / 46.0).round();
+        let kore_scale = (Self::TILE * 0.7) as u32 / kore.width;
+        let canvas = Self::CANVAS as u32;
+        Self {
+            half: (Self::TILE - stroke) / 2.0,
+            stroke,
+            kore_scale,
+            kore_left: (canvas - kore.width * kore_scale) / 2,
+            kore_top: (canvas - kore.height * kore_scale) / 2,
+        }
+    }
+
+    /// The colour at a point of the canvas (0xRRGGBB), or none where it is transparent.
+    fn colour_at(&self, x: f64, y: f64) -> Option<u32> {
+        let kore = &sprites::KORE_NORMAL;
+        let (kx, ky) = (x - f64::from(self.kore_left), y - f64::from(self.kore_top));
+        if kx >= 0.0 && ky >= 0.0 {
+            let (col, row) = (kx as u32 / self.kore_scale, ky as u32 / self.kore_scale);
+            if col < kore.width
+                && row < kore.height
+                && let Some(index) = kore.pixels[(row * kore.width + col) as usize].checked_sub(1)
+            {
+                return Some(kore.palette[usize::from(index)]);
+            }
+        }
+        // Signed distance to the rounded square the outline follows: negative inside.
+        let centre = Self::CANVAS / 2.0;
+        let (dx, dy) = ((x - centre).abs() - (self.half - Self::RADIUS), (y - centre).abs() - (self.half - Self::RADIUS));
+        let outside = dx.max(0.0).hypot(dy.max(0.0));
+        let distance = outside + dx.max(dy).min(0.0) - Self::RADIUS;
+        if distance.abs() <= self.stroke / 2.0 {
+            Some(0x1C1730)
+        } else if distance < 0.0 {
+            Some(0xFFD23F)
+        } else {
+            None
+        }
+    }
+}
+
 /// The settings window's sections, in the sidebar's order (docs/design/korekore/README.md).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Section {
@@ -242,6 +334,95 @@ mod tests {
             assert_eq!(sprite.pixels.len(), (sprite.width * sprite.height) as usize, "{name}");
             assert!(sprite.pixels.iter().all(|&index| usize::from(index) <= sprite.palette.len()), "{name}");
         }
+    }
+
+    #[test]
+    fn the_app_icon_is_kore_on_a_sun_tile_with_an_ink_outline() {
+        let size = 64;
+        let icon = app_icon(size);
+        assert_eq!(icon.len(), (size * size * 4) as usize);
+        let at = |x: u32, y: u32| &icon[((y * size + x) * 4) as usize..][..4];
+        // Outside the tile, in its sun fill (between the outline and Kore), on the outline at the middle of the
+        // left edge, and on Kore's screen.
+        assert_eq!(at(1, 1), [0; 4]);
+        assert_eq!(at(12, 32), [0xFF, 0xD2, 0x3F, 0xFF]);
+        assert_eq!(at(7, 32)[..3], [0x1C, 0x17, 0x30]);
+        assert_eq!(at(30, 25), [0x3B, 0x2F, 0x63, 0xFF]);
+    }
+
+    /// Writes the app's icon files from `app_icon`, so they always match it: the Windows `.ico` and the Linux `.svg`.
+    /// Run it by hand after changing Kore or the badge: `cargo test -p vibebuddy-desktop write_app_icons -- --ignored`.
+    #[test]
+    #[ignore]
+    fn write_app_icons() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("..");
+        std::fs::write(root.join("packaging/windows/vibebuddy.ico"), app_icon_ico()).unwrap();
+        std::fs::write(root.join("packaging/linux/vibebuddy.svg"), app_icon_svg()).unwrap();
+    }
+
+    /// An `.ico` of PNG images, which Windows reads at every size since Vista.
+    fn app_icon_ico() -> Vec<u8> {
+        use ::image::ImageEncoder;
+        let sizes = [16u32, 20, 24, 32, 40, 48, 64, 128, 256];
+        let images: Vec<Vec<u8>> = sizes
+            .iter()
+            .map(|&size| {
+                let mut png = Vec::new();
+                ::image::codecs::png::PngEncoder::new(&mut png)
+                    .write_image(&app_icon(size), size, size, ::image::ExtendedColorType::Rgba8)
+                    .unwrap();
+                png
+            })
+            .collect();
+        let mut ico = vec![0, 0, 1, 0];
+        ico.extend_from_slice(&(sizes.len() as u16).to_le_bytes());
+        let mut offset = 6 + 16 * sizes.len() as u32;
+        for (size, png) in sizes.iter().zip(&images) {
+            // A side of 256 is written as 0.
+            let side = (*size % 256) as u8;
+            ico.extend_from_slice(&[side, side, 0, 0, 1, 0, 32, 0]);
+            ico.extend_from_slice(&(png.len() as u32).to_le_bytes());
+            ico.extend_from_slice(&offset.to_le_bytes());
+            offset += png.len() as u32;
+        }
+        images.iter().for_each(|png| ico.extend_from_slice(png));
+        ico
+    }
+
+    /// The same badge as vectors: the outlined tile, then Kore's pixels as runs of rects.
+    fn app_icon_svg() -> String {
+        let geometry = AppIconGeometry::new();
+        let kore = &sprites::KORE_NORMAL;
+        let corner = AppIconGeometry::CANVAS / 2.0 - geometry.half;
+        let mut svg = format!(
+            "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 1024 1024\">\n  \
+             <rect x=\"{corner}\" y=\"{corner}\" width=\"{side}\" height=\"{side}\" rx=\"{radius}\" \
+             fill=\"#FFD23F\" stroke=\"#1C1730\" stroke-width=\"{stroke}\"/>\n  <g shape-rendering=\"crispEdges\">\n",
+            side = geometry.half * 2.0,
+            radius = AppIconGeometry::RADIUS,
+            stroke = geometry.stroke,
+        );
+        let scale = geometry.kore_scale;
+        for row in 0..kore.height {
+            let mut col = 0;
+            while col < kore.width {
+                let index = kore.pixels[(row * kore.width + col) as usize];
+                let start = col;
+                while col < kore.width && kore.pixels[(row * kore.width + col) as usize] == index {
+                    col += 1;
+                }
+                if let Some(n) = index.checked_sub(1) {
+                    svg += &format!(
+                        "    <rect x=\"{}\" y=\"{}\" width=\"{}\" height=\"{scale}\" fill=\"#{:06X}\"/>\n",
+                        geometry.kore_left + start * scale,
+                        geometry.kore_top + row * scale,
+                        (col - start) * scale,
+                        kore.palette[usize::from(n)],
+                    );
+                }
+            }
+        }
+        svg + "  </g>\n</svg>\n"
     }
 
     #[test]

@@ -675,6 +675,8 @@ impl App {
                 let (id, open) = window::open(window::Settings {
                     size: iced::Size::new(960.0, 772.0),
                     min_size: Some(iced::Size::new(900.0, 760.0)),
+                    // Kore's badge, as the Mac app shows in the Dock; Wayland takes the icon from the desktop entry instead.
+                    icon: window::icon::from_rgba(korekore::app_icon(256), 256, 256).ok(),
                     #[cfg(target_os = "linux")]
                     platform_specific: window::settings::PlatformSpecific {
                         application_id: "vibebuddy".to_owned(),
