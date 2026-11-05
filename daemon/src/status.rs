@@ -173,7 +173,12 @@ impl DeviceState {
                 self.bridge_baud = Some(*baud);
                 self.bridge_switches = *switches;
             }
-            DeviceMessage::Busy { owner, reason } => self.busy = Some(Busy { owner: owner.clone(), reason: reason.clone() }),
+            DeviceMessage::Busy { owner, reason } => {
+                // The box is with another computer, so whatever link this one had is gone, even before the transport
+                // stops waiting on the Relay and says so.
+                self.apply(&DeviceMessage::Disconnected);
+                self.busy = Some(Busy { owner: owner.clone(), reason: reason.clone() });
+            }
             DeviceMessage::ForeignFirmware => {
                 // Over the bridge the port survives a reset into other firmware, so what ours reported must go too.
                 self.foreign_firmware = true;
@@ -633,6 +638,17 @@ mod tests {
         assert!(state.busy.is_none() && state.relay && state.network);
         state.apply(&DeviceMessage::Disconnected);
         assert!(!state.relay && !state.network, "a dropped link isn't through anything");
+    }
+
+    #[test]
+    fn a_box_that_is_busy_elsewhere_is_not_connected_here() {
+        // Off this computer's cable, the transport waits on the Relay and says Disconnected only when the wait ends
+        // (seen 2026-11-05): the status kept the old port and the apps sent settings into nothing.
+        let mut state = DeviceState::default();
+        state.apply(&DeviceMessage::Connected { port: "/dev/cu.x".to_owned(), bridge: false, usb_serial: None });
+        state.apply(&DeviceMessage::Busy { owner: "omarchy".to_owned(), reason: "linked".to_owned() });
+        assert!(!state.connected && state.port.is_none());
+        assert_eq!(state.busy.as_ref().map(|busy| busy.owner.as_str()), Some("omarchy"));
     }
 
     #[test]
