@@ -139,7 +139,7 @@ static void indicator(uint8_t *f, const status_model *m)
     status_link_state host = m->linked ? STATUS_LINK_OK : m->host_seen ? STATUS_LINK_ERROR : STATUS_LINK_UNSET;
     const uint8_t *network = m->network_link == STATUS_LINK_OK ? bar_ok
         : m->network_link == STATUS_LINK_ERROR ? bar_error : bar_unset;
-    const uint8_t *link = host == STATUS_LINK_OK ? bar_ok : host == STATUS_LINK_ERROR ? bar_error : bar_unset;
+    const uint8_t *link = host == STATUS_LINK_OK ? (const uint8_t[]){0,6,8} : host == STATUS_LINK_ERROR ? bar_error : bar_unset;
     for (unsigned y = 0; y < 4; ++y) pixel(f, 63, y, network);
     for (unsigned y = 4; y < 8; ++y) pixel(f, 63, y, link);
 }
