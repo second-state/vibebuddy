@@ -33,6 +33,6 @@ for pack in "${repo}"/characters/*/pack.bin; do
 done
 python "${repo}/tools/package-licenses.py" "${stage}" x86_64-pc-windows-msvc
 
-# Inno Setup reads Windows paths.
-"${iscc}" /Qp "/DAppVersion=${version}" "/DLabel=${label}" "/DStage=$(cygpath -w "${stage}")" "/O$(cygpath -w "${repo}")" "$(cygpath -w "${here}/vibebuddy.iss")"
+# Inno Setup reads Windows paths, and Git Bash would rewrite its /switches as paths.
+MSYS_NO_PATHCONV=1 "${iscc}" /Qp "/DAppVersion=${version}" "/DLabel=${label}" "/DStage=$(cygpath -w "${stage}")" "/O$(cygpath -w "${repo}")" "$(cygpath -w "${here}/vibebuddy.iss")"
 echo "${repo}/VibeBuddy-${label}-windows-x86_64-setup.exe"

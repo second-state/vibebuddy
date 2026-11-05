@@ -1,4 +1,4 @@
-﻿; The Windows installer, VibeBuddy-<label>-windows-x86_64-setup.exe, built by make-installer.sh with Inno Setup 6.
+; The Windows installer, VibeBuddy-<label>-windows-x86_64-setup.exe, built by make-installer.sh with Inno Setup 6.
 ; It installs for the current user only, with no admin prompt: the app, daemon and hook, the voice packs and the
 ; licenses go to %LOCALAPPDATA%\Programs\VibeBuddy. Like install.sh on Linux it also connects the agents found on
 ; this computer (vibebuddy-hook install) and starts the app at login. Uninstalling takes the hooks out again.
@@ -29,15 +29,13 @@ WizardStyle=modern
 Compression=lzma2
 SolidCompression=yes
 
+; English only: Inno Setup ships no Simplified Chinese messages file, only an unofficial one.
 [Languages]
 Name: "en"; MessagesFile: "compiler:Default.isl"
-Name: "zh"; MessagesFile: "compiler:Languages\ChineseSimplified.isl"
 
 [CustomMessages]
-en.LaunchAtLogin=Launch VibeBuddy at login
-zh.LaunchAtLogin=登录时启动 VibeBuddy
-en.ConnectingAgents=Connecting the agents on this computer…
-zh.ConnectingAgents=正在连接这台电脑上的 Agent…
+LaunchAtLogin=Launch VibeBuddy at login
+ConnectingAgents=Connecting the agents on this computer...
 
 [Tasks]
 Name: "login"; Description: "{cm:LaunchAtLogin}"
