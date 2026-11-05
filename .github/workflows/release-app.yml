@@ -1,5 +1,6 @@
-# Apple-silicon DMG and x86_64 Linux tarball. Only a vX.Y.Z tag notarizes and publishes a GitHub Release; commits
-# to main that touch packaged content only build, test and sign, keeping both packages as 7-day artifacts for self-testing.
+# Apple-silicon DMG, x86_64 Linux tarball and x86_64 Windows installer. Only a vX.Y.Z tag notarizes and publishes a
+# GitHub Release; commits to main that touch packaged content only build, test and sign, keeping the packages as 7-day
+# artifacts for self-testing.
 # Firmware isn't in either package: it is released on its own by release-firmware.yml and the daemon downloads it
 # (ADR-0010). firmware-rs/core stays a trigger path because the workspace tests run it on the host.
 name: release-app
@@ -174,9 +175,50 @@ jobs:
           path: VibeBuddy-${{ steps.version.outputs.label }}-linux-x86_64.tar.gz
           retention-days: 7
 
+  windows:
+    runs-on: windows-latest
+    env:
+      RELEASE: ${{ startsWith(github.ref, 'refs/tags/') }}
+      VIBEBUDDY_RELEASE_BUILD: "1"
+      VIBEBUDDY_RELEASE_TAG: ${{ startsWith(github.ref, 'refs/tags/') && '1' || '' }}
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Determine version
+        id: version
+        run: |
+          version="$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -n 1)"
+          if [[ "${RELEASE}" == "true" ]]; then
+            [[ "${GITHUB_REF_NAME}" == "v${version}" ]] || {
+              echo "tag ${GITHUB_REF_NAME} does not match Cargo.toml version ${version}" >&2; exit 1; }
+            label="${GITHUB_REF_NAME}"
+          else
+            label="$(git describe --tags --always)"
+          fi
+          echo "label=${label}" >> "${GITHUB_OUTPUT}"
+      - name: Test
+        run: |
+          rustup update stable --no-self-update
+          cargo test --workspace
+      - name: Build installer
+        run: |
+          # The runner image usually has Inno Setup 6; install it when it doesn't.
+          [[ -x "/c/Program Files (x86)/Inno Setup 6/ISCC.exe" ]] || choco install innosetup --no-progress -y
+          cargo install cargo-about --version 0.9.2 --locked --features cli
+          packaging/windows/make-installer.sh "${{ steps.version.outputs.label }}"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows
+          path: VibeBuddy-${{ steps.version.outputs.label }}-windows-x86_64-setup.exe
+          retention-days: 7
+
   publish:
-    # One release for both platforms, made only once both packages exist.
-    needs: [app, linux]
+    # One release for every platform, made only once all the packages exist.
+    needs: [app, linux, windows]
     if: startsWith(github.ref, 'refs/tags/')
     runs-on: ubuntu-latest
     env:
@@ -192,6 +234,9 @@ jobs:
       - uses: actions/download-artifact@v4
         with:
           name: linux
+      - uses: actions/download-artifact@v4
+        with:
+          name: windows
       - name: Publish
         env:
           GH_TOKEN: ${{ github.token }}
@@ -204,6 +249,7 @@ jobs:
           cat >> notes.md <<NOTES
           - **macOS** (Apple silicon, macOS 14+): open the DMG and drag VibeBuddy into Applications.
           - **Linux** (x86_64, tested on Omarchy): \`tar xf VibeBuddy-${label}-linux-x86_64.tar.gz && cd VibeBuddy-${label}-linux-x86_64 && ./install.sh\`
+          - **Windows** (x86_64, Windows 10 and 11): run \`VibeBuddy-${label}-windows-x86_64-setup.exe\`. It isn't signed yet, so SmartScreen warns first: choose More info, then Run anyway.
           - **Firmware** comes in its own releases (\`firmware-v…\`); the app downloads it and offers it on the Device tab.
           NOTES
           if [[ "${SIGNED}" != "true" ]]; then
@@ -215,6 +261,7 @@ jobs:
           gh release create "${label}" --repo "${GITHUB_REPOSITORY}" \
             "VibeBuddy-${label}-arm64.dmg" \
             "VibeBuddy-${label}-linux-x86_64.tar.gz" \
+            "VibeBuddy-${label}-windows-x86_64-setup.exe" \
             --title "VibeBuddy ${label}" \
             --notes-file notes.md
 

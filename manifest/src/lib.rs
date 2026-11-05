@@ -22,7 +22,7 @@ pub struct Manifest {
     pub generated_at: String,
     /// Apps older than this show a banner that can't be dismissed.
     pub min_supported_app: String,
-    /// The latest App per platform, keyed `macos-arm64`, `linux-x86_64`.
+    /// The latest App per platform, keyed `macos-arm64`, `linux-x86_64`, `windows-x86_64`.
     pub app: BTreeMap<String, Download>,
     /// Every released firmware, newest first, so an App too old for the newest one can still find one it can run.
     pub firmware: Vec<Firmware>,
