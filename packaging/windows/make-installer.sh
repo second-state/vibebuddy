@@ -12,6 +12,8 @@ here="${repo}/packaging/windows"
 stage="${repo}/target/package/VibeBuddy-${label}-windows-x86_64"
 version="$(sed -n 's/^version = "\(.*\)"/\1/p' "${repo}/Cargo.toml" | head -n 1)"
 iscc="${ISCC:-/c/Program Files (x86)/Inno Setup 6/ISCC.exe}"
+# Python on Windows reads and writes text in the ANSI code page unless told otherwise; the notices are UTF-8.
+export PYTHONUTF8=1
 
 cargo build --release --locked --manifest-path "${repo}/Cargo.toml" -p vibebuddyd -p vibebuddy-hook -p vibebuddy-desktop
 
