@@ -47,9 +47,9 @@ vibebuddy-firmware-core = { path = "../firmware-rs/core" }
 regex.workspace = true
 sha1 = "0.11"
 
-# Watching the supervising app's process on Windows (main.rs).
+# Watching the supervising app's process (main.rs) and the device name (identity.rs) on Windows.
 [target.'cfg(windows)'.dependencies]
-windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_System_Threading"] }
+windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_System_SystemInformation", "Win32_System_Threading"] }
 
 [dev-dependencies]
 http-body-util = "0.1"

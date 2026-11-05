@@ -93,9 +93,16 @@ fn host_name() -> Option<String> {
     }
 }
 
+/// The device name as Windows Settings shows it; `COMPUTERNAME` is its upper-case NetBIOS form.
 #[cfg(windows)]
 fn host_name() -> Option<String> {
-    std::env::var("COMPUTERNAME").ok().filter(|name| !name.is_empty())
+    use windows_sys::Win32::System::SystemInformation::{ComputerNameDnsHostname, GetComputerNameExW};
+    let mut buffer = [0u16; 256];
+    let mut length = buffer.len() as u32;
+    // SAFETY: the buffer holds `length` UTF-16 units, and the call writes at most that many.
+    let ok = unsafe { GetComputerNameExW(ComputerNameDnsHostname, buffer.as_mut_ptr(), &mut length) };
+    let name = String::from_utf16_lossy(&buffer[..length as usize]);
+    (ok != 0 && !name.is_empty()).then_some(name)
 }
 
 #[cfg(test)]
