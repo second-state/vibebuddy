@@ -15,7 +15,7 @@ use windows_sys::Win32::UI::Shell::ShellExecuteW;
 use windows_sys::Win32::UI::WindowsAndMessaging::SW_SHOWNORMAL;
 
 /// No console window flashes up for a child.
-const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+pub const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 /// How long a daemon that exited waits before the next start, so one that can't start doesn't spin.
 const RESTART_DELAY: Duration = Duration::from_secs(3);
 const RUN_KEY: &str = r"HKCU\Software\Microsoft\Windows\CurrentVersion\Run";

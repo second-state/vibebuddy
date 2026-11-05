@@ -75,8 +75,12 @@ pub async fn apply(plan: Plan) -> Result<String, String> {
 
 async fn hook(args: &[&str]) -> Result<String, String> {
     let hook = std::env::current_exe().map_err(|error| error.to_string())?.with_file_name("vibebuddy-hook");
-    let output = tokio::process::Command::new(&hook)
-        .args(args)
+    let mut command = tokio::process::Command::new(&hook);
+    command.args(args);
+    // The hook is a console program: without this a console window flashes up on Windows.
+    #[cfg(windows)]
+    command.creation_flags(crate::windows::CREATE_NO_WINDOW);
+    let output = command
         .output()
         .await
         .map_err(|error| format!("cannot run {}: {error}", hook.display()))?;
