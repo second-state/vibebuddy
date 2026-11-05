@@ -184,6 +184,10 @@ public struct VoiceCatalogEntry: Equatable, Identifiable, Sendable {
                           summary: String(localized: "An opinionated Danish developer. Hates complexity, keeps it simple."), language: .en),
         VoiceCatalogEntry(id: "mei", name: "Mei", tag: String(localized: "English · Bay Area"),
                           summary: String(localized: "An upbeat Bay Area engineer who cheers you on, sometimes in Chinese."), language: .en),
+        VoiceCatalogEntry(id: "tom", name: "Tom", tag: String(localized: "English · Midwest accent"),
+                          summary: String(localized: "A cozy Thanksgiving turkey, thankful for everything, you most of all."), language: .en),
+        VoiceCatalogEntry(id: "pip", name: "Pip", tag: String(localized: "English · Christmas snowman"),
+                          summary: String(localized: "A bubbly little snowman who thinks winter is the best thing ever."), language: .en),
     ]
 
     /// The language a box voice speaks, from the voice id the box reports; "builtin" is Jessica (English).

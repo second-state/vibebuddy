@@ -87,6 +87,17 @@ VibeBuddy is mainly for programmers in Europe and North America, so three Englis
 
 Each Character card in the App carries a one-sentence summary of who they are, so users can choose between them.
 
+### Holiday Characters
+
+A holiday is a Character like any other: its own look, voice, persona and lines in one pack, with nothing new in the firmware, the protocol or the App. Its lines are about the season, never a date, so the Character still makes sense the week after. It ships with the App, so it must be in a release about a week before the holiday. Backgrounds and colours for a holiday are not part of a Character (the state colours carry meaning) and are not planned.
+
+| Character id | Language | Voice | Holiday |
+| --- | --- | --- | --- |
+| `tom` | en | ElevenLabs, a child's voice: a little Midwestern turkey | Thanksgiving |
+| `pip` | en | ElevenLabs, a child's voice: a bright, bubbly little snowman | Christmas |
+
+Their looks were drawn with ChatGPT's image generation from the description in `look.txt` (the local image model could not keep a turkey the same across four expressions), then cut out, scaled and set in their cells the way `tools/draft-look.py` does it.
+
 ### Where the lines come from
 
 Lines are written in advance, never when they are spoken (ADR-0007). For each Character the repo holds:
