@@ -255,7 +255,7 @@ pub struct Device {
     pub volume: Option<u8>,
     /// Which set of screens the box draws, `robot` or `korekore` (ADR-0021); None from firmware that predates the choice.
     pub screens: Option<String>,
-    /// The decoration the box draws over its screens, `off`, `leaves` or `snow` (ADR-0022); None from firmware that
+    /// The decoration the box draws over its screens, `off`, `leaves`, `snow` or `lights` (ADR-0022); None from firmware that
     /// predates decorations.
     pub decoration: Option<String>,
     /// Linked over the local network or the Relay; `port` is then the box's or the Relay's address.

@@ -1084,7 +1084,7 @@ async fn post_screens(
 }
 
 /// The decorations the box can draw over its screens (ADR-0022).
-const DECORATIONS: [&str; 3] = ["off", "leaves", "snow"];
+const DECORATIONS: [&str; 4] = ["off", "leaves", "snow", "lights"];
 
 #[derive(serde::Deserialize)]
 struct DecorationRequest {

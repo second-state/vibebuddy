@@ -77,7 +77,7 @@ pub async fn set_screens(style: &'static str) -> Result<(), String> {
     post("/v1/device/screens", Some(serde_json::json!({ "style": style }))).await
 }
 
-/// `name` is `off`, `leaves` or `snow`; the box reports a DECORATION line once it has stored it, and the status follows.
+/// `name` is `off`, `leaves`, `snow` or `lights`; the box reports a DECORATION line once it has stored it, and the status follows.
 pub async fn set_decoration(name: &'static str) -> Result<(), String> {
     post("/v1/device/decoration", Some(serde_json::json!({ "name": name }))).await
 }

@@ -52,7 +52,7 @@ pub struct DeviceState {
     /// Which set of screens the box draws, `robot` or `korekore` (ADR-0021), stored on the device; None from firmware that
     /// predates the choice.
     pub screens: Option<String>,
-    /// The decoration the box draws over its screens, `off`, `leaves` or `snow` (ADR-0022), stored on the device; None
+    /// The decoration the box draws over its screens, `off`, `leaves`, `snow` or `lights` (ADR-0022), stored on the device; None
     /// from firmware that predates decorations.
     pub decoration: Option<String>,
     /// The connected port's USB serial number, which tells this device from another ESP32-S3.

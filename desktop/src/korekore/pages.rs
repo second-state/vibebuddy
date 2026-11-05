@@ -167,8 +167,52 @@ impl crate::App {
             .push(job.and_then(|job| self.kk_making_row(job)))
             .push(grid)
             .push(custom)
+            .push(self.decoration_card())
             .spacing(14);
         scrollable(container(content).padding(Padding::ZERO.right(14).bottom(8))).id(CHARACTER_PAGE).into()
+    }
+
+    /// The decoration the box draws over its screens (ADR-0022): a tile for each, playing the firmware's own frames
+    /// over the box screens it uses now. The one in use is the one the box last said.
+    fn decoration_card(&self) -> Element<'_, Message> {
+        let device = self.status.as_ref().map(|status| &status.device);
+        let current = device.and_then(|device| device.decoration.as_deref());
+        let screens = device.and_then(|device| device.screens.as_deref()).unwrap_or("robot");
+        let can_pick = self.online() && !self.busy() && current.is_some();
+        let mut tiles = row![].spacing(10);
+        for decoration in BoxDecoration::ALL {
+            let in_use = current == Some(decoration.0);
+            let key = format!("{screens}-{}", decoration.0);
+            let preview: Element<'_, Message> = match self.decoration_frames.iter().find(|(name, _)| *name == key) {
+                Some((_, frames)) if !frames.is_empty() => image(frames[self.decoration_frame % frames.len()].clone())
+                    .filter_method(image::FilterMethod::Nearest)
+                    .width(Length::Fill)
+                    .into(),
+                _ => Space::new().into(),
+            };
+            let (outline, stroke) = if in_use { (theme::KORE_PINK, theme::STROKE_BOLD) } else { (theme::INK, theme::STROKE_BASE) };
+            let tile = column![
+                container(preview).padding(stroke).style(move |_| container::Style {
+                    border: Border { color: outline, width: stroke, radius: theme::RADIUS_SM.into() },
+                    ..container::Style::default()
+                }),
+                row![text(decoration.to_string()).font(bold()).size(13).width(Length::Fill)]
+                    .push(in_use.then(|| tag(tr("In use", &[]), theme::KORE_PINK_TEXT)))
+                    .align_y(Alignment::Center),
+            ]
+            .spacing(6);
+            let tile = button(tile).padding(0).style(|_, _| button::Style::default()).on_press_maybe((can_pick && !in_use).then_some(Message::SetDecoration(decoration)));
+            tiles = tiles.push(container(tile).width(Length::FillPortion(1)));
+        }
+        card(
+            column![heading(tr("Decoration", &[])), small(tr("Drawn over the box's screens, whatever Character it wears.", &[])), tiles]
+                .push(
+                    // Firmware too old for the screens is too old for this as well; the Device page says how to update.
+                    (self.online() && current.is_none()).then(|| note(tr("Update the box's firmware to choose a decoration.", &[]))),
+                )
+                .spacing(10),
+        )
+        .into()
     }
 
     pub(super) fn kore_card(&self) -> Element<'_, Message> {
@@ -679,28 +723,12 @@ impl crate::App {
                 row![small(tr("Box screens", &[])), Space::new().width(Length::Fill), value].align_y(Alignment::Center).into()
             }
         };
-        // The decoration over either set of screens (ADR-0022). Firmware too old for the screens is too old for this as
-        // well, and already has its note.
-        let decoration: Element<'_, Message> = match device.and_then(|device| device.decoration.as_deref()) {
-            None if online && device.is_some_and(|device| device.screens.is_some()) => {
-                note(tr("Update the box's firmware to choose a decoration.", &[]))
-            }
-            decoration => {
-                let current = decoration.and_then(BoxDecoration::of);
-                let value: Element<'_, Message> = match current {
-                    Some(current) if online && !busy => picker(BoxDecoration::ALL.to_vec(), Some(current), Message::SetDecoration),
-                    _ => text(current.map_or_else(|| "—".to_owned(), |current| current.to_string())).font(pixel(13.0).0).size(pixel(13.0).1).color(theme::INK).into(),
-                };
-                row![small(tr("Decoration", &[])), Space::new().width(Length::Fill), value].align_y(Alignment::Center).into()
-            }
-        };
         let the_box = card(
             column![
                 heading(tr("The box", &[])),
                 column![small(tr("Link", &[])), text(link).font(pixel(13.0).0).size(pixel(13.0).1).color(theme::INK)].spacing(2),
                 column![small(tr("Firmware", &[])), firmware].spacing(2),
                 screens,
-                decoration,
             ]
             .push(device.filter(|device| !device.connected).and_then(status::Device::relay_refusal).map(|why| text(why).font(regular()).size(12).color(theme::KORE_PINK_TEXT)))
             .push(Space::new().height(Length::Fill))

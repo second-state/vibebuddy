@@ -1,5 +1,7 @@
 //! Renders each decoration (ADR-0022) over both sets of box screens to PPM on the Mac, a few states each, to check
-//! that one drawing reads well on every set: `<screens>-<decoration>-<state>.ppm`.
+//! that one drawing reads well on every set: `<screens>-<decoration>-<state>.ppm`. Also the frames the apps play as
+//! the decoration's preview, the ready screen every `FRAME_MS`: `frame-<screens>-<decoration>-<nn>.ppm` (one frame
+//! for off). `tools/decoration-previews.sh` turns those into the apps' strips in `decorations/`.
 //!
 //! Usage: cargo run -p vibebuddy-firmware-core --example decoration_preview -- <directory>
 
@@ -8,7 +10,7 @@ use std::path::{Path, PathBuf};
 
 use vibebuddy_firmware_core::agent_icon::AgentIcon;
 use vibebuddy_firmware_core::canvas::{FRAME_BYTES, HEIGHT, WIDTH};
-use vibebuddy_firmware_core::decoration::Decoration;
+use vibebuddy_firmware_core::decoration::{self, Decoration};
 use vibebuddy_firmware_core::display::{Display, LinkPath, Scene, Screen, Screens, State, TaskInput};
 use vibebuddy_firmware_core::leisure::Leisure;
 use vibebuddy_firmware_core::pomodoro::Pomodoro;
@@ -44,6 +46,23 @@ fn task<'a>(title: &'a [u8], state: State, icon: AgentIcon) -> TaskInput<'a> {
     TaskInput { title: Some(title), state, elapsed_s: 420, project: Some(b"vibebuddy"), id: Some(b"a1"), icon: Some(icon) }
 }
 
+/// Frames in an app preview: 2.4 s at the box's own pace.
+const PREVIEW_FRAMES: u32 = 16;
+
+/// The ready screen in `screens` with `decoration`, as the box draws it at `now_ms`.
+fn ready(screens: Screens, decoration: Decoration, now_ms: u32) -> Vec<u8> {
+    let (pomodoro, leisure) = (Pomodoro::new(), Leisure::new(1, 0));
+    let scene = Scene { now_ms, pomodoro: &pomodoro, leisure: &leisure };
+    let mut screen = Frame { bytes: vec![0; FRAME_BYTES] };
+    let mut display = Display::new();
+    display.start(&mut screen, &scene).unwrap();
+    display.set_screens(&mut screen, &scene, screens);
+    display.set_link(&mut screen, &scene, Some(LinkPath::Usb), false);
+    display.set_decoration(&mut screen, &scene, decoration);
+    display.refresh(&mut screen, &scene);
+    screen.bytes
+}
+
 fn main() {
     let directory = PathBuf::from(std::env::args().nth(1).expect("usage: decoration_preview <output directory>"));
     fs::create_dir_all(&directory).expect("create directory");
@@ -59,7 +78,16 @@ fn main() {
     let states: [(&str, State, &[TaskInput]); 4] =
         [("ready", State::Idle, &[]), ("working", State::Working, &working), ("needs-input", State::InputRequired, &asking), ("done", State::Done, &done)];
     for screens in [Screens::Robot, Screens::Korekore] {
-        for decoration in [Decoration::Leaves, Decoration::Snow] {
+        for decoration in [Decoration::Off, Decoration::Leaves, Decoration::Snow, Decoration::Lights] {
+            let frames = if decoration == Decoration::Off { 1 } else { PREVIEW_FRAMES };
+            for frame in 0..frames {
+                let screens_name = String::from_utf8_lossy(screens.name()).to_lowercase();
+                let decoration_name = String::from_utf8_lossy(decoration.name()).to_lowercase();
+                let bytes = ready(screens, decoration, 61_000 + frame * decoration::FRAME_MS);
+                write_ppm(&directory.join(format!("frame-{screens_name}-{decoration_name}-{frame:02}.ppm")), &bytes);
+            }
+        }
+        for decoration in [Decoration::Leaves, Decoration::Snow, Decoration::Lights] {
             for (name, state, tasks) in states {
                 let mut screen = Frame { bytes: vec![0; FRAME_BYTES] };
                 let mut display = Display::new();
