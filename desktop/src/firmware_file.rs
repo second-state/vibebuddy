@@ -34,14 +34,14 @@ impl Package {
 
 /// Asks for a zip and unpacks it into a fresh temporary directory. `Ok(None)` when the user cancels.
 pub async fn pick() -> Result<Option<Package>, String> {
-    #[cfg(target_os = "linux")]
+    #[cfg(any(target_os = "linux", windows))]
     let file = rfd::AsyncFileDialog::new()
         .set_title(tr("Choose a firmware package", &[]))
         .add_filter("Zip", &["zip"])
         .pick_file()
         .await
         .map(|file| file.path().to_path_buf());
-    #[cfg(not(target_os = "linux"))]
+    #[cfg(not(any(target_os = "linux", windows)))]
     let file: Option<PathBuf> = None;
     let Some(zip) = file else { return Ok(None) };
     let name = zip.file_name().map(|name| name.to_string_lossy().into_owned()).unwrap_or_default();
