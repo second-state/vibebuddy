@@ -1,13 +1,15 @@
 //! Decorations (ADR-0022): a seasonal layer drawn over whichever box screens the box uses, after the screen and
 //! before the dimming, the menu and the tap outline. Only things that don't depend on the layout, so one drawing
 //! works on every set of screens. Each one is named for its holiday: Thanksgiving is falling leaves with an acorn
-//! here and there, and Christmas is lights on a pine garland down the sides and along the bottom with snow
-//! falling inside it. The garland leaves the top edge alone, where it would sit against the state colour.
+//! here and there, and Christmas is strings of lights hanging in swags across the top, pine boughs with baubles in
+//! the bottom left corner, a small tree in the bottom right, and snow falling.
 //!
 //! Every flake, leaf and bulb is a function of time alone, so a frame drawn at any moment is right and the
 //! screens' own animation pace doesn't matter. Nothing is drawn in the top rows, where both sets show the state
-//! colour, and nothing uses a state colour. A flake, leaf, acorn or bulb that would touch text, an edge or an icon isn't
-//! drawn in that frame, so it seems to pass behind it and the text stays whole, on any layout.
+//! colour, and nothing uses a state colour. A flake, leaf, acorn or bulb that would touch text, an edge or an icon
+//! isn't drawn in that frame, so it seems to pass behind it and the text stays whole, on any layout. The pine is
+//! drawn a pixel at a time on its corner's ground only, so text and cards sit on top of it with a pixel of ground
+//! around them.
 
 use crate::canvas::{Canvas, HEIGHT, WIDTH, half_bright};
 
@@ -90,20 +92,45 @@ const ACORN_NUT_COLOR: u16 = 0xd54d;
 /// the screens use for state.
 const BULB_COLORS: [u16; 4] = [0xff9a, 0xf60a, 0xff9a, 0xf60a];
 const BULB_ACCENTS: [u16; 2] = [0xf419, 0xac5f];
-/// The pine garland the bulbs hang on: a band this deep along each edge (under the state colour at the top), its
-/// needles dark, mid and light pine, its outer and inner rows ragged. Pine, far from the done green.
-const GARLAND: i32 = 7;
-const NEEDLES: [u16; 3] = [0x1a25, 0x2b27, 0x4c4a];
-/// The bulbs hang along the middle of the garland.
-const WIRE_INSET: i32 = GARLAND / 2;
-/// A bulb every this many pixels along the garland, 4 × 4 with its corners off, centred on it.
-const BULB_SPACING: i32 = 10;
-const BULB_SIZE: i32 = 4;
-/// More than there are bulbs around the screen.
-const MAX_BULBS: usize = 120;
+/// The light strings hang in swags from just under the state colour: a hook every `SWAG_PERIOD` pixels, sagging
+/// `SWAG_SAG` between them, on a wire of light pine.
+const SWAG_TOP: i32 = TOP + 2;
+const SWAG_PERIOD: i32 = 64;
+const SWAG_SAG: i32 = 10;
+/// A bulb every this many pixels across, hanging from a socket just under the wire: `BULB` is its shape, 6 wide.
+const BULB_SPACING: i32 = 20;
+const BULB_SIZE: i32 = 6;
+const BULB: [u8; 7] = [0b011110, 0b111111, 0b111111, 0b111111, 0b111111, 0b011110, 0b001100];
+/// More than there are bulbs across the screen.
+const MAX_BULBS: usize = 24;
 /// Each bulb steps through this many twinkle phases, one every `TWINKLE_MS`: dark in one, dim in one, lit in the rest.
 const TWINKLE_PHASES: u64 = 8;
 const TWINKLE_MS: u64 = 350;
+/// Pine boughs in the two bottom corners: needles from dark to light pine, far from the done green, on a dark
+/// brown twig. The lighter two are the upper side of a bough, where the light falls.
+const NEEDLES: [u16; 4] = [0x1a25, 0x2b27, 0x4c4a, 0x5c6b];
+const TWIG: u16 = 0x4163;
+/// The boughs of the bottom left corner, each from just off the corner to (x, y), with y up from the bottom edge.
+/// The right corner is the same, mirrored.
+const BOUGHS: [(i32, i32); 8] = [(70, 4), (58, 18), (40, 10), (48, 34), (26, 26), (30, 48), (10, 40), (6, 58)];
+/// The longest needles, at the base of a bough; they get shorter towards its tip.
+const NEEDLE_LENGTH: i32 = 6;
+/// Baubles hung in each corner's boughs, 7 × 7 and round, where (x, y) is their bottom left from the bottom left
+/// corner.
+const BAUBLES: [(i32, i32); 3] = [(18, 12), (40, 22), (8, 34)];
+const BAUBLE: [u8; 7] = [0b0011100, 0b0111110, 0b1111111, 0b1111111, 0b1111111, 0b0111110, 0b0011100];
+const BAUBLE_SIZE: i32 = 7;
+const BAUBLE_CAP: u16 = 0x8c71;
+/// A small Christmas tree in the bottom right corner: three tiers of pine over a brown trunk, a warm white star on
+/// top and bulbs on it. Its foliage is `TREE_FOLIAGE` rows high, its centre `TREE_INSET` from the right edge.
+const TREE_TIER: i32 = 13;
+const TREE_FOLIAGE: i32 = 3 * TREE_TIER;
+const TREE_TRUNK: i32 = 5;
+const TREE_INSET: i32 = 28;
+const TREE_STAR: i32 = 7;
+const TRUNK: u16 = 0x6243;
+/// Where the tree's bulbs are, from the top of the foliage and its centre line.
+const TREE_BULBS: [(i32, i32); 9] = [(9, -2), (17, 4), (21, -6), (23, 1), (28, 8), (30, -9), (35, 2), (34, 13), (36, -14)];
 
 /// A spread of bits from a flake's number, so flakes don't line up.
 fn mix(index: u32, salt: u32) -> u32 {
@@ -152,72 +179,210 @@ fn plain(canvas: &Canvas, x: i32, y: i32, width: i32, height: i32) -> bool {
     true
 }
 
-/// The line the bulbs hang along, down the middle of the garland: top and bottom rows, left and right columns.
-const WIRE_TOP: i32 = TOP + WIRE_INSET;
-const WIRE_BOTTOM: i32 = HEIGHT - 1 - WIRE_INSET;
-const WIRE_LEFT: i32 = WIRE_INSET;
-const WIRE_RIGHT: i32 = WIDTH - 1 - WIRE_INSET;
-
-/// The centres of the bulbs: down the right, along the bottom and up the left. None along the top, where they would
-/// sit against the state colour.
-fn bulbs() -> impl Iterator<Item = (i32, i32)> {
-    let across = (0..).map(|step| WIRE_LEFT + 6 + step * BULB_SPACING).take_while(|x| *x <= WIRE_RIGHT - 6);
-    let down = (1..).map(|step| WIRE_TOP + step * BULB_SPACING).take_while(|y| *y <= WIRE_BOTTOM - 6);
-    down.clone().map(|y| (WIRE_RIGHT, y)).chain(across.map(|x| (x, WIRE_BOTTOM))).chain(down.map(|y| (WIRE_LEFT, y)))
+/// How far down the light string is at `x`: at the hooks it is just under the state colour, and it sags between.
+fn swag_y(x: i32) -> i32 {
+    let u = 2 * (x.rem_euclid(SWAG_PERIOD)) - SWAG_PERIOD;
+    SWAG_TOP + SWAG_SAG - SWAG_SAG * u * u / (SWAG_PERIOD * SWAG_PERIOD)
 }
 
-/// One cross-section of the garland, `GARLAND` pixels from `(x, y)` one step of `(dx, dy)` at a time, from the edge
-/// inwards. It is left out where anything but plain ground is under it or right beside its inner edge, so text
-/// and icons near the edge stay whole.
-fn garland_slice(canvas: &mut Canvas, x: i32, y: i32, dx: i32, dy: i32, along: i32) {
-    let at = |step: i32| canvas.pixel(((y + dy * step) * WIDTH + x + dx * step) as usize);
-    let ground = at(0);
-    if (1..=GARLAND).any(|step| at(step) != ground) {
+/// The centres of the bulbs, each just under the wire.
+fn bulbs() -> impl Iterator<Item = (i32, i32)> {
+    (0..).map(|step| BULB_SPACING / 2 + step * BULB_SPACING).take_while(|x| *x < WIDTH - BULB_SIZE).map(|x| (x, swag_y(x) + 3))
+}
+
+/// The light string's wire, a pixel wide, left out where it would touch anything but plain ground.
+fn wire(canvas: &mut Canvas) {
+    for x in 0..WIDTH {
+        let y = swag_y(x);
+        if plain(canvas, x, y, 1, 1) {
+            dot(canvas, x, y, 1, 1, NEEDLES[2]);
+        }
+    }
+}
+
+fn pine(color: u16) -> bool {
+    color == TWIG || color == TRUNK || NEEDLES.contains(&color)
+}
+
+/// One pixel of pine, drawn only where it and the pixels around it are the corner's `ground` or pine already. So the
+/// pine grows behind text, cards and icons, and keeps a pixel of ground around them: text on the tree stays whole
+/// and readable, and the pine never fills the inside of a card or a key cap.
+fn needle_dot(canvas: &mut Canvas, ground: u16, x: i32, y: i32, color: u16) {
+    if !(0..WIDTH).contains(&x) || !(TOP..HEIGHT).contains(&y) {
         return;
     }
-    for depth in 0..GARLAND {
-        let bits = mix(along as u32 * 16 + depth as u32, 0x917e);
-        // Ragged at both edges, so it reads as needles rather than a stripe.
-        if (depth == 0 || depth == GARLAND - 1) && bits & 1 == 0 {
-            continue;
-        }
-        let color = NEEDLES[(bits >> 4) as usize % NEEDLES.len()];
-        dot(canvas, x + dx * depth, y + dy * depth, 1, 1, color);
+    if on_ground(canvas, ground, x, y, 1, 1) {
+        dot(canvas, x, y, 1, 1, color);
     }
 }
 
-/// Down both sides from just under the state colour, and along the bottom.
-fn garland(canvas: &mut Canvas) {
-    for x in 0..WIDTH {
-        garland_slice(canvas, x, HEIGHT - 1, 0, -1, x + WIDTH);
+/// Whether the box from (x, y), `width` by `height`, and a pixel around it, is all `ground` or pine.
+fn on_ground(canvas: &Canvas, ground: u16, x: i32, y: i32, width: i32, height: i32) -> bool {
+    for row in (y - 1).max(TOP)..(y + height + 1).min(HEIGHT) {
+        for column in (x - 1).max(0)..(x + width + 1).min(WIDTH) {
+            let color = canvas.pixel((row * WIDTH + column) as usize);
+            if color != ground && !pine(color) {
+                return false;
+            }
+        }
     }
-    for y in TOP..HEIGHT - GARLAND {
-        garland_slice(canvas, 0, y, 1, 0, y + 2 * WIDTH);
-        garland_slice(canvas, WIDTH - 1, y, -1, 0, y + 3 * WIDTH);
+    true
+}
+
+/// A straight line of pine from (x0, y0) to (x1, y1).
+fn needle_line(canvas: &mut Canvas, ground: u16, (x0, y0): (i32, i32), (x1, y1): (i32, i32), color: u16) {
+    let steps = (x1 - x0).abs().max((y1 - y0).abs()).max(1);
+    for step in 0..=steps {
+        needle_dot(canvas, ground, x0 + (x1 - x0) * step / steps, y0 + (y1 - y0) * step / steps, color);
+    }
+}
+
+/// The square root, rounded down, for a bough's length.
+fn root(value: i32) -> i32 {
+    let mut root = 0;
+    while (root + 1) * (root + 1) <= value {
+        root += 1;
+    }
+    root
+}
+
+/// The boughs and baubles of the bottom left corner, on its `ground`.
+fn corner(canvas: &mut Canvas, ground: u16) {
+    let place = |x: i32, y: i32| (x, HEIGHT - 1 - y);
+    let baubles = [BULB_COLORS[1], BULB_ACCENTS[1], BULB_ACCENTS[0]];
+    let origin = (-3, -2);
+    for (index, (end_x, end_y)) in BOUGHS.into_iter().enumerate() {
+        let (dx, dy) = (end_x - origin.0, end_y - origin.1);
+        let length = root(dx * dx + dy * dy);
+        // Along the bough and across it, in 1/256ths of a pixel.
+        let (ux, uy) = (dx * 256 / length, dy * 256 / length);
+        needle_line(canvas, ground, place(origin.0, origin.1), place(end_x, end_y), TWIG);
+        for along in 0..length {
+            let (x, y) = (origin.0 + dx * along / length, origin.1 + dy * along / length);
+            let reach = 3 + (NEEDLE_LENGTH - 3) * (length - along) / length;
+            for side in [-1, 1] {
+                let bits = mix(index as u32 * 512 + along as u32 * 2 + (side + 1) as u32 / 2, 0x917e);
+                if bits.is_multiple_of(5) {
+                    continue;
+                }
+                // Swept towards the tip, as pine needles grow.
+                let tip_x = x + (ux * 6 / 10 - side * uy) * reach / 256;
+                let tip_y = y + (uy * 6 / 10 + side * ux) * reach / 256;
+                // Lighter on the upper side, where the light falls.
+                let shade = if side * ux > 0 { 2 + (bits >> 3) as usize % 2 } else { (bits >> 3) as usize % 2 };
+                needle_line(canvas, ground, place(x, y), place(tip_x, tip_y), NEEDLES[shade]);
+            }
+        }
+    }
+    for ((x, y), color) in BAUBLES.into_iter().zip(baubles) {
+        let (left, top) = place(x, y + BAUBLE_SIZE);
+        let left = left.min(place(x + BAUBLE_SIZE - 1, y).0);
+        if !on_ground(canvas, ground, left, top - 2, BAUBLE_SIZE, BAUBLE_SIZE + 2) {
+            continue;
+        }
+        // The cap, a shine at the upper left, and the ball.
+        dot(canvas, left + 2, top - 2, 3, 2, BAUBLE_CAP);
+        for (row, line) in BAUBLE.iter().enumerate() {
+            for column in 0..BAUBLE_SIZE {
+                if line & (1 << (BAUBLE_SIZE - 1 - column)) != 0 {
+                    let shine = (row == 1 || row == 2) && column == 2;
+                    dot(canvas, left + column, top + row as i32, 1, 1, if shine { 0xffff } else { color });
+                }
+            }
+        }
+    }
+}
+
+/// How far the tree's foliage reaches either side of its centre, `row` rows from its top: each tier starts narrow
+/// and spreads, and each is wider than the one above.
+fn tree_reach(row: i32) -> i32 {
+    let tier = row / TREE_TIER;
+    let local = row % TREE_TIER;
+    2 + tier * 3 + local * (6 + tier * 2) / (TREE_TIER - 1)
+}
+
+/// The tree in the bottom right corner, on its `ground`.
+fn tree(canvas: &mut Canvas, ground: u16, t_ms: u64) {
+    let centre = WIDTH - TREE_INSET;
+    let top = HEIGHT - TREE_TRUNK - TREE_FOLIAGE;
+    for row in 0..TREE_FOLIAGE {
+        let reach = tree_reach(row);
+        for offset in -reach..=reach {
+            let bits = mix((row * 64 + offset + 32) as u32, 0x7ee5);
+            // Ragged at the edges, so it reads as needles.
+            if offset.abs() == reach && bits & 1 == 0 {
+                continue;
+            }
+            // Lighter on the left, where the light falls, darker on the right and along the bottom of each tier.
+            let light = if row % TREE_TIER == TREE_TIER - 1 {
+                0
+            } else if offset < -reach / 3 {
+                2
+            } else if offset < reach / 3 {
+                1
+            } else {
+                0
+            };
+            let shade = (light + (bits >> 3) as usize % 2).min(NEEDLES.len() - 1);
+            needle_dot(canvas, ground, centre + offset, top + row, NEEDLES[shade]);
+        }
+    }
+    for row in 0..TREE_TRUNK {
+        needle_line(canvas, ground, (centre - 2, top + TREE_FOLIAGE + row), (centre + 2, top + TREE_FOLIAGE + row), TRUNK);
+    }
+    // The star, on the top: a plus with a fuller middle and a gold heart. It and the bulbs are left out where they
+    // would touch anything but the ground and the tree.
+    let star = top - TREE_STAR;
+    let middle = star + TREE_STAR / 2;
+    if on_ground(canvas, ground, centre - TREE_STAR / 2, star, TREE_STAR, TREE_STAR) {
+        dot(canvas, centre, star, 1, TREE_STAR, BULB_COLORS[0]);
+        dot(canvas, centre - TREE_STAR / 2, middle, TREE_STAR, 1, BULB_COLORS[0]);
+        dot(canvas, centre - 1, middle - 1, 3, 3, BULB_COLORS[0]);
+        dot(canvas, centre, middle, 1, 1, BULB_COLORS[1]);
+    }
+    for (index, (row, offset)) in TREE_BULBS.into_iter().enumerate() {
+        let lit = [BULB_COLORS[1], BULB_ACCENTS[0], BULB_COLORS[0], BULB_ACCENTS[1]][index % 4];
+        let color = if (t_ms / TWINKLE_MS + mix(index as u32, 0x7b01) as u64).is_multiple_of(3) { half_bright(lit) } else { lit };
+        if on_ground(canvas, ground, centre + offset, top + row, 2, 2) {
+            dot(canvas, centre + offset, top + row, 2, 2, color);
+        }
     }
 }
 
 fn lights(canvas: &mut Canvas, t_ms: u64) {
-    // Which bulbs have room, judged on the screen before the garland goes on.
+    // Which bulbs have room, judged on the screen before anything goes on.
     let mut room = [false; MAX_BULBS];
     for (index, (x, y)) in bulbs().enumerate().take(MAX_BULBS) {
-        room[index] = plain(canvas, x - BULB_SIZE / 2, y - BULB_SIZE / 2, BULB_SIZE, BULB_SIZE);
+        room[index] = plain(canvas, x - BULB_SIZE / 2, y - 2, BULB_SIZE, BULB.len() as i32 + 2);
     }
-    garland(canvas);
+    // Each corner's ground is the screen's colour a pixel in from it.
+    let left_ground = canvas.pixel(((HEIGHT - 2) * WIDTH + 1) as usize);
+    let right_ground = canvas.pixel(((HEIGHT - 2) * WIDTH + WIDTH - 2) as usize);
+    corner(canvas, left_ground);
+    tree(canvas, right_ground, t_ms);
+    wire(canvas);
     for (index, (x, y)) in bulbs().enumerate().take(MAX_BULBS) {
         if !room[index] {
             continue;
         }
-        let color = if index % 4 == 3 { BULB_ACCENTS[(index / 4) % BULB_ACCENTS.len()] } else { BULB_COLORS[index % BULB_COLORS.len()] };
-        // Off is a dark bulb still on the garland; dim is half way.
+        let lit = if index % 4 == 3 { BULB_ACCENTS[(index / 4) % BULB_ACCENTS.len()] } else { BULB_COLORS[index % BULB_COLORS.len()] };
+        // Off is a dark bulb still on the string; dim is half way.
         let color = match (t_ms / TWINKLE_MS + mix(index as u32, 0x11e5) as u64) % TWINKLE_PHASES {
-            0 => half_bright(half_bright(color)),
-            1 => half_bright(color),
-            _ => color,
+            0 => half_bright(half_bright(lit)),
+            1 => half_bright(lit),
+            _ => lit,
         };
-        let (left, top) = (x - BULB_SIZE / 2, y - BULB_SIZE / 2);
-        dot(canvas, left + 1, top, BULB_SIZE - 2, BULB_SIZE, color);
-        dot(canvas, left, top + 1, BULB_SIZE, BULB_SIZE - 2, color);
+        // `y` is the bulb's top: the socket above it, then the bulb with a shine while it is lit.
+        let left = x - BULB_SIZE / 2;
+        dot(canvas, left + 2, y - 2, 2, 2, BAUBLE_CAP);
+        for (row, line) in BULB.iter().enumerate() {
+            for column in 0..BULB_SIZE {
+                if line & (1 << (BULB_SIZE - 1 - column)) != 0 {
+                    let shine = row == 1 && column == 1 && color == lit;
+                    dot(canvas, left + column, y + row as i32, 1, 1, if shine { 0xffff } else { color });
+                }
+            }
+        }
     }
 }
 
@@ -285,7 +450,7 @@ pub fn draw(canvas: &mut Canvas, decoration: Decoration, t_ms: u32) {
     match decoration {
         Decoration::Off => {}
         Decoration::Thanksgiving => leaves(canvas, t_ms),
-        // The garland first, so the snow falls behind it: a flake only lands on plain ground.
+        // The lights and boughs first, so the snow falls behind them: a flake only lands on plain ground.
         Decoration::Christmas => {
             lights(canvas, t_ms);
             snow(canvas, t_ms);
@@ -339,7 +504,7 @@ mod tests {
     }
 
     #[test]
-    fn christmas_has_snow_inside_the_garland_and_thanksgiving_has_acorns_among_the_leaves() {
+    fn christmas_has_lights_boughs_and_snow_and_thanksgiving_has_acorns_among_the_leaves() {
         // Whether `color` is anywhere at least `inside` pixels in from the edges, under the state colour's rows.
         let has = |frame: &[u8], color: u16, inside: i32| {
             (TOP + inside..HEIGHT - inside).any(|y| {
@@ -350,8 +515,9 @@ mod tests {
             })
         };
         let christmas = drawn(Decoration::Christmas, 61_000);
-        assert!(has(&christmas, NEEDLES[0], 0) || has(&christmas, NEEDLES[1], 0), "the garland is there");
-        assert!(has(&christmas, SNOW, GARLAND) || has(&christmas, SNOW_SHADE, GARLAND), "and snow falls inside it");
+        assert!(has(&christmas, NEEDLES[0], 0) || has(&christmas, NEEDLES[1], 0), "the boughs are there");
+        assert!(has(&christmas, BULB_COLORS[0], 0) || has(&christmas, BULB_COLORS[1], 0), "and the lights");
+        assert!(has(&christmas, SNOW, 0) || has(&christmas, SNOW_SHADE, 0), "and the snow");
         let thanksgiving = drawn(Decoration::Thanksgiving, 61_000);
         assert!(has(&thanksgiving, ACORN_CAP_COLOR, 0), "an acorn falls among the leaves");
     }
