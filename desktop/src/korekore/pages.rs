@@ -1024,13 +1024,23 @@ impl crate::App {
             );
         } else {
             let valid = !self.wifi_ssid.is_empty() && self.wifi_ssid.len() <= 32 && self.wifi_password.len() <= 63;
-            let seen = device.wifi_seen.iter().take(8).map(|network| {
-                let fill = if network.ssid == self.wifi_ssid { Fill::Ink } else { Fill::Paper };
-                pill(format!("{}  {} dBm", network.ssid, network.rssi), fill, Some(Message::WifiSsid(network.ssid.clone()))).into()
-            });
+            // The networks the box heard, in a menu as on the Mac: a scan can hear a dozen or more.
+            let choices: Vec<NetworkChoice> = std::iter::once(NetworkChoice { ssid: String::new(), label: tr("Choose…", &[]) })
+                .chain(device.wifi_seen.iter().map(|network| NetworkChoice {
+                    ssid: network.ssid.clone(),
+                    label: format!("{}  {} dBm", network.ssid, network.rssi),
+                }))
+                .collect();
+            let chosen = choices.iter().find(|choice| choice.ssid == self.wifi_ssid).cloned().or_else(|| choices.first().cloned());
             wifi = wifi
-                .push(row![small(tr("Nearby networks", &[])), Space::new().width(Length::Fill), pill(tr("Scan", &[]), Fill::Paper, (!busy).then_some(Message::ScanWifi))].align_y(Alignment::Center))
-                .push(column(seen).spacing(4))
+                .push(
+                    row![
+                        picker(choices, chosen, |choice: NetworkChoice| Message::WifiSsid(choice.ssid)),
+                        pill(tr("Scan", &[]), Fill::Paper, (!busy).then_some(Message::ScanWifi))
+                    ]
+                    .spacing(8)
+                    .align_y(Alignment::Center),
+                )
                 .push(field(&tr("Network name", &[]), &self.wifi_ssid).on_input(Message::WifiSsid))
                 .push(field(&tr("Password", &[]), &self.wifi_password).secure(true).on_input(Message::WifiPassword))
                 .push(
@@ -1376,4 +1386,17 @@ fn buddy(words: &str) -> Element<'_, Message> {
 /// three screen pixels on a 2× display.
 pub(super) fn figure(face: image::Handle) -> iced::widget::Image {
     image(face).filter_method(image::FilterMethod::Nearest).width(72).height(96)
+}
+
+/// One entry of the Wi-Fi menu: a network the box heard, or none yet.
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct NetworkChoice {
+    ssid: String,
+    label: String,
+}
+
+impl std::fmt::Display for NetworkChoice {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.label)
+    }
 }
