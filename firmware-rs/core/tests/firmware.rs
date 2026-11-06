@@ -528,12 +528,30 @@ fn the_decoration_switches_moves_holds_still_for_input_and_survives_a_reboot() {
     firmware.poll(&mut board);
     assert_ne!(board.frame, before, "the decoration moves between the screens' own frames");
 
-    // While the box needs input, nothing but the buddy moves.
+    // While the box needs input, nothing but the buddy and the lights moves.
     send(&mut firmware, &mut board, r#"{"version":1,"event":"agent.input_required","suppress_audio":true}"#);
+    // The lights twinkle on in the rows under the state colour, where they hang.
+    let lights = |frame: &[u8]| frame[4 * 320 * 2..32 * 320 * 2].to_vec();
+    let asking = lights(&board.frame);
+    let mut twinkled = false;
+    for _ in 0..10 {
+        board.advance(decoration::FRAME_MS);
+        firmware.poll(&mut board);
+        twinkled |= lights(&board.frame) != asking;
+    }
+    assert!(twinkled, "the lights twinkle while the box asks");
+    assert_eq!(
+        send(&mut firmware, &mut board, r#"{"version":1,"event":"device.decoration","name":"thanksgiving"}"#),
+        ["DECORATION THANKSGIVING"]
+    );
     let asking = board.frame.clone();
     board.advance(decoration::FRAME_MS);
     firmware.poll(&mut board);
-    assert_eq!(board.frame, asking, "the decoration holds still while the box asks");
+    assert_eq!(board.frame, asking, "a decoration without lights holds still while the box asks");
+    assert_eq!(
+        send(&mut firmware, &mut board, r#"{"version":1,"event":"device.decoration","name":"christmas"}"#),
+        ["DECORATION CHRISTMAS"]
+    );
 
     let flash = board.flash;
     let (mut firmware, mut board, _) = booted(flash);

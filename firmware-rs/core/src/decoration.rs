@@ -332,7 +332,7 @@ fn tree_reach(row: i32) -> i32 {
 }
 
 /// The tree in the bottom right corner, on its `ground`.
-fn tree(canvas: &mut Canvas, ground: u16, t_ms: u64) {
+fn tree(canvas: &mut Canvas, ground: u16, twinkle_ms: u64) {
     let centre = WIDTH - TREE_INSET;
     let top = HEIGHT - TREE_TRUNK - TREE_FOLIAGE;
     for row in 0..TREE_FOLIAGE {
@@ -372,7 +372,7 @@ fn tree(canvas: &mut Canvas, ground: u16, t_ms: u64) {
     }
     for (index, (row, offset)) in TREE_BULBS.into_iter().enumerate() {
         let lit = [BULB_COLORS[1], BULB_ACCENTS[0], BULB_COLORS[0], BULB_ACCENTS[1]][index % 4];
-        let color = if (t_ms / TWINKLE_MS + mix(index as u32, 0x7b01) as u64).is_multiple_of(3) { half_bright(lit) } else { lit };
+        let color = if (twinkle_ms / TWINKLE_MS + mix(index as u32, 0x7b01) as u64).is_multiple_of(3) { half_bright(lit) } else { lit };
         if on_ground(canvas, ground, centre + offset, top + row, 2, 2) {
             dot(canvas, centre + offset, top + row, 2, 2, color);
         }
@@ -475,7 +475,7 @@ fn harvest(canvas: &mut Canvas) {
     }
 }
 
-fn lights(canvas: &mut Canvas, t_ms: u64) {
+fn lights(canvas: &mut Canvas, twinkle_ms: u64) {
     // Which bulbs have room, judged on the screen before anything goes on.
     let mut room = [false; MAX_BULBS];
     for (index, (x, y)) in bulbs().enumerate().take(MAX_BULBS) {
@@ -485,7 +485,7 @@ fn lights(canvas: &mut Canvas, t_ms: u64) {
     let left_ground = canvas.pixel(((HEIGHT - 2) * WIDTH + 1) as usize);
     let right_ground = canvas.pixel(((HEIGHT - 2) * WIDTH + WIDTH - 2) as usize);
     corner(canvas, left_ground);
-    tree(canvas, right_ground, t_ms);
+    tree(canvas, right_ground, twinkle_ms);
     wire(canvas, NEEDLES[2]);
     for (index, (x, y)) in bulbs().enumerate().take(MAX_BULBS) {
         if !room[index] {
@@ -493,7 +493,7 @@ fn lights(canvas: &mut Canvas, t_ms: u64) {
         }
         let lit = if index % 4 == 3 { BULB_ACCENTS[(index / 4) % BULB_ACCENTS.len()] } else { BULB_COLORS[index % BULB_COLORS.len()] };
         // Off is a dark bulb still on the string; dim is half way.
-        let color = match (t_ms / TWINKLE_MS + mix(index as u32, 0x11e5) as u64) % TWINKLE_PHASES {
+        let color = match (twinkle_ms / TWINKLE_MS + mix(index as u32, 0x11e5) as u64) % TWINKLE_PHASES {
             0 => half_bright(half_bright(lit)),
             1 => half_bright(lit),
             _ => lit,
@@ -570,9 +570,14 @@ fn leaves(canvas: &mut Canvas, t_ms: u64) {
     }
 }
 
-/// Draws `decoration` as it is at `t_ms`. Off draws nothing.
-pub fn draw(canvas: &mut Canvas, decoration: Decoration, t_ms: u32) {
-    let t_ms = t_ms as u64;
+/// Whether `decoration` has lights that twinkle. They keep twinkling while the rest holds still for input.
+pub fn twinkles(decoration: Decoration) -> bool {
+    decoration == Decoration::Christmas
+}
+
+/// Draws `decoration` as it is at `t_ms`, with its lights as they are at `twinkle_ms`. Off draws nothing.
+pub fn draw(canvas: &mut Canvas, decoration: Decoration, t_ms: u32, twinkle_ms: u32) {
+    let (t_ms, twinkle_ms) = (t_ms as u64, twinkle_ms as u64);
     match decoration {
         Decoration::Off => {}
         // The parts that stay put first, so the leaves fall behind them.
@@ -582,7 +587,7 @@ pub fn draw(canvas: &mut Canvas, decoration: Decoration, t_ms: u32) {
         }
         // The lights and boughs first, so the snow falls behind them: a flake only lands on plain ground.
         Decoration::Christmas => {
-            lights(canvas, t_ms);
+            lights(canvas, twinkle_ms);
             snow(canvas, t_ms);
         }
     }
@@ -597,7 +602,7 @@ mod tests {
 
     fn drawn(decoration: Decoration, t_ms: u32) -> Vec<u8> {
         let mut frame = vec![0u8; FRAME_BYTES];
-        draw(&mut Canvas::new(&mut frame), decoration, t_ms);
+        draw(&mut Canvas::new(&mut frame), decoration, t_ms, t_ms);
         frame
     }
 
