@@ -116,6 +116,14 @@ _Avoid_: theme, holiday skin, background (it is drawn over the screens, not unde
 One Character bundled into a single pack: its look (unless it uses the built-in one), the audio of its lines and its name, written to a location on the device separate from the program. Changing Character means changing the Character pack, never the firmware, and the whole pack is written at once so look and voice never disagree. When the device has no Character pack, it uses the built-in default Character.
 _Avoid_: voice pack (the older pack that held only five lines), 语音包, 音色包, asset pack, skin pack
 
+**Company edition (企业定制版)**:
+A batch of boxes that a company buys as a gift, each one with a company Character written at the factory. It is data on the box, in its own `edition` partition, never a separate firmware or App build: one firmware and one App serve every edition and every ordinary box (ADR-0025).
+_Avoid_: custom build, OEM version, white label
+
+**Company Character (品牌角色)**:
+The Character a company edition carries, made from the company's logo or mascot. The App shows it first in the Character list, only on a box of that edition. The user can change to another Character and go back to it in one step; it is never locked.
+_Avoid_: brand skin, corporate theme
+
 **Making a Character (创建角色)**:
 The user making a Character of their own in the App: a look they import, a voice picked from a list we choose, and lines that start as a preset Character's and may be edited. The computer synthesizes every line, with the user's own key or through our voice service, and builds the Character pack. No language model writes the lines.
 _Avoid_: generate, clone (voices are picked, never cloned), custom skin
