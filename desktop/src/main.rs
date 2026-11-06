@@ -147,7 +147,7 @@ enum Message {
     JoinWifi,
     /// Show the fields again to join another network.
     ChangeWifi,
-    ForgetWifi,
+    ForgetWifi(String),
     ScanWifi,
     Identify,
     UseVoice(&'static str),
@@ -903,7 +903,7 @@ impl App {
                 let password = std::mem::take(&mut self.wifi_password);
                 return Task::perform(client::set_wifi(self.wifi_ssid.clone(), password), Message::Done);
             }
-            Message::ForgetWifi => return Task::perform(client::forget_wifi(), Message::Done),
+            Message::ForgetWifi(ssid) => return Task::perform(client::forget_wifi(ssid), Message::Done),
             Message::ScanWifi => return Task::perform(client::scan_wifi(), Message::Done),
             Message::Identify => return Task::perform(client::identify(), Message::Done),
             Message::UseVoice(id) => {

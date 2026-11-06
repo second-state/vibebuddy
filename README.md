@@ -160,15 +160,15 @@ The App and the box's firmware are released separately, and VibeBuddy looks for 
 
 ### Wi-Fi and the Relay
 
-Put the box on Wi-Fi (Settings → Device, with the box on the cable) and VibeBuddy reaches it without the cable: over the local network when this computer is on the same one, or through the VibeBuddy Relay when it isn't. The cable wins whenever it's plugged in, and moving between them doesn't drop the link ([ADR-0012](docs/adr/0012-the-relay-is-a-closed-cloudflare-service-with-pairing-not-accounts.md)).
+Put the box on Wi-Fi (Settings → Device, with the box on the cable) and VibeBuddy reaches it without the cable: over the local network when this computer is on the same one, or through the VibeBuddy Relay when it isn't. The cable wins whenever it's plugged in, and moving between them doesn't drop the link ([ADR-0012](docs/adr/0012-the-relay-is-a-closed-cloudflare-service-with-pairing-not-accounts.md)). The box remembers up to 5 networks, say the office and home, and joins whichever it finds ([ADR-0023](docs/adr/0023-the-box-remembers-several-wi-fi-networks.md)); Settings → Device lists them and forgets each one.
 
 - **Pairing**: the box and each computer have their own key. A computer pairs with the box when it's plugged in; nothing else can link to the box, over the network or the Relay.
 - **What the Relay sees**: it runs on Cloudflare at `relay.korekore.ai`. While the box is on Wi-Fi it keeps a connection there, which carries its key, the names of the computers paired with it, and, while a computer is linked through the Relay, the lines that drive the box. Those lines (agent states, task titles, project names) are end-to-end encrypted between the computer and the box with the keys they exchanged when pairing, so the Relay can't read or change them; it sees which computer is linked to which box, when, and how much they send. The local network link is encrypted the same way. Firmware older than this links in the clear until it is updated over USB.
-- **Turning it off**: Settings → General → Reach the box through the VibeBuddy Relay. With it off, this computer never contacts the Relay. The box still connects to it while it's on Wi-Fi; forget its network to stop that.
+- **Turning it off**: Settings → General → Reach the box through the VibeBuddy Relay. With it off, this computer never contacts the Relay. The box still connects to it while it's on Wi-Fi; forget its networks to stop that.
 
 ### Giving the box to someone else
 
-The box has its own key, which computers pair with when it's plugged in. Before the box changes hands, or if you think its key has leaked, give it a new one: hold K1 for the menu, then COMPUTERS → NEW ID, and confirm twice. The box makes a new key and forgets every paired computer, its Wi-Fi network and its Relay, then restarts. Its Character, voice, volume and today's tally stay. Every computer then pairs again the next time it's plugged in, and the Wi-Fi network is set again from the App. To forget the computers but keep the key, use FORGET ALL in the same place.
+The box has its own key, which computers pair with when it's plugged in. Before the box changes hands, or if you think its key has leaked, give it a new one: hold K1 for the menu, then COMPUTERS → NEW ID, and confirm twice. The box makes a new key and forgets every paired computer, its Wi-Fi networks and its Relay, then restarts. Its Character, voice, volume and today's tally stay. Every computer then pairs again the next time it's plugged in, and the Wi-Fi networks are set again from the App. To forget the computers but keep the key, use FORGET ALL in the same place.
 
 ## Development
 

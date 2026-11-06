@@ -225,8 +225,10 @@ public struct DeviceState: Codable, Equatable {
     /// Linked through the Relay; `port` is then the Relay's address. Absent from older daemons, like busy.
     public var relay: Bool?
     public var busy: BoxBusy?
-    /// The Wi-Fi network the box is set to join, and the address it got there. Absent from older daemons.
+    /// The Wi-Fi network the box is on or trying now, and the address it got there. Absent from older daemons.
     public var wifiNetwork: String?
+    /// Every network the box knows, most recently joined first (ADR-0023). Absent from older daemons.
+    public var wifiNetworks: [String]?
     public var wifiAddress: String?
     /// Why the box couldn't join the network, until it does. Absent from older daemons.
     public var wifiError: String?
@@ -238,7 +240,7 @@ public struct DeviceState: Codable, Equatable {
     public var rolledBack: Bool?
     /// Why the Relay won't carry the link (ADR-0020): `signed_out`, `plan` or `unavailable`. Absent from older daemons.
     public var relayRefused: String?
-    enum CodingKeys: String, CodingKey { case transfer, rolledBack = "rolled_back", relayRefused = "relay_refused", wifiNetwork = "wifi_network", wifiAddress = "wifi_address", wifiError = "wifi_error", wifiSeen = "wifi_seen", relay, busy, connected, port, bridge, network, mode, firmwareBuild = "firmware_build", firmwareVersion = "firmware_version", voice, volume, screens, decoration, foreignFirmware = "foreign_firmware", pin, candidates, unsupportedBoard = "unsupported_board", boxKey = "box_key", computerKey = "computer_key", pairedComputers = "paired_computers" }
+    enum CodingKeys: String, CodingKey { case transfer, rolledBack = "rolled_back", relayRefused = "relay_refused", wifiNetwork = "wifi_network", wifiNetworks = "wifi_networks", wifiAddress = "wifi_address", wifiError = "wifi_error", wifiSeen = "wifi_seen", relay, busy, connected, port, bridge, network, mode, firmwareBuild = "firmware_build", firmwareVersion = "firmware_version", voice, volume, screens, decoration, foreignFirmware = "foreign_firmware", pin, candidates, unsupportedBoard = "unsupported_board", boxKey = "box_key", computerKey = "computer_key", pairedComputers = "paired_computers" }
     public init(connected: Bool, port: String? = nil, bridge: Bool = false, mode: String? = nil, firmwareBuild: String? = nil, firmwareVersion: String? = nil, voice: String? = nil, volume: Int? = nil, foreignFirmware: Bool? = nil) {
         self.connected = connected; self.port = port; self.bridge = bridge; self.mode = mode; self.firmwareBuild = firmwareBuild; self.firmwareVersion = firmwareVersion; self.voice = voice; self.volume = volume
         self.foreignFirmware = foreignFirmware

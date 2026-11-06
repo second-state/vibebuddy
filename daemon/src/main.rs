@@ -1188,11 +1188,30 @@ async fn post_wifi(State(state): State<AppState>, Json(request): Json<WifiReques
     response
 }
 
-async fn post_wifi_forget(State(state): State<AppState>) -> (StatusCode, Json<ApiResponse>) {
+#[derive(serde::Deserialize)]
+struct ForgetRequest {
+    ssid: Option<String>,
+}
+
+/// Forgets one network, `{"ssid": "Home"}`, or with no body every network, as an App from before several
+/// networks asks. Firmware from before several networks knows one network and forgets it either way.
+async fn post_wifi_forget(State(state): State<AppState>, body: axum::body::Bytes) -> (StatusCode, Json<ApiResponse>) {
+    let ssid = if body.iter().all(u8::is_ascii_whitespace) {
+        None
+    } else {
+        match serde_json::from_slice::<ForgetRequest>(&body) {
+            Ok(request) => request.ssid,
+            Err(_) => return (StatusCode::BAD_REQUEST, Json(ApiResponse { accepted: false, message: "expected {\"ssid\": \"name\"}".to_owned() })),
+        }
+    };
     if let Some(refused) = wifi_refusal(&state).await {
         return refused;
     }
-    post_event(State(state), Json(device_command("device.wifi.forget"))).await
+    let mut event = device_command("device.wifi.forget");
+    if let Some(ssid) = ssid {
+        event.extra.insert("ssid".to_owned(), ssid.into());
+    }
+    post_event(State(state), Json(event)).await
 }
 
 /// Asks the box which networks it can hear; the answer comes back as `device.wifi_seen` in the status.
@@ -2378,10 +2397,16 @@ mod tests {
         assert_eq!(state.device.lock().await.wifi_error, None, "joining again forgets the old password's failure");
         let set = transport.events().into_iter().find(|event| event.event == "device.wifi.set").expect("sent");
         assert_eq!((set.extra["ssid"].as_str(), set.extra["password"].as_str()), (Some("Home"), Some("secret")));
+        let (status, _) = post_wifi_forget(State(state.clone()), axum::body::Bytes::from_static(br#"{"ssid":"Home"}"#)).await;
+        assert_eq!(status, StatusCode::ACCEPTED);
+        let forget = transport.events().into_iter().find(|event| event.event == "device.wifi.forget").expect("sent");
+        assert_eq!(forget.extra["ssid"].as_str(), Some("Home"), "one network");
+        let (status, _) = post_wifi_forget(State(state.clone()), axum::body::Bytes::from_static(b"{")).await;
+        assert_eq!(status, StatusCode::BAD_REQUEST);
 
         publish_device_message(&state, DeviceMessage::ConnectedNetwork { address: "192.168.1.23:7340".to_owned() }).await;
         publish_device_message(&state, DeviceMessage::Line("BOX KEY 1Uc4Vh8Aby1bV4I08TphnmbwAm0AzHkw5RelizUGdRE".to_owned())).await;
-        let (status, _) = post_wifi_forget(State(state.clone())).await;
+        let (status, _) = post_wifi_forget(State(state.clone()), axum::body::Bytes::new()).await;
         assert_eq!(status, StatusCode::CONFLICT, "not over the network");
     }
 

@@ -191,18 +191,24 @@ After pairing, the daemon asks `device.pairs`, and `/v1/status` reports `device.
 
 ## Wi-Fi network
 
-Set only over USB, like pairing. The box keeps the network in the `link` partition and reports only its name: at boot, in answer to hello, and on change as `WIFI NETWORK <ssid>`. The password never leaves the box.
+Set only over USB, like pairing. The box keeps up to 5 networks in the `link` partition, most recently joined first (ADR-0023), and reports only their names: at boot, in answer to hello, and on change. The passwords never leave the box.
 
 ```json
 {"version":1,"event":"device.wifi.set","ssid":"Home","password":"…"}
+{"version":1,"event":"device.wifi.forget","ssid":"Office"}
 {"version":1,"event":"device.wifi.forget"}
+{"version":1,"event":"device.wifi.scan"}
 ```
 
-The apps set it through `POST /v1/device/wifi` with `{"ssid", "password"}` and `POST /v1/device/wifi/forget`; the daemon refuses both unless a box that reports `BOX KEY` is on the cable, and passes the password on without logging or keeping it. `/v1/status` reports `device.wifi_network` and, once the box reports `WIFI ADDRESS <ip>`, `device.wifi_address`.
+`device.wifi.set` adds a network, or gives a known one its new password; either way it goes first and the box joins it now. With 5 known, the one joined longest ago is forgotten. `device.wifi.forget` with an `ssid` forgets that network; without one, every network. `device.wifi.scan` asks the box which networks it hears.
 
-Replies: `WIFI NETWORK <ssid>`, `WIFI FORGOTTEN`, `WIFI INVALID` (an empty name, a name over 32 bytes, or a password over 63), or `WIFI UNAVAILABLE` (no `link` partition).
+The box reports its networks as `WIFI NETWORKS <count>`, then `WIFI KNOWN <ssid>` for each, most recently joined first, then `WIFI NETWORK <ssid>` for the first. With none left it reports `WIFI FORGOTTEN`. Firmware from before several networks sends only `WIFI NETWORK <ssid>`. Other replies: `WIFI INVALID` (an empty name, a name over 32 bytes, or a password over 63), or `WIFI UNAVAILABLE` (no `link` partition).
 
-Once joined it reports `WIFI ADDRESS <ip>`, and repeats it after `WIFI NETWORK` in answer to hello, so a computer that connects later learns it too; the daemon also takes the address it reached the box at over the local network. While it tries, the box reports `WIFI CONNECTING <ssid>`, then `WIFI CONNECTED` or `WIFI FAILED <why>`, and tries again every 10 s until the network changes. `<why>` is the Wi-Fi driver's disconnect reason (`AuthenticationExpired`, `NoAccessPointFound`, …), or `password` / `ssid` when the box can't use them as given. A wrong password usually takes 10 to 15 s to fail: the network repeats the handshake before turning the box away. The daemon turns `<why>` into `device.wifi_error` for the apps to explain: `wrong_password` (the network turned the box away; `AuthenticationExpired`, `AuthenticationFailed`, `FourWayHandshakeTimeout`, `HandshakeTimeout`, `MicFailure`), `not_found` (`NoAccessPointFound`, `BeaconTimeout`), `security` (no WPA2 or open network by that name), `password`, `ssid`, or the reason as it came. Joining again clears it.
+The apps go through the daemon: `POST /v1/device/wifi` with `{"ssid", "password"}`, `POST /v1/device/wifi/forget` with `{"ssid"}` (no body forgets every network), and `POST /v1/device/wifi/scan`. The daemon refuses them unless a box that reports `BOX KEY` is on the cable, and passes the password on without logging or keeping it. `/v1/status` reports `device.wifi_networks` (what the box knows; from older firmware, the one network it names), `device.wifi_network` (the one it is on or trying now), and, once the box reports `WIFI ADDRESS <ip>`, `device.wifi_address`. A scan comes back as `WIFI SEEN <count>`, then `WIFI SEEN <rssi> <channel> <ssid>` for each network heard, strongest first, or `WIFI SCAN FAILED <why>`; `/v1/status` reports it as `device.wifi_seen`, one entry per name.
+
+At boot, and whenever it loses its network, the box scans and tries the known networks it hears, strongest first; if it hears none of them, it tries every one, most recently joined first. The network it joins goes first in the list, and the box reports the list again.
+
+Once joined it reports `WIFI ADDRESS <ip>`, and repeats it after `WIFI NETWORK` in answer to hello, so a computer that connects later learns it too; the daemon also takes the address it reached the box at over the local network. While it tries, the box reports `WIFI CONNECTING <ssid>` for each network, then `WIFI CONNECTED` or `WIFI FAILED <why>`; when every network fails it goes again after 10 s, sooner if the networks change. `<why>` is the Wi-Fi driver's disconnect reason (`AuthenticationExpired`, `NoAccessPointFound`, …), or `password` / `ssid` when the box can't use them as given. A wrong password usually takes 10 to 15 s to fail: the network repeats the handshake before turning the box away. The daemon turns `<why>` into `device.wifi_error` for the apps to explain: `wrong_password` (the network turned the box away; `AuthenticationExpired`, `AuthenticationFailed`, `FourWayHandshakeTimeout`, `HandshakeTimeout`, `MicFailure`), `not_found` (`NoAccessPointFound`, `BeaconTimeout`), `security` (no WPA2 or open network by that name), `password`, `ssid`, or the reason as it came. Joining again clears it.
 
 ## Relay
 

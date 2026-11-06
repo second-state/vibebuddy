@@ -280,8 +280,10 @@ pub struct Device {
     /// This computer's key, to tell it apart in `paired_computers`.
     pub computer_key: Option<String>,
     pub paired_computers: Vec<PairedComputer>,
-    /// The Wi-Fi network the box is set to join, and the address it got there.
+    /// The Wi-Fi network the box is on or trying now, and the address it got there.
     pub wifi_network: Option<String>,
+    /// Every network the box knows, most recently joined first (ADR-0023); empty from older daemons.
+    pub wifi_networks: Vec<String>,
     pub wifi_address: Option<String>,
     /// Why the box couldn't join the network, until it does.
     pub wifi_error: Option<String>,
@@ -474,6 +476,14 @@ mod tests {
         let device: Device = serde_json::from_str(r#"{"connected": true, "port": null, "bridge": false, "screens": "korekore", "decoration": "snow"}"#).expect("device");
         assert_eq!(device.screens.as_deref(), Some("korekore"));
         assert_eq!(device.decoration.as_deref(), Some("snow"));
+    }
+
+    #[test]
+    fn the_networks_the_box_knows_parse() {
+        let device: Device = serde_json::from_str(r#"{"connected": true, "wifi_network": "Home", "wifi_networks": ["Home", "Office"]}"#).expect("device");
+        assert_eq!(device.wifi_networks, ["Home", "Office"]);
+        let older: Device = serde_json::from_str(r#"{"connected": true, "wifi_network": "Home"}"#).expect("device");
+        assert!(older.wifi_networks.is_empty(), "an older daemon lists none");
     }
 
     #[test]

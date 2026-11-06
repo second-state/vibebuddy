@@ -34,8 +34,9 @@ pub struct Link {
     /// The secret seed of the box's key.
     seed: [u8; 32],
     pub paired: Vec<Paired>,
-    /// The Wi-Fi network to join, name and password; set only over USB.
-    pub wifi: Option<Wifi>,
+    /// The Wi-Fi networks the box knows, most recently joined first, at most [`MAX_NETWORKS`]; set only
+    /// over USB (ADR-0023).
+    pub wifi: Vec<Wifi>,
     /// The Relay to use, `wss://host`, as the computer on the cable last said; None means the
     /// firmware's own default (docs/relay-protocol.md, "Which Relay").
     pub relay: Option<String>,
@@ -50,6 +51,8 @@ pub struct Wifi {
 /// Wi-Fi's own limits: a network name is at most 32 bytes, a WPA passphrase at most 63.
 pub const MAX_SSID_BYTES: usize = 32;
 pub const MAX_PASSWORD_BYTES: usize = 63;
+/// Most Wi-Fi networks a box remembers. Adding one more forgets the one joined longest ago.
+pub const MAX_NETWORKS: usize = 5;
 /// Longest Relay URL kept: its length is stored in one byte.
 pub const MAX_RELAY_BYTES: usize = 255;
 
@@ -61,7 +64,7 @@ pub enum PairError {
 impl Link {
     /// A box with a new key and nobody paired.
     pub fn new(entropy: [u8; 32]) -> Self {
-        Self { seed: entropy, paired: Vec::new(), wifi: None, relay: None }
+        Self { seed: entropy, paired: Vec::new(), wifi: Vec::new(), relay: None }
     }
 
     /// The box's public key, which is also its id on the Relay.
@@ -107,6 +110,34 @@ impl Link {
         self.paired.len() != before
     }
 
+    /// Adds a network, or gives a known one its new password, and puts it first: it is the one to join now.
+    /// With [`MAX_NETWORKS`] already known, the last one goes.
+    pub fn remember_wifi(&mut self, ssid: &str, password: &str) {
+        self.wifi.retain(|wifi| wifi.ssid != ssid);
+        self.wifi.insert(0, Wifi { ssid: String::from(ssid), password: String::from(password) });
+        self.wifi.truncate(MAX_NETWORKS);
+    }
+
+    /// Forgets one network. Returns whether the box knew it.
+    pub fn forget_wifi(&mut self, ssid: &str) -> bool {
+        let before = self.wifi.len();
+        self.wifi.retain(|wifi| wifi.ssid != ssid);
+        self.wifi.len() != before
+    }
+
+    /// The box joined this network: it goes first. Returns whether the order changed, so the record is saved
+    /// only then.
+    pub fn joined_wifi(&mut self, ssid: &str) -> bool {
+        match self.wifi.iter().position(|wifi| wifi.ssid == ssid) {
+            Some(index) if index > 0 => {
+                let wifi = self.wifi.remove(index);
+                self.wifi.insert(0, wifi);
+                true
+            }
+            _ => false,
+        }
+    }
+
     fn encode(&self) -> Vec<u8> {
         let mut payload = Vec::with_capacity(33 + self.paired.len() * (33 + MAX_NAME_BYTES));
         payload.extend_from_slice(&self.seed);
@@ -116,18 +147,29 @@ impl Link {
             payload.push(paired.name.len() as u8);
             payload.extend_from_slice(paired.name.as_bytes());
         }
-        // The network, then the Relay, are an optional tail, so a record written before either existed
-        // still reads. An empty network name means none: no network has one.
-        let (ssid, password) = self.wifi.as_ref().map_or(("", ""), |wifi| (wifi.ssid.as_str(), wifi.password.as_str()));
+        // The first network, the Relay, then the other networks are an optional tail, so a record written
+        // before any of them existed still reads, and firmware from before several networks still joins the
+        // first one. An empty network name means none: no network has one. An empty Relay means the default.
+        let (ssid, password) = self.wifi.first().map_or(("", ""), |wifi| (wifi.ssid.as_str(), wifi.password.as_str()));
+        let others = self.wifi.get(1..).unwrap_or_default();
         let mut fields = alloc::vec![ssid, password];
-        if let Some(relay) = &self.relay {
-            fields.push(relay);
-        } else if self.wifi.is_none() {
+        if self.relay.is_some() || !others.is_empty() {
+            fields.push(self.relay.as_deref().unwrap_or(""));
+        } else if self.wifi.is_empty() {
             fields.clear();
         }
         for field in fields {
             payload.push(field.len() as u8);
             payload.extend_from_slice(field.as_bytes());
+        }
+        if !others.is_empty() {
+            payload.push(others.len() as u8);
+            for wifi in others {
+                for field in [&wifi.ssid, &wifi.password] {
+                    payload.push(field.len() as u8);
+                    payload.extend_from_slice(field.as_bytes());
+                }
+            }
         }
         payload
     }
@@ -150,13 +192,47 @@ impl Link {
             at += 1 + length;
             Some(String::from(text))
         };
-        let wifi = match (field(), field()) {
-            (Some(ssid), Some(password)) if !ssid.is_empty() => Some(Wifi { ssid, password }),
-            _ => None,
-        };
+        let mut wifi = Vec::new();
+        if let (Some(ssid), Some(password)) = (field(), field())
+            && !ssid.is_empty()
+        {
+            wifi.push(Wifi { ssid, password });
+        }
         let relay = field().filter(|relay| !relay.is_empty());
+        let others = payload.get(at).copied().unwrap_or(0) as usize;
+        at += 1;
+        let mut field = || -> Option<String> {
+            let length = *payload.get(at)? as usize;
+            let text = core::str::from_utf8(payload.get(at + 1..at + 1 + length)?).ok()?;
+            at += 1 + length;
+            Some(String::from(text))
+        };
+        for _ in 0..others {
+            let (Some(ssid), Some(password)) = (field(), field()) else { break };
+            if !wifi.is_empty() && !ssid.is_empty() && wifi.len() < MAX_NETWORKS && wifi.iter().all(|known| known.ssid != ssid) {
+                wifi.push(Wifi { ssid, password });
+            }
+        }
         Some(Self { seed, paired, wifi, relay })
     }
+}
+
+/// Which known networks to try, in order, by index into `known` (most recently joined first). The ones `seen`
+/// on a scan (strongest first) come first, strongest first; if none was seen, which a hidden network or a failed
+/// scan also gives, every one in `known`'s order. With `first_now` the first network leads: it was just set.
+pub fn join_order(known: &[&str], seen: &[&str], first_now: bool) -> Vec<usize> {
+    let mut order: Vec<usize> = Vec::new();
+    if first_now && !known.is_empty() {
+        order.push(0);
+    }
+    let visible: Vec<usize> = seen.iter().filter_map(|ssid| known.iter().position(|known| known == ssid)).collect();
+    let rest = if visible.is_empty() { (0..known.len()).collect() } else { visible };
+    for index in rest {
+        if !order.contains(&index) {
+            order.push(index);
+        }
+    }
+    order
 }
 
 fn truncate(text: &str, max: usize) -> &str {
@@ -440,7 +516,7 @@ mod tests {
         let (mut store, _) = LinkStore::open(&mut flash, REGION).unwrap();
         let mut link = Link::new([7; 32]);
         link.pair([8; 32], "a").unwrap();
-        link.wifi = Some(Wifi { ssid: String::from("Home 5G"), password: String::from("secret pass") });
+        link.remember_wifi("Home 5G", "secret pass");
         store.save(&mut flash, &link).unwrap();
         let (_, found) = LinkStore::open(&mut flash, REGION).unwrap();
         assert_eq!(found, Some(link));
@@ -454,7 +530,7 @@ mod tests {
         link.relay = Some(String::from("wss://relay-staging.korekore.ai"));
         store.save(&mut flash, &link).unwrap();
         assert_eq!(LinkStore::open(&mut flash, REGION).unwrap().1, Some(link.clone()));
-        link.wifi = Some(Wifi { ssid: String::from("Home"), password: String::new() });
+        link.remember_wifi("Home", "");
         store.save(&mut flash, &link).unwrap();
         assert_eq!(LinkStore::open(&mut flash, REGION).unwrap().1, Some(link));
     }
@@ -469,9 +545,93 @@ mod tests {
             payload.extend_from_slice(field.as_bytes());
         }
         let link = Link::decode(&payload).unwrap();
-        assert_eq!(link.wifi, Some(Wifi { ssid: String::from("Home"), password: String::from("pass") }));
+        assert_eq!(link.wifi, [Wifi { ssid: String::from("Home"), password: String::from("pass") }]);
         assert_eq!(link.relay, None);
-        assert_eq!(Link::decode(&payload[..33]).unwrap().wifi, None);
+        assert_eq!(Link::decode(&payload[..33]).unwrap().wifi, []);
+    }
+
+    fn names(link: &Link) -> Vec<&str> {
+        link.wifi.iter().map(|wifi| wifi.ssid.as_str()).collect()
+    }
+
+    #[test]
+    fn networks_are_remembered_newest_first_up_to_the_limit() {
+        let mut link = Link::new([1; 32]);
+        for name in ["A", "B", "C", "D", "E"] {
+            link.remember_wifi(name, "pw");
+        }
+        assert_eq!(names(&link), ["E", "D", "C", "B", "A"]);
+        // A known network takes its new password and goes first.
+        link.remember_wifi("C", "new");
+        assert_eq!(names(&link), ["C", "E", "D", "B", "A"]);
+        assert_eq!(link.wifi[0].password, "new");
+        // A sixth forgets the one joined longest ago.
+        link.remember_wifi("F", "pw");
+        assert_eq!(names(&link), ["F", "C", "E", "D", "B"]);
+        assert!(link.joined_wifi("D"));
+        assert!(!link.joined_wifi("D"), "already first");
+        assert!(!link.joined_wifi("Z"), "not known");
+        assert_eq!(names(&link), ["D", "F", "C", "E", "B"]);
+        assert!(link.forget_wifi("F"));
+        assert!(!link.forget_wifi("F"));
+        assert_eq!(names(&link), ["D", "C", "E", "B"]);
+    }
+
+    #[test]
+    fn the_box_tries_the_networks_it_hears_strongest_first() {
+        let known = ["Home", "Office", "Phone"];
+        assert_eq!(join_order(&known, &["Cafe", "Office", "Phone", "Office"], false), [1, 2]);
+        assert_eq!(join_order(&known, &["Cafe"], false), [0, 1, 2], "none heard: newest first");
+        assert_eq!(join_order(&known, &[], false), [0, 1, 2]);
+        assert_eq!(join_order(&known, &["Office"], true), [0, 1], "just set: tried first");
+        assert_eq!(join_order(&[], &["Office"], true), [] as [usize; 0]);
+    }
+
+    #[test]
+    fn several_networks_are_kept_with_or_without_a_relay() {
+        let mut flash = flash();
+        let (mut store, _) = LinkStore::open(&mut flash, REGION).unwrap();
+        let mut link = Link::new([7; 32]);
+        link.pair([8; 32], "a").unwrap();
+        for name in ["Office", "Home", "Phone"] {
+            link.remember_wifi(name, &alloc::format!("{name} pass"));
+        }
+        store.save(&mut flash, &link).unwrap();
+        assert_eq!(LinkStore::open(&mut flash, REGION).unwrap().1, Some(link.clone()));
+        link.relay = Some(String::from("wss://relay-staging.korekore.ai"));
+        store.save(&mut flash, &link).unwrap();
+        assert_eq!(LinkStore::open(&mut flash, REGION).unwrap().1, Some(link));
+    }
+
+    #[test]
+    fn firmware_from_before_several_networks_reads_the_newest_one() {
+        // What firmware before several networks reads: the first network, then the Relay, and nothing after.
+        let mut link = Link::new([7; 32]);
+        link.remember_wifi("Office", "o");
+        link.remember_wifi("Home", "h");
+        let payload = link.encode();
+        let mut at = 33;
+        let mut field = || {
+            let length = payload[at] as usize;
+            at += 1 + length;
+            String::from(core::str::from_utf8(&payload[at - length..at]).unwrap())
+        };
+        assert_eq!([field(), field(), field()], ["Home", "h", ""]);
+    }
+
+    #[test]
+    fn the_largest_record_fits_a_sector() {
+        let mut link = Link::new([7; 32]);
+        for index in 0..MAX_PAIRED as u8 {
+            link.pair([index; 32], &"n".repeat(MAX_NAME_BYTES)).unwrap();
+        }
+        for index in 0..MAX_NETWORKS {
+            link.remember_wifi(&alloc::format!("{index}").repeat(MAX_SSID_BYTES), &"p".repeat(MAX_PASSWORD_BYTES));
+        }
+        link.relay = Some("r".repeat(MAX_RELAY_BYTES));
+        let payload = link.encode();
+        assert!(HEADER_BYTES + payload.len() + 4 <= SECTOR_BYTES as usize, "{}", payload.len());
+        assert_eq!(Link::decode(&payload), Some(link));
     }
 
     #[test]
