@@ -77,10 +77,10 @@ do {
     """.utf8))
     check(refused.relayRefused == "plan" && busy.relayRefused == nil, "the Relay's refusal decodes")
     let screens = try StatusCoding.decoder().decode(DeviceState.self, from: Data("""
-    {"connected":true,"bridge":false,"screens":"korekore","decoration":"snow"}
+    {"connected":true,"bridge":false,"screens":"korekore","decoration":"christmas"}
     """.utf8))
     check(screens.screens == "korekore" && busy.screens == nil, "the box screens decode, and are nil from older firmware")
-    check(screens.decoration == "snow" && busy.decoration == nil, "the decoration decodes, and is nil from older firmware")
+    check(screens.decoration == "christmas" && busy.decoration == nil, "the decoration decodes, and is nil from older firmware")
     let seen = try StatusCoding.decoder().decode(DeviceState.self, from: Data("""
     {"connected":true,"bridge":false,"wifi_seen":[{"ssid":"ByteTrade","rssi":-49}]}
     """.utf8))

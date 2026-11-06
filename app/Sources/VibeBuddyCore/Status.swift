@@ -206,7 +206,7 @@ public struct DeviceState: Codable, Equatable {
     public var volume: Int?
     /// Which set of screens the box draws, `robot` or `korekore` (ADR-0021); nil from firmware that predates the choice, and from older daemons.
     public var screens: String?
-    /// The decoration the box draws over its screens, `off`, `leaves`, `snow` or `lights` (ADR-0022); nil from firmware that predates decorations, and from older daemons.
+    /// The decoration the box draws over its screens, `off`, `thanksgiving` or `christmas` (ADR-0022); nil from firmware that predates decorations, and from older daemons.
     public var decoration: String?
     /// Connected but running other firmware, as the daemon judged it; absent from older daemons.
     public var foreignFirmware: Bool?

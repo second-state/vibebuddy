@@ -190,8 +190,8 @@ struct KorekoreDecorationCard: View {
     @State private var pointed: String?
 
     private static let choices = [
-        ("off", String(localized: "Off")), ("leaves", String(localized: "Falling leaves")),
-        ("snow", String(localized: "Snow")), ("lights", String(localized: "Lights")),
+        ("off", String(localized: "Off")), ("thanksgiving", String(localized: "Thanksgiving")),
+        ("christmas", String(localized: "Christmas")),
     ]
     /// Loaded once a set of screens: the strips don't change while the app runs.
     @MainActor private static var frames: [String: [NSImage]] = [:]

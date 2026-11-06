@@ -1,40 +1,38 @@
 //! Decorations (ADR-0022): a seasonal layer drawn over whichever box screens the box uses, after the screen and
 //! before the dimming, the menu and the tap outline. Only things that don't depend on the layout, so one drawing
-//! works on every set of screens: falling leaves, falling snow, and lights on a pine garland around the edge.
+//! works on every set of screens. Each one is named for its holiday: Thanksgiving is falling leaves with an acorn
+//! here and there, and Christmas is lights on a pine garland around the edge with snow falling inside it.
 //!
 //! Every flake, leaf and bulb is a function of time alone, so a frame drawn at any moment is right and the
 //! screens' own animation pace doesn't matter. Nothing is drawn in the top rows, where both sets show the state
-//! colour, and nothing uses a state colour. A flake, leaf or bulb that would touch text, an edge or an icon isn't
+//! colour, and nothing uses a state colour. A flake, leaf, acorn or bulb that would touch text, an edge or an icon isn't
 //! drawn in that frame, so it seems to pass behind it and the text stays whole, on any layout.
 
 use crate::canvas::{Canvas, HEIGHT, WIDTH, half_bright};
 
-/// Which decoration the box draws: none, the default, or one of the seasonal ones.
+/// Which decoration the box draws: none, the default, or one of the holiday ones.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum Decoration {
     #[default]
     Off,
-    Leaves,
-    Snow,
-    Lights,
+    Thanksgiving,
+    Christmas,
 }
 
 impl Decoration {
     pub fn name(self) -> &'static [u8] {
         match self {
             Decoration::Off => b"OFF",
-            Decoration::Leaves => b"LEAVES",
-            Decoration::Snow => b"SNOW",
-            Decoration::Lights => b"LIGHTS",
+            Decoration::Thanksgiving => b"THANKSGIVING",
+            Decoration::Christmas => b"CHRISTMAS",
         }
     }
 
     pub fn parse(name: &str) -> Option<Self> {
         match name {
             "off" => Some(Decoration::Off),
-            "leaves" => Some(Decoration::Leaves),
-            "snow" => Some(Decoration::Snow),
-            "lights" => Some(Decoration::Lights),
+            "thanksgiving" => Some(Decoration::Thanksgiving),
+            "christmas" => Some(Decoration::Christmas),
             _ => None,
         }
     }
@@ -43,17 +41,15 @@ impl Decoration {
     pub fn code(self) -> u32 {
         match self {
             Decoration::Off => 0,
-            Decoration::Leaves => 1,
-            Decoration::Snow => 2,
-            Decoration::Lights => 3,
+            Decoration::Thanksgiving => 1,
+            Decoration::Christmas => 2,
         }
     }
 
     pub fn from_code(code: u32) -> Self {
         match code {
-            1 => Decoration::Leaves,
-            2 => Decoration::Snow,
-            3 => Decoration::Lights,
+            1 => Decoration::Thanksgiving,
+            2 => Decoration::Christmas,
             _ => Decoration::Off,
         }
     }
@@ -79,6 +75,15 @@ const LEAF_WIDTH: i32 = 7;
 const LEAF_SCALE: i32 = 2;
 const LEAF_FLAT: [u8; 5] = [0b0011000, 0b0111100, 0b1111110, 0b0111111, 0b0000110];
 const LEAF_EDGE: [u8; 5] = [0b0001000, 0b0011100, 0b0011100, 0b0011100, 0b0001000];
+
+/// Acorns among the leaves: fewer, heavier, so they fall faster and sway less, and don't tumble. 5 wide and 6 high
+/// at [`LEAF_SCALE`]: the stem and the cap in a dark brown, the nut under it in tan.
+const ACORNS: u32 = 4;
+const ACORN_WIDTH: i32 = 5;
+const ACORN_CAP: [u8; 3] = [0b00100, 0b01110, 0b11111];
+const ACORN_NUT: [u8; 3] = [0b01110, 0b01110, 0b00100];
+const ACORN_CAP_COLOR: u16 = 0x59e3;
+const ACORN_NUT_COLOR: u16 = 0xd54d;
 
 /// Bulbs: mostly warm white and gold, every fourth pink or violet. No red, green, yellow, orange or blue, which
 /// the screens use for state.
@@ -214,52 +219,74 @@ fn lights(canvas: &mut Canvas, t_ms: u64) {
     }
 }
 
+/// Draws `rows` of a pixel shape, `width` bits each, from (x, y), each bit a square of [`LEAF_SCALE`] pixels.
+fn shape(canvas: &mut Canvas, x: i32, y: i32, width: i32, rows: &[u8], color: u16) {
+    for (row, line) in rows.iter().enumerate() {
+        for column in 0..width {
+            if line & (1 << (width - 1 - column)) != 0 {
+                dot(canvas, x + column * LEAF_SCALE, y + row as i32 * LEAF_SCALE, LEAF_SCALE, LEAF_SCALE, color);
+            }
+        }
+    }
+}
+
+fn snow(canvas: &mut Canvas, t_ms: u64) {
+    for index in 0..SNOWFLAKES {
+        let bits = mix(index, 0x5a0e);
+        // A third are bigger and fall faster, nearer the glass.
+        let big = bits.is_multiple_of(3);
+        let speed = if big { 22 } else { 12 } + (bits >> 4) % 8;
+        let y = fall(t_ms, bits >> 8, speed, 3);
+        let x = (bits >> 20) as i32 % WIDTH + sway(t_ms, 4000 + (bits % 2000) as u64, bits, 3);
+        if !plain(canvas, x, y, 3, 3) {
+            continue;
+        }
+        if big {
+            dot(canvas, x + 1, y, 1, 3, SNOW);
+            dot(canvas, x, y + 1, 3, 1, SNOW);
+        } else {
+            dot(canvas, x, y, 2, 2, if bits & 0x10 == 0 { SNOW } else { SNOW_SHADE });
+        }
+    }
+}
+
+fn leaves(canvas: &mut Canvas, t_ms: u64) {
+    for index in 0..LEAVES {
+        let bits = mix(index, 0x1eaf);
+        let speed = 14 + (bits >> 4) % 10;
+        let y = fall(t_ms, bits >> 8, speed, 5 * LEAF_SCALE);
+        let period = 3000 + (bits % 2500) as u64;
+        let x = (bits >> 20) as i32 % WIDTH + sway(t_ms, period, bits, 12);
+        // It turns on its edge where the sway turns back.
+        let rows = if sway(t_ms, period / 2, bits, 4).abs() > 2 { &LEAF_FLAT } else { &LEAF_EDGE };
+        let color = LEAF_COLORS[(bits >> 12) as usize % LEAF_COLORS.len()];
+        if plain(canvas, x, y, LEAF_WIDTH * LEAF_SCALE, rows.len() as i32 * LEAF_SCALE) {
+            shape(canvas, x, y, LEAF_WIDTH, rows, color);
+        }
+    }
+    let height = (ACORN_CAP.len() + ACORN_NUT.len()) as i32 * LEAF_SCALE;
+    for index in 0..ACORNS {
+        let bits = mix(index, 0xac04);
+        let speed = 26 + (bits >> 4) % 8;
+        let y = fall(t_ms, bits >> 8, speed, height);
+        let x = (bits >> 20) as i32 % WIDTH + sway(t_ms, 5000 + (bits % 2000) as u64, bits, 2);
+        if plain(canvas, x, y, ACORN_WIDTH * LEAF_SCALE, height) {
+            shape(canvas, x, y, ACORN_WIDTH, &ACORN_CAP, ACORN_CAP_COLOR);
+            shape(canvas, x, y + ACORN_CAP.len() as i32 * LEAF_SCALE, ACORN_WIDTH, &ACORN_NUT, ACORN_NUT_COLOR);
+        }
+    }
+}
+
 /// Draws `decoration` as it is at `t_ms`. Off draws nothing.
 pub fn draw(canvas: &mut Canvas, decoration: Decoration, t_ms: u32) {
     let t_ms = t_ms as u64;
     match decoration {
         Decoration::Off => {}
-        Decoration::Snow => {
-            for index in 0..SNOWFLAKES {
-                let bits = mix(index, 0x5a0e);
-                // A third are bigger and fall faster, nearer the glass.
-                let big = bits.is_multiple_of(3);
-                let speed = if big { 22 } else { 12 } + (bits >> 4) % 8;
-                let y = fall(t_ms, bits >> 8, speed, 3);
-                let x = (bits >> 20) as i32 % WIDTH + sway(t_ms, 4000 + (bits % 2000) as u64, bits, 3);
-                if !plain(canvas, x, y, 3, 3) {
-                    continue;
-                }
-                if big {
-                    dot(canvas, x + 1, y, 1, 3, SNOW);
-                    dot(canvas, x, y + 1, 3, 1, SNOW);
-                } else {
-                    dot(canvas, x, y, 2, 2, if bits & 0x10 == 0 { SNOW } else { SNOW_SHADE });
-                }
-            }
-        }
-        Decoration::Lights => lights(canvas, t_ms),
-        Decoration::Leaves => {
-            for index in 0..LEAVES {
-                let bits = mix(index, 0x1eaf);
-                let speed = 14 + (bits >> 4) % 10;
-                let y = fall(t_ms, bits >> 8, speed, 5 * LEAF_SCALE);
-                let period = 3000 + (bits % 2500) as u64;
-                let x = (bits >> 20) as i32 % WIDTH + sway(t_ms, period, bits, 12);
-                // It turns on its edge where the sway turns back.
-                let shape = if sway(t_ms, period / 2, bits, 4).abs() > 2 { &LEAF_FLAT } else { &LEAF_EDGE };
-                let color = LEAF_COLORS[(bits >> 12) as usize % LEAF_COLORS.len()];
-                if !plain(canvas, x, y, LEAF_WIDTH * LEAF_SCALE, shape.len() as i32 * LEAF_SCALE) {
-                    continue;
-                }
-                for (row, line) in shape.iter().enumerate() {
-                    for column in 0..LEAF_WIDTH {
-                        if line & (1 << (LEAF_WIDTH - 1 - column)) != 0 {
-                            dot(canvas, x + column * LEAF_SCALE, y + row as i32 * LEAF_SCALE, LEAF_SCALE, LEAF_SCALE, color);
-                        }
-                    }
-                }
-            }
+        Decoration::Thanksgiving => leaves(canvas, t_ms),
+        // The garland first, so the snow falls behind it: a flake only lands on plain ground.
+        Decoration::Christmas => {
+            lights(canvas, t_ms);
+            snow(canvas, t_ms);
         }
     }
 }
@@ -279,7 +306,7 @@ mod tests {
 
     #[test]
     fn names_and_codes_go_both_ways() {
-        for decoration in [Decoration::Off, Decoration::Leaves, Decoration::Snow, Decoration::Lights] {
+        for decoration in [Decoration::Off, Decoration::Thanksgiving, Decoration::Christmas] {
             let name = core::str::from_utf8(decoration.name()).unwrap().to_ascii_lowercase();
             assert_eq!(Decoration::parse(&name), Some(decoration));
             assert_eq!(Decoration::from_code(decoration.code()), decoration);
@@ -291,7 +318,7 @@ mod tests {
     #[test]
     fn off_draws_nothing_and_the_others_move() {
         assert!(drawn(Decoration::Off, 1234).iter().all(|byte| *byte == 0));
-        for decoration in [Decoration::Leaves, Decoration::Snow, Decoration::Lights] {
+        for decoration in [Decoration::Thanksgiving, Decoration::Christmas] {
             let first = drawn(decoration, 1000);
             assert!(first.iter().any(|byte| *byte != 0));
             assert_ne!(first, drawn(decoration, 1000 + FRAME_MS), "{decoration:?} moves from one frame to the next");
@@ -302,7 +329,7 @@ mod tests {
     #[test]
     fn the_state_colour_rows_stay_untouched_at_every_moment() {
         let top_bytes = (TOP * WIDTH * 2) as usize;
-        for decoration in [Decoration::Leaves, Decoration::Snow, Decoration::Lights] {
+        for decoration in [Decoration::Thanksgiving, Decoration::Christmas] {
             for t_ms in (0..120_000).step_by(37) {
                 assert!(drawn(decoration, t_ms)[..top_bytes].iter().all(|byte| *byte == 0), "{decoration:?} at {t_ms} ms");
             }
@@ -310,8 +337,26 @@ mod tests {
     }
 
     #[test]
+    fn christmas_has_snow_inside_the_garland_and_thanksgiving_has_acorns_among_the_leaves() {
+        // Whether `color` is anywhere at least `inside` pixels in from the edges, under the state colour's rows.
+        let has = |frame: &[u8], color: u16, inside: i32| {
+            (TOP + inside..HEIGHT - inside).any(|y| {
+                (inside..WIDTH - inside).any(|x| {
+                    let at = ((y * WIDTH + x) * 2) as usize;
+                    u16::from_be_bytes([frame[at], frame[at + 1]]) == color
+                })
+            })
+        };
+        let christmas = drawn(Decoration::Christmas, 61_000);
+        assert!(has(&christmas, NEEDLES[0], 0) || has(&christmas, NEEDLES[1], 0), "the garland is there");
+        assert!(has(&christmas, SNOW, GARLAND) || has(&christmas, SNOW_SHADE, GARLAND), "and snow falls inside it");
+        let thanksgiving = drawn(Decoration::Thanksgiving, 61_000);
+        assert!(has(&thanksgiving, ACORN_CAP_COLOR, 0), "an acorn falls among the leaves");
+    }
+
+    #[test]
     fn a_long_uptime_does_not_overflow() {
-        drawn(Decoration::Snow, u32::MAX);
-        drawn(Decoration::Leaves, u32::MAX - 7);
+        drawn(Decoration::Christmas, u32::MAX);
+        drawn(Decoration::Thanksgiving, u32::MAX - 7);
     }
 }
