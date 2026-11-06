@@ -695,8 +695,12 @@ impl crate::App {
         .width(358);
         let link = match device {
             None => tr("daemon isn't running", &[]),
-            Some(device) if !device.connected && !device.candidates.is_empty() => tr("Several devices found", &[]),
-            Some(device) if !device.connected => tr("Box not found", &[]),
+            Some(device) if !device.connected => match &device.busy {
+                Some(busy) if busy.owner.is_empty() => tr("On another computer", &[]),
+                Some(busy) => tr("With %@", &[&busy.owner]),
+                None if !device.candidates.is_empty() => tr("Several devices found", &[]),
+                None => tr("Box not found", &[]),
+            },
             Some(device) if device.relay => tr("Relay", &[]),
             Some(device) => {
                 let port = device.port.as_deref().unwrap_or("?").trim_start_matches("/dev/");
@@ -816,7 +820,7 @@ impl crate::App {
                     .extend(rows)
                     .spacing(8),
             ));
-        } else if self.status.is_some() && !online && !busy && !replug && device.is_some_and(|device| device.pin.is_none()) {
+        } else if self.status.is_some() && !online && !busy && !replug && device.is_some_and(|device| device.pin.is_none() && device.busy.is_none()) {
             finding = finding.push(card(
                 column![
                     row![badge(&sprites::KORE_SLEEP, true, theme::INK), heading(tr("Box not found", &[]))].spacing(10).align_y(Alignment::Center),

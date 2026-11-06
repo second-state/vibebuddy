@@ -517,6 +517,10 @@ do {
     check(picture.mood == .input && picture.link == .lan, "an Activity waiting on you makes the box ask; linked over the network")
     check(picture.tickets.map(\.icon) == ["cx", "cc", "ci"] && picture.tickets.first?.title == "Review changes", "the newest three, by tile, without prefix")
     check(BoxPicture.derive(status: status, daemonAlive: false).mood == .noLink, "no daemon, no link")
+    var away = status
+    away.device.connected = false
+    away.device.busy = BoxBusy(owner: "omarchy", reason: "linked")
+    check(BoxPicture.derive(status: away, daemonAlive: true).awayWith == "omarchy" && picture.awayWith == nil, "a box with another computer is away, not waiting")
     check(BoxPicture.cardTitle("Fix: the build") == "Fix: the build", "only a short capital prefix is dropped")
     check(BoxPicture.busy(15120) == "4h12m" && BoxPicture.busy(2100) == "35m", "busy time reads 4h12m")
     let old = try StatusCoding.decoder().decode(Status.self, from: Data(sample.utf8))

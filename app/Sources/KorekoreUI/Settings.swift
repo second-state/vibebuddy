@@ -114,6 +114,12 @@ struct KorekoreSidebar: View {
             Text("DAEMON NOT RUNNING")
         } else if let link = picture.link {
             Text("BOX ONLINE · \(link.rawValue)")
+        } else if let owner = picture.awayWith {
+            if owner.isEmpty {
+                Text("BOX ON ANOTHER COMPUTER")
+            } else {
+                Text("BOX WITH \(owner.uppercased())")
+            }
         } else {
             Text("NO BOX LINKED")
         }

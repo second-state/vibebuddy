@@ -424,7 +424,11 @@ impl MenuState {
                 .unwrap_or("?");
             tr("Box online · firmware %@", &[&build])
         } else {
-            tr("Box not found", &[])
+            match &device.busy {
+                Some(busy) if busy.owner.is_empty() => tr("Box on another computer", &[]),
+                Some(busy) => tr("Box with %@", &[&busy.owner]),
+                None => tr("Box not found", &[]),
+            }
         };
         let mode = match device.mode.as_deref() {
             Some("duty") => tr("On duty", &[]),
@@ -522,6 +526,9 @@ mod tests {
         let offline = Status::default();
         assert_eq!(MenuState::derive(Some(&offline)).icon, Icon::Offline);
         assert_eq!(MenuState::derive(Some(&offline)).device_line, "Box not found");
+        let mut away = Status::default();
+        away.device.busy = Some(Busy { owner: "omarchy".to_owned(), reason: "linked".to_owned() });
+        assert_eq!(MenuState::derive(Some(&away)).device_line, "Box with omarchy");
     }
 
     #[test]
