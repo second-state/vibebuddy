@@ -139,8 +139,9 @@ pub async fn scan_wifi() -> Result<(), String> {
     post("/v1/device/wifi/scan", None).await
 }
 
-pub async fn forget_wifi() -> Result<(), String> {
-    post("/v1/device/wifi/forget", None).await
+/// Forgets one of the networks the box knows.
+pub async fn forget_wifi(ssid: String) -> Result<(), String> {
+    post("/v1/device/wifi/forget", Some(serde_json::json!({ "ssid": ssid }))).await
 }
 
 pub async fn identify() -> Result<(), String> {

@@ -64,7 +64,7 @@ Who trusts the box. K1 moves, K0 opens, K2 closes; BACK returns to the menu.
 | NEW ID | always | asks NEW IDENTITY? (what goes and what stays), then SURE?; K0 at both makes the box a new identity, K1 at either goes back (#122) |
 | BACK | always | back to the menu |
 
-A new identity is for a box changing hands or a key that may have leaked (flash isn't encrypted, ADR-0014). The box draws a new key from its hardware random number generator and forgets the paired computers, its Wi-Fi network and its Relay (back to the default). Its Character, voice, volume and tally are kept elsewhere and stay. It prints `NEW IDENTITY <key>` and restarts. With a new key it is a new box to everyone: each computer pairs again over USB, and until then its local-network and Relay attempts fail on the key; the daemon takes the new key only from `BOX KEY` on the cable, never from the network. The old id's place on the Relay is simply never used again.
+A new identity is for a box changing hands or a key that may have leaked (flash isn't encrypted, ADR-0014). The box draws a new key from its hardware random number generator and forgets the paired computers, its Wi-Fi networks and its Relay (back to the default). Its Character, voice, volume and tally are kept elsewhere and stay. It prints `NEW IDENTITY <key>` and restarts. With a new key it is a new box to everyone: each computer pairs again over USB, and until then its local-network and Relay attempts fail on the key; the daemon takes the new key only from `BOX KEY` on the cable, never from the network. The old id's place on the Relay is simply never used again.
 
 ### Network
 
@@ -75,7 +75,7 @@ How the box reaches its computer, as rows a glance can read; anything dimmed isn
 | Row | Shows |
 |---|---|
 | LINK | `USB`, `LAN` or `RELAY`, the way the computer is linked now (USB wins, then the local network, then the Relay); `NO LINK` dimmed without one |
-| WIFI | the network's name, dimmed until the box has joined it; `OFF` with none set |
+| WIFI | the name of the network the box is on; while it is on none, the one it joined last, dimmed; `OFF` with none set. The box remembers up to 5 networks and joins the one it finds (ADR-0023); they are forgotten from the apps |
 | RELAY | `PROD` or `STAGING` for the Relay the box uses (docs/relay-protocol.md, "Which Relay"), the host for any other; `DOWN` after it, dimmed, while not connected; `OFF` without Wi-Fi |
 
 ### The link icon

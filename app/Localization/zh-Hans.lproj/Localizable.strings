@@ -228,7 +228,9 @@
 "The password must be 8 to 63 characters." = "密码要 8 到 63 个字符。";
 "The network name is too long: 32 bytes at most." = "网络名太长了，最多 32 字节。";
 "Status" = "状态";
-"Change network" = "更换网络";
+"Add network" = "添加网络";
+"Remembered networks" = "记住的网络";
+"The box remembers up to 5 networks and joins the one it finds." = "盒子最多记住 5 个网络，找到哪个就连哪个。";
 
 /* Conversation (the resident session, experimental) */
 "Conversation" = "对话";

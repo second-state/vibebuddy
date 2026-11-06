@@ -555,7 +555,7 @@ async fn main(spawner: Spawner) -> ! {
     firmware.boot(&mut board);
     // Booting got this far, so an image installed over the air keeps its slot.
     storage::confirm_running_image();
-    net::CREDENTIALS.signal(wifi_credentials(&firmware));
+    net::CREDENTIALS.signal(wifi_networks(&firmware, false));
     report_reset(&mut board);
     report_memory(&mut board);
     if let Some(stack) = stack {
@@ -565,6 +565,8 @@ async fn main(spawner: Spawner) -> ! {
         start_relay(&spawner, stack, trng, &firmware);
     }
     let mut relay_box = RelayBox::new();
+    // The network the Wi-Fi task is trying, from its `WIFI CONNECTING` line: the one it joins on `WIFI CONNECTED`.
+    let mut wifi_trying = alloc::string::String::new();
 
     let mut input = [0u8; 256];
     // UART and USB feed one line parser, so UART bytes are held here until their line is whole: a stray byte on
@@ -605,9 +607,12 @@ async fn main(spawner: Spawner) -> ! {
                     board.write(line.as_bytes());
                     board.write(b"\n");
                     if line == "WIFI CONNECTED" {
-                        firmware.set_wifi_joined(true);
+                        firmware.joined_wifi(&mut board, &wifi_trying);
                     } else if line == "WIFI DISCONNECTED" || line.starts_with("WIFI FAILED") || line.starts_with("WIFI CONNECTING") {
                         firmware.set_wifi_joined(false);
+                    }
+                    if let Some(ssid) = line.strip_prefix("WIFI CONNECTING ") {
+                        wifi_trying = ssid.into();
                     }
                     // Once on the network, the Wi-Fi driver has taken what it needs (#108).
                     if let Some(address) = line.strip_prefix("WIFI ADDRESS ") {
@@ -655,7 +660,7 @@ async fn main(spawner: Spawner) -> ! {
             relay::URL.signal(firmware.relay_url().into());
         }
         if firmware.take_wifi_change() {
-            net::CREDENTIALS.signal(wifi_credentials(&firmware));
+            net::CREDENTIALS.signal(wifi_networks(&firmware, true));
         }
         // Back to 115200 when the computer and the box may no longer agree on the UART's rate.
         let errors = serial::take_uart_errors() + garbled;
@@ -690,8 +695,8 @@ async fn main(spawner: Spawner) -> ! {
     }
 }
 
-fn wifi_credentials(firmware: &Firmware) -> Option<(alloc::string::String, alloc::string::String)> {
-    firmware.wifi().map(|wifi| (wifi.ssid.clone(), wifi.password.clone()))
+fn wifi_networks(firmware: &Firmware, first_now: bool) -> net::Networks {
+    net::Networks { known: firmware.wifi().iter().map(|wifi| (wifi.ssid.clone(), wifi.password.clone())).collect(), first_now }
 }
 
 /// `MEMORY INTERNAL <free>/<total> PSRAM <free>/<total>` in bytes: what the heaps have left (#108).

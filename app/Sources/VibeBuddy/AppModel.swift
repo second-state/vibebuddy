@@ -182,7 +182,7 @@ final class AppModel: ObservableObject {
 
     func setWifi(ssid: String, password: String) { run { try await self.client.setWifi(ssid: ssid, password: password) } }
 
-    func forgetWifi() { run { try await self.client.forgetWifi() } }
+    func forgetWifi(ssid: String) { run { try await self.client.forgetWifi(ssid: ssid) } }
 
     func scanWifi() { run { try await self.client.scanWifi() } }
 

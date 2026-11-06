@@ -1019,9 +1019,7 @@ impl crate::App {
         if device.network {
             wifi = wifi.push(note(tr("Plug in the cable to change the box's network.", &[])));
         } else if !fields {
-            wifi = wifi.push(
-                row![pill(tr("Change network", &[]), Fill::Paper, Some(Message::ChangeWifi)), pill(tr("Forget", &[]), Fill::Paper, (!busy).then_some(Message::ForgetWifi))].spacing(8),
-            );
+            wifi = wifi.push(row![pill(tr("Add network", &[]), Fill::Paper, Some(Message::ChangeWifi))]);
         } else {
             let valid = !self.wifi_ssid.is_empty() && self.wifi_ssid.len() <= 32 && self.wifi_password.len() <= 63;
             let seen = device.wifi_seen.iter().take(8).map(|network| {
@@ -1033,11 +1031,20 @@ impl crate::App {
                 .push(column(seen).spacing(4))
                 .push(field(&tr("Network name", &[]), &self.wifi_ssid).on_input(Message::WifiSsid))
                 .push(field(&tr("Password", &[]), &self.wifi_password).secure(true).on_input(Message::WifiPassword))
-                .push(
-                    row![pill(tr("Join", &[]), Fill::Sun, (valid && !busy).then_some(Message::JoinWifi))]
-                        .push(device.wifi_network.as_ref().map(|_| pill(tr("Forget", &[]), Fill::Paper, (!busy).then_some(Message::ForgetWifi))))
-                        .spacing(8),
+                .push(row![pill(tr("Join", &[]), Fill::Sun, (valid && !busy).then_some(Message::JoinWifi))]);
+        }
+        // What the box knows; an older daemon names only the network it is on.
+        let known: Vec<String> =
+            if device.wifi_networks.is_empty() { device.wifi_network.iter().cloned().collect() } else { device.wifi_networks.clone() };
+        if !known.is_empty() {
+            wifi = wifi.push(text(tr("Remembered networks", &[])).font(bold()).size(13).color(theme::INK));
+            for network in known {
+                let forget = (!device.network).then(|| pill(tr("Forget", &[]), Fill::Paper, (!busy).then_some(Message::ForgetWifi(network.clone()))));
+                wifi = wifi.push(
+                    row![text(network.clone()).font(regular()).size(13).color(theme::INK), Space::new().width(Length::Fill)].push(forget).align_y(Alignment::Center),
                 );
+            }
+            wifi = wifi.push(small(tr("The box remembers up to 5 networks and joins the one it finds.", &[])));
         }
         card(wifi.push(small(tr("On the same network, a paired computer drives the box without the cable.", &[])))).width(Length::FillPortion(1)).into()
     }

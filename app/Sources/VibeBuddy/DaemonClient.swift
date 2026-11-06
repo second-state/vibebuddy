@@ -104,8 +104,10 @@ struct DaemonClient {
         guard code == 202 else { throw DaemonError(message: DaemonClient.message(in: data) ?? String(localized: "Scanning for networks was rejected (\(code))")) }
     }
 
-    func forgetWifi() async throws {
-        let (code, data) = try await post("/v1/device/wifi/forget", body: Data(), contentType: "application/json")
+    /// Forgets one of the networks the box knows.
+    func forgetWifi(ssid: String) async throws {
+        let body = try JSONSerialization.data(withJSONObject: ["ssid": ssid])
+        let (code, data) = try await post("/v1/device/wifi/forget", body: body, contentType: "application/json")
         guard code == 202 else { throw DaemonError(message: DaemonClient.message(in: data) ?? String(localized: "Forgetting Wi-Fi was rejected (\(code))")) }
     }
 

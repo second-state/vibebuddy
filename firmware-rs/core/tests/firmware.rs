@@ -1051,7 +1051,7 @@ fn a_new_identity_forgets_everything_that_trusted_the_old_one() {
     assert!(lines.contains(&"RELAY URL wss://relay.korekore.ai".to_owned()), "the Relay is the default again");
     assert!(lines.contains(&"VOLUME 35".to_owned()), "settings stay");
     assert!(!lines.iter().any(|line| line.starts_with("WIFI NETWORK")), "{lines:?}");
-    assert_eq!(firmware.wifi(), None);
+    assert!(firmware.wifi().is_empty());
     assert_eq!(send(&mut firmware, &mut board, r#"{"version":1,"event":"device.pairs"}"#), ["PAIRS 0"]);
 }
 
@@ -1185,16 +1185,69 @@ mod lan {
     fn the_wifi_network_is_set_over_the_cable_and_kept() {
         let (mut firmware, mut board, _) = booted(blank_flash());
         let lines = send(&mut firmware, &mut board, r#"{"version":1,"event":"device.wifi.set","ssid":"Home","password":"secret"}"#);
-        assert_eq!(lines, ["WIFI NETWORK Home"]);
+        assert_eq!(lines, ["WIFI NETWORKS 1", "WIFI KNOWN Home", "WIFI NETWORK Home"]);
         assert!(firmware.take_wifi_change());
         assert!(!firmware.take_wifi_change(), "only once");
 
         let (mut firmware, mut board, lines) = booted(board.flash);
         assert!(lines.contains(&"WIFI NETWORK Home".to_owned()), "{lines:?}");
         assert!(!lines.iter().any(|line| line.contains("secret")), "the password never leaves the box");
-        assert_eq!(firmware.wifi().map(|wifi| wifi.password.as_str()), Some("secret"));
+        assert_eq!(firmware.wifi().first().map(|wifi| wifi.password.as_str()), Some("secret"));
         assert_eq!(send(&mut firmware, &mut board, r#"{"version":1,"event":"device.wifi.forget"}"#), ["WIFI FORGOTTEN"]);
-        assert_eq!(firmware.wifi(), None);
+        assert!(firmware.wifi().is_empty());
+    }
+
+    fn names(firmware: &Firmware) -> Vec<&str> {
+        firmware.wifi().iter().map(|wifi| wifi.ssid.as_str()).collect()
+    }
+
+    fn set_wifi(firmware: &mut Firmware, board: &mut FakeBoard, ssid: &str) -> Vec<String> {
+        send(firmware, board, &format!(r#"{{"version":1,"event":"device.wifi.set","ssid":"{ssid}","password":"pw"}}"#))
+    }
+
+    #[test]
+    fn the_box_remembers_several_networks_and_forgets_one_at_a_time() {
+        let (mut firmware, mut board, _) = booted(blank_flash());
+        set_wifi(&mut firmware, &mut board, "Office");
+        let lines = set_wifi(&mut firmware, &mut board, "Home");
+        assert_eq!(lines, ["WIFI NETWORKS 2", "WIFI KNOWN Home", "WIFI KNOWN Office", "WIFI NETWORK Home"]);
+        assert!(firmware.take_wifi_change(), "a new network is joined now");
+
+        // Forgetting another network leaves the box on the one it is on.
+        let lines = send(&mut firmware, &mut board, r#"{"version":1,"event":"device.wifi.forget","ssid":"Office"}"#);
+        assert_eq!(lines, ["WIFI NETWORKS 1", "WIFI KNOWN Home", "WIFI NETWORK Home"]);
+        assert!(!firmware.take_wifi_change());
+        set_wifi(&mut firmware, &mut board, "Office");
+        firmware.take_wifi_change();
+        // Forgetting the first one moves the box on to the next.
+        let lines = send(&mut firmware, &mut board, r#"{"version":1,"event":"device.wifi.forget","ssid":"Office"}"#);
+        assert_eq!(lines.last().map(String::as_str), Some("WIFI NETWORK Home"));
+        assert!(firmware.take_wifi_change());
+
+        for name in ["A", "B", "C", "D", "E"] {
+            set_wifi(&mut firmware, &mut board, name);
+        }
+        assert_eq!(names(&firmware), ["E", "D", "C", "B", "A"], "Home, joined longest ago, went");
+        let (firmware, _, lines) = booted(board.flash);
+        assert_eq!(names(&firmware), ["E", "D", "C", "B", "A"]);
+        assert!(lines.contains(&"WIFI NETWORKS 5".to_owned()), "{lines:?}");
+    }
+
+    #[test]
+    fn the_network_joined_goes_first_without_joining_again() {
+        let (mut firmware, mut board, _) = booted(blank_flash());
+        set_wifi(&mut firmware, &mut board, "Office");
+        set_wifi(&mut firmware, &mut board, "Home");
+        firmware.take_wifi_change();
+        board.take_lines();
+        // Back at the office, the box finds the office network and joins it.
+        firmware.joined_wifi(&mut board, "Office");
+        assert_eq!(board.take_lines(), ["WIFI NETWORKS 2", "WIFI KNOWN Office", "WIFI KNOWN Home", "WIFI NETWORK Office"]);
+        assert!(!firmware.take_wifi_change(), "it is on the network already");
+        firmware.joined_wifi(&mut board, "Office");
+        assert!(board.take_lines().is_empty(), "nothing changed, nothing saved");
+        let (firmware, _, _) = booted(board.flash);
+        assert_eq!(names(&firmware), ["Office", "Home"]);
     }
 
     #[test]
@@ -1203,7 +1256,7 @@ mod lan {
         send(&mut firmware, &mut board, r#"{"version":1,"event":"device.wifi.set","ssid":"Home","password":"secret"}"#);
         let hello = |firmware: &mut Firmware, board: &mut _| send(firmware, board, r#"{"version":1,"event":"device.hello"}"#);
         assert!(!hello(&mut firmware, &mut board).iter().any(|line| line.starts_with("WIFI ADDRESS")), "not joined yet");
-        firmware.set_wifi_joined(true);
+        firmware.joined_wifi(&mut board, "Home");
         firmware.set_wifi_address("192.168.1.23");
         let lines = hello(&mut firmware, &mut board);
         let network = lines.iter().position(|line| line == "WIFI NETWORK Home").expect("network");

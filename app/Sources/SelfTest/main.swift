@@ -85,6 +85,10 @@ do {
     {"connected":true,"bridge":false,"wifi_seen":[{"ssid":"ByteTrade","rssi":-49}]}
     """.utf8))
     check(seen.wifiSeen == [SeenNetwork(ssid: "ByteTrade", rssi: -49)], "scan results decode")
+    let known = try StatusCoding.decoder().decode(DeviceState.self, from: Data("""
+    {"connected":true,"bridge":false,"wifi_network":"Home","wifi_networks":["Home","Office"]}
+    """.utf8))
+    check(known.wifiNetworks == ["Home", "Office"] && wifi.wifiNetworks == nil, "the networks the box knows decode, and are nil from older daemons")
     check(status.account == nil, "an older daemon: no account")
     let account = try StatusCoding.decoder().decode(AccountStatus.self, from: Data("""
     {"available":true,"signed_in":true,"email":null,"github_id":583231,"github_login":"octocat"}
