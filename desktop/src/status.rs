@@ -21,9 +21,9 @@ pub struct Status {
     /// The VibeBuddy account this computer is signed in to (ADR-0018); older daemons don't say, which reads as not
     /// available.
     pub account: Account,
-    /// Which of the user's own keys for spoken replies are set (ADR-0020); absent from older daemons.
+    /// Which of the user's own keys for spoken replies are set (ADR-0023); absent from older daemons.
     pub voice_keys: Option<VoiceKeys>,
-    /// The Character being made, or the last one made since the daemon started (ADR-0020); absent when there is none,
+    /// The Character being made, or the last one made since the daemon started (ADR-0023); absent when there is none,
     /// and from older daemons.
     pub making: Option<crate::making::Making>,
 }
@@ -68,7 +68,7 @@ pub struct Account {
     pub today: Option<Usage>,
     /// Why the service refused voice today: `allowance` or `global_cap`.
     pub refused: Option<String>,
-    /// The account's plan (ADR-0020), when the daemon knows.
+    /// The account's plan (ADR-0023), when the daemon knows.
     pub plan: Option<Plan>,
 }
 
@@ -287,7 +287,7 @@ pub struct Device {
     pub wifi_error: Option<String>,
     /// What the box heard on its last scan, strongest first.
     pub wifi_seen: Vec<SeenNetwork>,
-    /// Why the Relay won't carry the link (ADR-0020): `signed_out`, `plan` or `unavailable`.
+    /// Why the Relay won't carry the link (ADR-0023): `signed_out`, `plan` or `unavailable`.
     pub relay_refused: Option<String>,
 }
 

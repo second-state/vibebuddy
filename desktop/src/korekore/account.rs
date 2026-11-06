@@ -1,4 +1,4 @@
-//! The account (ADR-0018), the user's own keys and making a Character (ADR-0020) in the korekore look. The design has
+//! The account (ADR-0018), the user's own keys and making a Character (ADR-0023) in the korekore look. The design has
 //! no boards for them, so they use its cards, rows and pills; the state and messages are the current tabs' in main.rs.
 
 use iced::widget::{Space, button, column, container, image, row, text};

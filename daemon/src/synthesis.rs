@@ -385,7 +385,7 @@ pub fn service_base(base_url: Option<String>, release: bool) -> Option<String> {
 }
 
 /// The voice service's base URL, for spoken replies, speech recognition ([`crate::speech`]) and Characters' lines:
-/// only the variable's. Neither production nor staging serves voice (ADR-0020), so every build gets its voice from the
+/// only the variable's. Neither production nor staging serves voice (ADR-0023), so every build gets its voice from the
 /// user's own keys alike; the variable is for testing a service that does.
 pub fn voice_base(base_url: Option<String>) -> Option<String> {
     base_url.map(|url| url.trim().to_owned()).filter(|url| !url.is_empty() && url != "off").and_then(|url| checked(Some(url), STAGING_URL))

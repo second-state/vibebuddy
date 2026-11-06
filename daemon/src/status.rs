@@ -74,7 +74,7 @@ pub struct DeviceState {
     pub wifi_error: Option<String>,
     /// The Relay this computer uses, `wss://host`; None without a key. Set by the daemon, not the box.
     pub relay_server: Option<String>,
-    /// Why the Relay won't carry this computer's link (ADR-0020): `signed_out`, `plan`, or `unavailable` (it
+    /// Why the Relay won't carry this computer's link (ADR-0023): `signed_out`, `plan`, or `unavailable` (it
     /// couldn't check the plan; tried again later). Set by the daemon from [`crate::relay::RelayConfig::refused`].
     pub relay_refused: Option<String>,
     /// The Relay the box uses, as it last said (`RELAY URL`); it follows the computer on the cable.
@@ -385,9 +385,9 @@ pub struct Status {
     pub updates: crate::updates::UpdateStatus,
     /// The person's VibeBuddy account (ADR-0018).
     pub account: crate::account::AccountStatus,
-    /// Which of the user's own keys for spoken replies are set, and refused (ADR-0020); never a key.
+    /// Which of the user's own keys for spoken replies are set, and refused (ADR-0023); never a key.
     pub voice_keys: crate::voice_keys::VoiceKeysStatus,
-    /// The Character being made, or the last one made, since the daemon started (ADR-0020).
+    /// The Character being made, or the last one made, since the daemon started (ADR-0023).
     pub making: Option<crate::making::MakingStatus>,
 }
 

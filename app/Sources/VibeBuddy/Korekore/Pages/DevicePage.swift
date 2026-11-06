@@ -219,7 +219,7 @@ struct KorekoreDevicePage: View {
         }
     }
 
-    /// Why the Relay won't carry the link, shown while the box is away (ADR-0020).
+    /// Why the Relay won't carry the link, shown while the box is away (ADR-0023).
     private var relayRefusal: String? {
         guard AccountPlan.shown else { return nil }
         return switch device?.relayRefused {

@@ -17,7 +17,7 @@ final class AppModel: ObservableObject {
     @Published private(set) var previewingVoice: String?
     /// Serial port open but no build ID ever reported: the box isn't running our firmware (a factory box), so offer to flash it.
     @Published private(set) var foreignFirmware = false
-    /// The Characters made on this computer, and the voices one can be made with (ADR-0020); asked when the daemon
+    /// The Characters made on this computer, and the voices one can be made with (ADR-0023); asked when the daemon
     /// comes up and whenever a job changes state.
     @Published private(set) var madeCharacters: [MadeCharacter] = []
     @Published private(set) var characterVoices: [CharacterVoice] = []

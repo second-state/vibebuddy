@@ -275,7 +275,7 @@ pub async fn set_anthropic_key(key: Option<String>) -> Result<ResidentInfo, Stri
     resident_setting(request).await
 }
 
-/// A provider the user can give their own key for (ADR-0020): of spoken replies, or Groq for speech recognition.
+/// A provider the user can give their own key for (ADR-0023): of spoken replies, or Groq for speech recognition.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum KeyProvider {
     ElevenLabs,

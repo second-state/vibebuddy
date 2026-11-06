@@ -1,4 +1,4 @@
-//! Making a Character (ADR-0020, docs/characters.md), the Mac app's `Making.swift`: the user starts from a preset,
+//! Making a Character (ADR-0023, docs/characters.md), the Mac app's `Making.swift`: the user starts from a preset,
 //! edits its lines and picks a voice; the daemon makes the line audio (`POST /v1/characters`) into
 //! `config_dir()/characters/<id>/`, and the app packs it with a look and writes it to the box like a preset.
 

@@ -44,15 +44,17 @@ The daemon sends the token as `Authorization: Bearer <token>` and keeps it in `c
   {"id":"…","email":null,"github_id":60097,"created_at":"2026-10-23T08:44:49.885Z","plan":{"name":"free"},"today":{"day":"2026-10-23","commands":1,"replies":1},"limits":{"commands":20,"replies":20}}
   ```
 
-  An account has an `email` or a `github_id`, never both. `plan` is `{"name":"free"}` or `{"name":"paid","period_end":"…","characters":12300,"characters_limit":100000}` (ADR-0020), where `characters` counts the billing period's spoken replies against the monthly allowance. `today` counts voice in the current UTC day, and `limits` is the daily allowance of the account's plan.
+  An account has an `email` or a `github_id`, never both. `plan` is `{"name":"free"}` or `{"name":"paid","period_end":"…","characters":12300,"characters_limit":100000}` (ADR-0023), where `characters` counts the billing period's spoken replies against the monthly allowance. `today` counts voice in the current UTC day, and `limits` is the daily allowance of the account's plan.
 - `POST /v1/sign-out` revokes this session only: 204.
 - `DELETE /v1/account` deletes the account with all its sessions and usage: 204.
 
 ## Voice
 
+ADR-0024 (2026-11-06) changes this section: recognition goes through Token Station, and the daily allowance, the monthly allowance and the global cap go away. This section describes the service as it runs now. It changes when the service changes.
+
 Both calls need `Authorization: Bearer <session>` and answer 401 without a valid one. Only daemons call them: the box's audio reaches the daemon over the link, however the box is linked (ADR-0018).
 
-Production serves no voice (ADR-0020): every call below gets `403 {"reason":"own_key"}` there, before the session is checked, and voice comes from the user's own keys. Staging does the same. So no daemon calls them unless `VIBEBUDDY_TTS_BASE_URL` names a service; given that 403 anyway, it tells the box `own_key` for a command and leaves a reply as text. The service's `SERVE_VOICE` setting turns voice back on as described below, for testing or a later Paid plan.
+Production serves no voice (ADR-0023): every call below gets `403 {"reason":"own_key"}` there, before the session is checked, and voice comes from the user's own keys. Staging does the same. So no daemon calls them unless `VIBEBUDDY_TTS_BASE_URL` names a service; given that 403 anyway, it tells the box `own_key` for a command and leaves a reply as text. The service's `SERVE_VOICE` setting turns voice back on as described below, for testing or a later Paid plan.
 
 ### Recognizing a voice command
 
@@ -81,11 +83,11 @@ POST /v1/voice/speak
 {"text":"…","voice":"elevenlabs:<voice_id>","for":"character"}
 ```
 
-A line for a Character the user is making (ADR-0020). It streams back `audio/pcm;rate=16000`: 16 kHz mono 16-bit little-endian PCM, which the daemon trims, normalizes and packs as ADPCM. Only the Paid plan gets it; on Free the call gets `403 {"reason":"plan"}`. It counts its characters only against the monthly allowance, never the daily replies; past it the call gets `429 {"reason":"monthly"}` until the next period. A synthesis failure is 502: lines never come in another voice.
+A line for a Character the user is making (ADR-0023). It streams back `audio/pcm;rate=16000`: 16 kHz mono 16-bit little-endian PCM, which the daemon trims, normalizes and packs as ADPCM. Only the Paid plan gets it; on Free the call gets `403 {"reason":"plan"}`. It counts its characters only against the monthly allowance, never the daily replies; past it the call gets `429 {"reason":"monthly"}` until the next period. A synthesis failure is 502: lines never come in another voice.
 
 ### The daily allowance
 
-Each recognition counts one command and each spoken reply one reply, against the account's UTC day. On Free that is 20 commands and 20 replies; on the Paid plan, 100 commands, and spoken replies count their characters against the monthly allowance first (ADR-0020). The reply that crosses the monthly allowance still passes; after it, replies count against Free's daily replies until the period ends. The service sets the numbers. A use is counted once the request is found valid. Past either limit the call gets
+Each recognition counts one command and each spoken reply one reply, against the account's UTC day. On Free that is 20 commands and 20 replies; on the Paid plan, 100 commands, and spoken replies count their characters against the monthly allowance first (ADR-0023). The reply that crosses the monthly allowance still passes; after it, replies count against Free's daily replies until the period ends. The service sets the numbers. A use is counted once the request is found valid. Past either limit the call gets
 
 ```text
 429 {"reason":"allowance"}

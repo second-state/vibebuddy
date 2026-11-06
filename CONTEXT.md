@@ -51,24 +51,28 @@ The lasting permission for a computer to link to a box. Pairing is done once per
 _Avoid_: binding, registration, login (an account is a separate thing, see below)
 
 **Account (账户)**:
-A person's identity with VibeBuddy's online services, needed only for features that cost us money to run: our voices and the Relay. It belongs to a person, never to a box: the user signs in on a computer, in the App, and a box is never signed in. It is layered on pairing and changes nothing about it: linking and takeover need no account; only the Relay needs one, on the Paid plan.
+A person's identity with VibeBuddy's online services, needed only for features that cost us money to run: our voice service and the Relay. It belongs to a person, never to a box: the user signs in on a computer, in the App, and a box is never signed in. It is layered on pairing and changes nothing about it: linking and takeover need no account; only the Relay needs one, on the Paid plan.
 _Avoid_: user (the person, not their account), box account, device registration, login (the act of signing in)
 
-**Daily allowance (每日额度)**:
-How many voice commands and spoken replies one account may have in a day. Every account has one; the Paid plan's commands allowance is larger. Past it, voice stops for that account until the next day; nothing else about the box changes.
-_Avoid_: quota, credits, plan, limit (on its own)
-
 **Paid plan (付费版)**:
-The one thing VibeBuddy sells: a monthly subscription on an account, paid through Stripe on the website. It opens the Relay and gives the monthly allowance. An account without it is on Free (免费版), which keeps everything over USB and the local network. When the plan ends, the account goes back to Free, and nothing the user has made is taken away.
-_Avoid_: subscription (Stripe's word), Pro, premium, membership, VIP, credits
+The one thing VibeBuddy sells: a monthly subscription on an account, paid through Stripe on the website. It opens the Relay and gives voice credit for each billing period. An account without it is on Free (免费版), which keeps everything over USB and the local network. When the plan ends, the account goes back to Free, and nothing the user has made is taken away.
+_Avoid_: subscription (Stripe's word), Pro, premium, membership, VIP
 
-**Monthly allowance (每月额度)**:
-How many characters of our voices an account on the Paid plan may have spoken in one billing period, by spoken replies and by making Characters. Past it, the daily allowance applies until the next period. Speech made with the user's own key never counts.
-_Avoid_: credits, quota, tokens, balance
+**Voice credit (语音额度)**:
+What an account may spend on voice through our voice service: the gift, plus the Paid plan's credit for the current billing period. The plan's credit is spent first and ends with its period; it never rolls over. When the voice credit is used up, our voice service stops for that account, and the user needs their own key. Speech made with an own key never spends it. The account page shows how much is left.
+_Avoid_: allowance, quota, tokens, balance, credits (on its own)
+
+**Gift (赠送额度)**:
+The one-time 1 dollar of voice credit an account gets when it first uses our voice service. An account gets it once, and it doesn't expire.
+_Avoid_: free credit, trial, bonus
 
 **Own key (自己的密钥)**:
-A key the user has with a speech provider, entered in the App and kept only on the computer. The daemon calls the provider with it directly; it never reaches us.
+A key the user has with a speech provider: Groq for speech recognition, ElevenLabs or Volcano Engine for spoken replies and lines. The user sets it in the App, and it is kept only on the computer. The daemon calls the provider with it directly; it never reaches us. It is the only kind of key a computer holds for voice.
 _Avoid_: token, BYOK (fine in code, not in the UI), API key on its own (the Anthropic API key is another one)
+
+**Token Station key (Token Station 密钥)**:
+The key one account uses with Token Station, the AI gateway our voice service goes through. Each account has one. We make it, and only our voice service keeps it; it never goes to a computer. It is an internal term: the UI never names it.
+_Avoid_: own key (that is the user's), voice token, API key on its own
 
 **Takeover (接管)**:
 A paired computer becoming the one the box links to, ending the previous computer's link. Plugging in USB always takes over; otherwise the user takes over from the App, or another paired computer links on its own once the previous one has been gone long enough. Agent activity never moves the box between computers by itself.
@@ -113,7 +117,7 @@ One Character bundled into a single pack: its look (unless it uses the built-in 
 _Avoid_: voice pack (the older pack that held only five lines), 语音包, 音色包, asset pack, skin pack
 
 **Making a Character (创建角色)**:
-The user making a Character of their own in the App: a look they import, a voice picked from a list we choose, and lines that start as a preset Character's and may be edited. The computer synthesizes every line, with the user's own key or with our voices, and builds the Character pack. No language model writes the lines.
+The user making a Character of their own in the App: a look they import, a voice picked from a list we choose, and lines that start as a preset Character's and may be edited. The computer synthesizes every line, with the user's own key or through our voice service, and builds the Character pack. No language model writes the lines.
 _Avoid_: generate, clone (voices are picked, never cloned), custom skin
 
 **Mute (静音)**:
@@ -219,7 +223,7 @@ Fixed wording for the App's English UI and English logs. Use these words when wr
 | 配对 / 已配对的电脑 | pair / paired computers | On the box's menu the row is COMPUTERS; "this computer" marks the one the App runs on |
 | 账户 / 登录 / 退出登录 | account / sign in / sign out | Never "log in" or "login"; the account belongs to the person, never the box |
 | 付费版 / 免费版 / 升级 | Paid plan / Free / upgrade | Never "Pro" or "premium" |
-| 每月额度 / 每日额度 | monthly allowance / daily allowance | |
+| 语音额度 | voice credit | What is left of it shows on the account page; never "tokens", "allowance" or "balance" |
 | 自己的密钥 | your own key | A speech provider's key; never "token" |
 | 创建角色 | make a Character | |
 | UART 桥 / 原生 USB | UART bridge / native USB | |

@@ -159,7 +159,7 @@ enum Message {
     UseRobot,
     UseCustom,
     CopyPrompt,
-    /// Making a Character (ADR-0020): open the form in place of the Character tab, or (false) leave it.
+    /// Making a Character (ADR-0023): open the form in place of the Character tab, or (false) leave it.
     MakeCharacter(bool),
     MakeBase(Lender),
     /// A preset's lines, for the form if it still starts from that preset.
@@ -316,7 +316,7 @@ struct App {
     decoration_frames: Vec<(&'static str, Vec<image::Handle>)>,
     decoration_frame: usize,
     decoration_pointed: Option<BoxDecoration>,
-    /// The Characters made on this computer, each one's face, and the voices one can be made with (ADR-0020); asked
+    /// The Characters made on this computer, each one's face, and the voices one can be made with (ADR-0023); asked
     /// when the daemon comes up and whenever a job changes state.
     made: Vec<making::MadeCharacter>,
     made_faces: Vec<(String, image::Handle)>,
