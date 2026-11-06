@@ -105,7 +105,7 @@ The set of screens the box draws everything with: the robot screens (the default
 _Avoid_: theme, skin, style on its own (界面风格 is fine in talk, but the UI says box screens)
 
 **Decoration (装饰)**:
-A seasonal layer the box draws over whichever box screens it uses, one for each holiday: falling leaves and acorns for Thanksgiving, lights on a pine garland around the edge of the screen with snow falling inside it for Christmas. It uses only things that don't depend on the layout, so one decoration is designed once and works on every set of screens. It is separate from the Character: a decoration doesn't come with one, and a Character doesn't bring one. It never hides or changes what the screen means (ADR-0022).
+A seasonal layer the box draws over whichever box screens it uses, one for each holiday: falling leaves and acorns for Thanksgiving, lights on a pine garland down the sides and along the bottom of the screen with snow falling inside it for Christmas. It uses only things that don't depend on the layout, so one decoration is designed once and works on every set of screens. It is separate from the Character: a decoration doesn't come with one, and a Character doesn't bring one. It never hides or changes what the screen means (ADR-0022).
 _Avoid_: theme, holiday skin, background (it is drawn over the screens, not under them)
 
 **Character pack (角色包)**:

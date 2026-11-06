@@ -1,7 +1,8 @@
 //! Decorations (ADR-0022): a seasonal layer drawn over whichever box screens the box uses, after the screen and
 //! before the dimming, the menu and the tap outline. Only things that don't depend on the layout, so one drawing
 //! works on every set of screens. Each one is named for its holiday: Thanksgiving is falling leaves with an acorn
-//! here and there, and Christmas is lights on a pine garland around the edge with snow falling inside it.
+//! here and there, and Christmas is lights on a pine garland down the sides and along the bottom with snow
+//! falling inside it. The garland leaves the top edge alone, where it would sit against the state colour.
 //!
 //! Every flake, leaf and bulb is a function of time alone, so a frame drawn at any moment is right and the
 //! screens' own animation pace doesn't matter. Nothing is drawn in the top rows, where both sets show the state
@@ -157,11 +158,12 @@ const WIRE_BOTTOM: i32 = HEIGHT - 1 - WIRE_INSET;
 const WIRE_LEFT: i32 = WIRE_INSET;
 const WIRE_RIGHT: i32 = WIDTH - 1 - WIRE_INSET;
 
-/// The centres of the bulbs: along the top, down the right, along the bottom and up the left.
+/// The centres of the bulbs: down the right, along the bottom and up the left. None along the top, where they would
+/// sit against the state colour.
 fn bulbs() -> impl Iterator<Item = (i32, i32)> {
     let across = (0..).map(|step| WIRE_LEFT + 6 + step * BULB_SPACING).take_while(|x| *x <= WIRE_RIGHT - 6);
     let down = (1..).map(|step| WIRE_TOP + step * BULB_SPACING).take_while(|y| *y <= WIRE_BOTTOM - 6);
-    across.clone().map(|x| (x, WIRE_TOP)).chain(down.clone().map(|y| (WIRE_RIGHT, y))).chain(across.map(|x| (x, WIRE_BOTTOM))).chain(down.map(|y| (WIRE_LEFT, y)))
+    down.clone().map(|y| (WIRE_RIGHT, y)).chain(across.map(|x| (x, WIRE_BOTTOM))).chain(down.map(|y| (WIRE_LEFT, y)))
 }
 
 /// One cross-section of the garland, `GARLAND` pixels from `(x, y)` one step of `(dx, dy)` at a time, from the edge
@@ -184,12 +186,12 @@ fn garland_slice(canvas: &mut Canvas, x: i32, y: i32, dx: i32, dy: i32, along: i
     }
 }
 
+/// Down both sides from just under the state colour, and along the bottom.
 fn garland(canvas: &mut Canvas) {
     for x in 0..WIDTH {
-        garland_slice(canvas, x, TOP, 0, 1, x);
         garland_slice(canvas, x, HEIGHT - 1, 0, -1, x + WIDTH);
     }
-    for y in TOP + GARLAND..HEIGHT - GARLAND {
+    for y in TOP..HEIGHT - GARLAND {
         garland_slice(canvas, 0, y, 1, 0, y + 2 * WIDTH);
         garland_slice(canvas, WIDTH - 1, y, -1, 0, y + 3 * WIDTH);
     }
