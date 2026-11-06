@@ -34,7 +34,7 @@ pub struct AccountStatus {
     pub today: Option<Usage>,
     /// Why the service last refused voice today (`allowance` or `global_cap`), until the UTC day ends.
     pub refused: Option<String>,
-    /// The account's plan (ADR-0020), read with today's usage; on the Paid plan its characters are counted here
+    /// The account's plan (ADR-0023), read with today's usage; on the Paid plan its characters are counted here
     /// too as replies are spoken.
     pub plan: Option<Plan>,
 }

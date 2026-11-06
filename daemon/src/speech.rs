@@ -4,7 +4,7 @@
 //!
 //! - The user's own recognizer: any OpenAI-compatible transcription endpoint (`VIBEBUDDY_STT_BASE_URL`,
 //!   `VIBEBUDDY_STT_API_KEY`, `VIBEBUDDY_STT_MODEL`).
-//! - The user's own Groq key, set in the App with their other own keys ([`crate::voice_keys`], ADR-0020). It is read
+//! - The user's own Groq key, set in the App with their other own keys ([`crate::voice_keys`], ADR-0023). It is read
 //!   at each turn, so a key set or cleared takes effect at once.
 //! - The voice service in `vibebuddy-cloud`, `POST {base}/v1/voice/transcribe` with the account's session (ADR-0018,
 //!   docs/api.md), at the base spoken replies use ([`crate::synthesis::voice_base`]): only where
@@ -210,7 +210,7 @@ impl Recognizer for VoiceService {
 }
 
 /// The service's refusals the box is told about by name: no session (401; the daemon then forgets it), no voice
-/// served here so the user's own key is needed (403 `own_key`, ADR-0020), and the daily allowance or the global cap
+/// served here so the user's own key is needed (403 `own_key`, ADR-0023), and the daily allowance or the global cap
 /// (429, ADR-0018). The messages are what the box shows.
 pub fn refusal(status: u16, body: &str, session: Option<&Account>) -> Option<RecognitionError> {
     match status {

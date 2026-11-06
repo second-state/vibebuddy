@@ -1,5 +1,5 @@
 ---
-status: proposed
+status: proposed; the voice part is superseded by ADR-0024
 ---
 
 # One paid plan carries the Relay and a monthly voice allowance; we charge only for what runs on our servers
@@ -39,3 +39,12 @@ Until the Paid plan is on sale, production `vibebuddy-api` serves none of our vo
 - Voice commands need the user's own Groq key for speech recognition, set in the App beside the other own keys. The daemon calls Groq's Whisper with it (docs/resident-session.md). Without one, the box shows SET VOICE KEY.
 - Spoken replies need an own ElevenLabs or Volcano Engine key for the Character's voice. Without one, a reply stays text.
 - No daemon calls the service for voice unless `VIBEBUDDY_TTS_BASE_URL` names one, in a release or not, so a signed-out computer isn't asked to sign in for nothing. Accounts and the Relay still use the service: production in a release, staging otherwise.
+
+## Update, 2026-11-06: voice goes through Token Station
+
+[ADR-0024](0024-voice-through-token-station-behind-our-service.md) replaces the voice part of this decision. The Relay part stays.
+
+- The Paid plan still carries the Relay. Its voice part is now voice credit in Token Station for each billing period, not a monthly allowance of characters.
+- There is no daily allowance, no monthly allowance and no global daily cap. An account may spend its voice credit, and no more.
+- The own keys stay as above: they stay on the computer, and the daemon calls the provider itself.
+- Our service gives recognition again when ADR-0024 is built. It gives synthesis only when Token Station offers it.

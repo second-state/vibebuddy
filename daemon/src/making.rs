@@ -1,4 +1,4 @@
-//! Making a Character (ADR-0020, docs/characters.md): the lines the user wrote, spoken in a voice from
+//! Making a Character (ADR-0023, docs/characters.md): the lines the user wrote, spoken in a voice from
 //! `characters/voices.tsv`, made into audio pools the App packs with a look.
 //!
 //! `POST /v1/characters` starts one job at a time on its own thread. Each line is synthesized as 16 kHz PCM: with the

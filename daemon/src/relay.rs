@@ -56,7 +56,7 @@ pub struct RelayConfig {
     url: Arc<std::sync::RwLock<String>>,
     /// The update manifest may move the Relay: a release build on its compiled default.
     movable: bool,
-    /// Whose session `hello` carries, for the Relay's check of the Paid plan (ADR-0020); None only in tests.
+    /// Whose session `hello` carries, for the Relay's check of the Paid plan (ADR-0023); None only in tests.
     account: Option<Arc<Account>>,
     refusal: Arc<watch::Sender<Option<Refusal>>>,
 }
