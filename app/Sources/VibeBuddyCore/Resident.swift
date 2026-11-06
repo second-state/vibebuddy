@@ -21,7 +21,7 @@ public struct ResidentInfo: Decodable, Equatable {
     /// Whether the daemon holds an Anthropic API key; the key itself never comes back.
     public var anthropicKeySet: Bool?
     /// Why the box can't take voice commands right now besides `problem`: `bridge_firmware`, `bridge_slow`,
-    /// `own_key`, `signed_out`, `allowance` or `global_cap`. Nil when nothing else holds voice back, and from an older daemon.
+    /// `own_key` or `signed_out`. Nil when nothing else holds voice back, and from an older daemon.
     public var voiceOff: String?
 
     enum CodingKeys: String, CodingKey {
@@ -55,10 +55,8 @@ public struct ResidentInfo: Decodable, Equatable {
         switch voiceOff {
         case "bridge_firmware": String(localized: "The box is on its UART bridge, and its firmware can't carry voice there. Update the firmware, or plug the cable into the box's native USB port.")
         case "bridge_slow": String(localized: "The box is on its UART bridge, which didn't hold the speed voice needs. Plug the cable into the box's native USB port, or plug it in again to try once more.")
-        case "own_key": String(localized: "Voice commands need your own Groq key for speech recognition. Set it under Your own keys on the General page.")
+        case "own_key": String(localized: "Voice commands need this computer signed in to VibeBuddy, or your own Groq key. Sign in, or set the key under Your own keys, on the General page.")
         case "signed_out": String(localized: "Voice needs this computer signed in to VibeBuddy. Sign in on the General page.")
-        case "allowance": String(localized: "Today's voice is used up. It comes back at \(AccountStatus.voiceComesBack()).")
-        case "global_cap": String(localized: "Voice is paused for everyone today. It comes back at \(AccountStatus.voiceComesBack()).")
         default: nil
         }
     }

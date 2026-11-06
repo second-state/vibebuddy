@@ -64,12 +64,20 @@ pub struct Account {
     pub github_id: Option<u64>,
     /// Looked up on GitHub when signing in; the service keeps only the id.
     pub github_login: Option<String>,
-    /// Voice used in the current UTC day, when the daemon knows.
-    pub today: Option<Usage>,
-    /// Why the service refused voice today: `allowance` or `global_cap`.
-    pub refused: Option<String>,
     /// The account's plan (ADR-0023), when the daemon knows.
     pub plan: Option<Plan>,
+    /// The voice credit left, in millionths of a US dollar (ADR-0024); None before the account first uses our voice
+    /// service, when the service couldn't read it, and from older daemons.
+    pub voice_credit_micro_usd: Option<u64>,
+}
+
+impl Account {
+    /// The voice credit left in dollars, "$0.93", for the account card; None when the daemon doesn't know it. Cut
+    /// down to the cent, so it never shows more than is left.
+    pub fn voice_credit(&self) -> Option<String> {
+        let cents = self.voice_credit_micro_usd? / 10_000;
+        Some(format!("${}.{:02}", cents / 100, cents % 100))
+    }
 }
 
 #[derive(Clone, Debug, Default, Deserialize, PartialEq)]
@@ -77,10 +85,8 @@ pub struct Account {
 pub struct Plan {
     /// `free` or `paid`.
     pub name: String,
-    /// When the billing period ends and the plan renews, RFC 3339; the counts and this come only on the Paid plan.
+    /// When the billing period ends and the plan renews, RFC 3339; only on the Paid plan.
     pub period_end: Option<String>,
-    pub characters: Option<u64>,
-    pub characters_limit: Option<u64>,
 }
 
 impl Plan {
@@ -91,45 +97,6 @@ impl Plan {
     pub fn paid(&self) -> bool {
         self.name == "paid"
     }
-
-    /// "This month: 12,300 of 100,000 characters · renews 24 Nov", on the Paid plan only.
-    pub fn month_line(&self) -> Option<String> {
-        let (Some(used), Some(limit), Some(end)) = (self.characters, self.characters_limit, self.period_end.as_deref()) else { return None };
-        let end = chrono::DateTime::parse_from_rfc3339(end).ok()?.with_timezone(&chrono::Local);
-        let renews = if crate::i18n::is_chinese() { end.format("%-m月%-d日") } else { end.format("%-d %b") }.to_string();
-        self.paid().then(|| tr("This month: %@ of %@ characters · renews %@", &[&grouped(used), &grouped(limit), &renews]))
-    }
-}
-
-/// When refused voice comes back: the next 00:00 UTC after `now`, when the service's day starts over, as `HH:MM`
-/// (24 hours) in `zone`, the same time the box shows.
-pub fn voice_comes_back<Zone: chrono::TimeZone>(now: chrono::DateTime<chrono::Utc>, zone: &Zone) -> String
-where
-    Zone::Offset: std::fmt::Display,
-{
-    let midnight = (now.date_naive() + chrono::Days::new(1)).and_time(chrono::NaiveTime::MIN).and_utc();
-    midnight.with_timezone(zone).format("%H:%M").to_string()
-}
-
-/// `12300` as "12,300".
-fn grouped(number: u64) -> String {
-    let digits = number.to_string();
-    let mut out = String::new();
-    for (index, digit) in digits.chars().enumerate() {
-        if index > 0 && (digits.len() - index).is_multiple_of(3) {
-            out.push(',');
-        }
-        out.push(digit);
-    }
-    out
-}
-
-#[derive(Clone, Debug, Default, Deserialize, PartialEq)]
-#[serde(default)]
-pub struct Usage {
-    pub day: String,
-    pub commands: u64,
-    pub commands_limit: u64,
 }
 
 /// One Activity as the daemon summarises it (daemon/src/activity.rs `ActivitySummary`).
@@ -582,33 +549,23 @@ mod tests {
         )
         .expect("account");
         assert!(account.available && account.signed_in);
-        assert_eq!((account.github_id, account.github_login.as_deref(), account.email), (Some(60097), Some("octocat"), None));
-        let used: Account = serde_json::from_str(r#"{"signed_in":true,"today":{"day":"2026-10-24","commands":7,"commands_limit":100},"refused":"global_cap"}"#).expect("account");
-        assert_eq!(used.today, Some(Usage { day: "2026-10-24".to_owned(), commands: 7, commands_limit: 100 }));
-        assert_eq!(used.refused.as_deref(), Some("global_cap"));
-        assert_eq!(used.plan, None);
+        assert_eq!((account.github_id, account.github_login.as_deref(), account.email.clone()), (Some(60097), Some("octocat"), None));
+        assert_eq!((account.voice_credit(), account.plan), (None, None));
     }
 
     #[test]
-    fn refused_voice_comes_back_at_the_next_midnight_utc_in_local_time() {
-        let at = |text: &str| chrono::DateTime::parse_from_rfc3339(text).unwrap().with_timezone(&chrono::Utc);
-        let zone = |hours: i32| chrono::FixedOffset::east_opt(hours * 3600).unwrap();
-        assert_eq!(voice_comes_back(at("2026-10-27T15:59:00Z"), &zone(8)), "08:00");
-        assert_eq!(voice_comes_back(at("2026-10-27T15:59:00Z"), &zone(-5)), "19:00");
-        assert_eq!(voice_comes_back(at("2026-12-31T23:59:59Z"), &chrono::Utc), "00:00");
-    }
-
-    #[test]
-    fn the_plan_decodes_and_only_the_paid_plan_has_a_month() {
+    fn the_plan_and_the_voice_credit_decode_and_the_credit_shows_in_dollars() {
         let free: Account = serde_json::from_str(r#"{"signed_in":true,"plan":{"name":"free"}}"#).expect("account");
-        let free = free.plan.expect("plan");
-        assert!(!free.paid());
-        assert_eq!(free.month_line(), None);
-        let paid: Plan = serde_json::from_str(r#"{"name":"paid","period_end":"2026-11-24T12:00:00.000Z","characters":12300,"characters_limit":100000}"#).expect("plan");
-        assert!(paid.paid());
-        let line = paid.month_line().expect("a month");
-        assert!(line.starts_with("This month: 12,300 of 100,000 characters · renews ") && line.ends_with(" Nov"), "{line}");
-        assert_eq!((grouped(0), grouped(999), grouped(1000), grouped(1234567)), ("0".to_owned(), "999".to_owned(), "1,000".to_owned(), "1,234,567".to_owned()));
+        assert!(!free.plan.as_ref().expect("plan").paid());
+        assert_eq!(free.voice_credit(), None, "nothing before the first use");
+        let paid: Plan = serde_json::from_str(r#"{"name":"paid","period_end":"2026-11-24T12:00:00.000Z"}"#).expect("plan");
+        assert!(paid.paid() && paid.period_end.is_some());
+        let credited: Account = serde_json::from_str(r#"{"signed_in":true,"plan":{"name":"free"},"voice_credit_micro_usd":933100}"#).expect("account");
+        assert_eq!(credited.voice_credit_micro_usd, Some(933_100));
+        assert_eq!(credited.voice_credit().as_deref(), Some("$0.93"));
+        let credit = |micro| Account { voice_credit_micro_usd: Some(micro), ..Account::default() }.voice_credit().unwrap();
+        // Cut down to the cent: a credit just under a dollar never shows as a whole one.
+        assert_eq!((credit(999_933), credit(1_000_000), credit(12_345_678), credit(0)), ("$0.99".into(), "$1.00".into(), "$12.34".into(), "$0.00".into()));
     }
 
     #[test]
