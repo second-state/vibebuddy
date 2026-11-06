@@ -1,6 +1,6 @@
 import Foundation
 
-/// Making a Character (ADR-0020, docs/characters.md): the user starts from a preset, edits its lines and picks a voice;
+/// Making a Character (ADR-0023, docs/characters.md): the user starts from a preset, edits its lines and picks a voice;
 /// the daemon makes the line audio (`POST /v1/characters`), and the App packs it with a look.
 
 /// A voice a made Character can speak with, from `GET /v1/voices`: a row of characters/voices.tsv, or one in the

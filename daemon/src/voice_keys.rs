@@ -1,4 +1,4 @@
-//! The user's own keys (ADR-0020, "Own key"): an ElevenLabs key and a Volcano Engine key for spoken replies, and a
+//! The user's own keys (ADR-0023, "Own key"): an ElevenLabs key and a Volcano Engine key for spoken replies, and a
 //! Groq key for speech recognition ([`crate::speech`]), in `voice-keys.json` in the config directory,
 //! `{"elevenlabs"?, "volc"?, "groq"?}`, mode 0600. A file of its own, because `PUT /v1/config` replaces the
 //! whole config and an older App would wipe a key it doesn't know. A reply whose voice is from a provider with an own key goes straight to that provider ([`crate::synthesis`]).

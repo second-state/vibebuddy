@@ -117,9 +117,9 @@ struct AppState {
     written: Arc<Mutex<persona::Written>>,
     /// The person's VibeBuddy account (ADR-0018); unavailable in tests unless one sets it.
     account: Arc<account::Account>,
-    /// The user's own keys for spoken replies (ADR-0020); none can be set in tests unless one sets it.
+    /// The user's own keys for spoken replies (ADR-0023); none can be set in tests unless one sets it.
     voice_keys: Arc<voice_keys::VoiceKeys>,
-    /// Making a Character's line audio (ADR-0020); nothing can be made in tests unless one sets it.
+    /// Making a Character's line audio (ADR-0023); nothing can be made in tests unless one sets it.
     making: Arc<making::Maker>,
 }
 
@@ -1935,7 +1935,7 @@ async fn set_anthropic_key(state: AppState, key: Option<String>) -> axum::respon
     get_resident(State(state)).await.into_response()
 }
 
-/// Sets or clears the user's own keys (ADR-0020): `{"elevenlabs"?, "volc"?, "groq"?}`, each a key, or null
+/// Sets or clears the user's own keys (ADR-0023): `{"elevenlabs"?, "volc"?, "groq"?}`, each a key, or null
 /// or "" to clear it; one left out stays. Answers which are set, as in the status; a key is never sent back or logged.
 async fn put_voice_keys(State(state): State<AppState>, Json(request): Json<serde_json::Map<String, serde_json::Value>>) -> axum::response::Response {
     use axum::response::IntoResponse;

@@ -15,9 +15,9 @@ public struct Status: Codable, Equatable {
 
     /// The person's VibeBuddy account (ADR-0018); absent from older daemons, which can't sign in.
     public var account: AccountStatus?
-    /// Which of the user's own keys for spoken replies are set (ADR-0020); absent from older daemons.
+    /// Which of the user's own keys for spoken replies are set (ADR-0023); absent from older daemons.
     public var voiceKeys: VoiceKeysStatus?
-    /// The Character being made, or the last one made since the daemon started (ADR-0020); absent when there is none,
+    /// The Character being made, or the last one made since the daemon started (ADR-0023); absent when there is none,
     /// and from older daemons.
     public var making: MakingStatus?
 
@@ -89,7 +89,7 @@ public struct AccountStatus: Codable, Equatable {
     public var githubID: Int?
     /// Looked up on GitHub when signing in; nil if that lookup failed.
     public var githubLogin: String?
-    /// The account's plan (ADR-0020), when the daemon knows.
+    /// The account's plan (ADR-0023), when the daemon knows.
     public var plan: AccountPlan?
     /// The voice credit left, in millionths of a US dollar (ADR-0024); nil before the account first uses our voice
     /// service, when the service couldn't read it, and from older daemons.
@@ -220,7 +220,7 @@ public struct DeviceState: Codable, Equatable {
     public var transfer: Bool?
     /// The last image sent over the link didn't confirm itself, and the box went back (`FIRMWARE ROLLED BACK`).
     public var rolledBack: Bool?
-    /// Why the Relay won't carry the link (ADR-0020): `signed_out`, `plan` or `unavailable`. Absent from older daemons.
+    /// Why the Relay won't carry the link (ADR-0023): `signed_out`, `plan` or `unavailable`. Absent from older daemons.
     public var relayRefused: String?
     enum CodingKeys: String, CodingKey { case transfer, rolledBack = "rolled_back", relayRefused = "relay_refused", wifiNetwork = "wifi_network", wifiNetworks = "wifi_networks", wifiAddress = "wifi_address", wifiError = "wifi_error", wifiSeen = "wifi_seen", relay, busy, connected, port, bridge, network, mode, firmwareBuild = "firmware_build", firmwareVersion = "firmware_version", voice, volume, screens, decoration, foreignFirmware = "foreign_firmware", pin, candidates, unsupportedBoard = "unsupported_board", boxKey = "box_key", computerKey = "computer_key", pairedComputers = "paired_computers" }
     public init(connected: Bool, port: String? = nil, bridge: Bool = false, mode: String? = nil, firmwareBuild: String? = nil, firmwareVersion: String? = nil, voice: String? = nil, volume: Int? = nil, foreignFirmware: Bool? = nil) {

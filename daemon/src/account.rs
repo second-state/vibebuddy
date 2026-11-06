@@ -29,7 +29,7 @@ pub struct AccountStatus {
     pub github_id: Option<u64>,
     /// Looked up on GitHub when signing in, for the App to show; the service keeps only the id.
     pub github_login: Option<String>,
-    /// The account's plan (ADR-0020), read from the service at sign-in and when the App asks.
+    /// The account's plan (ADR-0023), read from the service at sign-in and when the App asks.
     pub plan: Option<Plan>,
     /// The voice credit left, in millionths of a US dollar (ADR-0024), read with the plan. None before the account
     /// first uses our voice service, and when the service couldn't read it.

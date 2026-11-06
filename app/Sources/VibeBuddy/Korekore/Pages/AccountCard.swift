@@ -2,7 +2,7 @@ import KorekoreUI
 import SwiftUI
 import VibeBuddyCore
 
-/// The account (ADR-0018) and the user's own keys (ADR-0020), at the top of the General page: the design has no
+/// The account (ADR-0018) and the user's own keys (ADR-0023), at the top of the General page: the design has no
 /// Account page or sidebar tile, so it sits with the other settings.
 struct KorekoreAccountCard: View {
     @ObservedObject var model: AppModel
@@ -147,7 +147,7 @@ struct KorekoreAccountCard: View {
     }
 }
 
-/// One provider's own key for spoken replies (ADR-0020). It is typed once and never shown again: the daemon only says
+/// One provider's own key for spoken replies (ADR-0023). It is typed once and never shown again: the daemon only says
 /// whether it has one.
 struct KorekoreOwnKeyRow: View {
     let title: String

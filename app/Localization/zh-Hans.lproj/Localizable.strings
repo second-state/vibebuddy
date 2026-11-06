@@ -452,7 +452,7 @@
 "The Relay needs the Paid plan." = "中转需要付费版。";
 "The Relay can't check the account right now. VibeBuddy tries again later." = "中转暂时无法确认账户，VibeBuddy 稍后会再试。";
 
-/* Own keys for spoken replies (ADR-0020) */
+/* Own keys for spoken replies (ADR-0023) */
 "Your own keys" = "自己的密钥";
 "With your own key, spoken replies in that provider's voices go straight to it, billed to your account there, and never through VibeBuddy." = "填了自己的密钥后，用这家服务商声音的语音回复会直接由它合成，费用记在你在那里的账户上，不经过 VibeBuddy。";
 "Volcano Engine" = "火山引擎";
@@ -466,7 +466,7 @@
 "Voice commands need this computer signed in to VibeBuddy, or your own Groq key. Sign in, or set the key under Your own keys, on the General page." = "语音指令需要这台电脑登录 VibeBuddy，或者填上你自己的 Groq 密钥。请在通用页登录，或在“自己的密钥”里填上密钥。";
 "Couldn't save your own key: %@" = "保存自己的密钥失败：%@";
 
-/* Making a Character (ADR-0020) */
+/* Making a Character (ADR-0023) */
 "Name" = "名字";
 "Voice" = "声音";
 "Look" = "形象";

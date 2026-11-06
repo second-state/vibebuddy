@@ -44,7 +44,7 @@ The daemon sends the token as `Authorization: Bearer <token>` and keeps it in `c
   {"id":"…","email":null,"github_id":60097,"created_at":"2026-10-23T08:44:49.885Z","plan":{"name":"free"},"voice_credit_micro_usd":933100}
   ```
 
-  An account has an `email` or a `github_id`, never both. `plan` is `{"name":"free"}` or `{"name":"paid","period_end":"…"}` (ADR-0020). `voice_credit_micro_usd` is the voice credit left in Token Station, in millionths of a US dollar (ADR-0024). It is absent before the account first uses the voice service, and when Token Station can't be read at that moment; the request doesn't fail then. The daemon passes it on in `/v1/status` as `account.voice_credit_micro_usd`, and the App shows it in dollars on the account card ("Voice credit $0.93"), cut down to the cent. With no value, the App shows no line.
+  An account has an `email` or a `github_id`, never both. `plan` is `{"name":"free"}` or `{"name":"paid","period_end":"…"}` (ADR-0023). `voice_credit_micro_usd` is the voice credit left in Token Station, in millionths of a US dollar (ADR-0024). It is absent before the account first uses the voice service, and when Token Station can't be read at that moment; the request doesn't fail then. The daemon passes it on in `/v1/status` as `account.voice_credit_micro_usd`, and the App shows it in dollars on the account card ("Voice credit $0.93"), cut down to the cent. With no value, the App shows no line.
 - `POST /v1/sign-out` revokes this session only: 204.
 - `DELETE /v1/account` deletes the account with all its sessions: 204.
 
@@ -91,6 +91,6 @@ POST /v1/voice/speak
 {"text":"…","voice":"elevenlabs:<voice_id>","for":"character"}
 ```
 
-A line for a Character the user is making (ADR-0020). It gets `403 {"reason":"own_key"}` for now too, as all synthesis does. When synthesis is offered, it streams back `audio/pcm;rate=16000`: 16 kHz mono 16-bit little-endian PCM, which the daemon trims, normalizes and packs as ADPCM.
+A line for a Character the user is making (ADR-0023). It gets `403 {"reason":"own_key"}` for now too, as all synthesis does. When synthesis is offered, it streams back `audio/pcm;rate=16000`: 16 kHz mono 16-bit little-endian PCM, which the daemon trims, normalizes and packs as ADPCM.
 
 The `/v0/voice/…` calls take the same bodies without a session and run on staging only, until the daemon has moved to v1.

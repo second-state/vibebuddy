@@ -2,7 +2,7 @@ import KorekoreUI
 import SwiftUI
 import VibeBuddyCore
 
-/// A Character the user made (ADR-0020), as a Character card: its look, its name, Use or Resume, and Delete. The
+/// A Character the user made (ADR-0023), as a Character card: its look, its name, Use or Resume, and Delete. The
 /// design has no card of its own for it.
 struct KorekoreMadeCard: View {
     @ObservedObject var model: AppModel
