@@ -444,16 +444,13 @@
 "Couldn't sign in: %@" = "登录失败：%@";
 "Couldn't sign out: %@" = "退出登录失败：%@";
 "Couldn't delete the account: %@" = "删除账户失败：%@";
-"Voice today: %lld of %lld" = "今天的语音：已用 %lld / %lld 条";
-"Today's voice is used up. It comes back at %@." = "今天的语音已用完，%@ 恢复。";
-"Voice is paused for everyone today. It comes back at %@." = "今天的语音已全局暂停，%@ 恢复。";
+"Voice credit %@" = "语音额度 %@";
 "Plan" = "方案";
 "Free" = "免费版";
 "Paid plan" = "付费版";
 "Sign in to use the Relay." = "登录后才能使用中转。";
 "The Relay needs the Paid plan." = "中转需要付费版。";
 "The Relay can't check the account right now. VibeBuddy tries again later." = "中转暂时无法确认账户，VibeBuddy 稍后会再试。";
-"This month: %@ of %@ characters · renews %@" = "本月：已用 %@ / %@ 字符 · %@续期";
 
 /* Own keys for spoken replies (ADR-0020) */
 "Your own keys" = "自己的密钥";
@@ -464,9 +461,9 @@
 "Clear" = "清除";
 "ElevenLabs refused your own key. Replies in its voices stay silent until you set another one." = "ElevenLabs 拒绝了你自己的密钥。换一个密钥之前，用它的声音的回复不会出声。";
 "Volcano Engine refused your own key. Replies in its voices stay silent until you set another one." = "火山引擎拒绝了你自己的密钥。换一个密钥之前，用它的声音的回复不会出声。";
-"Voice commands need your own Groq key for speech recognition, from console.groq.com. Your recordings go straight to Groq, billed to your account there." = "语音指令要用你自己的 Groq 密钥来识别语音，在 console.groq.com 申请。录音直接发给 Groq，费用记在你在那里的账户上。";
+"When you are signed in, voice commands go through VibeBuddy's voice service and use your voice credit. With your own Groq key, from console.groq.com, your recordings go straight to Groq instead, billed to your account there." = "登录后，语音指令经 VibeBuddy 的语音服务识别，用的是你的语音额度。填上你自己的 Groq 密钥（在 console.groq.com 申请）后，录音改为直接发给 Groq，费用记在你在那里的账户上。";
 "Groq refused your own key. Voice commands stop until you set another one." = "Groq 拒绝了你自己的密钥。换一个密钥之前，语音指令用不了。";
-"Voice commands need your own Groq key for speech recognition. Set it under Your own keys on the General page." = "语音指令要用你自己的 Groq 密钥来识别语音。请在通用页的“自己的密钥”里填上。";
+"Voice commands need this computer signed in to VibeBuddy, or your own Groq key. Sign in, or set the key under Your own keys, on the General page." = "语音指令需要这台电脑登录 VibeBuddy，或者填上你自己的 Groq 密钥。请在通用页登录，或在“自己的密钥”里填上密钥。";
 "Couldn't save your own key: %@" = "保存自己的密钥失败：%@";
 
 /* Making a Character (ADR-0020) */

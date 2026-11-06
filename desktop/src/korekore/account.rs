@@ -13,7 +13,7 @@ use crate::{Lender, MakeForm, Message, ROBOT, assets, client, making};
 impl crate::App {
     // MARK: Account
 
-    /// At the top of the General page: who is signed in, the plan and today's use, then the own keys.
+    /// At the top of the General page: who is signed in, the plan and the voice credit, then the own keys.
     pub(super) fn kk_account(&self) -> Element<'_, Message> {
         let title = |label: String| container(text(label).font(bold()).size(15).color(theme::INK)).padding(Padding::ZERO.left(4));
         let keys = self.status.as_ref().and_then(|status| status.voice_keys.as_ref()).map(|keys| column![title(tr("Your own keys", &[])), self.kk_own_keys(keys)].spacing(14));
@@ -77,27 +77,11 @@ impl crate::App {
             let (name, color) = if plan.paid() { (tr("Paid plan", &[]), theme::DONE_TEXT) } else { (tr("Free", &[]), theme::INK) };
             items.push(divider());
             items.push(line(row![text(tr("Plan", &[])).font(bold()).size(14).color(theme::INK).width(Length::Fill), tag(name, color)].align_y(Alignment::Center).into()));
-            if let Some(month) = plan.month_line() {
-                items.push(divider());
-                items.push(line(tag(month, theme::MUTED_2)));
-            }
         }
-        let today = match (account.refused.as_deref(), &account.today) {
-            (Some(refused), _) => {
-                let back = status::voice_comes_back(chrono::Utc::now(), &chrono::Local);
-                let line = if refused == "global_cap" {
-                    tr("Voice is paused for everyone today. It comes back at %@.", &[&back])
-                } else {
-                    tr("Today's voice is used up. It comes back at %@.", &[&back])
-                };
-                Some(tag(line, theme::KORE_PINK_TEXT))
-            }
-            (None, Some(usage)) => Some(tag(tr("Voice today: %lld of %lld", &[&usage.commands, &usage.commands_limit]), theme::MUTED_2)),
-            (None, None) => None,
-        };
-        if let Some(today) = today {
+        // Nothing before the first use of our voice service.
+        if let Some(credit) = account.voice_credit() {
             items.push(divider());
-            items.push(line(today));
+            items.push(line(tag(tr("Voice credit %@", &[&credit]), theme::MUTED_2)));
         }
         items
     }
@@ -121,7 +105,7 @@ impl crate::App {
         if let Some(groq) = &keys.groq {
             items.push(divider());
             items.push(
-                container(note(tr("Voice commands need your own Groq key for speech recognition, from console.groq.com. Your recordings go straight to Groq, billed to your account there.", &[])))
+                container(note(tr("When you are signed in, voice commands go through VibeBuddy's voice service and use your voice credit. With your own Groq key, from console.groq.com, your recordings go straight to Groq instead, billed to your account there.", &[])))
                     .padding(Padding::from([12, 16]))
                     .into(),
             );

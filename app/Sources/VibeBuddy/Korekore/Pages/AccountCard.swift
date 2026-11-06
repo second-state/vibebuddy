@@ -54,7 +54,7 @@ struct KorekoreAccountCard: View {
                     if let groq = keys.groq {
                         KDivider()
                         row {
-                            KNote(String(localized: "Voice commands need your own Groq key for speech recognition, from console.groq.com. Your recordings go straight to Groq, billed to your account there."))
+                            KNote(String(localized: "When you are signed in, voice commands go through VibeBuddy's voice service and use your voice credit. With your own Groq key, from console.groq.com, your recordings go straight to Groq instead, billed to your account there."))
                         }
                         KDivider()
                         KorekoreOwnKeyRow(title: "Groq", key: groq,
@@ -66,7 +66,7 @@ struct KorekoreAccountCard: View {
             }
         }
         .onChange(of: account?.signedIn) { waiting = false }
-        // Reading the day's use and the plan costs a request to the service, so only when the page is shown.
+        // Reading the plan and the voice credit costs a request to the service, so only when the page is shown.
         .task { if account?.signedIn == true { try? await model.client.refreshAccount() } }
     }
 
@@ -83,19 +83,11 @@ struct KorekoreAccountCard: View {
                 Spacer()
                 KTag(plan.paid ? String(localized: "Paid plan") : String(localized: "Free"), color: plan.paid ? Theme.Colors.doneText : Theme.Colors.ink)
             }
-            if plan.paid, let used = plan.characters, let limit = plan.charactersLimit, let end = plan.periodEnd {
-                KDivider()
-                row {
-                    KTag(String(localized: "This month: \(used.formatted()) of \(limit.formatted()) characters · renews \(end.formatted(.dateTime.day().month(.abbreviated)))"))
-                }
-            }
         }
-        if let refusal {
+        // Nothing before the first use of our voice service.
+        if let credit = account.voiceCredit {
             KDivider()
-            row { KTag(refusal, color: Theme.Colors.korePinkText) }
-        } else if let today = account.today {
-            KDivider()
-            row { KTag(String(localized: "Voice today: \(today.commands) of \(today.commandsLimit)")) }
+            row { KTag(String(localized: "Voice credit \(credit)")) }
         }
     }
 
@@ -104,15 +96,6 @@ struct KorekoreAccountCard: View {
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.vertical, 12)
             .padding(.horizontal, 16)
-    }
-
-    /// Why voice is refused today, if it is.
-    private var refusal: String? {
-        switch account?.refused {
-        case nil: nil
-        case "global_cap": String(localized: "Voice is paused for everyone today. It comes back at \(AccountStatus.voiceComesBack()).")
-        default: String(localized: "Today's voice is used up. It comes back at \(AccountStatus.voiceComesBack()).")
-        }
     }
 
     private var signedInText: String {

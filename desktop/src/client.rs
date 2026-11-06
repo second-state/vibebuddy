@@ -193,8 +193,7 @@ pub struct ResidentInfo {
     #[serde(default)]
     pub anthropic_key_set: Option<bool>,
     /// Why the box can't take voice commands right now besides `problem`: `bridge_firmware`, `bridge_slow`,
-    /// `own_key`, `signed_out`, `allowance` or `global_cap`. None when nothing else holds voice back, and from an older
-    /// daemon.
+    /// `own_key` or `signed_out`. None when nothing else holds voice back, and from an older daemon.
     #[serde(default)]
     pub voice_off: Option<String>,
 }
@@ -203,14 +202,11 @@ impl ResidentInfo {
     /// Why holding K0 does nothing right now, said for the user, as on the Mac; None when nothing but `problem` holds
     /// voice back, or for a reason this app doesn't know.
     pub fn voice_off_note(&self) -> Option<String> {
-        let back = || crate::status::voice_comes_back(chrono::Utc::now(), &chrono::Local);
         Some(match self.voice_off.as_deref()? {
             "bridge_firmware" => tr("The box is on its UART bridge, and its firmware can't carry voice there. Update the firmware, or plug the cable into the box's native USB port.", &[]),
             "bridge_slow" => tr("The box is on its UART bridge, which didn't hold the speed voice needs. Plug the cable into the box's native USB port, or plug it in again to try once more.", &[]),
-            "own_key" => tr("Voice commands need your own Groq key for speech recognition. Set it under Your own keys on the General page.", &[]),
+            "own_key" => tr("Voice commands need this computer signed in to VibeBuddy, or your own Groq key. Sign in, or set the key under Your own keys, on the General page.", &[]),
             "signed_out" => tr("Voice needs this computer signed in to VibeBuddy. Sign in on the General page.", &[]),
-            "allowance" => tr("Today's voice is used up. It comes back at %@.", &[&back()]),
-            "global_cap" => tr("Voice is paused for everyone today. It comes back at %@.", &[&back()]),
             _ => return None,
         })
     }
@@ -555,7 +551,7 @@ mod tests {
         assert_eq!(parse(r#"{"enabled":true}"#).voice_off_note(), None, "an older daemon says nothing");
         let bridge = parse(r#"{"enabled":true,"ready":true,"voice_off":"bridge_firmware"}"#);
         assert!(bridge.voice_off_note().is_some_and(|note| note.contains("UART bridge")), "{bridge:?}");
-        assert!(parse(r#"{"enabled":true,"voice_off":"allowance"}"#).voice_off_note().is_some_and(|note| note.contains("comes back at")));
+        assert_eq!(parse(r#"{"enabled":true,"voice_off":"allowance"}"#).voice_off_note(), None, "no daily allowance any more");
         assert!(parse(r#"{"enabled":true,"voice_off":"own_key"}"#).voice_off_note().is_some_and(|note| note.contains("Groq")));
         assert_eq!(parse(r#"{"enabled":true,"voice_off":"something_new"}"#).voice_off_note(), None);
     }

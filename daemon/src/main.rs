@@ -308,9 +308,8 @@ async fn main() {
             None => resident,
         })
     });
-    let session = Some(state.account.clone());
     state.voice_keys = Arc::new(voice_keys::VoiceKeys::new(config::config_dir().as_deref()));
-    let synthesizer = synthesis::from_env(session.clone(), state.voice_keys.clone());
+    let synthesizer = synthesis::new(state.account.clone(), state.voice_keys.clone());
     let made = config::config_dir().map(|dir| dir.join("characters"));
     if let Some(made) = &made {
         let _ = making::DIR.set(made.clone());
@@ -319,12 +318,13 @@ async fn main() {
     let _ = making::OWN.set((own_voices.clone(), state.voice_keys.clone()));
     state.making = Arc::new(making::Maker::new(
         made,
-        synthesis::voice_base(env::var(synthesis::BASE_URL_VARIABLE).ok()),
+        state.account.base(),
         state.account.clone(),
         state.voice_keys.clone(),
         own_voices,
     ));
-    state.voice = Arc::new(voice::Voice::new(speech::from_env(session, Some(state.voice_keys.clone())), state.resident.clone()).with_synthesizer(Some(synthesizer)));
+    let recognizer = speech::new(state.account.clone(), state.voice_keys.clone());
+    state.voice = Arc::new(voice::Voice::new(Some(recognizer), state.resident.clone()).with_synthesizer(Some(synthesizer)));
     if let Some(resident) = state.resident.clone() {
         let wearing = wearing(&state).await;
         tokio::spawn(async move { resident.warm(&wearing).await });
@@ -522,8 +522,8 @@ async fn voice_offer(state: &AppState) -> Option<Event> {
 }
 
 /// Why voice commands can't be taken right now, for the Conversation tab: the bridge at 115200 (`bridge_firmware`
-/// when the firmware can't move it, `bridge_slow` when moving it failed), or the recognizer's refusal (`signed_out`, `own_key`,
-/// `allowance`, `global_cap`). The resident session not being ready is the tab's `problem` already.
+/// when the firmware can't move it, `bridge_slow` when moving it failed), or the recognizer's refusal (`signed_out`,
+/// `own_key`). The resident session not being ready is the tab's `problem` already.
 async fn voice_off(state: &AppState) -> Option<String> {
     let device = state.device.lock().await.clone();
     if device.connected && device.bridge && device.bridge_baud.is_some_and(|baud| baud != serial_transport::FAST_BAUD_RATE) {
@@ -547,8 +547,8 @@ async fn wearing(state: &AppState) -> persona::Wearing {
 }
 
 /// Tells a box that has reported its build whether voice is on now, and if not why, after the resident session's
-/// readiness or the account flipped (the user's Codex installed or gone, logged in or out, the service refusing
-/// voice for the day or the day ending), or the UART bridge's rate settled. Told `false`, a long K0 gives up the
+/// readiness or the account flipped (the user's Codex installed or gone, signed in or out), or the UART bridge's rate
+/// settled. Told `false`, a long K0 gives up the
 /// Pomodoro phase as it did before voice.
 async fn offer_voice_again(state: &AppState) {
     let booted = {
@@ -571,26 +571,12 @@ fn follow_account(state: &AppState) {
             offer_voice_again(&follower).await;
         }
     });
-    // Today's usage is only shown. A refusal for the day also withdraws voice until the UTC day ends or a read of
-    // the account shows voice again; the day's end changes both without a word from the service.
-    let mut usage = state.account.watch_usage();
+    // The plan and the voice credit are only shown.
+    let mut details = state.account.watch_details();
     let follower = state.clone();
-    let mut refusal = state.account.voice_refusal();
     tokio::spawn(async move {
-        loop {
-            let now = chrono::Utc::now();
-            let day_ends = account::next_utc_day(now) - now;
-            tokio::select! {
-                changed = usage.changed() => if changed.is_err() { break },
-                // A second late, so the clock is surely in the new day.
-                () = tokio::time::sleep(day_ends.to_std().unwrap_or_default() + Duration::from_secs(1)) => {}
-            }
+        while details.changed().await.is_ok() {
             follower.notify_status();
-            let today = follower.account.voice_refusal();
-            if today != refusal {
-                refusal = today;
-                offer_voice_again(&follower).await;
-            }
         }
     });
     // So is why the Relay turned this computer away.
@@ -1828,7 +1814,7 @@ struct ResidentInfo {
     /// Whether an Anthropic API key is stored; the key itself is never sent back.
     anthropic_key_set: bool,
     /// Why the box can't take voice commands right now besides `problem`: `bridge_firmware`, `bridge_slow`,
-    /// `signed_out`, `own_key`, `allowance` or `global_cap` (see [`voice_off`]).
+    /// `signed_out` or `own_key` (see [`voice_off`]).
     voice_off: Option<String>,
 }
 
@@ -2124,10 +2110,10 @@ async fn post_sign_out(State(state): State<AppState>) -> (StatusCode, Json<ApiRe
     }
 }
 
-/// Reads today's voice use and the plan from the service, for the App's Account tab; the status stream carries them.
+/// Reads the plan and the voice credit from the service, for the App's account card; the status stream carries them.
 async fn post_account_refresh(State(state): State<AppState>) -> (StatusCode, Json<ApiResponse>) {
     let account = state.account.clone();
-    match tokio::task::spawn_blocking(move || account.refresh_usage()).await.unwrap_or_else(|error| Err(account::AccountError::Service(error.to_string()))) {
+    match tokio::task::spawn_blocking(move || account.refresh()).await.unwrap_or_else(|error| Err(account::AccountError::Service(error.to_string()))) {
         Ok(()) => (StatusCode::OK, Json(ApiResponse { accepted: true, message: "refreshed".to_owned() })),
         Err(error) => account_refusal(&error),
     }
@@ -2776,31 +2762,18 @@ mod tests {
         let _ = std::fs::remove_dir_all(dir);
     }
 
-    /// Asks the account why voice is off, as the voice service does.
-    struct AccountRecognizer(Arc<account::Account>);
-
-    impl speech::Recognizer for AccountRecognizer {
-        fn recognize(&self, _wav: &[u8]) -> Result<speech::Transcript, speech::RecognitionError> {
-            Ok(speech::Transcript::default())
-        }
-
-        fn refusal(&self) -> Option<&'static str> {
-            if self.0.token().is_none() {
-                return Some("signed_out");
-            }
-            self.0.voice_refusal()
-        }
-    }
-
     #[tokio::test]
-    async fn a_refusal_for_the_day_withdraws_voice_with_its_reason_until_a_read_shows_voice_again() {
-        let dir = resident::tests::temp_dir("main-refusal-offer");
+    async fn signing_out_with_no_groq_key_tells_the_box_to_set_one() {
+        let dir = resident::tests::temp_dir("main-own-key-offer");
         let transport = Arc::new(RecordingTransport::default());
         let mut state = test_state(transport.clone());
         let resident = Arc::new(resident::tests::resident(&dir, &resident::tests::logged_in(), Arc::default()));
         resident.note(None);
         state.account = Arc::new(account::signed_in_for_tests(&dir.join("config"), "tok"));
-        state.voice = Arc::new(voice::Voice::new(Some(Arc::new(AccountRecognizer(state.account.clone()))), Some(resident)));
+        state.voice_keys = Arc::new(voice_keys::VoiceKeys::new(Some(&dir.join("config"))));
+        // The daemon's own recognizer: no Groq key, so our service while signed in.
+        let recognizer = speech::new(state.account.clone(), state.voice_keys.clone());
+        state.voice = Arc::new(voice::Voice::new(Some(recognizer), Some(resident)));
         let offers = || {
             transport
                 .events()
@@ -2813,31 +2786,20 @@ mod tests {
         publish_device_message(&state, DeviceMessage::Connected { port: "/dev/cu.x".to_owned(), bridge: false, usb_serial: None }).await;
         publish_device_message(&state, DeviceMessage::Line("DISPLAY READY BUILD v9 2026-10-01".to_owned())).await;
         follow_account(&state);
-        assert_eq!(offers(), [(serde_json::json!(true), None, None)]);
-
-        state.account.note_refusal("allowance");
-        settle().await;
-        let (on, reason, message) = offers()[1].clone();
-        assert_eq!((on, reason), (serde_json::json!(false), Some(serde_json::json!("allowance"))));
-        assert_eq!(message, voice::refusal_message("allowance"));
-        // A rebooted box is told again, reason and all.
-        publish_device_message(&state, DeviceMessage::Line("DISPLAY READY BUILD v9 2026-10-01".to_owned())).await;
-        assert_eq!(offers().len(), 3);
-        assert_eq!(offers()[2].1, Some(serde_json::json!("allowance")));
-
-        // Usage that leaves the refusal as it was tells the box nothing new.
-        state.account.read_usage_for_tests(20, 20);
-        settle().await;
-        assert_eq!(offers().len(), 3);
-        // A read that shows commands left (a higher limit) brings voice back.
-        state.account.read_usage_for_tests(20, 100);
-        settle().await;
-        assert_eq!(offers().len(), 4);
-        assert_eq!(offers()[3], (serde_json::json!(true), None, None));
+        follow_voice_keys(&state);
+        assert_eq!(offers(), [(serde_json::json!(true), None, None)], "signed in, voice goes to our service");
 
         state.account.forget();
         settle().await;
-        assert_eq!(offers().last().unwrap().1, Some(serde_json::json!("signed_out")));
+        let (on, reason, message) = offers().last().unwrap().clone();
+        assert_eq!((on, reason), (serde_json::json!(false), Some(serde_json::json!("own_key"))));
+        assert_eq!(message.as_deref(), Some("Set a Groq key on the computer to talk to me."));
+        assert_eq!(voice_off(&state).await.as_deref(), Some("own_key"));
+
+        // A Groq key brings voice back, signed out or not.
+        state.voice_keys.set(&[(voice_keys::Provider::Groq, Some("gsk_test".to_owned()))]).unwrap();
+        settle().await;
+        assert_eq!(offers().last().unwrap(), &(serde_json::json!(true), None, None));
         let _ = std::fs::remove_dir_all(dir);
     }
 

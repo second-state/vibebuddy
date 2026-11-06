@@ -89,56 +89,38 @@ public struct AccountStatus: Codable, Equatable {
     public var githubID: Int?
     /// Looked up on GitHub when signing in; nil if that lookup failed.
     public var githubLogin: String?
-    /// Voice used in the current UTC day, when the daemon knows; absent from daemons before it.
-    public var today: AccountUsage?
-    /// Why the service refused voice today: `allowance` or `global_cap`.
-    public var refused: String?
     /// The account's plan (ADR-0020), when the daemon knows.
     public var plan: AccountPlan?
-    enum CodingKeys: String, CodingKey { case available, signedIn = "signed_in", email, githubID = "github_id", githubLogin = "github_login", today, refused, plan }
-    public init(available: Bool, signedIn: Bool, email: String? = nil, githubID: Int? = nil, githubLogin: String? = nil, today: AccountUsage? = nil, refused: String? = nil, plan: AccountPlan? = nil) {
+    /// The voice credit left, in millionths of a US dollar (ADR-0024); nil before the account first uses our voice
+    /// service, when the service couldn't read it, and from older daemons.
+    public var voiceCreditMicroUSD: Int?
+    enum CodingKeys: String, CodingKey { case available, signedIn = "signed_in", email, githubID = "github_id", githubLogin = "github_login", plan, voiceCreditMicroUSD = "voice_credit_micro_usd" }
+    public init(available: Bool, signedIn: Bool, email: String? = nil, githubID: Int? = nil, githubLogin: String? = nil, plan: AccountPlan? = nil, voiceCreditMicroUSD: Int? = nil) {
         self.available = available; self.signedIn = signedIn; self.email = email; self.githubID = githubID; self.githubLogin = githubLogin
-        self.today = today; self.refused = refused; self.plan = plan
+        self.plan = plan; self.voiceCreditMicroUSD = voiceCreditMicroUSD
     }
 
-    /// When refused voice comes back: the next 00:00 UTC after `now`, when the service's day starts over, as HH:mm
-    /// (24 hours) in `timeZone`, the same time the box shows.
-    public static func voiceComesBack(after now: Date = Date(), in timeZone: TimeZone = .current) -> String {
-        var utc = Calendar(identifier: .gregorian)
-        utc.timeZone = TimeZone(identifier: "UTC")!
-        let midnight = utc.date(byAdding: .day, value: 1, to: utc.startOfDay(for: now))!
-        let formatter = DateFormatter()
-        formatter.locale = Locale(identifier: "en_US_POSIX")
-        formatter.timeZone = timeZone
-        formatter.dateFormat = "HH:mm"
-        return formatter.string(from: midnight)
+    /// The voice credit left in dollars, "$0.93", for the account card; nil when the daemon doesn't know it. Cut down
+    /// to the cent, so it never shows more than is left.
+    public var voiceCredit: String? {
+        guard let micro = voiceCreditMicroUSD else { return nil }
+        let cents = max(micro, 0) / 10_000
+        return "$\(cents / 100)." + String(format: "%02d", cents % 100)
     }
 }
 
-/// `free`, or `paid` with the billing period's end and its monthly allowance, in characters of our voices.
+/// `free`, or `paid` with the billing period's end.
 public struct AccountPlan: Codable, Equatable {
     public var name: String
     public var periodEnd: Date?
-    public var characters: Int?
-    public var charactersLimit: Int?
-    enum CodingKeys: String, CodingKey { case name, periodEnd = "period_end", characters, charactersLimit = "characters_limit" }
-    public init(name: String, periodEnd: Date? = nil, characters: Int? = nil, charactersLimit: Int? = nil) {
-        self.name = name; self.periodEnd = periodEnd; self.characters = characters; self.charactersLimit = charactersLimit
+    enum CodingKeys: String, CodingKey { case name, periodEnd = "period_end" }
+    public init(name: String, periodEnd: Date? = nil) {
+        self.name = name; self.periodEnd = periodEnd
     }
     public var paid: Bool { name == "paid" }
     /// Whether the App shows the Paid plan. Off until the plan is on sale (2026-10-28): the plan row, the Relay switch
     /// and its refusals, and making a Character with VibeBuddy's voices are hidden. The daemon doesn't change.
     public static let shown = false
-}
-
-public struct AccountUsage: Codable, Equatable {
-    public var day: String
-    public var commands: Int
-    public var commandsLimit: Int
-    enum CodingKeys: String, CodingKey { case day, commands, commandsLimit = "commands_limit" }
-    public init(day: String, commands: Int, commandsLimit: Int) {
-        self.day = day; self.commands = commands; self.commandsLimit = commandsLimit
-    }
 }
 
 public struct DaemonInfo: Codable, Equatable {

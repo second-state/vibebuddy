@@ -120,23 +120,27 @@ do {
     check(!sent.contains("\"id\"") && sent.contains(#""occasion":"done""#), "a new Character is sent without an id: \(sent)")
     let manifest = try StatusCoding.decoder().decode(CharacterRequest.self, from: Data(#"{"name":"Owl","base":"ada","voice":"luna","lines":[{"occasion":"done","text":"Done."}]}"#.utf8))
     check(manifest == request, "a manifest reads back as the request it was")
-    let used = try StatusCoding.decoder().decode(AccountStatus.self, from: Data("""
-    {"available":true,"signed_in":true,"github_id":1,"today":{"day":"2026-10-24","commands":7,"commands_limit":100},"refused":"allowance"}
+    let credited = try StatusCoding.decoder().decode(AccountStatus.self, from: Data("""
+    {"available":true,"signed_in":true,"github_id":1,"plan":{"name":"free"},"voice_credit_micro_usd":933100}
     """.utf8))
-    check(used.today == AccountUsage(day: "2026-10-24", commands: 7, commandsLimit: 100) && used.refused == "allowance", "today's voice use decodes")
-    // Refused voice comes back at the next 00:00 UTC, in the computer's own time.
-    let afternoon = ISO8601DateFormatter().date(from: "2026-10-27T15:59:00Z")!
-    check(AccountStatus.voiceComesBack(after: afternoon, in: TimeZone(secondsFromGMT: 8 * 3600)!) == "08:00", "voice comes back at 08:00 in UTC+8")
-    check(AccountStatus.voiceComesBack(after: afternoon, in: TimeZone(secondsFromGMT: -5 * 3600)!) == "19:00", "voice comes back at 19:00 in UTC-5")
-    check(AccountStatus.voiceComesBack(after: ISO8601DateFormatter().date(from: "2026-12-31T23:59:59Z")!, in: TimeZone(identifier: "UTC")!) == "00:00", "and at 00:00 in UTC")
+    check(credited.voiceCreditMicroUSD == 933_100 && credited.voiceCredit == "$0.93", "the voice credit decodes and shows in dollars")
+    let unused = try StatusCoding.decoder().decode(AccountStatus.self, from: Data("""
+    {"available":true,"signed_in":true,"github_id":1,"plan":{"name":"free"}}
+    """.utf8))
+    check(unused.voiceCreditMicroUSD == nil && unused.voiceCredit == nil, "no voice credit before the first use: nothing to show")
+    // Cut down to the cent: a credit just under a dollar never shows as a whole one.
+    check(AccountStatus(available: true, signedIn: true, voiceCreditMicroUSD: 999_933).voiceCredit == "$0.99", "$0.99, not $1.00")
+    check(AccountStatus(available: true, signedIn: true, voiceCreditMicroUSD: 1_000_000).voiceCredit == "$1.00", "the gift is $1.00")
+    check(AccountStatus(available: true, signedIn: true, voiceCreditMicroUSD: 12_345_678).voiceCredit == "$12.34", "and more than ten dollars")
+    check(AccountStatus(available: true, signedIn: true, voiceCreditMicroUSD: 0).voiceCredit == "$0.00", "used up")
     let free = try StatusCoding.decoder().decode(AccountStatus.self, from: Data("""
     {"available":true,"signed_in":true,"plan":{"name":"free"}}
     """.utf8))
     check(free.plan == AccountPlan(name: "free") && free.plan?.paid == false, "the Free plan decodes")
     let paid = try StatusCoding.decoder().decode(AccountPlan.self, from: Data("""
-    {"name":"paid","period_end":"2026-11-24T00:00:00.000Z","characters":12300,"characters_limit":100000}
+    {"name":"paid","period_end":"2026-11-24T00:00:00.000Z"}
     """.utf8))
-    check(paid.paid && paid.periodEnd == Date(timeIntervalSince1970: 1_795_478_400) && paid.characters == 12300 && paid.charactersLimit == 100_000, "the Paid plan decodes")
+    check(paid.paid && paid.periodEnd == Date(timeIntervalSince1970: 1_795_478_400), "the Paid plan decodes")
 } catch {
     check(false, "status decoding threw: \(error)")
 }
