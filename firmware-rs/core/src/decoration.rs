@@ -1,15 +1,16 @@
 //! Decorations (ADR-0022): a seasonal layer drawn over whichever box screens the box uses, after the screen and
 //! before the dimming, the menu and the tap outline. Only things that don't depend on the layout, so one drawing
-//! works on every set of screens. Each one is named for its holiday: Thanksgiving is falling leaves with an acorn
-//! here and there, and Christmas is strings of lights hanging in swags across the top, pine boughs with baubles in
-//! the bottom left corner, a small tree in the bottom right, and snow falling.
+//! works on every set of screens. Each one is named for its holiday: Thanksgiving is bunting across the top, a pile
+//! of leaves in the bottom left corner, a sheaf of wheat in the bottom right, and falling leaves and acorns.
+//! Christmas is strings of lights hanging in swags across the top, pine boughs with baubles in the bottom left
+//! corner, a small tree in the bottom right, and snow falling.
 //!
 //! Every flake, leaf and bulb is a function of time alone, so a frame drawn at any moment is right and the
 //! screens' own animation pace doesn't matter. Nothing is drawn in the top rows, where both sets show the state
 //! colour, and nothing uses a state colour. A flake, leaf, acorn or bulb that would touch text, an edge or an icon
-//! isn't drawn in that frame, so it seems to pass behind it and the text stays whole, on any layout. The pine is
-//! drawn a pixel at a time on its corner's ground only, so text and cards sit on top of it with a pixel of ground
-//! around them.
+//! isn't drawn in that frame, so it seems to pass behind it and the text stays whole, on any layout. The parts in
+//! the corners are drawn a pixel at a time on their corner's ground only, so text and cards sit on top of them with
+//! a pixel of ground around them.
 
 use crate::canvas::{Canvas, HEIGHT, WIDTH, half_bright};
 
@@ -87,6 +88,28 @@ const ACORN_CAP: [u8; 3] = [0b00100, 0b01110, 0b11111];
 const ACORN_NUT: [u8; 3] = [0b01110, 0b01110, 0b00100];
 const ACORN_CAP_COLOR: u16 = 0x59e3;
 const ACORN_NUT_COLOR: u16 = 0xd54d;
+/// Thanksgiving's parts that stay put. Bunting hangs in swags across the top like the Christmas lights: a pennant
+/// every `PENNANT_SPACING` pixels on a twine, `PENNANT_WIDTH` wide and `PENNANT_HEIGHT` long, in the leaves' colours.
+const TWINE: u16 = 0x8b68;
+const PENNANT_SPACING: i32 = 20;
+const PENNANT_WIDTH: i32 = 11;
+const PENNANT_HEIGHT: i32 = 10;
+const MAX_PENNANTS: usize = 16;
+/// A pile of fallen leaves in the bottom left corner, `PILE_WIDTH` wide and up to `PILE_HEIGHT` high, with a few
+/// whole leaves on it and two acorns at its foot.
+const PILE_WIDTH: i32 = 84;
+const PILE_HEIGHT: i32 = 26;
+const PILE_LEAVES: [(i32, i32); 6] = [(6, 20), (22, 22), (40, 18), (56, 12), (14, 10), (34, 8)];
+const PILE_ACORNS: [i32; 2] = [64, 76];
+/// A sheaf of wheat in the bottom right corner: `STALKS` stalks tied together, fanning out above the band into ears
+/// of grain and splaying a little below it. Golden browns and ochre, dark enough to show on the needs input yellow.
+const STALKS: i32 = 9;
+const SHEAF_INSET: i32 = 30;
+const SHEAF_HEIGHT: i32 = 56;
+const SHEAF_BAND: i32 = 16;
+const EAR: i32 = 12;
+const STALK: u16 = 0x9386;
+const GRAIN: u16 = 0xab45;
 
 /// Bulbs: mostly warm white and gold, every fourth pink or violet. No red, green, yellow, orange or blue, which
 /// the screens use for state.
@@ -191,23 +214,30 @@ fn bulbs() -> impl Iterator<Item = (i32, i32)> {
 }
 
 /// The light string's wire, a pixel wide, left out where it would touch anything but plain ground.
-fn wire(canvas: &mut Canvas) {
+fn wire(canvas: &mut Canvas, color: u16) {
     for x in 0..WIDTH {
         let y = swag_y(x);
         if plain(canvas, x, y, 1, 1) {
-            dot(canvas, x, y, 1, 1, NEEDLES[2]);
+            dot(canvas, x, y, 1, 1, color);
         }
     }
 }
 
-fn pine(color: u16) -> bool {
-    color == TWIG || color == TRUNK || NEEDLES.contains(&color)
+/// The colours of the parts that stay put in the corners: the pine and the tree, the leaf pile and the wheat.
+fn ours(color: u16) -> bool {
+    color == TWIG
+        || color == TRUNK
+        || color == STALK
+        || color == GRAIN
+        || color == ACORN_NUT_COLOR
+        || NEEDLES.contains(&color)
+        || LEAF_COLORS.iter().any(|leaf| *leaf == color || half_bright(*leaf) == color)
 }
 
-/// One pixel of pine, drawn only where it and the pixels around it are the corner's `ground` or pine already. So the
-/// pine grows behind text, cards and icons, and keeps a pixel of ground around them: text on the tree stays whole
-/// and readable, and the pine never fills the inside of a card or a key cap.
-fn needle_dot(canvas: &mut Canvas, ground: u16, x: i32, y: i32, color: u16) {
+/// One pixel of a part in a corner, drawn only where it and the pixels around it are the corner's `ground` or such a
+/// part already. So the part grows behind text, cards and icons, and keeps a pixel of ground around them: text on
+/// the tree stays whole and readable, and a part never fills the inside of a card or a key cap.
+fn part_dot(canvas: &mut Canvas, ground: u16, x: i32, y: i32, color: u16) {
     if !(0..WIDTH).contains(&x) || !(TOP..HEIGHT).contains(&y) {
         return;
     }
@@ -216,12 +246,12 @@ fn needle_dot(canvas: &mut Canvas, ground: u16, x: i32, y: i32, color: u16) {
     }
 }
 
-/// Whether the box from (x, y), `width` by `height`, and a pixel around it, is all `ground` or pine.
+/// Whether the box from (x, y), `width` by `height`, and a pixel around it, is all `ground` or a corner's part.
 fn on_ground(canvas: &Canvas, ground: u16, x: i32, y: i32, width: i32, height: i32) -> bool {
     for row in (y - 1).max(TOP)..(y + height + 1).min(HEIGHT) {
         for column in (x - 1).max(0)..(x + width + 1).min(WIDTH) {
             let color = canvas.pixel((row * WIDTH + column) as usize);
-            if color != ground && !pine(color) {
+            if color != ground && !ours(color) {
                 return false;
             }
         }
@@ -229,11 +259,11 @@ fn on_ground(canvas: &Canvas, ground: u16, x: i32, y: i32, width: i32, height: i
     true
 }
 
-/// A straight line of pine from (x0, y0) to (x1, y1).
-fn needle_line(canvas: &mut Canvas, ground: u16, (x0, y0): (i32, i32), (x1, y1): (i32, i32), color: u16) {
+/// A straight line of a corner's part from (x0, y0) to (x1, y1).
+fn part_line(canvas: &mut Canvas, ground: u16, (x0, y0): (i32, i32), (x1, y1): (i32, i32), color: u16) {
     let steps = (x1 - x0).abs().max((y1 - y0).abs()).max(1);
     for step in 0..=steps {
-        needle_dot(canvas, ground, x0 + (x1 - x0) * step / steps, y0 + (y1 - y0) * step / steps, color);
+        part_dot(canvas, ground, x0 + (x1 - x0) * step / steps, y0 + (y1 - y0) * step / steps, color);
     }
 }
 
@@ -256,7 +286,7 @@ fn corner(canvas: &mut Canvas, ground: u16) {
         let length = root(dx * dx + dy * dy);
         // Along the bough and across it, in 1/256ths of a pixel.
         let (ux, uy) = (dx * 256 / length, dy * 256 / length);
-        needle_line(canvas, ground, place(origin.0, origin.1), place(end_x, end_y), TWIG);
+        part_line(canvas, ground, place(origin.0, origin.1), place(end_x, end_y), TWIG);
         for along in 0..length {
             let (x, y) = (origin.0 + dx * along / length, origin.1 + dy * along / length);
             let reach = 3 + (NEEDLE_LENGTH - 3) * (length - along) / length;
@@ -270,7 +300,7 @@ fn corner(canvas: &mut Canvas, ground: u16) {
                 let tip_y = y + (uy * 6 / 10 + side * ux) * reach / 256;
                 // Lighter on the upper side, where the light falls.
                 let shade = if side * ux > 0 { 2 + (bits >> 3) as usize % 2 } else { (bits >> 3) as usize % 2 };
-                needle_line(canvas, ground, place(x, y), place(tip_x, tip_y), NEEDLES[shade]);
+                part_line(canvas, ground, place(x, y), place(tip_x, tip_y), NEEDLES[shade]);
             }
         }
     }
@@ -324,11 +354,11 @@ fn tree(canvas: &mut Canvas, ground: u16, t_ms: u64) {
                 0
             };
             let shade = (light + (bits >> 3) as usize % 2).min(NEEDLES.len() - 1);
-            needle_dot(canvas, ground, centre + offset, top + row, NEEDLES[shade]);
+            part_dot(canvas, ground, centre + offset, top + row, NEEDLES[shade]);
         }
     }
     for row in 0..TREE_TRUNK {
-        needle_line(canvas, ground, (centre - 2, top + TREE_FOLIAGE + row), (centre + 2, top + TREE_FOLIAGE + row), TRUNK);
+        part_line(canvas, ground, (centre - 2, top + TREE_FOLIAGE + row), (centre + 2, top + TREE_FOLIAGE + row), TRUNK);
     }
     // The star, on the top: a plus with a fuller middle and a gold heart. It and the bulbs are left out where they
     // would touch anything but the ground and the tree.
@@ -349,6 +379,102 @@ fn tree(canvas: &mut Canvas, ground: u16, t_ms: u64) {
     }
 }
 
+/// The pile of leaves in the bottom left corner, on its `ground`: a mound of leaf-sized patches of the leaves'
+/// colours, lighter towards the top, with whole leaves lying on it and acorns at its foot.
+fn pile(canvas: &mut Canvas, ground: u16) {
+    for x in 0..PILE_WIDTH {
+        // A quarter ellipse from the corner, ragged along the top.
+        let across = PILE_WIDTH * PILE_WIDTH - x * x;
+        let height = PILE_HEIGHT * root(across) / PILE_WIDTH - (mix(x as u32, 0x9113) % 3) as i32;
+        for up in 0..height.max(0) {
+            let patch = mix(((x / 4) * 64 + (up + x / 3) / 3) as u32, 0x1eaf);
+            let color = LEAF_COLORS[(patch >> 4) as usize % LEAF_COLORS.len()];
+            // Shade the inside of the pile, so the patches read as leaves on leaves.
+            let color = if up < height - 4 && patch & 3 == 0 { half_bright(color) } else { color };
+            part_dot(canvas, ground, x, HEIGHT - 1 - up, color);
+        }
+    }
+    for (index, (x, y)) in PILE_LEAVES.into_iter().enumerate() {
+        let color = LEAF_COLORS[(index + 1) % LEAF_COLORS.len()];
+        for (row, line) in LEAF_FLAT.iter().enumerate() {
+            for column in 0..LEAF_WIDTH {
+                if line & (1 << (LEAF_WIDTH - 1 - column)) != 0 {
+                    for (dx, dy) in [(0, 0), (1, 0), (0, 1), (1, 1)] {
+                        part_dot(canvas, ground, x + column * 2 + dx, HEIGHT - 1 - y + row as i32 * 2 + dy, color);
+                    }
+                }
+            }
+        }
+    }
+    let acorn_height = (ACORN_CAP.len() + ACORN_NUT.len()) as i32 * LEAF_SCALE;
+    for x in PILE_ACORNS {
+        let top = HEIGHT - 1 - acorn_height;
+        if on_ground(canvas, ground, x, top, ACORN_WIDTH * LEAF_SCALE, acorn_height) {
+            shape(canvas, x, top, ACORN_WIDTH, &ACORN_CAP, ACORN_CAP_COLOR);
+            shape(canvas, x, top + ACORN_CAP.len() as i32 * LEAF_SCALE, ACORN_WIDTH, &ACORN_NUT, ACORN_NUT_COLOR);
+        }
+    }
+}
+
+/// The sheaf of wheat in the bottom right corner, on its `ground`.
+fn sheaf(canvas: &mut Canvas, ground: u16) {
+    let centre = WIDTH - SHEAF_INSET;
+    let band = HEIGHT - 1 - SHEAF_BAND;
+    let top = HEIGHT - 1 - SHEAF_HEIGHT;
+    for stalk in -(STALKS / 2)..=STALKS / 2 {
+        let foot = (centre + stalk * 3, HEIGHT - 1);
+        let waist = (centre + stalk / 2, band);
+        let head = (centre + stalk * 4, top + stalk.abs() * 3);
+        part_line(canvas, ground, foot, waist, STALK);
+        part_line(canvas, ground, waist, head, STALK);
+        // The ear: grains in pairs either side of the top of the stalk, and a few awns past its tip.
+        let (dx, dy) = (head.0 - waist.0, head.1 - waist.1);
+        let length = root(dx * dx + dy * dy).max(1);
+        for along in (0..EAR).step_by(2) {
+            let (x, y) = (head.0 - dx * along / length, head.1 - dy * along / length);
+            let color = if along % 4 == 0 { GRAIN } else { LEAF_COLORS[2] };
+            part_line(canvas, ground, (x - 1, y + 1), (x + 1, y + 1), color);
+            part_dot(canvas, ground, x, y, color);
+        }
+        part_line(canvas, ground, head, (head.0 + dx * 4 / length, head.1 + dy * 4 / length), STALK);
+    }
+    // The band that ties them.
+    part_line(canvas, ground, (centre - 4, band), (centre + 4, band), TWIG);
+    part_line(canvas, ground, (centre - 4, band + 1), (centre + 4, band + 1), TWIG);
+}
+
+/// The middles of the pennants along the twine.
+fn pennants() -> impl Iterator<Item = (i32, i32)> {
+    (0..)
+        .map(|step| PENNANT_SPACING / 2 + step * PENNANT_SPACING)
+        .take_while(|x| *x < WIDTH - PENNANT_WIDTH / 2)
+        .map(|x| (x, swag_y(x) + 1))
+}
+
+/// Thanksgiving's parts that stay put: the bunting across the top, the leaf pile and the sheaf of wheat.
+fn harvest(canvas: &mut Canvas) {
+    let mut room = [false; MAX_PENNANTS];
+    for (index, (x, y)) in pennants().enumerate().take(MAX_PENNANTS) {
+        room[index] = plain(canvas, x - PENNANT_WIDTH / 2, y, PENNANT_WIDTH, PENNANT_HEIGHT);
+    }
+    let left_ground = canvas.pixel(((HEIGHT - 2) * WIDTH + 1) as usize);
+    let right_ground = canvas.pixel(((HEIGHT - 2) * WIDTH + WIDTH - 2) as usize);
+    pile(canvas, left_ground);
+    sheaf(canvas, right_ground);
+    wire(canvas, TWINE);
+    for (index, (x, y)) in pennants().enumerate().take(MAX_PENNANTS) {
+        if !room[index] {
+            continue;
+        }
+        let color = LEAF_COLORS[index % LEAF_COLORS.len()];
+        // A triangle pointing down, with its top row a shade darker where it folds over the twine.
+        for row in 0..PENNANT_HEIGHT {
+            let half = (PENNANT_WIDTH / 2) * (PENNANT_HEIGHT - row) / PENNANT_HEIGHT;
+            dot(canvas, x - half, y + row, 2 * half + 1, 1, if row == 0 { half_bright(color) } else { color });
+        }
+    }
+}
+
 fn lights(canvas: &mut Canvas, t_ms: u64) {
     // Which bulbs have room, judged on the screen before anything goes on.
     let mut room = [false; MAX_BULBS];
@@ -360,7 +486,7 @@ fn lights(canvas: &mut Canvas, t_ms: u64) {
     let right_ground = canvas.pixel(((HEIGHT - 2) * WIDTH + WIDTH - 2) as usize);
     corner(canvas, left_ground);
     tree(canvas, right_ground, t_ms);
-    wire(canvas);
+    wire(canvas, NEEDLES[2]);
     for (index, (x, y)) in bulbs().enumerate().take(MAX_BULBS) {
         if !room[index] {
             continue;
@@ -449,7 +575,11 @@ pub fn draw(canvas: &mut Canvas, decoration: Decoration, t_ms: u32) {
     let t_ms = t_ms as u64;
     match decoration {
         Decoration::Off => {}
-        Decoration::Thanksgiving => leaves(canvas, t_ms),
+        // The parts that stay put first, so the leaves fall behind them.
+        Decoration::Thanksgiving => {
+            harvest(canvas);
+            leaves(canvas, t_ms);
+        }
         // The lights and boughs first, so the snow falls behind them: a flake only lands on plain ground.
         Decoration::Christmas => {
             lights(canvas, t_ms);
@@ -504,7 +634,7 @@ mod tests {
     }
 
     #[test]
-    fn christmas_has_lights_boughs_and_snow_and_thanksgiving_has_acorns_among_the_leaves() {
+    fn christmas_has_lights_boughs_and_snow_and_thanksgiving_has_bunting_wheat_and_acorns() {
         // Whether `color` is anywhere at least `inside` pixels in from the edges, under the state colour's rows.
         let has = |frame: &[u8], color: u16, inside: i32| {
             (TOP + inside..HEIGHT - inside).any(|y| {
@@ -519,7 +649,9 @@ mod tests {
         assert!(has(&christmas, BULB_COLORS[0], 0) || has(&christmas, BULB_COLORS[1], 0), "and the lights");
         assert!(has(&christmas, SNOW, 0) || has(&christmas, SNOW_SHADE, 0), "and the snow");
         let thanksgiving = drawn(Decoration::Thanksgiving, 61_000);
-        assert!(has(&thanksgiving, ACORN_CAP_COLOR, 0), "an acorn falls among the leaves");
+        assert!(has(&thanksgiving, ACORN_CAP_COLOR, 0), "there are acorns");
+        assert!(has(&thanksgiving, TWINE, 0), "and the bunting's twine");
+        assert!(has(&thanksgiving, STALK, 0), "and the wheat");
     }
 
     #[test]
