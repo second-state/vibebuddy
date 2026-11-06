@@ -1139,9 +1139,9 @@ pub mod tests {
 
     #[tokio::test]
     async fn a_failed_recognizer_or_session_is_unavailable() {
-        let rig = Rig::new("stt-down", Err("Workers AI answered 401: Authentication error"), logged_in());
+        let rig = Rig::new("stt-down", Err("the voice service answered 502: recognition failed"), logged_in());
         rig.feed(&voice_lines(1, &sine(12_000))).unwrap().await.unwrap();
-        assert_eq!(rig.error(), ("unavailable".to_owned(), "Workers AI answered 401: Authentication error".to_owned()));
+        assert_eq!(rig.error(), ("unavailable".to_owned(), "the voice service answered 502: recognition failed".to_owned()));
 
         // Codex isn't logged in: what was heard is still shown, then the error.
         let rig = Rig::new("no-login", Ok("hi"), Arc::new(std::sync::Mutex::new(Default::default())));
