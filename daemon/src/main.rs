@@ -33,6 +33,7 @@ mod voice_writer;
 
 use std::convert::Infallible;
 use std::env;
+use std::io::IsTerminal;
 use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -234,7 +235,8 @@ async fn main() {
         .filter(|value| !value.trim().is_empty())
         .and_then(|value| EnvFilter::try_new(value).ok())
         .unwrap_or_else(|| EnvFilter::new("vibebuddyd=info"));
-    tracing_subscriber::fmt().with_env_filter(log_filter).init();
+    // Colours only for a terminal: the apps send the log to a file or the journal, where they show as escape codes.
+    tracing_subscriber::fmt().with_env_filter(log_filter).with_ansi(std::io::stdout().is_terminal()).init();
 
     let bind_address = env::var("VIBEBUDDY_BIND")
         .unwrap_or_else(|_| "127.0.0.1:7331".to_owned())

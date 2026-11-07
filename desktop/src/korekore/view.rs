@@ -95,7 +95,7 @@ pub fn screen<'a, M: 'a>(picture: &BoxPicture, scale: f32) -> Element<'a, M> {
                 text("Z z").font(pixel(14.0 * S).0).size(pixel(14.0 * S).1).color(theme::MIST),
                 sized(&sprites::KORE_SLEEP, 6, true, 6.0 * S),
                 text("NO LINK").font(pixel(typography::BOX_STATE.size * S).0).size(pixel(typography::BOX_STATE.size * S).1).color(theme::MIST),
-                text("waiting for the Mac").font(pixel(11.0 * S).0).size(pixel(11.0 * S).1).color(theme::MIST_TEXT),
+                text("waiting for the computer").font(pixel(11.0 * S).0).size(pixel(11.0 * S).1).color(theme::MIST_TEXT),
             ]
             .spacing(6.0 * S)
             .align_x(Alignment::Center),
@@ -285,6 +285,15 @@ pub fn settings<'a, M: Clone + 'a>(
         .height(Length::Fill)
         .style(|_| container::Style { background: Some(theme::CREAM.into()), ..container::Style::default() })
         .into()
+}
+
+/// What the last action said, above the page: green when it worked, pink when it failed.
+pub fn notice<'a, M: 'a>(notice: &Result<String, String>) -> Element<'a, M> {
+    let (message, color) = match notice {
+        Ok(message) => (message, theme::DONE_TEXT),
+        Err(error) => (error, theme::KORE_PINK_TEXT),
+    };
+    text(message.clone()).font(rounded(iced::font::Weight::Bold)).size(13).color(color).into()
 }
 
 /// Stands in for a page that comes with a later step of the korekore UI.

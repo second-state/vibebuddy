@@ -130,12 +130,12 @@ impl Making {
             return None;
         }
         Some(match self.reason.as_deref() {
-            Some("plan") if !Plan::SHOWN => tr("Set your own key for %@ on the Account tab first.", &[&provider]),
+            Some("plan") if !Plan::SHOWN => tr("Set your own key for %@ on the General tab first.", &[&provider]),
             Some("plan") => tr("Making a Character with VibeBuddy's voices needs the Paid plan, or your own key for %@.", &[&provider]),
             Some("monthly") => tr("This month's Characters on the Paid plan are used up. The lines made so far are kept: resume next month, or with your own key for %@.", &[&provider]),
             Some("global_cap") => tr("VibeBuddy's voices are paused for today. The lines made so far are kept: resume tomorrow.", &[]),
-            Some("signed_out") => tr("Sign in on the Account tab, or set your own key for %@ there, then resume.", &[&provider]),
-            Some("own_key") => tr("%@ refused your own key. Set another one on the Account tab, then resume.", &[&provider]),
+            Some("signed_out") => tr("Sign in on the General tab, or set your own key for %@ there, then resume.", &[&provider]),
+            Some("own_key") => tr("%@ refused your own key. Set another one on the General tab, then resume.", &[&provider]),
             Some("internal") => tr("Making the Character stopped unexpectedly. Resume to try again.", &[]),
             _ => tr("Making the Character failed: %@", &[&self.error.as_deref().unwrap_or_default()]),
         })
@@ -154,6 +154,8 @@ pub enum Readiness {
     SignIn,
     /// No service to sign in to in this build, and no own key.
     OwnKeyOnly,
+    /// One of Volcano Engine's voices, which are no longer offered, without a key for it: there is no row to set one.
+    Retired,
 }
 
 impl Readiness {
@@ -161,6 +163,8 @@ impl Readiness {
         let key = keys.map(|keys| if voice.provider == "volc" { &keys.volc } else { &keys.elevenlabs });
         if key.is_some_and(|key| key.set && !key.refused) {
             Readiness::OwnKey
+        } else if voice.provider == "volc" && !voice.own && !keys.is_some_and(VoiceKeys::shows_volc) {
+            Readiness::Retired
         } else if voice.own || !Plan::SHOWN {
             // A voice in the user's own account: VibeBuddy's voice service can't speak it. Nor, while the Paid plan
             // is hidden, any voice.
@@ -182,8 +186,9 @@ impl Readiness {
         match self {
             Readiness::OwnKey => tr("Made with your own key for %@, billed to your account there.", &[&provider]),
             Readiness::PaidPlan => tr("Without your own key for %@, making a Character with VibeBuddy's voices needs the Paid plan.", &[&provider]),
-            Readiness::SignIn => tr("Sign in on the Account tab for the Paid plan, or set your own key for %@ there.", &[&provider]),
-            Readiness::OwnKeyOnly => tr("Set your own key for %@ on the Account tab first.", &[&provider]),
+            Readiness::SignIn => tr("Sign in on the General tab for the Paid plan, or set your own key for %@ there.", &[&provider]),
+            Readiness::OwnKeyOnly => tr("Set your own key for %@ on the General tab first.", &[&provider]),
+            Readiness::Retired => tr("%@ voices are no longer offered. Pick another voice.", &[&provider]),
         }
     }
 }
@@ -322,8 +327,11 @@ mod tests {
         assert_eq!(Readiness::of(&voice("elevenlabs"), Some(&keys), &Account::default()), Readiness::OwnKey);
         let (paid_plan, sign_in) = if Plan::SHOWN { (Readiness::PaidPlan, Readiness::SignIn) } else { (Readiness::OwnKeyOnly, Readiness::OwnKeyOnly) };
         assert_eq!(Readiness::of(&voice("volc"), Some(&keys), &signed_in), paid_plan, "a refused key doesn't count");
-        assert_eq!(Readiness::of(&voice("volc"), None, &signed_out), sign_in);
-        assert_eq!(Readiness::of(&voice("volc"), None, &Account::default()), Readiness::OwnKeyOnly);
+        assert_eq!(Readiness::of(&voice("elevenlabs"), None, &signed_out), sign_in);
+        assert_eq!(Readiness::of(&voice("elevenlabs"), None, &Account::default()), Readiness::OwnKeyOnly);
+        // Volcano Engine's voices without a key for it: no row to set one, so pick another voice.
+        assert_eq!(Readiness::of(&voice("volc"), None, &signed_in), Readiness::Retired);
+        assert!(!Readiness::Retired.can_start());
         assert!(!Readiness::SignIn.can_start() && Readiness::PaidPlan.can_start());
         // A voice of the user's own: only their own key speaks it, whatever the plan.
         let own = Voice { own: true, ..voice("volc") };
