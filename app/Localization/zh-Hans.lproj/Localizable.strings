@@ -152,10 +152,9 @@
 "The box isn't connected, so its character stays as it is. You can change it later on the Character tab." = "盒子没连上，这次角色不变，之后可以在「角色」页更换。";
 
 /* Your own character */
-"Your own character" = "你自己的角色";
+"My character" = "我的角色";
 "Choose images…" = "选择图片…";
 "Copy a prompt" = "复制提示词";
-"Voice and lines from" = "声音和台词来自";
 "Pick one to four PNG or JPEG images." = "请选一到四张 PNG 或 JPEG 图片。";
 "No figure found: use a plain white or transparent background." = "没找到人物：请用纯白或透明背景。";
 "That character can't lend its voice; pick another." = "这个角色没法借出声音，换一个吧。";
@@ -520,7 +519,6 @@
 "Delete" = "删除";
 "Delete “%@”? This can't be undone." = "删除「%@」？删除后无法恢复。";
 "Its lines made in its voice go with it; making it again would make them again." = "用它的声音做好的台词会一起删掉；再创建一次就得重新做。";
-"It's on the box: put another character on the box to delete this one." = "它正在盒子上：先给盒子换个角色，才能删除它。";
 "Couldn't delete “%@”: %@" = "删除「%@」失败：%@";
 "Making “%@”…" = "正在创建「%@」…";
 "Box screens" = "盒子界面";
@@ -569,3 +567,4 @@
 "Beta" = "体验版";
 "On while the daemon runs with VIBEBUDDY_RESIDENT_SESSION=1." = "daemon 带着 VIBEBUDDY_RESIDENT_SESSION=1 运行时一直开启。";
 "Hold K0 on the box and ask. Codex or Claude Code on this computer answers, with your own account or key, and the buddy speaks the reply. Your voice goes to VibeBuddy's speech service." = "按住盒子上的 K0 提问。由这台电脑上的 Codex 或 Claude Code 用你自己的账号或密钥回答，再由伙伴念出来。你的语音会发到 VibeBuddy 的语音识别服务。";
+"Your drawings · voice: %@" = "你的画 · 声音：%@";

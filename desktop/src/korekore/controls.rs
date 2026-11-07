@@ -230,6 +230,47 @@ pub fn badge<'a, M: 'a>(sprite: &super::Sprite, gray: bool, fill: Color) -> Elem
         .into()
 }
 
+/// A trash can, 10 × 10, for the delete button on a card (the Mac draws SF Symbols' `trash`).
+static TRASH: super::Sprite = super::Sprite {
+    width: 10,
+    height: 10,
+    palette: &[0x1C1730],
+    pixels: &[
+        0, 0, 0, 1, 1, 1, 1, 0, 0, 0,
+        1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+        0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+        0, 1, 1, 1, 1, 1, 1, 1, 1, 0,
+        0, 1, 0, 1, 0, 0, 1, 0, 1, 0,
+        0, 1, 0, 1, 0, 0, 1, 0, 1, 0,
+        0, 1, 0, 1, 0, 0, 1, 0, 1, 0,
+        0, 1, 0, 1, 0, 0, 1, 0, 1, 0,
+        0, 1, 0, 0, 0, 0, 0, 0, 1, 0,
+        0, 1, 1, 1, 1, 1, 1, 1, 1, 0,
+    ],
+};
+
+/// The delete button on a card: a paper pill with a trash can, the size of the ▶ beside Use on a preset's card.
+pub fn trash_pill<'a, M: Clone + 'a>(on_press: Option<M>) -> button::Button<'a, M> {
+    let disabled = on_press.is_none();
+    let icon = iced::widget::image(TRASH.handle(1, None))
+        .width(10)
+        .height(10)
+        .opacity(if disabled { 0.45_f32 } else { 1.0 })
+        .filter_method(iced::widget::image::FilterMethod::Nearest);
+    // As tall as a 12 pt pill's line of text, so it lines up with Use.
+    button(container(icon).height(16).align_y(Alignment::Center))
+        .padding(Padding::from([4, 10]))
+        .on_press_maybe(on_press)
+        .style(move |_, status| {
+            let fade = |color: Color| if matches!(status, button::Status::Disabled) { Color { a: 0.45, ..color } } else { color };
+            button::Style {
+                background: Some(Background::Color(fade(theme::PAPER))),
+                border: Border { color: fade(theme::INK), width: theme::STROKE_BASE, radius: theme::RADIUS_PILL.into() },
+                ..button::Style::default()
+            }
+        })
+}
+
 /// A sprite at a whole-number scale.
 pub fn sprite<'a, M: 'a>(sprite: &super::Sprite, scale: u32) -> Element<'a, M> {
     iced::widget::image(sprite.handle(scale, None))

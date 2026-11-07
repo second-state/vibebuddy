@@ -186,7 +186,7 @@ pub fn voice_name(id: &str) -> String {
         return tr("Built-in voice (Jessica)", &[]);
     }
     if id == "custom" {
-        return tr("Your own character", &[]);
+        return tr("My character", &[]);
     }
     if id == "robot" {
         return "VibeBuddy".to_owned();
