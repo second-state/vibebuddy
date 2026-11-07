@@ -78,7 +78,7 @@ fn main() {
     let states: [(&str, State, &[TaskInput]); 4] =
         [("ready", State::Idle, &[]), ("working", State::Working, &working), ("needs-input", State::InputRequired, &asking), ("done", State::Done, &done)];
     for screens in [Screens::Robot, Screens::Korekore] {
-        for decoration in [Decoration::Off, Decoration::Leaves, Decoration::Snow, Decoration::Lights] {
+        for decoration in [Decoration::Off, Decoration::Thanksgiving, Decoration::Christmas] {
             let frames = if decoration == Decoration::Off { 1 } else { PREVIEW_FRAMES };
             for frame in 0..frames {
                 let screens_name = String::from_utf8_lossy(screens.name()).to_lowercase();
@@ -87,7 +87,7 @@ fn main() {
                 write_ppm(&directory.join(format!("frame-{screens_name}-{decoration_name}-{frame:02}.ppm")), &bytes);
             }
         }
-        for decoration in [Decoration::Leaves, Decoration::Snow, Decoration::Lights] {
+        for decoration in [Decoration::Thanksgiving, Decoration::Christmas] {
             for (name, state, tasks) in states {
                 let mut screen = Frame { bytes: vec![0; FRAME_BYTES] };
                 let mut display = Display::new();

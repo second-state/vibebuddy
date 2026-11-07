@@ -1070,7 +1070,7 @@ async fn post_screens(
 }
 
 /// The decorations the box can draw over its screens (ADR-0022).
-const DECORATIONS: [&str; 4] = ["off", "leaves", "snow", "lights"];
+const DECORATIONS: [&str; 3] = ["off", "thanksgiving", "christmas"];
 
 #[derive(serde::Deserialize)]
 struct DecorationRequest {
@@ -2977,13 +2977,13 @@ mod tests {
     #[tokio::test]
     async fn choosing_a_decoration_sends_it_to_the_device_and_an_unknown_one_is_refused() {
         let transport = Arc::new(RecordingTransport::default());
-        let request = DecorationRequest { name: "snow".to_owned() };
+        let request = DecorationRequest { name: "christmas".to_owned() };
         let (status, _) = post_decoration(State(test_state(transport.clone())), Json(request)).await;
         assert_eq!(status, StatusCode::ACCEPTED);
         let event = &transport.events()[0];
         assert_eq!(event.event, "device.decoration");
-        assert_eq!(event.extra["name"], "snow");
-        let request = DecorationRequest { name: "Snow".to_owned() };
+        assert_eq!(event.extra["name"], "christmas");
+        let request = DecorationRequest { name: "Christmas".to_owned() };
         let (status, Json(response)) = post_decoration(State(test_state(transport.clone())), Json(request)).await;
         assert_eq!(status, StatusCode::BAD_REQUEST);
         assert!(!response.accepted);

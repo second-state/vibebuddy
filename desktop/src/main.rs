@@ -1641,13 +1641,11 @@ fn decoration_frames() -> Vec<(&'static str, Vec<image::Handle>)> {
     }
     let strips = [
         strip!("robot-off"),
-        strip!("robot-leaves"),
-        strip!("robot-snow"),
-        strip!("robot-lights"),
+        strip!("robot-thanksgiving"),
+        strip!("robot-christmas"),
         strip!("korekore-off"),
-        strip!("korekore-leaves"),
-        strip!("korekore-snow"),
-        strip!("korekore-lights"),
+        strip!("korekore-thanksgiving"),
+        strip!("korekore-christmas"),
     ];
     strips
         .into_iter()
@@ -1664,12 +1662,12 @@ fn decoration_frames() -> Vec<(&'static str, Vec<image::Handle>)> {
         .collect()
 }
 
-/// One entry of the decoration picker: `off`, `leaves`, `snow` or `lights` (ADR-0022).
+/// One entry of the decoration picker: `off`, `thanksgiving` or `christmas` (ADR-0022).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 struct BoxDecoration(&'static str);
 
 impl BoxDecoration {
-    const ALL: [BoxDecoration; 4] = [BoxDecoration("off"), BoxDecoration("leaves"), BoxDecoration("snow"), BoxDecoration("lights")];
+    const ALL: [BoxDecoration; 3] = [BoxDecoration("off"), BoxDecoration("thanksgiving"), BoxDecoration("christmas")];
 
     fn of(name: &str) -> Option<BoxDecoration> {
         Self::ALL.into_iter().find(|decoration| decoration.0 == name)
@@ -1679,9 +1677,8 @@ impl BoxDecoration {
 impl std::fmt::Display for BoxDecoration {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str(&match self.0 {
-            "leaves" => tr("Falling leaves", &[]),
-            "snow" => tr("Snow", &[]),
-            "lights" => tr("Lights", &[]),
+            "thanksgiving" => tr("Thanksgiving", &[]),
+            "christmas" => tr("Christmas", &[]),
             _ => tr("Off", &[]),
         })
     }
