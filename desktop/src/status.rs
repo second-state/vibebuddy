@@ -93,9 +93,9 @@ impl Account {
         }
     }
 
-    /// The account card's plan row shows with its button: a Paid user always sees it and Manage plan.
+    /// True when the plan row has a button: Manage plan on Paid, Upgrade on Free while the Paid plan is offered.
     pub fn shows_plan_row(&self) -> bool {
-        self.plan.is_some() && self.plan_button().is_some()
+        self.plan_button().is_some()
     }
 
     /// The voice credit left in dollars, "$0.93", for the account card; None when the daemon doesn't know it. Cut

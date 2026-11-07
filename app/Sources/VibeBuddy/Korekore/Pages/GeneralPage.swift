@@ -38,7 +38,7 @@ struct KorekoreGeneralPage: View {
                             .disabled(model.status == nil)
                     }
                     // ADR-0012: the Relay carries the box's messages through VibeBuddy's server, so it can be turned off.
-                    if model.status?.account?.upgradeOffered == true {
+                    if model.planOffered {
                         KDivider()
                         KRow(String(localized: "Reach the box through the Relay when it's away from this Mac")) {
                             KToggle(String(localized: "Reach the box through the Relay when it's away from this Mac"),

@@ -253,6 +253,16 @@ async fn main() {
         config::config_dir().as_deref(),
         bind_address.port(),
     ));
+    // Read the plan, and whether the Paid plan is offered, once at start: the Apps then don't wait for the account
+    // card to ask before they show the Relay switch or VibeBuddy's voices.
+    if account.token().is_some() {
+        let account = account.clone();
+        tokio::task::spawn_blocking(move || {
+            if let Err(error) = account.refresh() {
+                warn!(%error, "the account couldn't be read at start");
+            }
+        });
+    }
     let mut serial_config = SerialConfig::from_env(known_box_file());
     let mut relay_config = None;
     // Paired, the box can also be reached over the local network when it isn't on the cable (ADR-0012).

@@ -126,8 +126,8 @@ public struct AccountStatus: Codable, Equatable {
         return upgradeOffered ? .upgrade : nil
     }
 
-    /// The account card's plan row shows with its button: a Paid user always sees it and Manage plan.
-    public var showsPlanRow: Bool { plan != nil && planButton != nil }
+    /// True when the plan row has a button: Manage plan on Paid, Upgrade on Free while the Paid plan is offered.
+    public var showsPlanRow: Bool { planButton != nil }
 
     /// The voice credit left in dollars, "$0.93", for the account card; nil when the daemon doesn't know it. Cut down
     /// to the cent, so it never shows more than is left.

@@ -106,7 +106,7 @@ struct KorekoreMakingRow: View {
                     KBar(making.progress, fill: Theme.Colors.sun)
                 }
             }
-        } else if let why = making.explanation(provider: provider, planOffered: model.status?.account?.upgradeOffered == true) {
+        } else if let why = making.explanation(provider: provider, planOffered: model.planOffered) {
             KCard(fill: Theme.Colors.cream, outline: Theme.Colors.korePinkText) {
                 HStack(alignment: .top, spacing: 12) {
                     KNote(why, color: Theme.Colors.ink).frame(maxWidth: .infinity, alignment: .leading)
