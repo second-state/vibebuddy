@@ -221,14 +221,19 @@ impl Account {
     pub fn plan_page(&self, page: PlanPage) -> Result<String, AccountError> {
         let token = self.token().ok_or(AccountError::NotSignedIn)?;
         let base = self.base.clone().ok_or(AccountError::Unavailable)?;
-        let path = match page {
-            PlanPage::Checkout => "checkout",
-            PlanPage::Portal => "portal",
+        // The App opens the URL in the browser, so only Stripe's own page for what was asked goes through.
+        let (path, host) = match page {
+            PlanPage::Checkout => ("checkout", "checkout.stripe.com"),
+            PlanPage::Portal => ("portal", "billing.stripe.com"),
         };
         let (status, text) = read(crate::speech::agent(TIMEOUT).post(&format!("{base}/v1/plan/{path}")).header("Authorization", &format!("Bearer {token}")).send_empty())?;
         let body = serde_json::from_str::<serde_json::Value>(&text).unwrap_or_default();
         match status {
-            200 => body["url"].as_str().map(str::to_owned).ok_or_else(|| AccountError::Service("the service sent no URL".to_owned())),
+            200 => body["url"]
+                .as_str()
+                .filter(|url| url.starts_with(&format!("https://{host}/")))
+                .map(str::to_owned)
+                .ok_or_else(|| AccountError::Service(format!("the service sent no {host} URL"))),
             401 => {
                 self.forget();
                 Err(AccountError::NotSignedIn)
@@ -627,16 +632,37 @@ pub(crate) mod tests {
     fn passes_the_plan_pages_through_with_the_session() {
         let dir = scratch();
         let (service, seen) = serve(vec![
-            (200, r#"{"url":"https://checkout.stripe.test/c/1"}"#),
-            (200, r#"{"url":"https://billing.stripe.test/p/1"}"#),
+            (200, r#"{"url":"https://checkout.stripe.com/c/pay/cs_test_1"}"#),
+            (200, r#"{"url":"https://billing.stripe.com/p/session/test_1"}"#),
         ]);
         let account = signed_in(&service, dir.as_path());
-        assert_eq!(account.plan_page(PlanPage::Checkout).as_deref(), Ok("https://checkout.stripe.test/c/1"));
-        assert_eq!(account.plan_page(PlanPage::Portal).as_deref(), Ok("https://billing.stripe.test/p/1"));
+        assert_eq!(account.plan_page(PlanPage::Checkout).as_deref(), Ok("https://checkout.stripe.com/c/pay/cs_test_1"));
+        assert_eq!(account.plan_page(PlanPage::Portal).as_deref(), Ok("https://billing.stripe.com/p/session/test_1"));
         let seen = seen.lock().unwrap();
         assert!(seen[0].starts_with("POST /v1/plan/checkout"));
         assert!(seen[1].starts_with("POST /v1/plan/portal"));
         assert!(seen.iter().all(|request| request.to_ascii_lowercase().contains("authorization: bearer tok")));
+    }
+
+    #[test]
+    fn passes_only_a_stripe_page_for_the_page_asked_for() {
+        let dir = scratch();
+        let (service, _) = serve(vec![
+            (200, r#"{"url":"https://evil.example/c/1"}"#),
+            (200, r#"{"url":"http://checkout.stripe.com/c/1"}"#),
+            (200, r#"{"url":"https://checkout.stripe.com.evil.example/c/1"}"#),
+            (200, r#"{"url":"https://checkout.stripe.com@evil.example/c/1"}"#),
+            (200, r#"{"url":"https://billing.stripe.com/p/session/1"}"#),
+            (200, r#"{"url":"file:///etc/passwd"}"#),
+        ]);
+        let account = signed_in(&service, dir.as_path());
+        for _ in 0..4 {
+            assert!(matches!(account.plan_page(PlanPage::Checkout), Err(AccountError::Service(_))));
+        }
+        // The portal's host for Checkout is wrong too.
+        assert!(matches!(account.plan_page(PlanPage::Checkout), Err(AccountError::Service(_))));
+        assert!(matches!(account.plan_page(PlanPage::Portal), Err(AccountError::Service(_))));
+        assert!(account.status().signed_in);
     }
 
     #[test]
@@ -662,7 +688,7 @@ pub(crate) mod tests {
     #[test]
     fn a_plan_page_needs_a_session_and_asks_nothing_without_one() {
         let dir = scratch();
-        let (service, seen) = serve(vec![(200, r#"{"url":"https://checkout.stripe.test/c/1"}"#)]);
+        let (service, seen) = serve(vec![(200, r#"{"url":"https://checkout.stripe.com/c/pay/cs_test_1"}"#)]);
         let account = account(&service, dir.as_path());
         assert_eq!(account.plan_page(PlanPage::Checkout), Err(AccountError::NotSignedIn));
         assert_eq!(account.plan_page(PlanPage::Portal), Err(AccountError::NotSignedIn));

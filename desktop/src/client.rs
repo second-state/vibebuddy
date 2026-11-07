@@ -506,7 +506,8 @@ pub async fn plan_page(button: crate::status::PlanButton) -> PlanAnswer {
         crate::status::PlanButton::Upgrade => "upgrade",
         crate::status::PlanButton::ManagePlan => "manage-plan",
     };
-    match reqwest::Client::new().post(format!("{BASE}/v1/account/{path}")).send().await {
+    // After a 409 the daemon also reads the account again, two calls of up to 20 s each.
+    match reqwest::Client::new().post(format!("{BASE}/v1/account/{path}")).timeout(Duration::from_secs(50)).send().await {
         Ok(response) => {
             let status = response.status().as_u16();
             PlanAnswer::new(status, response.json().await.unwrap_or_default())

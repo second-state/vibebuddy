@@ -447,6 +447,8 @@
 "Paid plan" = "付费版";
 "Upgrade" = "升级";
 "Manage plan" = "管理方案";
+"Waiting for the payment…" = "等待付款…";
+"Your payment is being processed." = "付款正在处理中。";
 "This Paid plan can't be managed here." = "这个付费版无法在这里管理。";
 "The Paid plan isn't offered here." = "这里还不提供付费版。";
 "Couldn't open the plan page: %@" = "无法打开方案页面：%@";

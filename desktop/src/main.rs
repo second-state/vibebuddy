@@ -256,7 +256,10 @@ enum Message {
     SignOut,
     /// Upgrade or Manage plan: ask the daemon for the Stripe page, then open it in the browser.
     OpenPlanPage(status::PlanButton),
-    PlanPage(client::PlanAnswer),
+    PlanPage(status::PlanButton, client::PlanAnswer),
+    /// Read the account again while waiting for Stripe to confirm a payment: the watch it belongs to, and how many
+    /// reads are left.
+    WatchPlan(u32, u32),
     /// The settings window came to the front, for instance back from Stripe's pages in the browser.
     WindowFocused,
     AskDeleteAccount(bool),
@@ -362,6 +365,12 @@ struct App {
     signing_in: bool,
     /// Deleting the account waits for a second click, since it can't be undone.
     confirm_delete_account: bool,
+    /// A plan button's request is running: a second click would open a second Checkout.
+    plan_busy: bool,
+    /// What the plan row says while the app waits for Stripe to confirm a payment.
+    paying: Option<String>,
+    /// Bumped by each new watch for the Paid plan, so an older one stops.
+    plan_watch: u32,
     /// The own keys being typed, by provider; cleared once the daemon has one, and never filled from the daemon.
     own_key_drafts: [String; 3],
     /// The outcome of the last action, shown at the bottom of the window.
@@ -498,6 +507,9 @@ impl App {
             resident_setting_error: None,
             signing_in: false,
             confirm_delete_account: false,
+            plan_busy: false,
+            paying: None,
+            plan_watch: 0,
             own_key_drafts: Default::default(),
             notice: None,
             language: UiLanguage::saved(),
@@ -558,6 +570,19 @@ impl App {
     /// snapshots are drawn with.
     fn theme(&self, _window: window::Id) -> Theme {
         Theme::Light
+    }
+
+    fn plan_paid(&self) -> bool {
+        self.status.as_ref().and_then(|status| status.account.plan.as_ref()).is_some_and(status::Plan::paid)
+    }
+
+    /// Reads the account every 3 s for a minute, or until it is on the Paid plan: the plan changes only when Stripe's
+    /// payment reaches the service, which can be after the window comes back.
+    fn watch_for_paid(&mut self, note: String) -> Task<Message> {
+        self.paying = Some(note);
+        self.plan_watch = self.plan_watch.wrapping_add(1);
+        let watch = self.plan_watch;
+        Task::perform(tokio::time::sleep(Duration::from_secs(3)), move |()| Message::WatchPlan(watch, 20))
     }
 
     fn subscription(&self) -> Subscription<Message> {
@@ -1361,23 +1386,47 @@ impl App {
                     Message::AccountDone(result.map_err(|error| tr("Couldn't sign out: %@", &[&error])))
                 });
             }
-            Message::OpenPlanPage(button) => return Task::perform(client::plan_page(button), Message::PlanPage),
-            Message::PlanPage(answer) => match answer {
-                client::PlanAnswer::Open(url) => {
-                    if let Err(error) = open_target(std::ffi::OsStr::new(&url)) {
-                        self.notice = Some(Err(tr("Couldn't open the plan page: %@", &[&error])));
+            Message::OpenPlanPage(button) => {
+                self.plan_busy = true;
+                return Task::perform(client::plan_page(button), move |answer| Message::PlanPage(button, answer));
+            }
+            Message::PlanPage(button, answer) => {
+                self.plan_busy = false;
+                match answer {
+                    client::PlanAnswer::Open(url) => match open_target(std::ffi::OsStr::new(&url)) {
+                        Err(error) => self.notice = Some(Err(tr("Couldn't open the plan page: %@", &[&error]))),
+                        Ok(()) if button == status::PlanButton::Upgrade => return self.watch_for_paid(tr("Waiting for the payment…", &[])),
+                        Ok(()) => {}
+                    },
+                    // The status shows signed out.
+                    client::PlanAnswer::NotSignedIn => {}
+                    // The daemon has read the account again. Still Free: Stripe has the payment, the service not yet.
+                    client::PlanAnswer::Conflict(reason) if reason == "already_paid" => {
+                        if !self.plan_paid() {
+                            return self.watch_for_paid(tr("Your payment is being processed.", &[]));
+                        }
+                    }
+                    client::PlanAnswer::Conflict(_) => self.notice = Some(Err(tr("This Paid plan can't be managed here.", &[]))),
+                    client::PlanAnswer::NotOffered => self.notice = Some(Err(tr("The Paid plan isn't offered here.", &[]))),
+                    client::PlanAnswer::Failed(message) => {
+                        let why = message.unwrap_or_else(|| tr("the daemon didn't say why", &[]));
+                        self.notice = Some(Err(tr("Couldn't open the plan page: %@", &[&why])));
                     }
                 }
-                // The daemon has read the account again, or signed out: the status shows what is true now.
-                client::PlanAnswer::NotSignedIn => {}
-                client::PlanAnswer::Conflict(reason) if reason == "already_paid" => {}
-                client::PlanAnswer::Conflict(_) => self.notice = Some(Err(tr("This Paid plan can't be managed here.", &[]))),
-                client::PlanAnswer::NotOffered => self.notice = Some(Err(tr("The Paid plan isn't offered here.", &[]))),
-                client::PlanAnswer::Failed(message) => {
-                    let why = message.unwrap_or_else(|| tr("the daemon didn't say why", &[]));
-                    self.notice = Some(Err(tr("Couldn't open the plan page: %@", &[&why])));
+            }
+            Message::WatchPlan(watch, left) => {
+                if watch != self.plan_watch {
+                    return Task::none();
                 }
-            },
+                if self.plan_paid() || self.settings.is_none() || left == 0 {
+                    self.paying = None;
+                    return Task::none();
+                }
+                return Task::batch([
+                    Task::perform(client::refresh_account(), |_| Message::AccountDone(Ok(()))),
+                    Task::perform(tokio::time::sleep(Duration::from_secs(3)), move |()| Message::WatchPlan(watch, left - 1)),
+                ]);
+            }
             Message::WindowFocused => {
                 if self.status.as_ref().is_some_and(|status| status.account.signed_in) {
                     return Task::perform(client::refresh_account(), |_| Message::AccountDone(Ok(())));

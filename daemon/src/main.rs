@@ -2331,8 +2331,8 @@ mod tests {
     #[tokio::test]
     async fn upgrade_and_manage_plan_pass_the_service_through() {
         let (service, seen) = account::tests::serve(vec![
-            (200, r#"{"url":"https://checkout.stripe.test/c/1"}"#),
-            (200, r#"{"url":"https://billing.stripe.test/p/1"}"#),
+            (200, r#"{"url":"https://checkout.stripe.com/c/pay/cs_test_1"}"#),
+            (200, r#"{"url":"https://billing.stripe.com/p/session/test_1"}"#),
             (409, r#"{"reason":"already_paid"}"#),
             // The daemon reads the account again after `already_paid`, so the status shows the Paid plan.
             (200, r#"{"id":"a","github_id":1,"plan":{"name":"paid","period_end":"2026-12-06T00:00:00.000Z"},"voice_credit_micro_usd":5000000}"#),
@@ -2340,8 +2340,8 @@ mod tests {
             (401, r#"{"error":"unauthorized"}"#),
         ]);
         let state = signed_in_state(&service, "through");
-        assert_eq!(plan_answer(&state, account::PlanPage::Checkout, true).await, (StatusCode::OK, serde_json::json!({"url": "https://checkout.stripe.test/c/1"})));
-        assert_eq!(plan_answer(&state, account::PlanPage::Portal, true).await, (StatusCode::OK, serde_json::json!({"url": "https://billing.stripe.test/p/1"})));
+        assert_eq!(plan_answer(&state, account::PlanPage::Checkout, true).await, (StatusCode::OK, serde_json::json!({"url": "https://checkout.stripe.com/c/pay/cs_test_1"})));
+        assert_eq!(plan_answer(&state, account::PlanPage::Portal, true).await, (StatusCode::OK, serde_json::json!({"url": "https://billing.stripe.com/p/session/test_1"})));
 
         let (status, body) = plan_answer(&state, account::PlanPage::Checkout, true).await;
         assert_eq!((status, body["reason"].as_str()), (StatusCode::CONFLICT, Some("already_paid")));
@@ -2361,7 +2361,7 @@ mod tests {
 
     #[tokio::test]
     async fn the_plan_routes_ask_nothing_when_signed_out_or_while_upgrade_is_off() {
-        let (service, seen) = account::tests::serve(vec![(200, r#"{"url":"https://checkout.stripe.test/c/1"}"#)]);
+        let (service, seen) = account::tests::serve(vec![(200, r#"{"url":"https://checkout.stripe.com/c/pay/cs_test_1"}"#)]);
         let state = signed_in_state(&service, "off");
         let (status, body) = plan_answer(&state, account::PlanPage::Checkout, false).await;
         assert_eq!((status, body["accepted"].as_bool()), (StatusCode::NOT_FOUND, Some(false)));
