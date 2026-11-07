@@ -19,7 +19,7 @@ pub const ACCOUNT_FILE: &str = "account";
 const PENDING_FOR: Duration = Duration::from_secs(15 * 60);
 const TIMEOUT: Duration = Duration::from_secs(20);
 
-/// The one switch for Upgrade (ADR-0024): off until sales open, which is when Token Station synthesis works. While it
+/// The one switch for Upgrade (ADR-0024): off until sales open, which is when Token Station offers synthesis. While it
 /// is off, `POST /v1/account/upgrade` doesn't ask the service, and the status tells the Apps not to show Upgrade.
 /// Manage plan doesn't depend on it.
 pub const UPGRADE_OFFERED: bool = false;

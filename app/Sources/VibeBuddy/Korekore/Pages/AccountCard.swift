@@ -147,7 +147,7 @@ struct KorekoreAccountCard: View {
             case .open(let url): NSWorkspace.shared.open(url)
             // The daemon has read the account again, or signed out: the status shows what is true now.
             case .conflict("already_paid"), .notSignedIn: break
-            case .conflict: model.lastError = String(localized: "Your plan has no subscription to manage.")
+            case .conflict: model.lastError = String(localized: "This Paid plan can't be managed here.")
             case .notOffered: model.lastError = String(localized: "The Paid plan isn't offered here.")
             case .failed(let message):
                 model.lastError = String(localized: "Couldn't open the plan page: \(message ?? String(localized: "the daemon didn't say why"))")

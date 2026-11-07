@@ -1371,7 +1371,7 @@ impl App {
                 // The daemon has read the account again, or signed out: the status shows what is true now.
                 client::PlanAnswer::NotSignedIn => {}
                 client::PlanAnswer::Conflict(reason) if reason == "already_paid" => {}
-                client::PlanAnswer::Conflict(_) => self.notice = Some(Err(tr("Your plan has no subscription to manage.", &[]))),
+                client::PlanAnswer::Conflict(_) => self.notice = Some(Err(tr("This Paid plan can't be managed here.", &[]))),
                 client::PlanAnswer::NotOffered => self.notice = Some(Err(tr("The Paid plan isn't offered here.", &[]))),
                 client::PlanAnswer::Failed(message) => {
                     let why = message.unwrap_or_else(|| tr("the daemon didn't say why", &[]));

@@ -2132,6 +2132,11 @@ async fn post_manage_plan(State(state): State<AppState>) -> axum::response::Resp
 }
 
 #[derive(Serialize)]
+struct PlanPageResponse {
+    url: String,
+}
+
+#[derive(Serialize)]
 struct PlanRefusal {
     accepted: bool,
     message: String,
@@ -2151,7 +2156,7 @@ async fn plan_page(state: &AppState, page: account::PlanPage, offered: bool) -> 
         Err(account::AccountError::NotOffered)
     };
     let error = match result {
-        Ok(url) => return Json(SignInResponse { url }).into_response(),
+        Ok(url) => return Json(PlanPageResponse { url }).into_response(),
         Err(error) => error,
     };
     warn!(%error, ?page, "the plan page didn't open");
@@ -2361,13 +2366,19 @@ mod tests {
         let (status, body) = plan_answer(&state, account::PlanPage::Checkout, false).await;
         assert_eq!((status, body["accepted"].as_bool()), (StatusCode::NOT_FOUND, Some(false)));
         assert_eq!(state.snapshot().await.account.upgrade_offered, account::UPGRADE_OFFERED);
+        // The route itself follows the switch: off, it asks the service nothing.
+        let expected = if account::UPGRADE_OFFERED { StatusCode::OK } else { StatusCode::NOT_FOUND };
+        assert_eq!(post_upgrade(State(state.clone())).await.status(), expected);
+        if !account::UPGRADE_OFFERED {
+            assert!(seen.lock().unwrap().is_empty());
+        }
 
         let mut signed_out = test_state(Arc::new(RecordingTransport::default()));
         let dir = std::env::temp_dir().join(format!("vibebuddy-plan-out-{}", std::process::id()));
         signed_out.account = Arc::new(account::Account::new(Some(service), Some(&dir), 7331));
         assert_eq!(plan_answer(&signed_out, account::PlanPage::Checkout, true).await.0, StatusCode::UNAUTHORIZED);
         assert_eq!(plan_answer(&signed_out, account::PlanPage::Portal, true).await.0, StatusCode::UNAUTHORIZED);
-        assert!(seen.lock().unwrap().is_empty());
+        assert_eq!(seen.lock().unwrap().len(), usize::from(account::UPGRADE_OFFERED), "only an Upgrade with the switch on asks");
     }
 
     #[tokio::test]
