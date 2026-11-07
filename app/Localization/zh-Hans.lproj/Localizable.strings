@@ -445,6 +445,14 @@
 "Plan" = "方案";
 "Free" = "免费版";
 "Paid plan" = "付费版";
+"Upgrade" = "升级";
+"Manage plan" = "管理方案";
+"Waiting for the payment…" = "等待付款…";
+"Your payment is being processed." = "付款正在处理中。";
+"This Paid plan can't be managed here." = "这个付费版无法在这里管理。";
+"The Paid plan isn't offered here." = "这里还不提供付费版。";
+"Couldn't open the plan page: %@" = "无法打开方案页面：%@";
+"the daemon didn't say why" = "daemon 没说原因";
 "Sign in to use the Relay." = "登录后才能使用中转。";
 "The Relay needs the Paid plan." = "中转需要付费版。";
 "The Relay can't check the account right now. VibeBuddy tries again later." = "中转暂时无法确认账户，VibeBuddy 稍后会再试。";

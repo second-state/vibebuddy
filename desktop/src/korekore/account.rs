@@ -73,10 +73,29 @@ impl crate::App {
                 .into(),
             ));
         }
-        if status::Plan::SHOWN && let Some(plan) = &account.plan {
+        // The plan row shows with its button even while the plan is hidden: Upgrade has its own switch, and a Paid
+        // user must always be able to manage the plan.
+        let button = account.plan_button();
+        if let Some(plan) = &account.plan
+            && (status::Plan::SHOWN || button.is_some())
+        {
             let (name, color) = if plan.paid() { (tr("Paid plan", &[]), theme::DONE_TEXT) } else { (tr("Free", &[]), theme::INK) };
+            let press = |button| (!self.plan_busy).then_some(Message::OpenPlanPage(button));
+            let button = button.map(|button| match button {
+                status::PlanButton::Upgrade => pill(tr("Upgrade", &[]), Fill::Sun, press(button)),
+                status::PlanButton::ManagePlan => pill(tr("Manage plan", &[]), Fill::Paper, press(button)),
+            });
+            let paying = self.paying.clone().filter(|_| !plan.paid()).map(|note| tag(note, theme::WAIT_TEXT));
             items.push(divider());
-            items.push(line(row![text(tr("Plan", &[])).font(bold()).size(14).color(theme::INK).width(Length::Fill), tag(name, color)].align_y(Alignment::Center).into()));
+            items.push(line(
+                row![text(tr("Plan", &[])).font(bold()).size(14).color(theme::INK).width(Length::Fill)]
+                    .push(paying)
+                    .push(tag(name, color))
+                    .push(button)
+                    .spacing(8)
+                    .align_y(Alignment::Center)
+                    .into(),
+            ));
         }
         // Nothing before the first use of our voice service.
         if let Some(credit) = account.voice_credit() {
