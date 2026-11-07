@@ -94,10 +94,34 @@ public struct AccountStatus: Codable, Equatable {
     /// The voice credit left, in millionths of a US dollar (ADR-0024); nil before the account first uses our voice
     /// service, when the service couldn't read it, and from older daemons.
     public var voiceCreditMicroUSD: Int?
-    enum CodingKeys: String, CodingKey { case available, signedIn = "signed_in", email, githubID = "github_id", githubLogin = "github_login", plan, voiceCreditMicroUSD = "voice_credit_micro_usd" }
-    public init(available: Bool, signedIn: Bool, email: String? = nil, githubID: Int? = nil, githubLogin: String? = nil, plan: AccountPlan? = nil, voiceCreditMicroUSD: Int? = nil) {
+    /// Whether to show Upgrade on Free: the daemon's one switch (`account::UPGRADE_OFFERED`), off until sales open.
+    /// False from older daemons.
+    public var upgradeOffered: Bool
+    enum CodingKeys: String, CodingKey {
+        case available, signedIn = "signed_in", email, githubID = "github_id", githubLogin = "github_login", plan, voiceCreditMicroUSD = "voice_credit_micro_usd"
+        case upgradeOffered = "upgrade_offered"
+    }
+    public init(available: Bool, signedIn: Bool, email: String? = nil, githubID: Int? = nil, githubLogin: String? = nil, plan: AccountPlan? = nil, voiceCreditMicroUSD: Int? = nil,
+                upgradeOffered: Bool = false) {
         self.available = available; self.signedIn = signedIn; self.email = email; self.githubID = githubID; self.githubLogin = githubLogin
-        self.plan = plan; self.voiceCreditMicroUSD = voiceCreditMicroUSD
+        self.plan = plan; self.voiceCreditMicroUSD = voiceCreditMicroUSD; self.upgradeOffered = upgradeOffered
+    }
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        self.init(available: try c.decode(Bool.self, forKey: .available), signedIn: try c.decode(Bool.self, forKey: .signedIn),
+                  email: try c.decodeIfPresent(String.self, forKey: .email), githubID: try c.decodeIfPresent(Int.self, forKey: .githubID),
+                  githubLogin: try c.decodeIfPresent(String.self, forKey: .githubLogin), plan: try c.decodeIfPresent(AccountPlan.self, forKey: .plan),
+                  voiceCreditMicroUSD: try c.decodeIfPresent(Int.self, forKey: .voiceCreditMicroUSD),
+                  upgradeOffered: try c.decodeIfPresent(Bool.self, forKey: .upgradeOffered) ?? false)
+    }
+
+    public enum PlanButton: Equatable { case upgrade, managePlan }
+
+    /// The account card's plan button: Manage plan on Paid, Upgrade on Free while the switch is on, none otherwise.
+    public var planButton: PlanButton? {
+        guard signedIn, let plan else { return nil }
+        if plan.paid { return .managePlan }
+        return upgradeOffered ? .upgrade : nil
     }
 
     /// The voice credit left in dollars, "$0.93", for the account card; nil when the daemon doesn't know it. Cut down
@@ -121,6 +145,33 @@ public struct AccountPlan: Codable, Equatable {
     /// Whether the App shows the Paid plan. Off until the plan is on sale (2026-10-28): the plan row, the Relay switch
     /// and its refusals, and making a Character with VibeBuddy's voices are hidden. The daemon doesn't change.
     public static let shown = false
+}
+
+/// The daemon's answer to `POST /v1/account/upgrade` or `/v1/account/manage-plan` (docs/api.md).
+public enum PlanPageAnswer: Equatable {
+    /// The Stripe page to open in the browser.
+    case open(URL)
+    /// The service's 409 reason, `already_paid` or `no_subscription`: the plan isn't what the App showed, and the
+    /// daemon has read the account again.
+    case conflict(String)
+    /// 404: Stripe isn't set up for this service, the switch is off, or the daemon is too old for the route.
+    case notOffered
+    /// 401: the status then shows signed out.
+    case notSignedIn
+    /// Anything else, with the daemon's message when it gave one.
+    case failed(String?)
+
+    public init(code: Int, data: Data) {
+        let body = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any]
+        switch code {
+        case 200:
+            if let text = body?["url"] as? String, let url = URL(string: text) { self = .open(url) } else { self = .failed(nil) }
+        case 409: self = .conflict(body?["reason"] as? String ?? "")
+        case 404: self = .notOffered
+        case 401: self = .notSignedIn
+        default: self = .failed(body?["message"] as? String)
+        }
+    }
 }
 
 public struct DaemonInfo: Codable, Equatable {

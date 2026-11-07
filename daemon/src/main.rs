@@ -820,6 +820,8 @@ fn app(state: AppState) -> Router {
         .route("/v1/account/callback", get(get_account_callback))
         .route("/v1/account/sign-out", post(post_sign_out))
         .route("/v1/account/refresh", post(post_account_refresh))
+        .route("/v1/account/upgrade", post(post_upgrade))
+        .route("/v1/account/manage-plan", post(post_manage_plan))
         .with_state(state)
 }
 
@@ -2119,6 +2121,56 @@ async fn post_account_refresh(State(state): State<AppState>) -> (StatusCode, Jso
     }
 }
 
+/// Opens the Paid plan's Stripe Checkout: the App opens the URL in the browser. Behind [`account::UPGRADE_OFFERED`].
+async fn post_upgrade(State(state): State<AppState>) -> axum::response::Response {
+    plan_page(&state, account::PlanPage::Checkout, account::UPGRADE_OFFERED).await
+}
+
+/// Opens Stripe's Customer Portal, where a Paid user changes the card or cancels.
+async fn post_manage_plan(State(state): State<AppState>) -> axum::response::Response {
+    plan_page(&state, account::PlanPage::Portal, true).await
+}
+
+#[derive(Serialize)]
+struct PlanRefusal {
+    accepted: bool,
+    message: String,
+    /// The service's reason on a 409: `already_paid` or `no_subscription`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    reason: Option<String>,
+}
+
+/// `{"url"}` on 200; otherwise the service's 409 (with its reason), 404 and 401 as they are (docs/api.md). A 409
+/// means the plan isn't what the App thought, so the account is read again and the status shows the plan it has.
+async fn plan_page(state: &AppState, page: account::PlanPage, offered: bool) -> axum::response::Response {
+    use axum::response::IntoResponse;
+    let account = state.account.clone();
+    let result = if offered {
+        tokio::task::spawn_blocking(move || account.plan_page(page)).await.unwrap_or_else(|error| Err(account::AccountError::Service(error.to_string())))
+    } else {
+        Err(account::AccountError::NotOffered)
+    };
+    let error = match result {
+        Ok(url) => return Json(SignInResponse { url }).into_response(),
+        Err(error) => error,
+    };
+    warn!(%error, ?page, "the plan page didn't open");
+    let (status, reason) = match &error {
+        account::AccountError::NotSignedIn => (StatusCode::UNAUTHORIZED, None),
+        account::AccountError::NotOffered => (StatusCode::NOT_FOUND, None),
+        account::AccountError::Conflict(reason) => {
+            let account = state.account.clone();
+            if let Ok(Err(error)) = tokio::task::spawn_blocking(move || account.refresh()).await {
+                warn!(%error, "the account couldn't be read again");
+            }
+            (StatusCode::CONFLICT, Some(reason.clone()))
+        }
+        other => (account_refusal(other).0, None),
+    };
+    state.notify_status();
+    (status, Json(PlanRefusal { accepted: false, message: error.to_string(), reason })).into_response()
+}
+
 async fn delete_account(State(state): State<AppState>) -> (StatusCode, Json<ApiResponse>) {
     let account = state.account.clone();
     let result = tokio::task::spawn_blocking(move || account.delete()).await.unwrap_or_else(|error| Err(account::AccountError::Service(error.to_string())));
@@ -2135,6 +2187,8 @@ fn account_refusal(error: &account::AccountError) -> (StatusCode, Json<ApiRespon
         account::AccountError::NotSignedIn => StatusCode::CONFLICT,
         account::AccountError::UnknownSignIn => StatusCode::BAD_REQUEST,
         account::AccountError::Service(_) => StatusCode::BAD_GATEWAY,
+        account::AccountError::Conflict(_) => StatusCode::CONFLICT,
+        account::AccountError::NotOffered => StatusCode::NOT_FOUND,
     };
     (status, Json(ApiResponse { accepted: false, message: error.to_string() }))
 }
@@ -2251,6 +2305,69 @@ mod tests {
         let (status, _) = post_sign_out(State(state.clone())).await;
         assert_eq!(status, StatusCode::CONFLICT);
         assert!(!state.snapshot().await.account.available);
+    }
+
+    /// The answer's status and JSON body.
+    async fn plan_answer(state: &AppState, page: account::PlanPage, offered: bool) -> (StatusCode, serde_json::Value) {
+        let response = plan_page(state, page, offered).await;
+        let status = response.status();
+        let body = http_body_util::BodyExt::collect(response.into_body()).await.unwrap().to_bytes();
+        (status, serde_json::from_slice(&body).unwrap())
+    }
+
+    fn signed_in_state(service: &str, name: &str) -> AppState {
+        let mut state = test_state(Arc::new(RecordingTransport::default()));
+        let dir = std::env::temp_dir().join(format!("vibebuddy-plan-{name}-{}", std::process::id()));
+        account::signed_in_for_tests(&dir, "tok");
+        state.account = Arc::new(account::Account::new(Some(service.to_owned()), Some(&dir), 7331));
+        state
+    }
+
+    #[tokio::test]
+    async fn upgrade_and_manage_plan_pass_the_service_through() {
+        let (service, seen) = account::tests::serve(vec![
+            (200, r#"{"url":"https://checkout.stripe.test/c/1"}"#),
+            (200, r#"{"url":"https://billing.stripe.test/p/1"}"#),
+            (409, r#"{"reason":"already_paid"}"#),
+            // The daemon reads the account again after `already_paid`, so the status shows the Paid plan.
+            (200, r#"{"id":"a","github_id":1,"plan":{"name":"paid","period_end":"2026-12-06T00:00:00.000Z"},"voice_credit_micro_usd":5000000}"#),
+            (404, r#"{"error":"not_found"}"#),
+            (401, r#"{"error":"unauthorized"}"#),
+        ]);
+        let state = signed_in_state(&service, "through");
+        assert_eq!(plan_answer(&state, account::PlanPage::Checkout, true).await, (StatusCode::OK, serde_json::json!({"url": "https://checkout.stripe.test/c/1"})));
+        assert_eq!(plan_answer(&state, account::PlanPage::Portal, true).await, (StatusCode::OK, serde_json::json!({"url": "https://billing.stripe.test/p/1"})));
+
+        let (status, body) = plan_answer(&state, account::PlanPage::Checkout, true).await;
+        assert_eq!((status, body["reason"].as_str()), (StatusCode::CONFLICT, Some("already_paid")));
+        let paid = state.snapshot().await.account;
+        assert_eq!((paid.plan.map(|plan| plan.name), paid.voice_credit_micro_usd), (Some("paid".to_owned()), Some(5_000_000)));
+
+        let (status, body) = plan_answer(&state, account::PlanPage::Portal, true).await;
+        assert_eq!((status, body["accepted"].as_bool()), (StatusCode::NOT_FOUND, Some(false)));
+        assert_eq!(plan_answer(&state, account::PlanPage::Portal, true).await.0, StatusCode::UNAUTHORIZED);
+        assert!(!state.snapshot().await.account.signed_in, "a revoked session signs out");
+
+        let seen = seen.lock().unwrap();
+        let paths: Vec<&str> = seen.iter().map(|request| request.split(' ').nth(1).unwrap()).collect();
+        assert_eq!(paths, ["/v1/plan/checkout", "/v1/plan/portal", "/v1/plan/checkout", "/v1/account", "/v1/plan/portal", "/v1/plan/portal"]);
+        assert!(seen.iter().all(|request| request.to_ascii_lowercase().contains("authorization: bearer tok")), "the session goes with each call");
+    }
+
+    #[tokio::test]
+    async fn the_plan_routes_ask_nothing_when_signed_out_or_while_upgrade_is_off() {
+        let (service, seen) = account::tests::serve(vec![(200, r#"{"url":"https://checkout.stripe.test/c/1"}"#)]);
+        let state = signed_in_state(&service, "off");
+        let (status, body) = plan_answer(&state, account::PlanPage::Checkout, false).await;
+        assert_eq!((status, body["accepted"].as_bool()), (StatusCode::NOT_FOUND, Some(false)));
+        assert_eq!(state.snapshot().await.account.upgrade_offered, account::UPGRADE_OFFERED);
+
+        let mut signed_out = test_state(Arc::new(RecordingTransport::default()));
+        let dir = std::env::temp_dir().join(format!("vibebuddy-plan-out-{}", std::process::id()));
+        signed_out.account = Arc::new(account::Account::new(Some(service), Some(&dir), 7331));
+        assert_eq!(plan_answer(&signed_out, account::PlanPage::Checkout, true).await.0, StatusCode::UNAUTHORIZED);
+        assert_eq!(plan_answer(&signed_out, account::PlanPage::Portal, true).await.0, StatusCode::UNAUTHORIZED);
+        assert!(seen.lock().unwrap().is_empty());
     }
 
     #[tokio::test]

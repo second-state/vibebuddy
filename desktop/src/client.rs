@@ -471,6 +471,50 @@ pub async fn sign_in() -> Result<String, String> {
     serde_json::from_value::<SignIn>(body).map(|sign_in| sign_in.url).map_err(|error| error.to_string())
 }
 
+/// The daemon's answer to `POST /v1/account/upgrade` or `/v1/account/manage-plan` (docs/api.md).
+#[derive(Clone, Debug, PartialEq)]
+pub enum PlanAnswer {
+    /// The Stripe page to open in the browser.
+    Open(String),
+    /// The service's 409 reason, `already_paid` or `no_subscription`: the plan isn't what the app showed, and the
+    /// daemon has read the account again.
+    Conflict(String),
+    /// 404: Stripe isn't set up for this service, the switch is off, or the daemon is too old for the route.
+    NotOffered,
+    /// 401: the status then shows signed out.
+    NotSignedIn,
+    /// Anything else, with the daemon's message when it gave one.
+    Failed(Option<String>),
+}
+
+impl PlanAnswer {
+    fn new(status: u16, body: serde_json::Value) -> Self {
+        let text = |key: &str| body[key].as_str().map(str::to_owned);
+        match status {
+            200 => text("url").map_or(Self::Failed(None), Self::Open),
+            409 => Self::Conflict(text("reason").unwrap_or_default()),
+            404 => Self::NotOffered,
+            401 => Self::NotSignedIn,
+            _ => Self::Failed(text("message")),
+        }
+    }
+}
+
+/// A Stripe page for the account card's plan button: Checkout for Upgrade, the Customer Portal for Manage plan.
+pub async fn plan_page(button: crate::status::PlanButton) -> PlanAnswer {
+    let path = match button {
+        crate::status::PlanButton::Upgrade => "upgrade",
+        crate::status::PlanButton::ManagePlan => "manage-plan",
+    };
+    match reqwest::Client::new().post(format!("{BASE}/v1/account/{path}")).send().await {
+        Ok(response) => {
+            let status = response.status().as_u16();
+            PlanAnswer::new(status, response.json().await.unwrap_or_default())
+        }
+        Err(error) => PlanAnswer::Failed(Some(error.to_string())),
+    }
+}
+
 /// Ends this computer's session only.
 /// Has the daemon read today's voice use from the service; it comes back in the status.
 pub async fn refresh_account() -> Result<(), String> {
@@ -514,6 +558,19 @@ async fn accepted(request: reqwest::RequestBuilder) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_plan_page_answers_decode() {
+        let answer = |status: u16, body: &str| PlanAnswer::new(status, serde_json::from_str(body).unwrap_or_default());
+        assert_eq!(answer(200, r#"{"url":"https://checkout.stripe.com/c/pay/cs_test_1"}"#), PlanAnswer::Open("https://checkout.stripe.com/c/pay/cs_test_1".to_owned()));
+        assert_eq!(answer(200, r#"{"accepted":true}"#), PlanAnswer::Failed(None), "200 without a URL");
+        assert_eq!(answer(409, r#"{"accepted":false,"message":"…","reason":"already_paid"}"#), PlanAnswer::Conflict("already_paid".to_owned()));
+        assert_eq!(answer(409, r#"{"accepted":false,"message":"…","reason":"no_subscription"}"#), PlanAnswer::Conflict("no_subscription".to_owned()));
+        assert_eq!(answer(404, r#"{"accepted":false,"message":"the plan isn't offered here"}"#), PlanAnswer::NotOffered);
+        assert_eq!(answer(404, ""), PlanAnswer::NotOffered, "an older daemon without the route");
+        assert_eq!(answer(401, r#"{"accepted":false,"message":"not signed in"}"#), PlanAnswer::NotSignedIn);
+        assert_eq!(answer(502, r#"{"accepted":false,"message":"the service couldn't be reached"}"#), PlanAnswer::Failed(Some("the service couldn't be reached".to_owned())));
+    }
 
     #[test]
     fn events_split_across_chunks_are_reassembled() {

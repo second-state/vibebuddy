@@ -69,9 +69,29 @@ pub struct Account {
     /// The voice credit left, in millionths of a US dollar (ADR-0024); None before the account first uses our voice
     /// service, when the service couldn't read it, and from older daemons.
     pub voice_credit_micro_usd: Option<u64>,
+    /// Whether to show Upgrade on Free: the daemon's one switch (`account::UPGRADE_OFFERED`), off until sales open.
+    /// False from older daemons.
+    pub upgrade_offered: bool,
+}
+
+/// The account card's plan button.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PlanButton {
+    Upgrade,
+    ManagePlan,
 }
 
 impl Account {
+    /// Manage plan on Paid, Upgrade on Free while the switch is on, none otherwise.
+    pub fn plan_button(&self) -> Option<PlanButton> {
+        let plan = self.plan.as_ref().filter(|_| self.signed_in)?;
+        if plan.paid() {
+            Some(PlanButton::ManagePlan)
+        } else {
+            self.upgrade_offered.then_some(PlanButton::Upgrade)
+        }
+    }
+
     /// The voice credit left in dollars, "$0.93", for the account card; None when the daemon doesn't know it. Cut
     /// down to the cent, so it never shows more than is left.
     pub fn voice_credit(&self) -> Option<String> {
@@ -551,6 +571,18 @@ mod tests {
         assert!(account.available && account.signed_in);
         assert_eq!((account.github_id, account.github_login.as_deref(), account.email.clone()), (Some(60097), Some("octocat"), None));
         assert_eq!((account.voice_credit(), account.plan), (None, None));
+    }
+
+    #[test]
+    fn upgrade_shows_on_free_only_with_the_switch_and_manage_plan_on_paid() {
+        let free: Account = serde_json::from_str(r#"{"signed_in":true,"plan":{"name":"free"}}"#).expect("account");
+        assert_eq!((free.upgrade_offered, free.plan_button()), (false, None), "the switch off, or an older daemon");
+        let offered: Account = serde_json::from_str(r#"{"signed_in":true,"plan":{"name":"free"},"upgrade_offered":true}"#).expect("account");
+        assert_eq!(offered.plan_button(), Some(PlanButton::Upgrade));
+        let paid = Account { plan: Some(Plan { name: "paid".to_owned(), period_end: None }), upgrade_offered: false, ..offered.clone() };
+        assert_eq!(paid.plan_button(), Some(PlanButton::ManagePlan), "Manage plan doesn't wait for the switch");
+        assert_eq!(Account { signed_in: false, ..paid }.plan_button(), None, "signed out");
+        assert_eq!(Account { plan: None, ..offered }.plan_button(), None, "before the plan is read");
     }
 
     #[test]

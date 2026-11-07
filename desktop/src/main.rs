@@ -254,6 +254,11 @@ enum Message {
     SignIn,
     SignInUrl(Result<String, String>),
     SignOut,
+    /// Upgrade or Manage plan: ask the daemon for the Stripe page, then open it in the browser.
+    OpenPlanPage(status::PlanButton),
+    PlanPage(client::PlanAnswer),
+    /// The settings window came to the front, for instance back from Stripe's pages in the browser.
+    WindowFocused,
     AskDeleteAccount(bool),
     DeleteAccount,
     /// Signing out or deleting the account finished; the account itself comes with the next status.
@@ -578,11 +583,18 @@ impl App {
         } else {
             Subscription::none()
         };
+        // Only while General, which shows the account, is in an open window: read the plan again on coming back.
+        let account_focus = if self.settings.is_some() && self.tab == Tab::General {
+            iced::event::listen_with(|event, _, _| matches!(event, iced::Event::Window(window::Event::Focused)).then_some(Message::WindowFocused))
+        } else {
+            Subscription::none()
+        };
         Subscription::batch([
             Subscription::run(client::status_updates).map(Message::Daemon),
             decorations,
             iced::time::every(Duration::from_secs(2)).map(|_| Message::PluginTick),
             window::close_events().map(Message::WindowClosed),
+            account_focus,
             tray,
             instance,
             conversation,
@@ -1348,6 +1360,28 @@ impl App {
                 return Task::perform(client::sign_out(), |result| {
                     Message::AccountDone(result.map_err(|error| tr("Couldn't sign out: %@", &[&error])))
                 });
+            }
+            Message::OpenPlanPage(button) => return Task::perform(client::plan_page(button), Message::PlanPage),
+            Message::PlanPage(answer) => match answer {
+                client::PlanAnswer::Open(url) => {
+                    if let Err(error) = open_target(std::ffi::OsStr::new(&url)) {
+                        self.notice = Some(Err(tr("Couldn't open the plan page: %@", &[&error])));
+                    }
+                }
+                // The daemon has read the account again, or signed out: the status shows what is true now.
+                client::PlanAnswer::NotSignedIn => {}
+                client::PlanAnswer::Conflict(reason) if reason == "already_paid" => {}
+                client::PlanAnswer::Conflict(_) => self.notice = Some(Err(tr("Your plan has no subscription to manage.", &[]))),
+                client::PlanAnswer::NotOffered => self.notice = Some(Err(tr("The Paid plan isn't offered here.", &[]))),
+                client::PlanAnswer::Failed(message) => {
+                    let why = message.unwrap_or_else(|| tr("the daemon didn't say why", &[]));
+                    self.notice = Some(Err(tr("Couldn't open the plan page: %@", &[&why])));
+                }
+            },
+            Message::WindowFocused => {
+                if self.status.as_ref().is_some_and(|status| status.account.signed_in) {
+                    return Task::perform(client::refresh_account(), |_| Message::AccountDone(Ok(())));
+                }
             }
             Message::AskDeleteAccount(asking) => self.confirm_delete_account = asking,
             Message::DeleteAccount => {

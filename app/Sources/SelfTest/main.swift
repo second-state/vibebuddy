@@ -141,6 +141,33 @@ do {
     {"name":"paid","period_end":"2026-11-24T00:00:00.000Z"}
     """.utf8))
     check(paid.paid && paid.periodEnd == Date(timeIntervalSince1970: 1_795_478_400), "the Paid plan decodes")
+
+    // Upgrade and Manage plan (#185): the daemon's switch decides Upgrade, an older daemon reads as off.
+    check(free.upgradeOffered == false && free.planButton == nil, "the switch off (or an older daemon): no Upgrade on Free")
+    let offered = try StatusCoding.decoder().decode(AccountStatus.self, from: Data("""
+    {"available":true,"signed_in":true,"plan":{"name":"free"},"upgrade_offered":true}
+    """.utf8))
+    check(offered.planButton == .upgrade, "the switch on: Upgrade on Free")
+    var paidAccount = offered
+    paidAccount.plan = paid
+    check(paidAccount.planButton == .managePlan, "Manage plan on Paid")
+    paidAccount.upgradeOffered = false
+    check(paidAccount.planButton == .managePlan, "Manage plan doesn't wait for the switch")
+    var signedOut = offered
+    signedOut.signedIn = false
+    check(signedOut.planButton == nil, "no plan button when signed out")
+    check(AccountStatus(available: true, signedIn: true, upgradeOffered: true).planButton == nil, "no plan button before the plan is read")
+
+    // The daemon's answers to /v1/account/upgrade and /v1/account/manage-plan.
+    let answer = { (code: Int, body: String) in PlanPageAnswer(code: code, data: Data(body.utf8)) }
+    check(answer(200, #"{"url":"https://checkout.stripe.com/c/pay/cs_test_1"}"#) == .open(URL(string: "https://checkout.stripe.com/c/pay/cs_test_1")!), "a URL to open")
+    check(answer(200, #"{"accepted":true}"#) == .failed(nil), "200 without a URL is a failure")
+    check(answer(409, #"{"accepted":false,"message":"the service refused: already_paid","reason":"already_paid"}"#) == .conflict("already_paid"), "already paid")
+    check(answer(409, #"{"accepted":false,"message":"…","reason":"no_subscription"}"#) == .conflict("no_subscription"), "no subscription")
+    check(answer(404, #"{"accepted":false,"message":"the plan isn't offered here"}"#) == .notOffered, "not offered")
+    check(answer(401, #"{"accepted":false,"message":"not signed in"}"#) == .notSignedIn, "not signed in")
+    check(answer(502, #"{"accepted":false,"message":"the service couldn't be reached"}"#) == .failed("the service couldn't be reached"), "another failure keeps its message")
+    check(answer(404, "") == .notOffered, "an older daemon without the route: not offered")
 } catch {
     check(false, "status decoding threw: \(error)")
 }

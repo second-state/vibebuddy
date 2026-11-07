@@ -166,6 +166,19 @@ struct DaemonClient {
     /// Deletes the account on the service; when the service doesn't, the daemon stays signed in.
     func deleteAccount() async throws { try await accountCall("/v1/account", method: "DELETE") }
 
+    /// A Stripe page for the account card's plan button: Checkout for Upgrade, the Customer Portal for Manage plan.
+    /// The daemon asks the service, so this waits as long as the other account calls.
+    func planPage(_ button: AccountStatus.PlanButton) async -> PlanPageAnswer {
+        var request = request(button == .upgrade ? "/v1/account/upgrade" : "/v1/account/manage-plan", method: "POST")
+        request.timeoutInterval = 30
+        do {
+            let (data, response) = try await URLSession.shared.data(for: request)
+            return PlanPageAnswer(code: (response as? HTTPURLResponse)?.statusCode ?? 0, data: data)
+        } catch {
+            return .failed(error.localizedDescription)
+        }
+    }
+
     /// The daemon asks the service, which it gives 20 s, so this waits longer than the usual 10 s.
     private func accountCall(_ path: String, method: String) async throws {
         var request = request(path, method: method)
