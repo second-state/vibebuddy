@@ -215,7 +215,6 @@
 "Take over" = "接管";
 "Relay" = "中转";
 "Taking the box over was rejected (%lld)" = "接管盒子被拒绝（%lld）";
-"Nearby networks" = "附近的网络";
 "Choose…" = "选择…";
 "Scan" = "扫描";
 "Scanning for networks was rejected (%lld)" = "扫描网络被拒绝（%lld）";
@@ -394,7 +393,6 @@
 "Is this your box?" = "这是你的盒子吗？";
 "Keep it plugged in" = "别拔线";
 "Let the box go wireless?" = "让盒子用上无线？";
-"Looking for networks…" = "正在找网络…";
 "Newer firmware is available" = "有更新的固件";
 "Not this one" = "不是这个";
 "On Wi-Fi, this Mac reaches the box without the cable. Keep the cable in for this step." = "连上 Wi-Fi 后，这台 Mac 不插线也能连到盒子。这一步先别拔线。";

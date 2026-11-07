@@ -500,33 +500,11 @@ struct KorekoreOnboarding: View {
                 Button(String(localized: "Skip for now")) { step = 5 }.buttonStyle(KBigButtonStyle(.paper, primary: false))
             }
         } else {
-            KRows {
-                let seen = Array((device.wifiSeen ?? []).prefix(4))
-                if seen.isEmpty {
-                    HStack {
-                        KTag(String(localized: "Looking for networks…"))
-                        Spacer()
-                        Button(String(localized: "Scan")) { model.scanWifi() }.kButton().disabled(model.operationRunning)
-                    }
-                    .padding(.vertical, 10)
-                    .padding(.horizontal, 14)
-                }
-                ForEach(Array(seen.enumerated()), id: \.offset) { index, network in
-                    if index > 0 { KDivider() }
-                    Button { ssid = network.ssid } label: {
-                        HStack(spacing: 12) {
-                            SignalBars(rssi: network.rssi)
-                            Text(verbatim: network.ssid).font(.rounded(15))
-                            Spacer()
-                            KTag("\(network.rssi) dBm")
-                        }
-                        .padding(.vertical, 10)
-                        .padding(.horizontal, 14)
-                        .background(ssid == network.ssid ? Theme.Colors.cream : Theme.Colors.paper)
-                        .contentShape(Rectangle())
-                    }
-                    .buttonStyle(.plain)
-                }
+            // The networks the box heard, in a menu as on the Device page: a scan can hear a dozen or more.
+            HStack(spacing: 8) {
+                KMenu(selection: ssid, options: [("", String(localized: "Choose…"))]
+                      + (device.wifiSeen ?? []).map { ($0.ssid, "\($0.ssid)  \($0.rssi) dBm") }) { ssid = $0 }
+                Button(String(localized: "Scan")) { model.scanWifi() }.kButton().disabled(model.operationRunning)
             }
             .onAppear { if !passive, device.wifiSeen?.isEmpty ?? true { model.scanWifi() } }
             VStack(alignment: .leading, spacing: 6) {
@@ -592,27 +570,6 @@ struct KorekoreOnboarding: View {
             .frame(maxWidth: 560)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-    }
-}
-
-/// Signal strength as four pixel bars, 4 to 16 px tall.
-struct SignalBars: View {
-    let rssi: Int
-
-    private var lit: Int {
-        if rssi >= -55 { return 4 }
-        if rssi >= -67 { return 3 }
-        if rssi >= -75 { return 2 }
-        return 1
-    }
-
-    var body: some View {
-        HStack(alignment: .bottom, spacing: 2) {
-            ForEach(0..<4, id: \.self) { index in
-                Rectangle().fill(index < lit ? Theme.Colors.ink : Theme.Colors.backdrop).frame(width: 4, height: CGFloat(4 + index * 4))
-            }
-        }
-        .frame(height: 16, alignment: .bottom)
     }
 }
 
