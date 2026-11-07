@@ -98,6 +98,10 @@ A holiday is a Character like any other: its own look, voice, persona and lines 
 
 Their looks were drawn with ChatGPT's image generation from the description in `look.txt` (the local image model could not keep a turkey the same across four expressions), then cut out, scaled and set in their cells the way `tools/draft-look.py` does it.
 
+### Company Characters
+
+A company edition (ADR-0025) is a batch of boxes a company buys as a gift, each with a company Character made from the company's logo or mascot. It is a Character like any other, made with `tools/make-character.sh`, but its directory lives in a private assets repo, never this one: the look, voice and lines belong to the company. Its lines carry no form of address. `tools/make_edition.py <dir> <out.bin>` takes the directory's `pack.bin` and an `edition.json` (`{"id", "name", "summary"}`, the id being the pack's) and builds the edition image, checked as the firmware checks it. `tools/flash-factory.sh <edition.bin>` flashes a box in one pass: the bootloader, the partition table, the firmware, the pack in `voices` so the box starts up wearing the company Character, and the edition image in the `edition` partition; then `tools/check-edition.py` checks that the box says `EDITION <id>` and `VOICES <id>`. The box reports the edition in answer to hello ([protocol.md](protocol.md)), and `/v1/status` reports it as `device.edition`.
+
 ### Where the lines come from
 
 Lines are written in advance, never when they are spoken (ADR-0007). For each Character the repo holds:

@@ -25,7 +25,7 @@ We will not make a firmware build, an App build or an App component for each com
 
 ## Consequences
 
-- New boxes get a new partition table. `link` does not move (ADR-0014), and boxes already sold keep their layout and have no edition. The firmware must work with both tables: it finds `edition` at run time and treats a missing partition as an empty one.
+- The partition table gets `edition`. `link` does not move (ADR-0014). Boxes already sold get the new table only when the App flashes them over USB, and their `edition` partition is then blank, so they stay ordinary boxes; an OTA update keeps the old table. The firmware works with both tables: it finds `edition` at run time and treats a missing partition as an empty one.
 - The firmware gets the `EDITION` line, a read of the edition's header, look and manifest, and a command to copy `edition` to `voices`. Each is in docs/protocol.md when it lands.
 - A new company is a new edition image. It needs no new code.
 - An edition cannot change after the factory writes it. If companies want to change it later (for example, holiday lines), a `kind: edition` transfer (ADR-0016) can come later.
