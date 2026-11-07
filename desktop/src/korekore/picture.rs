@@ -45,6 +45,8 @@ pub struct BoxPicture {
     pub daemon_alive: bool,
     /// How the box is linked; None without a link.
     pub link: Option<Link>,
+    /// Without a link, the computer that has the box instead: its name, or empty when the box didn't say.
+    pub away_with: Option<String>,
     /// The newest three, as the box's first page shows them.
     pub tickets: Vec<Ticket>,
     pub today: Today,
@@ -68,6 +70,7 @@ impl BoxPicture {
                 Link::Usb
             }
         });
+        let away_with = device.filter(|_| link.is_none()).and_then(|device| device.busy.as_ref()).map(|busy| busy.owner.clone());
         let mood = match (link, device.and_then(|device| device.mode.as_deref())) {
             (None, _) => Mood::NoLink,
             (_, Some("pomodoro")) => Mood::Pomodoro,
@@ -89,6 +92,7 @@ impl BoxPicture {
             mood,
             daemon_alive: status.is_some(),
             link,
+            away_with,
             tickets,
             today: status.map(|status| status.today.clone()).unwrap_or_default(),
             firmware_version: device.and_then(|device| device.firmware_version.clone()),
@@ -162,6 +166,15 @@ mod tests {
         let asking = [("codex", "CX:Fix", "working"), ("claude-code", "CC:Ask", "needs_input")];
         assert_eq!(BoxPicture::derive(Some(&status(true, "duty", &asking))).mood, Mood::Input);
         assert_eq!(BoxPicture::derive(Some(&status(true, "pomodoro", &asking))).mood, Mood::Pomodoro);
+    }
+
+    #[test]
+    fn a_box_with_another_computer_is_away_not_waiting() {
+        let mut away = status(false, "duty", &[]);
+        away.device.busy = Some(crate::status::Busy { owner: "omarchy".to_owned(), reason: "linked".to_owned() });
+        let picture = BoxPicture::derive(Some(&away));
+        assert_eq!((picture.mood, picture.away_with.as_deref()), (Mood::NoLink, Some("omarchy")));
+        assert_eq!(BoxPicture::derive(Some(&status(false, "duty", &[]))).away_with, None);
     }
 
     #[test]

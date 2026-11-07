@@ -92,6 +92,12 @@ public struct KorekoreMenuPanel: View {
             } else {
                 Text("box online · \(link.rawValue)")
             }
+        } else if let owner = picture.awayWith {
+            if owner.isEmpty {
+                Text("box on another computer")
+            } else {
+                Text("box with \(owner)")
+            }
         } else {
             Text("no box linked")
         }
