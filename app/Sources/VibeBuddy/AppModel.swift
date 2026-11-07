@@ -6,6 +6,8 @@ import VibeBuddyCore
 @MainActor
 final class AppModel: ObservableObject {
     @Published private(set) var status: Status?
+    /// The one switch for the Paid plan: the daemon's `account.upgrade_offered`, false without a status.
+    var planOffered: Bool { status?.account?.upgradeOffered == true }
     @Published private(set) var daemonAlive = false
     @Published var lastError: String?
     @Published private(set) var screenshot: NSImage?

@@ -5,7 +5,7 @@
 use serde::{Deserialize, Serialize};
 
 use crate::i18n::tr;
-use crate::status::{Account, Plan, VoiceKeys};
+use crate::status::{Account, VoiceKeys};
 
 /// A voice a made Character can speak with, from `GET /v1/voices`: a row of characters/voices.tsv, or one in the
 /// user's own account (`own`), which only their own key speaks and which has no language of its own.
@@ -124,13 +124,14 @@ impl Making {
         if self.total == 0 { 0.0 } else { self.done as f32 / self.total as f32 }
     }
 
-    /// Why it stopped, said for the user; `provider` names the voice's provider. None unless it failed.
-    pub fn explanation(&self, provider: &str) -> Option<String> {
+    /// Why it stopped, said for the user; `provider` names the voice's provider, and the Paid plan is named only when
+    /// `plan_offered` ([`Account::upgrade_offered`]). None unless it failed.
+    pub fn explanation(&self, provider: &str, plan_offered: bool) -> Option<String> {
         if self.state != "failed" {
             return None;
         }
         Some(match self.reason.as_deref() {
-            Some("plan") if !Plan::SHOWN => tr("Set your own key for %@ on the Account tab first.", &[&provider]),
+            Some("plan") if !plan_offered => tr("Set your own key for %@ on the Account tab first.", &[&provider]),
             Some("plan") => tr("Making a Character with VibeBuddy's voices needs the Paid plan, or your own key for %@.", &[&provider]),
             Some("monthly") => tr("This month's Characters on the Paid plan are used up. The lines made so far are kept: resume next month, or with your own key for %@.", &[&provider]),
             Some("global_cap") => tr("VibeBuddy's voices are paused for today. The lines made so far are kept: resume tomorrow.", &[]),
@@ -161,9 +162,9 @@ impl Readiness {
         let key = keys.map(|keys| if voice.provider == "volc" { &keys.volc } else { &keys.elevenlabs });
         if key.is_some_and(|key| key.set && !key.refused) {
             Readiness::OwnKey
-        } else if voice.own || !Plan::SHOWN {
+        } else if voice.own || !account.upgrade_offered {
             // A voice in the user's own account: VibeBuddy's voice service can't speak it. Nor, while the Paid plan
-            // is hidden, any voice.
+            // isn't offered, any voice.
             Readiness::OwnKeyOnly
         } else if account.signed_in {
             Readiness::PaidPlan
@@ -320,9 +321,10 @@ mod tests {
         let signed_in = Account { available: true, signed_in: true, ..Account::default() };
         let signed_out = Account { available: true, ..Account::default() };
         assert_eq!(Readiness::of(&voice("elevenlabs"), Some(&keys), &Account::default()), Readiness::OwnKey);
-        let (paid_plan, sign_in) = if Plan::SHOWN { (Readiness::PaidPlan, Readiness::SignIn) } else { (Readiness::OwnKeyOnly, Readiness::OwnKeyOnly) };
-        assert_eq!(Readiness::of(&voice("volc"), Some(&keys), &signed_in), paid_plan, "a refused key doesn't count");
-        assert_eq!(Readiness::of(&voice("volc"), None, &signed_out), sign_in);
+        let offered = Account { upgrade_offered: true, ..signed_in.clone() };
+        assert_eq!(Readiness::of(&voice("volc"), Some(&keys), &offered), Readiness::PaidPlan, "a refused key doesn't count");
+        assert_eq!(Readiness::of(&voice("volc"), Some(&keys), &signed_in), Readiness::OwnKeyOnly, "only an own key while the Paid plan isn't offered");
+        assert_eq!(Readiness::of(&voice("volc"), None, &signed_out), Readiness::OwnKeyOnly, "signed out: the daemon says not offered");
         assert_eq!(Readiness::of(&voice("volc"), None, &Account::default()), Readiness::OwnKeyOnly);
         assert!(!Readiness::SignIn.can_start() && Readiness::PaidPlan.can_start());
         // A voice of the user's own: only their own key speaks it, whatever the plan.
@@ -354,8 +356,11 @@ mod tests {
         assert_eq!(manifest, request);
         let failed = Making { state: "failed".to_owned(), reason: Some("plan".to_owned()), done: 2, total: 6, ..Making::default() };
         // In whichever language the UI is, it names the provider.
-        assert!(!failed.running() && failed.explanation("ElevenLabs").unwrap().contains("ElevenLabs"));
-        assert_eq!(Making { state: "done".to_owned(), ..Making::default() }.explanation("ElevenLabs"), None);
+        assert!(!failed.running() && failed.explanation("ElevenLabs", true).unwrap().contains("ElevenLabs"));
+        assert_eq!(Making { state: "done".to_owned(), ..Making::default() }.explanation("ElevenLabs", true), None);
+        // The Paid plan is named only while it is offered.
+        let (offered, not_offered) = (failed.explanation("ElevenLabs", true).unwrap(), failed.explanation("ElevenLabs", false).unwrap());
+        assert!(offered.contains("Paid plan") && !not_offered.contains("Paid plan"), "{offered} / {not_offered}");
     }
 
     #[test]
