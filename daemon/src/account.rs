@@ -19,6 +19,11 @@ pub const ACCOUNT_FILE: &str = "account";
 const PENDING_FOR: Duration = Duration::from_secs(15 * 60);
 const TIMEOUT: Duration = Duration::from_secs(20);
 
+/// The one switch for Upgrade (ADR-0024): off until sales open, which is when Token Station offers synthesis. While it
+/// is off, `POST /v1/account/upgrade` doesn't ask the service, and the status tells the Apps not to show Upgrade.
+/// Manage plan doesn't depend on it.
+pub const UPGRADE_OFFERED: bool = false;
+
 /// What `GET /v1/status` says about the account.
 #[derive(Clone, Debug, Default, PartialEq, Serialize)]
 pub struct AccountStatus {
@@ -35,6 +40,17 @@ pub struct AccountStatus {
     /// first uses our voice service, and when the service couldn't read it.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub voice_credit_micro_usd: Option<u64>,
+    /// Whether the Apps show Upgrade on Free: [`UPGRADE_OFFERED`].
+    pub upgrade_offered: bool,
+}
+
+/// A Stripe page on the service (docs/api.md), which the App opens in the browser.
+#[derive(Clone, Copy, Debug)]
+pub enum PlanPage {
+    /// Checkout, to start the Paid plan.
+    Checkout,
+    /// The Customer Portal, to change the card or cancel.
+    Portal,
 }
 
 /// As the service's `GET /v1/account` says it (docs/api.md): `{"name":"free"}`, or `paid` with the billing
@@ -81,6 +97,10 @@ pub enum AccountError {
     /// The service refused or couldn't be reached; the message is for logs and the App.
     Service(String),
     NotSignedIn,
+    /// The service said 409 with this reason: `already_paid` for Checkout, `no_subscription` for the portal.
+    Conflict(String),
+    /// The service doesn't offer the plan pages (a 404: Stripe isn't set up there), or [`UPGRADE_OFFERED`] is off.
+    NotOffered,
 }
 
 impl std::fmt::Display for AccountError {
@@ -90,6 +110,8 @@ impl std::fmt::Display for AccountError {
             Self::UnknownSignIn => write!(f, "this sign-in wasn't started here, or has expired"),
             Self::Service(message) => write!(f, "{message}"),
             Self::NotSignedIn => write!(f, "not signed in"),
+            Self::Conflict(reason) => write!(f, "the service refused: {reason}"),
+            Self::NotOffered => write!(f, "the plan isn't offered here"),
         }
     }
 }
@@ -173,6 +195,7 @@ impl Account {
             github_login: saved.and_then(|s| s.github_login),
             plan: details.plan.clone().filter(|_| signed_in),
             voice_credit_micro_usd: details.voice_credit_micro_usd.filter(|_| signed_in),
+            upgrade_offered: UPGRADE_OFFERED,
         }
     }
 
@@ -191,6 +214,34 @@ impl Account {
         let account: serde_json::Value = serde_json::from_str(&text).map_err(|error| AccountError::Service(error.to_string()))?;
         self.take_details(&account);
         Ok(())
+    }
+
+    /// The URL of a Stripe page for this account, from the service's `POST /v1/plan/checkout` or `/v1/plan/portal`.
+    /// Blocking.
+    pub fn plan_page(&self, page: PlanPage) -> Result<String, AccountError> {
+        let token = self.token().ok_or(AccountError::NotSignedIn)?;
+        let base = self.base.clone().ok_or(AccountError::Unavailable)?;
+        // The App opens the URL in the browser, so only Stripe's own page for what was asked goes through.
+        let (path, host) = match page {
+            PlanPage::Checkout => ("checkout", "checkout.stripe.com"),
+            PlanPage::Portal => ("portal", "billing.stripe.com"),
+        };
+        let (status, text) = read(crate::speech::agent(TIMEOUT).post(&format!("{base}/v1/plan/{path}")).header("Authorization", &format!("Bearer {token}")).send_empty())?;
+        let body = serde_json::from_str::<serde_json::Value>(&text).unwrap_or_default();
+        match status {
+            200 => body["url"]
+                .as_str()
+                .filter(|url| url.starts_with(&format!("https://{host}/")))
+                .map(str::to_owned)
+                .ok_or_else(|| AccountError::Service(format!("the service sent no {host} URL"))),
+            401 => {
+                self.forget();
+                Err(AccountError::NotSignedIn)
+            }
+            404 => Err(AccountError::NotOffered),
+            409 => Err(AccountError::Conflict(body["reason"].as_str().unwrap_or_default().to_owned())),
+            _ => Err(AccountError::Service(format!("the service didn't open the page: HTTP {status}"))),
+        }
     }
 
     /// The plan and the voice credit from a `GET /v1/account` answer (docs/api.md).
@@ -406,14 +457,14 @@ pub fn callback_page(result: &Result<(), AccountError>) -> (u16, String) {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use std::io::{BufRead, BufReader, Read, Write};
     use std::net::TcpListener;
     use std::sync::Arc;
 
     /// A fake service: answers each request in turn with the next `(status, body)`, and records what it was sent.
-    fn serve(answers: Vec<(u16, &'static str)>) -> (String, Arc<Mutex<Vec<String>>>) {
+    pub(crate) fn serve(answers: Vec<(u16, &'static str)>) -> (String, Arc<Mutex<Vec<String>>>) {
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
         let url = format!("http://{}", listener.local_addr().unwrap());
         let seen = Arc::new(Mutex::new(Vec::new()));
@@ -575,6 +626,73 @@ mod tests {
         assert_eq!(serde_json::to_value(&paid).unwrap()["voice_credit_micro_usd"], 933_100);
         account.forget();
         assert_eq!((account.status().plan, account.status().voice_credit_micro_usd), (None, None), "signed out, nothing is shown");
+    }
+
+    #[test]
+    fn passes_the_plan_pages_through_with_the_session() {
+        let dir = scratch();
+        let (service, seen) = serve(vec![
+            (200, r#"{"url":"https://checkout.stripe.com/c/pay/cs_test_1"}"#),
+            (200, r#"{"url":"https://billing.stripe.com/p/session/test_1"}"#),
+        ]);
+        let account = signed_in(&service, dir.as_path());
+        assert_eq!(account.plan_page(PlanPage::Checkout).as_deref(), Ok("https://checkout.stripe.com/c/pay/cs_test_1"));
+        assert_eq!(account.plan_page(PlanPage::Portal).as_deref(), Ok("https://billing.stripe.com/p/session/test_1"));
+        let seen = seen.lock().unwrap();
+        assert!(seen[0].starts_with("POST /v1/plan/checkout"));
+        assert!(seen[1].starts_with("POST /v1/plan/portal"));
+        assert!(seen.iter().all(|request| request.to_ascii_lowercase().contains("authorization: bearer tok")));
+    }
+
+    #[test]
+    fn passes_only_a_stripe_page_for_the_page_asked_for() {
+        let dir = scratch();
+        let (service, _) = serve(vec![
+            (200, r#"{"url":"https://evil.example/c/1"}"#),
+            (200, r#"{"url":"http://checkout.stripe.com/c/1"}"#),
+            (200, r#"{"url":"https://checkout.stripe.com.evil.example/c/1"}"#),
+            (200, r#"{"url":"https://checkout.stripe.com@evil.example/c/1"}"#),
+            (200, r#"{"url":"https://billing.stripe.com/p/session/1"}"#),
+            (200, r#"{"url":"file:///etc/passwd"}"#),
+        ]);
+        let account = signed_in(&service, dir.as_path());
+        for _ in 0..4 {
+            assert!(matches!(account.plan_page(PlanPage::Checkout), Err(AccountError::Service(_))));
+        }
+        // The portal's host for Checkout is wrong too.
+        assert!(matches!(account.plan_page(PlanPage::Checkout), Err(AccountError::Service(_))));
+        assert!(matches!(account.plan_page(PlanPage::Portal), Err(AccountError::Service(_))));
+        assert!(account.status().signed_in);
+    }
+
+    #[test]
+    fn a_plan_page_the_service_refuses_says_why() {
+        let dir = scratch();
+        let (service, _) = serve(vec![
+            (409, r#"{"reason":"already_paid"}"#),
+            (409, r#"{"reason":"no_subscription"}"#),
+            (404, r#"{"error":"not_found"}"#),
+            (200, r#"{"no":"url"}"#),
+            (401, r#"{"error":"unauthorized"}"#),
+        ]);
+        let account = signed_in(&service, dir.as_path());
+        assert_eq!(account.plan_page(PlanPage::Checkout), Err(AccountError::Conflict("already_paid".to_owned())));
+        assert_eq!(account.plan_page(PlanPage::Portal), Err(AccountError::Conflict("no_subscription".to_owned())));
+        assert_eq!(account.plan_page(PlanPage::Checkout), Err(AccountError::NotOffered));
+        assert!(matches!(account.plan_page(PlanPage::Portal), Err(AccountError::Service(_))));
+        // A revoked session signs out, as anywhere else.
+        assert_eq!(account.plan_page(PlanPage::Portal), Err(AccountError::NotSignedIn));
+        assert!(!account.status().signed_in);
+    }
+
+    #[test]
+    fn a_plan_page_needs_a_session_and_asks_nothing_without_one() {
+        let dir = scratch();
+        let (service, seen) = serve(vec![(200, r#"{"url":"https://checkout.stripe.com/c/pay/cs_test_1"}"#)]);
+        let account = account(&service, dir.as_path());
+        assert_eq!(account.plan_page(PlanPage::Checkout), Err(AccountError::NotSignedIn));
+        assert_eq!(account.plan_page(PlanPage::Portal), Err(AccountError::NotSignedIn));
+        assert!(seen.lock().unwrap().is_empty());
     }
 
     #[test]

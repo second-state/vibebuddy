@@ -45,8 +45,28 @@ The daemon sends the token as `Authorization: Bearer <token>` and keeps it in `c
   ```
 
   An account has an `email` or a `github_id`, never both. `plan` is `{"name":"free"}` or `{"name":"paid","period_end":"…"}` (ADR-0023). `voice_credit_micro_usd` is the voice credit left in Token Station, in millionths of a US dollar (ADR-0024). It is absent before the account first uses the voice service, and when Token Station can't be read at that moment; the request doesn't fail then. The daemon passes it on in `/v1/status` as `account.voice_credit_micro_usd`, and the App shows it in dollars on the account card ("Voice credit $0.93"), cut down to the cent. With no value, the App shows no line.
+  The plan stays Paid for one day after `period_end`, while Stripe takes the next payment. A cancel keeps it Paid to `period_end`.
 - `POST /v1/sign-out` revokes this session only: 204.
 - `DELETE /v1/account` deletes the account with all its sessions: 204.
+
+### The Paid plan
+
+The user pays for the Paid plan, and changes the card or cancels, in Stripe's own pages in the browser (ADR-0024). The App never sees a card. The service offers these pages only where Stripe is set up; elsewhere both calls answer 404.
+
+- `POST /v1/plan/checkout` (session) answers `{"url":"<Stripe Checkout URL>"}`, a monthly subscription for this account. It answers 409 `{"reason":"already_paid"}` while the account is Paid, and while its Stripe customer has a subscription that is paid or can still be paid.
+- `POST /v1/plan/portal` (session) answers `{"url":"<Customer Portal URL>"}`. It answers 409 `{"reason":"no_subscription"}` when the account has no Stripe customer.
+- Both answer 401 without a valid session, and 404 where Stripe isn't set up.
+- Stripe's pages send the browser back to `GET /v1/plan/return`, a plain page that says to go back to the App. The service tells the App nothing: the App reads the account again when it comes back to the front. The plan changes only when Stripe's `invoice.paid` reaches the service, which can come later. So after it opens Checkout, the App also reads the account every 3 s for a minute, or until the plan is Paid.
+
+The daemon passes these through, so the session stays with the daemon:
+
+- `POST /v1/account/upgrade` calls `/v1/plan/checkout`, and `POST /v1/account/manage-plan` calls `/v1/plan/portal`. On 200 each answers `{"url":"…"}`, which the App opens in the system browser. The daemon passes only a URL that starts with `https://checkout.stripe.com/` for Checkout, or `https://billing.stripe.com/` for the portal. Any other URL gets 502, and the App opens nothing.
+- The service's 409 comes back as 409 `{"accepted":false,"message":"…","reason":"already_paid"}` (or `no_subscription`). The daemon then reads the account again, so the status shows the plan the account has.
+- 401: not signed in, or the service no longer takes the session (the daemon then signs out). The daemon doesn't call the service when it has no session.
+- 404: the service doesn't offer the pages. `upgrade` also answers 404, without calling the service, while the daemon's switch for Upgrade is off.
+- 502 when the service can't be reached, sends a URL that isn't Stripe's, or answers something else. 503 when the computer is signed in but this build's service is off (`VIBEBUDDY_TTS_BASE_URL=off`). The session is checked first, so with no session the answer is 401 here too.
+
+**Upgrade is off until sales open**, which is when Token Station offers synthesis. The one switch is `UPGRADE_OFFERED` in `daemon/src/account.rs`. The daemon reports it as `account.upgrade_offered` in `/v1/status`, and both Apps show Upgrade only when it is true. Manage plan doesn't depend on it.
 
 ## Voice
 

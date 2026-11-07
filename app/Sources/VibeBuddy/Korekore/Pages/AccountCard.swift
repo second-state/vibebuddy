@@ -8,6 +8,13 @@ struct KorekoreAccountCard: View {
     @ObservedObject var model: AppModel
     /// The browser is open on the sign-in page; cleared when the status says signed in.
     @State private var waiting = false
+    /// A plan button's request is running: a second click would open a second Checkout.
+    @State private var planBusy = false
+    /// What the plan row says while the App waits for Stripe to confirm a payment.
+    @State private var paying: String?
+    /// Reads the account every few seconds after Checkout opens, since the plan changes only when Stripe's payment
+    /// reaches the service, which can be after the App comes back.
+    @State private var watching: Task<Void, Never>?
 
     private var account: AccountStatus? { model.status?.account }
 
@@ -66,8 +73,13 @@ struct KorekoreAccountCard: View {
             }
         }
         .onChange(of: account?.signedIn) { waiting = false }
+        .onDisappear { watching?.cancel(); paying = nil }
         // Reading the plan and the voice credit costs a request to the service, so only when the page is shown.
         .task { if account?.signedIn == true { try? await model.client.refreshAccount() } }
+        // Back from Stripe's pages in the browser: read the plan and the voice credit again.
+        .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
+            if account?.signedIn == true { Task { try? await model.client.refreshAccount() } }
+        }
     }
 
     @ViewBuilder private func signedIn(_ account: AccountStatus) -> some View {
@@ -76,12 +88,20 @@ struct KorekoreAccountCard: View {
             Button(String(localized: "Sign out")) { signOut() }.kButton()
             Button(String(localized: "Delete account…")) { confirmDelete() }.kButton()
         }
-        if AccountPlan.shown, let plan = account.plan {
+        // The plan row shows with its button even while the plan is hidden: Upgrade has its own switch, and a Paid
+        // user must always be able to manage the plan.
+        if let plan = account.plan, AccountPlan.shown || account.planButton != nil {
             KDivider()
             row {
                 Text("Plan").font(.rounded(14))
                 Spacer()
+                if let paying, !plan.paid { KTag(paying, color: Theme.Colors.waitText) }
                 KTag(plan.paid ? String(localized: "Paid plan") : String(localized: "Free"), color: plan.paid ? Theme.Colors.doneText : Theme.Colors.ink)
+                switch account.planButton {
+                case .upgrade: Button(String(localized: "Upgrade")) { openPlanPage(.upgrade) }.kButton(.sun).disabled(planBusy)
+                case .managePlan: Button(String(localized: "Manage plan")) { openPlanPage(.managePlan) }.kButton().disabled(planBusy)
+                case nil: EmptyView()
+                }
             }
         }
         // Nothing before the first use of our voice service.
@@ -126,6 +146,43 @@ struct KorekoreAccountCard: View {
                 waiting = false
                 model.lastError = String(localized: "Couldn't sign in: \(error.localizedDescription)")
             }
+        }
+    }
+
+    /// Opens Checkout or the Customer Portal in the browser; the account is read again when the App comes back.
+    private func openPlanPage(_ button: AccountStatus.PlanButton) {
+        planBusy = true
+        Task {
+            let answer = await model.client.planPage(button)
+            planBusy = false
+            switch answer {
+            case .open(let url):
+                NSWorkspace.shared.open(url)
+                if button == .upgrade { watchForPaid(String(localized: "Waiting for the payment…")) }
+            // The daemon has read the account again. Still Free: Stripe has the payment, the service not yet.
+            case .conflict("already_paid"):
+                if model.status?.account?.plan?.paid != true { watchForPaid(String(localized: "Your payment is being processed.")) }
+            // The status shows signed out.
+            case .notSignedIn: break
+            case .conflict: model.lastError = String(localized: "This Paid plan can't be managed here.")
+            case .notOffered: model.lastError = String(localized: "The Paid plan isn't offered here.")
+            case .failed(let message):
+                model.lastError = String(localized: "Couldn't open the plan page: \(message ?? String(localized: "the daemon didn't say why"))")
+            }
+        }
+    }
+
+    /// Reads the account every 3 s for a minute, or until it is on the Paid plan.
+    private func watchForPaid(_ note: String) {
+        paying = note
+        watching?.cancel()
+        watching = Task {
+            for _ in 0..<20 {
+                try? await Task.sleep(for: .seconds(3))
+                if Task.isCancelled || model.status?.account?.plan?.paid == true { break }
+                try? await model.client.refreshAccount()
+            }
+            if !Task.isCancelled { paying = nil }
         }
     }
 
