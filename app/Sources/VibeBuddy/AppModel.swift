@@ -32,6 +32,8 @@ final class AppModel: ObservableObject {
     private var streamTask: Task<Void, Never>?
     private var linkLostSince: Date?
     private var linkNotified = false
+    /// The box was there at least once since the app started: a box that never showed up isn't lost.
+    private var linkSeen = false
     /// A voice the user asked for while changing the UI language, to write once the restarted app sees the box.
     /// Taken out of the defaults at start, so it is tried in this run only and never surprises the user days later.
     private var pendingVoice: String?
@@ -146,10 +148,12 @@ final class AppModel: ObservableObject {
     private func checkLink() {
         guard let status, daemonAlive, status.config.notifyLink else { linkLostSince = nil; return }
         if status.device.connected {
+            linkSeen = true
             linkLostSince = nil
             linkNotified = false
             return
         }
+        guard linkSeen else { return }
         if linkLostSince == nil { linkLostSince = Date() }
         if !linkNotified, let since = linkLostSince, Date().timeIntervalSince(since) >= 30 {
             linkNotified = true

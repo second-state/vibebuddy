@@ -1226,9 +1226,17 @@ fn link_auth(codex_home: &Path, user_codex_home: &Path) -> std::io::Result<()> {
     }
     #[cfg(unix)]
     return std::os::unix::fs::symlink(&target, &link);
-    // A file symlink on Windows needs Developer Mode or admin rights; without them this fails and voice can't start.
+    // A file symlink on Windows needs Developer Mode or admin rights. Without them, a hard link shares the one file in
+    // the same way, since Codex rewrites it in place; it is made again at every start, in case something replaced the
+    // user's file. Without a login there is nothing to link to, and the session reports "not logged in".
     #[cfg(windows)]
-    return std::os::windows::fs::symlink_file(&target, &link);
+    return std::os::windows::fs::symlink_file(&target, &link).or_else(|error| {
+        if !target.is_file() {
+            return Ok(());
+        }
+        info!("no symlink for the resident Codex home's auth.json ({error}); using a hard link");
+        std::fs::hard_link(&target, &link)
+    });
 }
 
 /// The user's Codex memory summary (`memories/memory_summary.md`), cut at Codex's own cap; None if there is none.
@@ -1743,6 +1751,32 @@ pub(crate) mod tests {
         std::io::Write::write_all(&mut file, b"{}").unwrap();
         assert_eq!(std::fs::read_to_string(user.join("auth.json")).unwrap(), "{}");
         assert!(std::fs::symlink_metadata(&link).unwrap().file_type().is_symlink());
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    /// Windows: a symlink if the user may make one, else a hard link. Either way the login is one file.
+    #[cfg(windows)]
+    #[test]
+    fn the_login_is_shared_on_windows_with_or_without_the_symlink_right() {
+        let dir = temp_dir("windows-link");
+        let (home, user) = (dir.join("home"), dir.join("user"));
+        std::fs::create_dir_all(&user).unwrap();
+        let link = home.join("auth.json");
+
+        // No login yet: nothing to link to, and no error.
+        prepare_codex_home(&home, &user).unwrap();
+        assert!(!link.exists());
+
+        std::fs::write(user.join("auth.json"), "{\"tokens\":\"user\"}").unwrap();
+        prepare_codex_home(&home, &user).unwrap();
+        prepare_codex_home(&home, &user).unwrap();
+        assert_eq!(std::fs::read_to_string(&link).unwrap(), "{\"tokens\":\"user\"}");
+
+        // A write through the link, as Codex refreshes tokens (truncate and rewrite in place), lands in the user's.
+        let mut file = std::fs::OpenOptions::new().write(true).truncate(true).open(&link).unwrap();
+        std::io::Write::write_all(&mut file, b"{}").unwrap();
+        drop(file);
+        assert_eq!(std::fs::read_to_string(user.join("auth.json")).unwrap(), "{}");
         let _ = std::fs::remove_dir_all(dir);
     }
 

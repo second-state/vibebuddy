@@ -45,7 +45,7 @@ Source: "{#Stage}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs
 Source: "vibebuddy.ico"; DestDir: "{app}"; Flags: ignoreversion
 
 [Icons]
-Name: "{autoprograms}\{#AppName}"; Filename: "{app}\vibebuddy-desktop.exe"; IconFilename: "{app}\vibebuddy.ico"; AppUserModelID: "{#AppId}"
+Name: "{autoprograms}\{#AppName}"; Filename: "{app}\vibebuddy-desktop.exe"; Parameters: "--settings"; IconFilename: "{app}\vibebuddy.ico"; AppUserModelID: "{#AppId}"
 
 [Registry]
 ; The same value the app's Launch at login switch reads and writes.
@@ -53,7 +53,7 @@ Root: HKCU; Subkey: "Software\Microsoft\Windows\CurrentVersion\Run"; ValueType: 
 
 [Run]
 Filename: "{app}\vibebuddy-hook.exe"; Parameters: "install"; StatusMsg: "{cm:ConnectingAgents}"; Flags: runhidden
-Filename: "{app}\vibebuddy-desktop.exe"; Description: "{cm:LaunchProgram,{#AppName}}"; Flags: nowait postinstall skipifsilent
+Filename: "{app}\vibebuddy-desktop.exe"; Parameters: "--settings"; Description: "{cm:LaunchProgram,{#AppName}}"; Flags: nowait postinstall skipifsilent
 
 [UninstallRun]
 Filename: "{app}\vibebuddy-hook.exe"; Parameters: "uninstall"; RunOnceId: "Hooks"; Flags: runhidden

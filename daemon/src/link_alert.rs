@@ -1,6 +1,8 @@
 //! Outside macOS there is no app to say the box is gone, so the daemon says it: with `notify-send` on Linux, a toast
 //! on Windows.
-//! Same rule as the app: once, after 30 seconds without the box, and again only after it has come back.
+//! Same rule as the app: once, after the box was there and then gone for 30 seconds, and again only after it has come
+//! back. A box that never showed up since the daemon started isn't lost, so that says nothing.
+//! The text is in the language the app shows: the `language` file it keeps in the config directory, else the locale.
 
 use std::time::{Duration, Instant};
 
@@ -9,11 +11,13 @@ use tracing::warn;
 
 const GRACE: Duration = Duration::from_secs(30);
 const CHECK_INTERVAL: Duration = Duration::from_secs(5);
-const TITLE: &str = "Box disconnected";
-const BODY: &str = "VibeBuddy hasn't seen the box for 30 seconds. Check the USB cable.";
+const TEXT: (&str, &str) = ("Box disconnected", "The box has been gone for 30 seconds.");
+const CHINESE_TEXT: (&str, &str) = ("盒子断开了", "盒子已经离开 30 秒了。");
 
 #[derive(Default)]
 struct LinkAlert {
+    /// The box was there at least once since the daemon started.
+    seen: bool,
     lost_since: Option<Instant>,
     notified: bool,
 }
@@ -22,11 +26,12 @@ impl LinkAlert {
     /// Returns true exactly when the notification should go out.
     fn check(&mut self, connected: bool, enabled: bool, now: Instant) -> bool {
         if connected {
+            self.seen = true;
             self.lost_since = None;
             self.notified = false;
             return false;
         }
-        if !enabled {
+        if !enabled || !self.seen {
             self.lost_since = None;
             return false;
         }
@@ -54,10 +59,39 @@ pub(crate) async fn watch(state: crate::AppState) {
     }
 }
 
+fn text() -> (&'static str, &'static str) {
+    let saved = crate::config::config_dir().and_then(|dir| std::fs::read_to_string(dir.join("language")).ok());
+    let chinese = match saved.as_deref().map(str::trim) {
+        Some("zh-Hans") => true,
+        Some("en") => false,
+        _ => locale_is_chinese(),
+    };
+    if chinese { CHINESE_TEXT } else { TEXT }
+}
+
+/// The first of the POSIX locale variables that is set decides, as in the app.
+#[cfg(not(windows))]
+fn locale_is_chinese() -> bool {
+    ["LC_ALL", "LC_MESSAGES", "LANG"]
+        .iter()
+        .find_map(|name| std::env::var(name).ok().filter(|value| !value.is_empty()))
+        .is_some_and(|locale| locale.starts_with("zh"))
+}
+
+/// The user's display language, as in the app.
+#[cfg(windows)]
+fn locale_is_chinese() -> bool {
+    // SAFETY: no arguments; it returns a language id.
+    let language = unsafe { windows_sys::Win32::Globalization::GetUserDefaultUILanguage() };
+    // The primary language in the low 10 bits; LANG_CHINESE is 4.
+    language & 0x3ff == 0x04
+}
+
 #[cfg(not(windows))]
 fn notify() -> Command {
+    let (title, body) = text();
     let mut command = Command::new("notify-send");
-    command.args(["--app-name=VibeBuddy", TITLE, BODY]);
+    command.args(["--app-name=VibeBuddy", title, body]);
     command
 }
 
@@ -76,11 +110,12 @@ fn notify() -> Command {
         $m::CreateToastNotifier($id).Show([Windows.UI.Notifications.ToastNotification]::new($x))";
     // No console window flashes up for it.
     const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+    let (title, body) = text();
     let mut command = Command::new("powershell.exe");
     command
         .args(["-NoProfile", "-NonInteractive", "-Command", SCRIPT])
-        .env("VIBEBUDDY_TITLE", TITLE)
-        .env("VIBEBUDDY_BODY", BODY)
+        .env("VIBEBUDDY_TITLE", title)
+        .env("VIBEBUDDY_BODY", body)
         .creation_flags(CREATE_NO_WINDOW);
     command
 }
@@ -92,7 +127,7 @@ mod tests {
     #[test]
     fn notifies_once_after_the_grace_period_and_rearms_on_reconnect() {
         let start = Instant::now();
-        let mut alert = LinkAlert::default();
+        let mut alert = LinkAlert { seen: true, ..LinkAlert::default() };
         assert!(!alert.check(false, true, start));
         assert!(!alert.check(false, true, start + Duration::from_secs(29)));
         assert!(alert.check(false, true, start + GRACE));
@@ -101,6 +136,17 @@ mod tests {
         let lost_again = start + Duration::from_secs(200);
         assert!(!alert.check(false, true, lost_again));
         assert!(alert.check(false, true, lost_again + GRACE));
+    }
+
+    #[test]
+    fn a_box_never_seen_since_start_is_not_lost() {
+        let start = Instant::now();
+        let mut alert = LinkAlert::default();
+        assert!(!alert.check(false, true, start));
+        assert!(!alert.check(false, true, start + Duration::from_secs(600)));
+        assert!(!alert.check(true, true, start + Duration::from_secs(601)));
+        assert!(!alert.check(false, true, start + Duration::from_secs(602)));
+        assert!(alert.check(false, true, start + Duration::from_secs(602) + GRACE));
     }
 
     #[test]
@@ -115,7 +161,7 @@ mod tests {
     #[test]
     fn turning_the_setting_off_silences_it() {
         let start = Instant::now();
-        let mut alert = LinkAlert::default();
+        let mut alert = LinkAlert { seen: true, ..LinkAlert::default() };
         assert!(!alert.check(false, false, start));
         assert!(!alert.check(false, false, start + Duration::from_secs(60)));
         // Turned back on: the 30 seconds count from then, not from when the box left.
