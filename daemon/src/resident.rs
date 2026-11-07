@@ -1226,9 +1226,17 @@ fn link_auth(codex_home: &Path, user_codex_home: &Path) -> std::io::Result<()> {
     }
     #[cfg(unix)]
     return std::os::unix::fs::symlink(&target, &link);
-    // A file symlink on Windows needs Developer Mode or admin rights; without them this fails and voice can't start.
+    // A file symlink on Windows needs Developer Mode or admin rights. Without them, a hard link shares the one file in
+    // the same way, since Codex rewrites it in place; it is made again at every start, in case something replaced the
+    // user's file. Without a login there is nothing to link to, and the session reports "not logged in".
     #[cfg(windows)]
-    return std::os::windows::fs::symlink_file(&target, &link);
+    return std::os::windows::fs::symlink_file(&target, &link).or_else(|error| {
+        if !target.is_file() {
+            return Ok(());
+        }
+        info!("no symlink for the resident Codex home's auth.json ({error}); using a hard link");
+        std::fs::hard_link(&target, &link)
+    });
 }
 
 /// The user's Codex memory summary (`memories/memory_summary.md`), cut at Codex's own cap; None if there is none.
