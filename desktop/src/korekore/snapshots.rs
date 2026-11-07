@@ -122,11 +122,21 @@ fn draw_the_korekore_pages() {
         lines: 12,
         complete: true,
     }];
+    // The user's own Character, as a card in the grid: Luna's drawings, from the repo, stand in for theirs.
+    let luna = std::fs::read(concat!(env!("CARGO_MANIFEST_DIR"), "/../characters/luna/pack.bin")).unwrap();
+    let frames = crate::character::look_frames(&crate::character::Pack::parse(&luna).unwrap().look.unwrap()).unwrap();
+    let faces: Vec<_> = frames.iter().take(4).map(|frame| crate::handle(frame, 1)).collect();
+    app.custom_look = Some((Vec::new(), faces));
+    app.characters.custom_lender = Some("luna".to_owned());
     for section in Section::ALL {
         app.tab = section.tab();
         let element: Element<'_, Message> = app.view(iced::window::Id::unique());
         save(&format!("page-{}", format!("{section:?}").to_lowercase()), (954.0, 766.0), element);
     }
+    // The whole Character page, down to the grid's last row.
+    app.tab = Section::Character.tab();
+    let element: Element<'_, Message> = app.view(iced::window::Id::unique());
+    save("page-character-tall", (954.0, 1500.0), element);
     // Making a Character, which takes the Character page's place.
     if let Some(base) = app.voices.first().map(crate::Lender::of) {
         app.tab = Section::Character.tab();

@@ -4,7 +4,7 @@
 use iced::widget::{Space, button, column, container, image, row, text};
 use iced::{Alignment, Border, Element, Length, Padding};
 
-use super::controls::{Fill, bar, bold, card, card_with, divider, field, heading, note, picker, pill, rows, small, tag};
+use super::controls::{Fill, bar, bold, card, card_with, divider, field, heading, note, picker, pill, rows, small, tag, trash_pill};
 use super::theme;
 use crate::i18n::tr;
 use crate::status;
@@ -144,21 +144,22 @@ impl crate::App {
 
     // MARK: Making a Character
 
-    /// A Character the user made, as a Character card with Use or Resume, and Delete.
+    /// A Character the user made, as a Character card with Use or Resume and a trash can beside it.
     pub(super) fn kk_made_card<'a>(&'a self, made: &'a making::MadeCharacter, job: Option<&'a making::Making>) -> Element<'a, Message> {
         let online = self.online();
         let busy = self.busy();
         let in_use = self.status.as_ref().and_then(|status| status.device.voice.as_deref()) == Some(made.id.as_str());
         let making_this = job.is_some_and(|job| job.running() && job.id == made.id);
         let job_running = job.is_some_and(making::Making::running);
+        let trash = trash_pill((!making_this).then(|| Message::AskDeleteMade(Some(made.id.clone()))));
         let action: Element<'_, Message> = if in_use {
             tag(tr("In use", &[]), theme::KORE_PINK_TEXT)
         } else if made.complete {
-            pill(tr("Use", &[]), Fill::Paper, (online && !busy).then_some(Message::UseMade(made.id.clone()))).into()
+            row![trash, pill(tr("Use", &[]), Fill::Paper, (online && !busy).then_some(Message::UseMade(made.id.clone())))].spacing(5).into()
         } else if making_this {
             tag(tr("Making…", &[]), theme::WAIT_TEXT)
         } else {
-            pill(tr("Resume", &[]), Fill::Paper, (!job_running).then_some(Message::ResumeMade(made.id.clone()))).into()
+            row![trash, pill(tr("Resume", &[]), Fill::Paper, (!job_running).then_some(Message::ResumeMade(made.id.clone())))].spacing(5).into()
         };
         let base = assets::voice_name(&made.base);
         let voice = self.character_voices.iter().find(|voice| voice.id == made.voice).map_or_else(|| made.voice.clone(), |voice| voice.name.clone());
@@ -167,7 +168,8 @@ impl crate::App {
             Some((_, face)) => super::pages::figure(face.clone()).into(),
             None => Space::new().into(),
         };
-        let delete: Element<'_, Message> = if self.confirm_delete_made.as_deref() == Some(made.id.as_str()) {
+        // Asking before deleting, for the moment it takes.
+        let delete = (self.confirm_delete_made.as_deref() == Some(made.id.as_str())).then(|| {
             column![
                 note(tr("Delete “%@”? This can't be undone.", &[&made.name])),
                 small(tr("Its lines made in its voice go with it; making it again would make them again.", &[])),
@@ -179,18 +181,13 @@ impl crate::App {
                 .spacing(6),
             ]
             .spacing(6)
-            .into()
-        } else if in_use {
-            small(tr("It's on the box: put another character on the box to delete this one.", &[]))
-        } else {
-            row![Space::new().width(Length::Fill), pill(tr("Delete…", &[]), Fill::Paper, (!making_this).then(|| Message::AskDeleteMade(Some(made.id.clone()))))].into()
-        };
+        });
         let content = column![
             container(face).center_x(Length::Fill).align_y(Alignment::End).height(104).padding(Padding::ZERO.bottom(4)).style(|_| super::pages::stage(theme::BOX_CARD)),
             row![text(made.name.clone()).font(bold()).size(16).width(Length::Fill), action].align_y(Alignment::Center),
             small(detail),
-            delete,
         ]
+        .push(delete)
         .spacing(6);
         let (outline, stroke) = if in_use { (theme::KORE_PINK, theme::STROKE_BOLD) } else { (theme::INK, theme::STROKE_BASE) };
         card_with(content, theme::PAPER, outline, stroke).padding(9).into()

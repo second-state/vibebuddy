@@ -85,6 +85,10 @@ enum KorekoreSnapshots {
         try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
         let status = try! StatusCoding.decoder().decode(Status.self, from: Data(sample.utf8))
         model.showSample(status)
+        // The user's own Character, as a card in the grid: a preset's drawings stand in for theirs.
+        if let sheet = LookImages.load(URL(fileURLWithPath: "characters/luna/look.png")), let look = try? LookBuilder.build([sheet]) {
+            model.sampleCustomCharacter = (look, "wanwanxiaohe")
+        }
         for section in KorekoreSection.allCases {
             let window = KorekoreSettingsWindow(rootView: KorekoreSettingsRoot(model: model, initial: section, sampleConversation: conversation))
             window.setFrameOrigin(NSPoint(x: -20_000, y: 0))

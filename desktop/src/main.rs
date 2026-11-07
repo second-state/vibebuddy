@@ -153,9 +153,6 @@ enum Message {
     UseVoice(&'static str),
     /// A form of address for a language, or none.
     PickAddress(assets::Language, Option<&'static str>),
-    ChooseDrawings,
-    Drawings(Result<Option<Vec<character::Image>>, String>),
-    PickLender(Lender),
     UseRobot,
     UseCustom,
     CopyPrompt,
@@ -306,10 +303,7 @@ struct App {
     characters: custom::Settings,
     /// The user's own Character on the card: its look, its four frames to show, and who lends it voice and lines.
     custom_look: Option<(Vec<u8>, Vec<image::Handle>)>,
-    /// `custom_look` is the look last written (with `characters.custom_lender`), not one just chosen.
-    custom_look_written: bool,
     lender: Option<Lender>,
-    custom_problem: Option<String>,
     /// The robot's face for its card.
     robot_face: Option<image::Handle>,
     /// Each decoration's preview over each set of box screens, keyed `<screens>-<decoration>`, and the frame up now.
@@ -468,9 +462,7 @@ impl App {
             faces: Vec::new(),
             characters: custom::Settings::load(),
             custom_look: None,
-            custom_look_written: false,
             lender: None,
-            custom_problem: None,
             robot_face: None,
             decoration_frames: decoration_frames(),
             decoration_frame: 0,
@@ -532,7 +524,6 @@ impl App {
         app.custom_look = custom::custom_look_file()
             .and_then(|path| std::fs::read(path).ok())
             .and_then(|look| character::look_frames(&look).map(|frames| (look, frames.iter().map(|frame| handle(frame, 2)).collect())));
-        app.custom_look_written = app.custom_look.is_some();
         // Debug builds only: open the window on a given section or first-run step, for checking it on a desktop
         // without a pointer (VIBEBUDDY_KOREKORE_SECTION=device, VIBEBUDDY_KOREKORE_GUIDE=1).
         #[cfg(debug_assertions)]
@@ -932,25 +923,6 @@ impl App {
                     return Task::done(Message::UseCustom);
                 }
             }
-            Message::ChooseDrawings => return Task::perform(custom::choose_drawings(), Message::Drawings),
-            Message::Drawings(Ok(None)) => {}
-            Message::Drawings(Ok(Some(drawings))) => {
-                match character::build_look(&drawings) {
-                    Some(look) => {
-                        let frames = character::look_frames(&look).unwrap_or_default();
-                        self.custom_look = Some((look, frames.iter().map(|frame| handle(frame, 2)).collect()));
-                        self.custom_look_written = false;
-                        self.custom_problem = None;
-                    }
-                    None => self.custom_problem = Some(tr("No figure found: use a plain white or transparent background.", &[])),
-                }
-                return self.show_custom_look();
-            }
-            Message::Drawings(Err(error)) => {
-                self.custom_problem = Some(error);
-                return self.show_custom_look();
-            }
-            Message::PickLender(lender) => self.lender = Some(lender),
             Message::UseRobot => {
                 self.characters.robot_lender = None;
                 self.characters.save();
@@ -964,7 +936,6 @@ impl App {
                 }
                 self.characters.custom_lender = Some(lender.id.to_owned());
                 self.characters.save();
-                self.custom_look_written = true;
                 let form = assets::language_of(lender.id).and_then(|language| self.characters.address(language)).map(str::to_owned);
                 let write = async move {
                     let pack = assets::read_character(lender.id, form.as_deref()).await?.with_look(look, CUSTOM);
@@ -1151,8 +1122,6 @@ impl App {
                 let Some((look, _)) = form.look else { return Task::none() };
                 let frames = character::look_frames(&look).unwrap_or_default();
                 self.custom_look = Some((look, frames.iter().map(|frame| handle(frame, 2)).collect()));
-                self.custom_look_written = false;
-                self.custom_problem = None;
                 self.lender = Some(form.base);
                 return Task::done(Message::UseCustom);
             }
@@ -1232,8 +1201,6 @@ impl App {
                     let _ = std::fs::remove_file(path);
                 }
                 self.custom_look = None;
-                self.custom_look_written = false;
-                self.custom_problem = None;
                 let lender = self.characters.custom_lender.take().and_then(|id| self.voices.iter().find(|voice| voice.id == id).map(|voice| voice.id));
                 self.characters.save();
                 let current = self.status.as_ref().and_then(|status| status.device.voice.clone());
@@ -1424,11 +1391,6 @@ impl App {
 
     /// Pushes the menu and the face's color to the tray; a no-op until the tray is up.
     /// Asks for the Characters made here, and the voices once.
-    /// The korekore Character page opens the look's card below the grid; go down to it.
-    fn show_custom_look(&self) -> Task<Message> {
-        iced::widget::operation::snap_to_end(korekore::pages::CHARACTER_PAGE)
-    }
-
     fn refresh_made(&self) -> Task<Message> {
         let voices = if self.character_voices.is_empty() {
             Task::perform(client::character_voices(), Message::CharacterVoices)
