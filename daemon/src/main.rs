@@ -2121,9 +2121,11 @@ async fn post_account_refresh(State(state): State<AppState>) -> (StatusCode, Jso
     }
 }
 
-/// Opens the Paid plan's Stripe Checkout: the App opens the URL in the browser. Behind [`account::UPGRADE_OFFERED`].
+/// Opens the Paid plan's Stripe Checkout: the App opens the URL in the browser. Only when the account says
+/// [`account::AccountStatus::upgrade_offered`].
 async fn post_upgrade(State(state): State<AppState>) -> axum::response::Response {
-    plan_page(&state, account::PlanPage::Checkout, account::UPGRADE_OFFERED).await
+    let offered = state.account.status().upgrade_offered;
+    plan_page(&state, account::PlanPage::Checkout, offered).await
 }
 
 /// Opens Stripe's Customer Portal, where a Paid user changes the card or cancels.
@@ -2360,25 +2362,27 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn the_plan_routes_ask_nothing_when_signed_out_or_while_upgrade_is_off() {
+    async fn the_plan_routes_ask_nothing_when_signed_out_or_while_upgrade_is_not_offered() {
         let (service, seen) = account::tests::serve(vec![(200, r#"{"url":"https://checkout.stripe.com/c/pay/cs_test_1"}"#)]);
         let state = signed_in_state(&service, "off");
-        let (status, body) = plan_answer(&state, account::PlanPage::Checkout, false).await;
-        assert_eq!((status, body["accepted"].as_bool()), (StatusCode::NOT_FOUND, Some(false)));
-        assert_eq!(state.snapshot().await.account.upgrade_offered, account::UPGRADE_OFFERED);
-        // The route itself follows the switch: off, it asks the service nothing.
-        let expected = if account::UPGRADE_OFFERED { StatusCode::OK } else { StatusCode::NOT_FOUND };
-        assert_eq!(post_upgrade(State(state.clone())).await.status(), expected);
-        if !account::UPGRADE_OFFERED {
-            assert!(seen.lock().unwrap().is_empty());
-        }
+        // Not read yet, or the service said false or had no such field: the route asks the service nothing.
+        assert!(!state.snapshot().await.account.upgrade_offered);
+        assert_eq!(post_upgrade(State(state.clone())).await.status(), StatusCode::NOT_FOUND);
+        state.account.read_upgrade_offered_for_tests(false);
+        assert_eq!(post_upgrade(State(state.clone())).await.status(), StatusCode::NOT_FOUND);
+        assert!(seen.lock().unwrap().is_empty());
+        // The service offers it: the route asks for Checkout.
+        state.account.read_upgrade_offered_for_tests(true);
+        assert!(state.snapshot().await.account.upgrade_offered);
+        assert_eq!(post_upgrade(State(state.clone())).await.status(), StatusCode::OK);
+        assert_eq!(seen.lock().unwrap().len(), 1);
 
         let mut signed_out = test_state(Arc::new(RecordingTransport::default()));
         let dir = std::env::temp_dir().join(format!("vibebuddy-plan-out-{}", std::process::id()));
         signed_out.account = Arc::new(account::Account::new(Some(service), Some(&dir), 7331));
         assert_eq!(plan_answer(&signed_out, account::PlanPage::Checkout, true).await.0, StatusCode::UNAUTHORIZED);
         assert_eq!(plan_answer(&signed_out, account::PlanPage::Portal, true).await.0, StatusCode::UNAUTHORIZED);
-        assert_eq!(seen.lock().unwrap().len(), usize::from(account::UPGRADE_OFFERED), "only an Upgrade with the switch on asks");
+        assert_eq!(seen.lock().unwrap().len(), 1, "signed out, nothing more is asked");
     }
 
     #[tokio::test]

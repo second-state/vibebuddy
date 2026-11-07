@@ -69,8 +69,9 @@ pub struct Account {
     /// The voice credit left, in millionths of a US dollar (ADR-0024); None before the account first uses our voice
     /// service, when the service couldn't read it, and from older daemons.
     pub voice_credit_micro_usd: Option<u64>,
-    /// Whether to show Upgrade on Free: the daemon's one switch (`account::UPGRADE_OFFERED`), off until sales open.
-    /// False from older daemons.
+    /// The one switch for the Paid plan: the service's answer, which the daemon reads with the plan. While it is false,
+    /// the app doesn't offer the Paid plan: no Upgrade, no Free plan row, no Relay switch or refusals, and no making a
+    /// Character with VibeBuddy's voices. False when signed out, and from older daemons and services.
     pub upgrade_offered: bool,
 }
 
@@ -82,7 +83,7 @@ pub enum PlanButton {
 }
 
 impl Account {
-    /// Manage plan on Paid, Upgrade on Free while the switch is on, none otherwise.
+    /// Manage plan on Paid, Upgrade on Free while the Paid plan is offered, none otherwise.
     pub fn plan_button(&self) -> Option<PlanButton> {
         let plan = self.plan.as_ref().filter(|_| self.signed_in)?;
         if plan.paid() {
@@ -90,6 +91,11 @@ impl Account {
         } else {
             self.upgrade_offered.then_some(PlanButton::Upgrade)
         }
+    }
+
+    /// The account card's plan row shows with its button: a Paid user always sees it and Manage plan.
+    pub fn shows_plan_row(&self) -> bool {
+        self.plan.is_some() && self.plan_button().is_some()
     }
 
     /// The voice credit left in dollars, "$0.93", for the account card; None when the daemon doesn't know it. Cut
@@ -110,10 +116,6 @@ pub struct Plan {
 }
 
 impl Plan {
-    /// Whether the app shows the Paid plan. Off until the plan is on sale (2026-10-28): the plan row, the Relay switch
-    /// and its refusals, and making a Character with VibeBuddy's voices are hidden. The daemon doesn't change.
-    pub const SHOWN: bool = false;
-
     pub fn paid(&self) -> bool {
         self.name == "paid"
     }
@@ -327,9 +329,10 @@ impl Device {
         }
     }
 
-    /// What the link section says about the Relay turning this computer away.
-    pub fn relay_refusal(&self) -> Option<String> {
-        if !Plan::SHOWN {
+    /// What the link section says about the Relay turning this computer away; nothing while the Paid plan isn't
+    /// `offered`.
+    pub fn relay_refusal(&self, offered: bool) -> Option<String> {
+        if !offered {
             return None;
         }
         Some(match self.relay_refused.as_deref()? {
@@ -555,8 +558,9 @@ mod tests {
     #[test]
     fn the_relays_refusal_is_explained() {
         let device: Device = serde_json::from_str(r#"{"connected":false,"relay_refused":"plan"}"#).expect("device");
-        assert_eq!(device.relay_refusal().as_deref(), Plan::SHOWN.then_some("The Relay needs the Paid plan."));
-        assert_eq!(Device::default().relay_refusal(), None);
+        assert_eq!(device.relay_refusal(true).as_deref(), Some("The Relay needs the Paid plan."));
+        assert_eq!(device.relay_refusal(false), None, "nothing about the Paid plan while it isn't offered");
+        assert_eq!(Device::default().relay_refusal(true), None);
     }
 
     #[test]
@@ -581,8 +585,10 @@ mod tests {
         assert_eq!(offered.plan_button(), Some(PlanButton::Upgrade));
         let paid = Account { plan: Some(Plan { name: "paid".to_owned(), period_end: None }), upgrade_offered: false, ..offered.clone() };
         assert_eq!(paid.plan_button(), Some(PlanButton::ManagePlan), "Manage plan doesn't wait for the switch");
-        assert_eq!(Account { signed_in: false, ..paid }.plan_button(), None, "signed out");
-        assert_eq!(Account { plan: None, ..offered }.plan_button(), None, "before the plan is read");
+        assert_eq!(Account { signed_in: false, ..paid.clone() }.plan_button(), None, "signed out");
+        assert_eq!(Account { plan: None, ..offered.clone() }.plan_button(), None, "before the plan is read");
+        // The plan row shows with its button: on Free only while the Paid plan is offered, always on Paid.
+        assert!(!free.shows_plan_row() && offered.shows_plan_row() && paid.shows_plan_row());
     }
 
     #[test]

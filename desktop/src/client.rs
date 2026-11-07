@@ -479,7 +479,7 @@ pub enum PlanAnswer {
     /// The service's 409 reason, `already_paid` or `no_subscription`: the plan isn't what the app showed, and the
     /// daemon has read the account again.
     Conflict(String),
-    /// 404: Stripe isn't set up for this service, the switch is off, or the daemon is too old for the route.
+    /// 404: Stripe isn't set up for this service, the Paid plan isn't offered, or the daemon is too old for the route.
     NotOffered,
     /// 401: the status then shows signed out.
     NotSignedIn,
