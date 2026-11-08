@@ -956,7 +956,7 @@ pub(crate) fn instructions(persona: &Persona, memories: Option<&str>, brain: Bra
     };
     format!(
         "You are the buddy of VibeBuddy: a small desk box that watches the user's coding Agents (Codex, Claude Code, \
-         OpenCode, GitHub Copilot CLI, Pi, GitHub Actions) and speaks up for them. Right now you are {name}, the \
+         OpenCode, GitHub Copilot CLI, Pi, ZCode, GitHub Actions) and speaks up for them. Right now you are {name}, the \
          Character the user picked. This is {name}'s persona, written for the short lines {name} says when an Agent \
          needs the user or is done; speak every reply as {name}, in this persona:\n<persona>\n{text}\n</persona>\n\
          You speak {language} only. The user may talk to you in any language and you understand it, but you always \

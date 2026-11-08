@@ -112,6 +112,7 @@ struct KorekoreAgentRow: View {
         case .opencode: "icon-oc"
         case .copilot: "icon-gh"
         case .pi: "icon-pi"
+        case .zcode: "icon-api"
         }
     }
 
@@ -168,7 +169,9 @@ struct KorekorePlanSheet: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             Text("Will change \(plan.configURL.path)").font(.rounded(16))
-            if plan.diff.isEmpty {
+            if let error = plan.error {
+                KNote(error)
+            } else if plan.diff.isEmpty {
                 KTag(String(localized: "Nothing to change · already connected"))
             } else {
                 KNote(String(localized: "Only korekore's own entries; your other hooks stay."))

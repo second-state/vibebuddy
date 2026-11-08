@@ -45,6 +45,7 @@ fn card_names(agent: &str) -> Option<(&'static str, &'static str)> {
         "opencode" => Some(("OC:", "OPENCODE")),
         "copilot" => Some(("CP:", "COPILOT")),
         "pi" => Some(("PI:", "PI")),
+        "zcode" => Some(("ZC:", "ZCODE")),
         _ => None,
     }
 }
@@ -194,5 +195,17 @@ mod tests {
         let mut tracker = ActivityTracker::default();
         assert!(apply(&mut tracker, hook("made-up", "working", None)).is_none());
         assert_eq!(tracker.focus_source(), None);
+    }
+    #[test]
+    fn zcode_turn_identity_and_permissions_use_the_shared_tracker() {
+        let mut tracker = ActivityTracker::default();
+        apply(&mut tracker, hook("zcode", "working", Some("turn-1"))).unwrap();
+        apply(&mut tracker, hook("zcode", "needs_input", Some("turn-1"))).unwrap();
+        apply(&mut tracker, hook("zcode", "working", Some("turn-1")));
+        assert_eq!(apply(&mut tracker, hook("zcode", "done", Some("turn-1"))).unwrap().event, "task.done");
+        assert!(apply(&mut tracker, hook("zcode", "done", Some("turn-1"))).is_none_or(|e| e.event != "task.done"));
+        apply(&mut tracker, hook("zcode", "working", Some("turn-2"))).unwrap();
+        assert!(!tracker.has_activity(&activity_id(&hook("zcode", "working", Some("turn-1")))));
+        assert!(tracker.has_activity(&activity_id(&hook("zcode", "working", Some("turn-2")))));
     }
 }

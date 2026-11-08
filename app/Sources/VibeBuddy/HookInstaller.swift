@@ -11,6 +11,7 @@ struct HookInstaller {
         let diff: [String]
         /// What the file becomes; nil deletes it.
         let contents: Data?
+        var error: String? = nil
     }
 
     /// The agent's own directory, which exists once it has run here. The hook binary looks in the same places
@@ -24,6 +25,7 @@ struct HookInstaller {
         case .opencode: return home.appendingPathComponent(".config/opencode")
         case .copilot: return home.appendingPathComponent(".copilot")
         case .pi: return home.appendingPathComponent(".pi/agent")
+        case .zcode: return home.appendingPathComponent(".zcode/cli")
         }
     }
 
@@ -34,6 +36,7 @@ struct HookInstaller {
         case .opencode: return directory(agent).appendingPathComponent("plugins/vibebuddy.js")
         case .copilot: return directory(agent).appendingPathComponent("hooks/vibebuddy.json")
         case .pi: return directory(agent).appendingPathComponent("extensions/vibebuddy.js")
+        case .zcode: return directory(agent).appendingPathComponent("config.json")
         }
     }
 
@@ -55,6 +58,10 @@ struct HookInstaller {
     }
 
     static func isInstalled(_ agent: HookAgent) -> Bool {
+        if agent == .zcode {
+            guard let data = hookOutput(["status"]), let rows = try? JSONSerialization.jsonObject(with: data) as? [[String: Any]] else { return false }
+            return rows.first { ($0["agent"] as? String) == "zcode" }?["installed"] as? Bool ?? false
+        }
         if agent.ownsFile {
             return (try? String(contentsOf: configURL(for: agent), encoding: .utf8))?.contains(Resources.installedHookBinary.path) ?? false
         }
@@ -102,6 +109,7 @@ struct HookInstaller {
 
     static func installPlan(for agent: HookAgent) -> Plan {
         let url = configURL(for: agent)
+        if agent == .zcode { return zcodePlan(installing: true) }
         if agent.ownsFile {
             // Without the hook to make the file there is nothing to write; never let that read as "delete it".
             guard let contents = ownedFileContents(agent) else { return Plan(agent: agent, configURL: url, diff: [], contents: nil) }
@@ -113,10 +121,35 @@ struct HookInstaller {
     }
 
     static func removePlan(for agent: HookAgent) -> Plan {
+        if agent == .zcode { return zcodePlan(installing: false) }
         let url = configURL(for: agent)
         if agent.ownsFile { return ownedFilePlan(agent, url: url, after: nil) }
         let before = readConfig(url)
         return mergePlan(agent, url: url, before: before, after: HookConfig.removed(from: before))
+    }
+
+    private static func hookOutput(_ args: [String]) -> Data? {
+        let process = Process()
+        process.executableURL = Resources.installedHookBinary
+        process.arguments = args
+        let output = Pipe()
+        process.standardOutput = output
+        guard (try? process.run()) != nil else { return nil }
+        let data = output.fileHandleForReading.readDataToEndOfFile()
+        process.waitUntilExit()
+        return process.terminationStatus == 0 ? data : nil
+    }
+
+    private static func zcodePlan(installing: Bool) -> Plan {
+        let url = configURL(for: .zcode)
+        let action = installing ? "install" : "uninstall"
+        guard let data = hookOutput(["plan", action, "zcode"]),
+              let result = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let lines = result["lines"] as? [String] else {
+            return Plan(agent: .zcode, configURL: url, diff: [], contents: nil, error: String(localized: "Could not update ZCode plugin. Check config.json and try again."))
+        }
+        let snapshot: [String: Any] = ["action": action, "before": (try? Data(contentsOf: url))?.base64EncodedString() as Any? ?? NSNull(), "plugin": (try? Data(contentsOf: url.deletingLastPathComponent().appendingPathComponent("vibebuddy-plugin/.zcode-plugin/plugin.json")))?.base64EncodedString() as Any? ?? NSNull()]
+        return Plan(agent: .zcode, configURL: url, diff: lines, contents: try? JSONSerialization.data(withJSONObject: snapshot))
     }
 
     private static func mergePlan(_ agent: HookAgent, url: URL, before: [String: Any], after: [String: Any]) -> Plan {
@@ -146,6 +179,17 @@ struct HookInstaller {
 
     /// Keeps a .bak before writing, and writes via a temp file swap. A file VibeBuddy owns is simply deleted.
     static func apply(_ plan: Plan) throws {
+        if plan.agent == .zcode {
+            guard let contents = plan.contents,
+                  let snapshot = try? JSONSerialization.jsonObject(with: contents) as? [String: Any],
+                  let action = snapshot["action"] as? String,
+                  (snapshot["before"] as? String) == (try? Data(contentsOf: plan.configURL))?.base64EncodedString(),
+                  (snapshot["plugin"] as? String) == (try? Data(contentsOf: plan.configURL.deletingLastPathComponent().appendingPathComponent("vibebuddy-plugin/.zcode-plugin/plugin.json")))?.base64EncodedString(),
+                  hookOutput([action, "zcode"]) != nil else {
+                throw NSError(domain: "VibeBuddy.HookInstaller", code: 1, userInfo: [NSLocalizedDescriptionKey: String(localized: "Could not update ZCode plugin. Check config.json and try again.")])
+            }
+            return
+        }
         let manager = FileManager.default
         guard let contents = plan.contents else {
             if manager.fileExists(atPath: plan.configURL.path) { try manager.removeItem(at: plan.configURL) }

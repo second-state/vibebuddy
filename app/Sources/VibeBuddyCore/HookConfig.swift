@@ -4,19 +4,20 @@ import Foundation
 /// Claude Code's user-level settings.json and Codex's hooks.json share one shape:
 /// `hooks.<event>: [ { hooks: [ { type: "command", command, timeout } ] } ]`.
 public enum HookAgent: String, CaseIterable {
-    case codex, claude, opencode, copilot, pi
+    case codex, claude, opencode, copilot, pi, zcode
 
     /// The events merged into a shared config; empty for agents whose whole file VibeBuddy owns.
     public var events: [String] {
         switch self {
         case .codex: return ["UserPromptSubmit", "PermissionRequest", "PostToolUse", "Stop", "Interrupt", "SessionEnd"]
         case .claude: return ["UserPromptSubmit", "PermissionRequest", "PostToolUse", "Stop", "StopFailure", "SubagentStart", "SubagentStop", "SessionEnd"]
-        case .opencode, .copilot, .pi: return []
+        case .opencode, .copilot, .pi, .zcode: return []
         }
     }
 
     /// OpenCode, Copilot and Pi get a file of VibeBuddy's own in their config directory, instead of entries merged
     /// into the user's: connecting writes it, removing deletes it. The hook binary makes its contents.
+    // ZCode delegates its plugin and shared registration to the Rust installer.
     public var ownsFile: Bool { events.isEmpty }
 
     public var displayName: String {
@@ -26,6 +27,7 @@ public enum HookAgent: String, CaseIterable {
         case .opencode: return "OpenCode"
         case .copilot: return "GitHub Copilot CLI"
         case .pi: return "Pi"
+        case .zcode: return "ZCode"
         }
     }
 }

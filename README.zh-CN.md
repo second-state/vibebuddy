@@ -2,7 +2,7 @@
 
 [English](README.md) | 简体中文
 
-VibeBuddy 是给 AI 编程 Agent 配的桌面宠物。它住在键盘旁一个小小的 ESP32-S3 盒子里，替你盯着 Codex、Claude Code、OpenCode、GitHub Copilot CLI、Pi 和 GitHub Actions：Agent 需要你、做完了或者失败了，氛围小助手会用动画、任务卡片和一句短语音告诉你。
+VibeBuddy 是给 AI 编程 Agent 配的桌面宠物。它住在键盘旁一个小小的 ESP32-S3 盒子里，替你盯着 Codex、Claude Code、OpenCode、GitHub Copilot CLI、Pi、ZCode 和 GitHub Actions：Agent 需要你、做完了或者失败了，氛围小助手会用动画、任务卡片和一句短语音告诉你。
 
 氛围小助手是原创角色。Codex 是第一个接入的 Agent，但设备协议不绑定某个客户端，本机任何程序或脚本都能给它发事件。
 
@@ -28,7 +28,7 @@ VibeBuddy 是给 AI 编程 Agent 配的桌面宠物。它住在键盘旁一个�
 
 ## 它做什么
 
-- **盯着你的 Agent。** Codex、Claude Code 与 GitHub Actions 共用同一个任务卡栈，最多 3 张，最新在最上。每张卡标明是哪个 Agent（Codex 为 `CX:`，Claude Code 为 `CC:`，OpenCode 为 `OC:`，GitHub Copilot CLI 为 `CP:`，Pi 为 `PI:`，GitHub Actions 为 `CI:`）、会话名和项目，以及它在当前状态里待了多久。
+- **盯着你的 Agent。** Codex、Claude Code 与 GitHub Actions 共用同一个任务卡栈，最多 3 张，最新在最上。每张卡标明是哪个 Agent（Codex 为 `CX:`，Claude Code 为 `CC:`，OpenCode 为 `OC:`，GitHub Copilot CLI 为 `CP:`，Pi 为 `PI:`，ZCode 为 `ZC:`，GitHub Actions 为 `CI:`）、会话名和项目，以及它在当前状态里待了多久。
 - **有事才开口。** 氛围小助手有空闲、工作中、需要确认、完成、失败和失联几种状态。需要确认、完成和失败各播报一次短语音，工作中保持安静。
 - **记着当日战绩。** 没事的时候轮播今天干了多少，偶尔做个小动作。
 
@@ -56,7 +56,7 @@ VibeBuddy 是给 AI 编程 Agent 配的桌面宠物。它住在键盘旁一个�
 2. 把盒子插上 Mac。
 3. 打开 VibeBuddy，首次启动的引导会带你：
    - 找到盒子（它会眨眼，确认是这一台），有新固件的话顺手升级；
-   - 接入 Agent：Codex、Claude Code、OpenCode、GitHub Copilot CLI 和 Pi（写 Hook 配置前先展示改动）；
+   - 接入 Agent：Codex、Claude Code、OpenCode、GitHub Copilot CLI、Pi 和 ZCode（写 Hook 配置前先展示改动）；
    - 挑一个角色写进盒子（默认的机器人排在第一个）；
    - 让盒子连上 Wi-Fi，这样不插线也能连到它；
    - 设置登录时启动。
@@ -120,6 +120,7 @@ Hook 是一个 Rust 二进制 [`hook/`](hook/)（`vibebuddy-hook codex` / `vibeb
 - Claude Code：`~/.claude/settings.json` 的八个事件；详见 [`docs/claude-adapter.md`](docs/claude-adapter.md)。
 - OpenCode：VibeBuddy 自己的插件 `~/.config/opencode/plugins/vibebuddy.js`，把每个事件交给 hook。
 - GitHub Copilot CLI：VibeBuddy 自己的 hooks 文件 `~/.copilot/hooks/vibebuddy.json`。Copilot 在一轮结束时不给出回复内容，所以结尾留了问题的一轮也会播报为完成。
+- ZCode：注册在 `~/.zcode/cli/config.json` 中、由 VibeBuddy 管理的本地插件。[设置与限制](docs/zcode-adapter.md)。
 - Pi（1.1.0 及以上）：VibeBuddy 自己的扩展 `~/.pi/agent/extensions/vibebuddy.js`，把每个事件交给 hook。运行中扩展弹出的对话框算作在等你。
 
 OpenCode、Copilot 和 Pi 的这几个文件只属于 VibeBuddy：接入时整份写入，移除时直接删除，不动你自己的配置。
@@ -291,3 +292,5 @@ daemon 平时由 App 看管。没有 App 的开发机可以用 [`packaging/com.v
 我们拥有权利的播报音频，以及日后加入的美术素材，以 [CC BY-SA 4.0](LICENSE-ASSETS) 授权。`voices/` 里的两个中文音色出自火山引擎的语音服务，不在此列；具体范围以 [`LICENSE-ASSETS`](LICENSE-ASSETS) 为准。
 
 两份许可证都不授予「VibeBuddy」名称或氛围小助手角色的商标权利。
+
+ZCode 通过 VibeBuddy 管理的本地插件接入。设置方式和限制见 [ZCode Adapter](docs/zcode-adapter.md)。

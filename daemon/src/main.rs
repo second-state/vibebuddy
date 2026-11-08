@@ -1839,6 +1839,7 @@ async fn post_agent_hook(
             "opencode" => seen.opencode = now,
             "copilot" => seen.copilot = now,
             "pi" => seen.pi = now,
+            "zcode" => seen.zcode = now,
             _ => {}
         }
     }
@@ -3177,5 +3178,31 @@ mod tests {
         )
         .expect("release event should parse");
         assert!(!is_k2_press(&release));
+    }
+    #[tokio::test]
+    async fn zcode_hooks_cross_the_real_http_router() {
+        let transport = Arc::new(RecordingTransport::default());
+        let state = test_state(transport.clone());
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let server = tokio::spawn({ let router = app(state.clone()); async move { axum::serve(listener, router).await } });
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        for (event, shown) in [("working", Some("working")), ("needs_input", Some("needs_input")), ("working", Some("working")), ("done", None), ("done", None)] {
+            let body = serde_json::json!({"agent":"zcode","session_id":"s","turn_id":"t","cwd":"/work","event":event}).to_string();
+            let mut stream = tokio::net::TcpStream::connect(address).await.unwrap();
+            let request = format!("POST /v1/agent-hooks HTTP/1.1\r\nHost: {address}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}", body.len());
+            stream.write_all(request.as_bytes()).await.unwrap();
+            let mut response = Vec::new();
+            tokio::time::timeout(Duration::from_secs(2), stream.read_to_end(&mut response)).await.unwrap().unwrap();
+            assert!(response.starts_with(b"HTTP/1.1 202"));
+            if let Some(shown) = shown {
+                let snapshot = state.snapshot().await;
+                assert_eq!(snapshot.activities.len(), 1);
+                assert_eq!(snapshot.activities[0].state, shown);
+            }
+        }
+        assert!(state.hooks_seen.lock().await.zcode.is_some());
+        assert_eq!(transport.events().iter().filter(|e| e.event == "task.done").count(), 1);
+        server.abort();
     }
 }

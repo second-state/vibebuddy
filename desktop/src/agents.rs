@@ -21,13 +21,21 @@ pub struct Setup {
 }
 
 /// What Connect, Repair or Remove would write, shown before writing it.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, PartialEq)]
 pub struct Plan {
     pub agent: String,
     pub installing: bool,
     pub config: PathBuf,
     /// `+ …` and `- …` lines; empty when nothing would change.
     pub lines: Vec<String>,
+    snapshot: Option<(Option<Vec<u8>>, Option<Vec<u8>>)>,
+}
+
+impl std::fmt::Debug for Plan {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        // Snapshots can contain user credentials; never include them in message logs.
+        f.debug_struct("Plan").field("agent", &self.agent).field("installing", &self.installing).finish_non_exhaustive()
+    }
 }
 
 /// Whether Codex is running the config, judged as on the Mac (`HookConfig.codexTrustHint`): Codex silently disables
@@ -64,13 +72,22 @@ pub async fn plan(agent: String, installing: bool) -> Result<Plan, String> {
     let output = hook(&["plan", action, &agent]).await?;
     let answer: Answer =
         serde_json::from_str(&output).map_err(|error| format!("unexpected answer from vibebuddy-hook plan: {error}"))?;
-    Ok(Plan { agent, installing, config: answer.config, lines: answer.lines })
+    let snapshot = (agent == "zcode").then(|| zcode_snapshot(&answer.config));
+    Ok(Plan { agent, installing, config: answer.config, lines: answer.lines, snapshot })
 }
 
 /// Writes what the plan showed. The hook works it out again from the file as it is now, so a file changed in the
 /// meantime is never overwritten with a stale copy.
 pub async fn apply(plan: Plan) -> Result<String, String> {
+    if plan.snapshot.as_ref().is_some_and(|snapshot| *snapshot != zcode_snapshot(&plan.config)) {
+        return Err("ZCode configuration changed while planning; try again".into());
+    }
     hook(&[if plan.installing { "install" } else { "uninstall" }, &plan.agent]).await
+}
+
+fn zcode_snapshot(config: &std::path::Path) -> (Option<Vec<u8>>, Option<Vec<u8>>) {
+    let plugin = config.parent().unwrap_or(config).join("vibebuddy-plugin/.zcode-plugin/plugin.json");
+    (std::fs::read(config).ok(), std::fs::read(plugin).ok())
 }
 
 async fn hook(args: &[&str]) -> Result<String, String> {

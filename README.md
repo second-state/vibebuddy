@@ -28,7 +28,7 @@ Screen captures from a real box running the Rust firmware. Status scenes use exa
 
 ## What it does
 
-- **Watches your agents.** Codex, Claude Code and GitHub Actions all feed the same stack of up to three task cards, newest on top. Each card shows which agent it is (`CX:` Codex, `CC:` Claude Code, `OC:` OpenCode, `CP:` GitHub Copilot CLI, `PI:` Pi, `CI:` GitHub Actions), the session's name and the project, and how long it has been in its current state.
+- **Watches your agents.** Codex, Claude Code and GitHub Actions all feed the same stack of up to three task cards, newest on top. Each card shows which agent it is (`CX:` Codex, `CC:` Claude Code, `OC:` OpenCode, `CP:` GitHub Copilot CLI, `PI:` Pi, `ZC:` ZCode, `CI:` GitHub Actions), the session's name and the project, and how long it has been in its current state.
 - **Speaks up only when it matters.** The buddy shows idle, working, needs input, done, failed and disconnected. It says one short line when an agent needs your input, finishes or fails, and stays quiet while agents work.
 - **Keeps today's stats.** When nothing is going on it cycles through what got done today and now and then does a little something.
 
@@ -56,7 +56,7 @@ Pomodoro runs entirely on the box: its timer and today's tally keep going withou
 2. Plug the box into the Mac.
 3. Open VibeBuddy. First-run setup walks you through:
    - finding the box (it blinks so you know it's the right one), and updating its firmware if a newer one is out;
-   - connecting your agents: Codex, Claude Code, OpenCode, GitHub Copilot CLI and Pi (you see the exact change to their hook config before it's written);
+   - connecting your agents: Codex, Claude Code, OpenCode, GitHub Copilot CLI, Pi and ZCode (you see the exact change to their hook config before it's written);
    - picking a character and writing it to the box (the default robot comes first);
    - putting the box on Wi-Fi, so this Mac reaches it without the cable;
    - launching at login.
@@ -120,6 +120,7 @@ The hook is a Rust binary in [`hook/`](hook/) (`vibebuddy-hook codex` / `vibebud
 - Claude Code: eight events in `~/.claude/settings.json`. See [`docs/claude-adapter.md`](docs/claude-adapter.md).
 - OpenCode: a plugin of VibeBuddy's own at `~/.config/opencode/plugins/vibebuddy.js`, which hands each event to the hook.
 - GitHub Copilot CLI: a hooks file of VibeBuddy's own at `~/.copilot/hooks/vibebuddy.json`. Copilot passes no reply at the end of a turn, so a question left at the end is announced as done.
+- ZCode: a managed local plugin registered in `~/.zcode/cli/config.json`. [Setup and limitations](docs/zcode-adapter.md).
 - Pi (1.1.0 or later): an extension of VibeBuddy's own at `~/.pi/agent/extensions/vibebuddy.js`, which hands each event to the hook. A dialog an extension opens mid-run counts as waiting on you.
 
 OpenCode's, Copilot's and Pi's files belong to VibeBuddy alone: connecting writes the whole file and removing deletes it, without touching your own config.
@@ -291,3 +292,5 @@ The source code is licensed under the [GNU General Public License v3.0 or later]
 The voice audio we hold the rights to, and any artwork added later, is licensed under [CC BY-SA 4.0](LICENSE-ASSETS). The two Chinese voices in `voices/` come from Volcano Engine's speech service and aren't covered; [`LICENSE-ASSETS`](LICENSE-ASSETS) lists exactly what is.
 
 Neither license grants rights to the name "VibeBuddy" or the buddy character as a trademark.
+
+ZCode connects through a VibeBuddy-managed local plugin. See [ZCode Adapter](docs/zcode-adapter.md) for setup and limitations.

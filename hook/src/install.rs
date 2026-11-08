@@ -173,12 +173,13 @@ enum Target {
 }
 
 impl Target {
-    const ALL: [Target; 5] = [
+    const ALL: [Target; 6] = [
         Target::Merged(Agent::Codex),
         Target::Merged(Agent::Claude),
         Target::Owned(cli_agents::Agent::OpenCode),
         Target::Owned(cli_agents::Agent::Copilot),
         Target::Owned(cli_agents::Agent::Pi),
+        Target::Owned(cli_agents::Agent::Zcode),
     ];
 
     fn from_argument(argument: &str) -> Option<Self> {
@@ -227,6 +228,7 @@ struct Change {
 
 enum Contents {
     Merged(Map<String, Value>),
+    Zcode(crate::zcode::Plan),
     /// None deletes the file.
     Owned(Option<String>),
 }
@@ -239,6 +241,11 @@ fn plan(target: Target, home: &Path, binary: &str, installing: bool) -> Result<C
             let after = if installing { install(before.clone(), agent, binary) } else { uninstall(before.clone()) };
             let lines = describe_change(&before, &after);
             (Contents::Merged(after), lines)
+        }
+        Target::Owned(cli_agents::Agent::Zcode) => {
+            let plan = crate::zcode::plan(home, binary, installing)?;
+            let lines = plan.lines.clone();
+            (Contents::Zcode(plan), lines)
         }
         Target::Owned(agent) => {
             let before = std::fs::read_to_string(&path).ok();
@@ -255,6 +262,7 @@ fn apply(change: &Change, home: &Path) -> Result<(), String> {
     let fail = |error: std::io::Error| format!("cannot write {}: {error}", path.display());
     match &change.after {
         Contents::Merged(root) => write(path, root),
+        Contents::Zcode(plan) => plan.apply(),
         Contents::Owned(Some(text)) => {
             std::fs::create_dir_all(path.parent().unwrap_or(home)).map_err(fail)?;
             std::fs::write(path, text).map_err(fail)
@@ -278,6 +286,7 @@ fn is_installed(target: Target, home: &Path, binary: &str) -> bool {
                     .is_some_and(|groups| groups.iter().any(|group| commands(group).any(|command| command == wanted)))
             })
         }
+        Target::Owned(cli_agents::Agent::Zcode) => crate::zcode::plan(home, binary, true).is_ok_and(|plan| plan.lines.is_empty()),
         Target::Owned(_) => std::fs::read_to_string(&path).is_ok_and(|text| text.contains(binary)),
     }
 }
@@ -334,7 +343,7 @@ pub fn run(installing: bool, only: Option<&str>) -> Result<(), String> {
     };
     if targets.is_empty() {
         println!(
-            "None of Claude Code, Codex, OpenCode, GitHub Copilot CLI or Pi has run here yet. Run one once, then run this again."
+            "None of Claude Code, Codex, OpenCode, GitHub Copilot CLI, Pi or ZCode has run here yet. Run one once, then run this again."
         );
     }
     for target in targets {
@@ -354,6 +363,7 @@ pub fn run(installing: bool, only: Option<&str>) -> Result<(), String> {
                 change.path.display(),
                 agent.config_file()
             ),
+            (Contents::Zcode(_), _) => println!("{name}: updated {} and VibeBuddy local plugin", change.path.display()),
             (Contents::Owned(Some(_)), _) => println!("{name}: wrote {}", change.path.display()),
             _ => println!("{name}: removed {}", change.path.display()),
         }

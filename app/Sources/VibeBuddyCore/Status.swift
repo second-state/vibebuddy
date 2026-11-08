@@ -244,8 +244,9 @@ public struct HooksSeen: Codable, Equatable {
     public var copilot: Date?
     /// Absent from daemons older than Pi support.
     public var pi: Date?
-    public init(codex: Date? = nil, claude: Date? = nil, opencode: Date? = nil, copilot: Date? = nil, pi: Date? = nil) {
-        self.codex = codex; self.claude = claude; self.opencode = opencode; self.copilot = copilot; self.pi = pi
+    public var zcode: Date?
+    public init(codex: Date? = nil, claude: Date? = nil, opencode: Date? = nil, copilot: Date? = nil, pi: Date? = nil, zcode: Date? = nil) {
+        self.codex = codex; self.claude = claude; self.opencode = opencode; self.copilot = copilot; self.pi = pi; self.zcode = zcode
     }
 
     public func lastEvent(_ agent: HookAgent) -> Date? {
@@ -255,6 +256,7 @@ public struct HooksSeen: Codable, Equatable {
         case .opencode: return opencode
         case .copilot: return copilot
         case .pi: return pi
+        case .zcode: return zcode
         }
     }
 }

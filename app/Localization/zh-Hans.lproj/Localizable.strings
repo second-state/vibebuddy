@@ -654,3 +654,5 @@
 "Starting the recording was rejected (%@)" = "启动录音被拒绝（%@）";
 "Stopping the recording was rejected (%@)" = "停止录音被拒绝（%@）";
 "Discarding the recording was rejected" = "丢弃录音被拒绝";
+
+"Could not update ZCode plugin. Check config.json and try again." = "无法更新 ZCode 插件。请检查 config.json 后重试。";

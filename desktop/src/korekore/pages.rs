@@ -308,6 +308,7 @@ impl crate::App {
             "opencode" => hooks.opencode.as_deref(),
             "copilot" => hooks.copilot.as_deref(),
             "pi" => hooks.pi.as_deref(),
+            "zcode" => hooks.zcode.as_deref(),
             _ => None,
         });
         let codex = (setup.agent == "codex" && setup.installed).then(|| agents::codex_trust(setup.modified.as_deref(), last));
@@ -334,6 +335,7 @@ impl crate::App {
             "opencode" => &sprites::ICON_OC,
             "copilot" => &sprites::ICON_GH,
             "pi" => &sprites::ICON_PI,
+            "zcode" => &sprites::ICON_API,
             _ => &sprites::ICON_API,
         };
         let id = setup.agent.clone();

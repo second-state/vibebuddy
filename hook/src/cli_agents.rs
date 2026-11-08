@@ -1,9 +1,10 @@
-//! Agents with no desktop app of their own to jump back into: OpenCode, GitHub Copilot CLI and Pi. Each speaks its own
+//! Agents with no desktop app of their own to jump back into: OpenCode, GitHub Copilot CLI, Pi and ZCode. Each speaks its own
 //! events; the hook turns them into five that mean the same for every such agent (`working`, `needs_input`,
 //! `done`, `stopped`, `session_end`), so the daemon needs one adapter for all of them, not one per agent.
 //!
 //! No config is merged into the user's own: VibeBuddy owns a whole file in each agent's directory, the
 //! OpenCode plugin, the Copilot hooks file or the Pi extension, so connecting writes it and removing deletes it. Their contents are
+//! ZCode registers an isolated local plugin through `zcode.rs`. Other owned files are
 //! made here and nowhere else; the Mac app asks this binary for them (`vibebuddy-hook agent-file`).
 
 use std::path::{Path, PathBuf};
@@ -34,16 +35,18 @@ pub enum Agent {
     OpenCode,
     Copilot,
     Pi,
+    Zcode,
 }
 
 impl Agent {
-    pub const ALL: [Agent; 3] = [Agent::OpenCode, Agent::Copilot, Agent::Pi];
+    pub const ALL: [Agent; 4] = [Agent::OpenCode, Agent::Copilot, Agent::Pi, Agent::Zcode];
 
     pub fn argument(self) -> &'static str {
         match self {
             Agent::OpenCode => "opencode",
             Agent::Copilot => "copilot",
             Agent::Pi => "pi",
+            Agent::Zcode => "zcode",
         }
     }
 
@@ -56,6 +59,7 @@ impl Agent {
             Agent::OpenCode => "OpenCode",
             Agent::Copilot => "GitHub Copilot CLI",
             Agent::Pi => "Pi",
+            Agent::Zcode => "ZCode",
         }
     }
 
@@ -72,6 +76,7 @@ impl Agent {
                 .map(PathBuf::from)
                 .filter(|dir| dir.is_absolute())
                 .unwrap_or_else(|| home.join(".copilot")),
+            Agent::Zcode => home.join(".zcode/cli"),
             Agent::Pi => std::env::var_os("PI_CODING_AGENT_DIR")
                 .map(PathBuf::from)
                 .filter(|dir| dir.is_absolute())
@@ -85,6 +90,7 @@ impl Agent {
             Agent::OpenCode => self.dir(home).join("plugins/vibebuddy.js"),
             Agent::Copilot => self.dir(home).join("hooks/vibebuddy.json"),
             Agent::Pi => self.dir(home).join("extensions/vibebuddy.js"),
+            Agent::Zcode => self.dir(home).join("config.json"),
         }
     }
 
@@ -93,6 +99,7 @@ impl Agent {
         let hook_literal = Value::String(hook.to_owned()).to_string();
         match self {
             Agent::OpenCode => OPENCODE_PLUGIN.replace("__HOOK__", &hook_literal),
+            Agent::Zcode => crate::zcode::manifest(hook).to_string(),
             Agent::Pi => PI_EXTENSION.replace("__HOOK__", &hook_literal),
             Agent::Copilot => {
                 let hooks: Map<String, Value> = COPILOT_EVENTS
@@ -134,6 +141,16 @@ pub fn copilot_payload(copilot_event: &str, source: &Value) -> Option<Map<String
     // Copilot hands over no reply text at the end of a turn, only a transcript path; a question left in the
     // reply is announced as done.
     payload(Agent::Copilot, event, source.get("sessionId"), None, source.get("cwd"), None)
+}
+
+pub fn zcode_payload(source: &Value) -> Option<Map<String, Value>> {
+    let event = match source.get("hookEventName").or_else(|| source.get("hook_event_name"))?.as_str()? {
+        "UserPromptSubmit" | "PostToolUse" | "PostToolUseFailure" => "working",
+        "PermissionRequest" => "needs_input",
+        "Stop" => "done",
+        _ => return None,
+    };
+    payload(Agent::Zcode, event, source.get("sessionId").or_else(|| source.get("session_id")), source.get("turnId"), source.get("cwd"), source.get("responseText").or_else(|| source.get("last_assistant_message")).and_then(Value::as_str))
 }
 
 fn payload(

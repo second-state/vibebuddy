@@ -9,6 +9,7 @@ mod cli_agents;
 mod codex;
 mod filter;
 mod install;
+mod zcode;
 mod surface;
 
 use std::io::{Read, Write};
@@ -108,6 +109,10 @@ fn main() {
             Some(payload) => (claude::ENDPOINT, payload),
             None => return,
         },
+        "zcode" => match cli_agents::zcode_payload(&source) {
+            Some(payload) => (cli_agents::ENDPOINT, payload),
+            None => return,
+        },
         "opencode" | "pi" => {
             let plugin = cli_agents::Agent::from_argument(&agent).expect("a plugin agent");
             match cli_agents::plugin_payload(plugin, &source) {
@@ -120,7 +125,7 @@ fn main() {
             None => return,
         },
         _ => {
-            eprintln!("usage: vibebuddy-hook codex|claude|opencode|copilot|pi <event>  (reads the hook payload from stdin)");
+            eprintln!("usage: vibebuddy-hook codex|claude|opencode|copilot|pi|zcode <event>  (reads the hook payload from stdin)");
             eprintln!("       vibebuddy-hook agent-file opencode|copilot|pi [hook path]  (prints the file VibeBuddy owns there)");
             eprintln!("       vibebuddy-hook install|uninstall  (adds or removes the hooks, where there is no app)");
             return;

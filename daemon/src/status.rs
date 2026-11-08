@@ -317,6 +317,7 @@ pub struct HooksSeen {
     pub opencode: Option<DateTime<Local>>,
     pub copilot: Option<DateTime<Local>>,
     pub pi: Option<DateTime<Local>>,
+    pub zcode: Option<DateTime<Local>>,
 }
 
 /// The device operation in progress: writing a voice pack or flashing firmware, only one at a time.
