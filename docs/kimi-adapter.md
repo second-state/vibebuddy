@@ -37,7 +37,9 @@ Session starts, subagent events and background notifications are not subscribed.
 A plain conversational question at Stop is announced as done because this
 adapter does not read replies or transcripts. A denied or failed tool can lack
 PostToolUse; the next Stop, StopFailure, Interrupt or user prompt updates the
-card. PermissionResult is not currently subscribed. Overlapping or very short
+card. A rejected approval works the same way: the card shows needs input until
+the turn ends, and if the turn then ends normally it is announced as done.
+PermissionResult is not currently subscribed. Overlapping or very short
 events have not been checked against a live Kimi.
 
 K2 uses the host terminal/editor and tmux metadata. Exact-session navigation in
@@ -98,9 +100,10 @@ What these runs do not establish:
 
 - Claude Code and Codex post to port 7331 too. The CLI and hook smokes count only
   Kimi's posts. The daemon smoke refuses to run if another agent reports during it.
-- Neither version sent `SessionEnd` in these runs, including when ACP was terminated.
-  Session-end cleanup is covered by the tracker and HTTP tests only, and a graceful
-  ACP shutdown was not tested.
+- Neither version sent `SessionEnd` in these runs, including when ACP was terminated,
+  and a graceful ACP shutdown was not tested. In the live run below, `/exit` in the
+  TUI posted a Kimi event while the session was idle; `SessionEnd` is the only
+  subscribed event that fits, though the daemon does not record which one arrived.
 - Print mode did not emit `PermissionRequest`: an `ask` rule ran Bash without a
   prompt. Approval is exercised only through ACP.
 - `stopped` comes from either `Interrupt` or `StopFailure`; these runs do not
@@ -108,7 +111,16 @@ What these runs do not establish:
 - The installer's last check and the final rename are still separated by a few
   microseconds. POSIX offers no compare-and-swap for files.
 
-Not checked yet: a session with a real model, graphical K2 focus, clicking through
+A live run on Linux on 2026-11-05 used Kimi 2.5.0's interactive TUI and its real
+model, a real `vibebuddyd` and an XGGF on USB, with the hooks in the real config:
+
+- A plain turn, an approved tool call, a rejected tool call and an interrupted turn
+  each showed the expected states in `/v1/status`, and the box acknowledged each
+  state over USB. Only the interrupted turn was not counted as done.
+- With the daemon stopped, `kimi -p` still exited 0 with no visible delay.
+- Removing the hooks left the config byte for byte as it was before connecting.
+
+Not checked yet: what the box's screen showed, graphical K2 focus, clicking through
 Connect, Repair and Remove in either App, and Kimi on macOS. CI covers the Mac
 App's `SelfTest`, not its interface. The scripted endpoint checks actual runtime
 integration; it does not measure external-model quality or graphical behavior.
