@@ -540,6 +540,12 @@ void app_main(void)
             if (model.audio_session && !microphone_active()) status_audio_stop(&model);
         }
         wifi_link_tick(receive_line, &model);
+        /* A LAN frame can arrive inside wifi_link_tick(). receive_line() timestamps its state and clock
+         * updates with now_ms(), which is later than the `now` captured at the top of this loop. Rebase
+         * before running expiry and clock calculations below: their unsigned elapsed-time math must never
+         * compare a fresh event timestamp against this loop's older time, or the subtraction wraps and
+         * immediately marks the host offline (and can expire other timed UI state too). */
+        now = now_ms();
         status_network(&model, wifi_link_configured(), wifi_link_online());
         link_status_info link_info = wifi_link_get_status();
         status_link_update(&model, &link_info);
