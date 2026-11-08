@@ -7,3 +7,9 @@ CONFIG_ESP_CONSOLE_SECONDARY_NONE=y
 CONFIG_COMPILER_OPTIMIZATION_SIZE=y
 CONFIG_LOG_DEFAULT_LEVEL_WARN=y
 CONFIG_BOOTLOADER_LOG_LEVEL_WARN=y
+# XGGF advertises its service; the desktop daemon performs all mDNS browsing.
+# The firmware uses its own USB JSON protocol and does not expose the IDF console CLI.
+# CONFIG_MDNS_ENABLE_BROWSE is not set
+# CONFIG_MDNS_ENABLE_CONSOLE_CLI is not set
+# This firmware joins an existing network as a station and never provides an access point.
+# CONFIG_ESP_WIFI_SOFTAP_SUPPORT is not set
