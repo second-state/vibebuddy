@@ -46,6 +46,7 @@ fn card_names(agent: &str) -> Option<(&'static str, &'static str)> {
         "copilot" => Some(("CP:", "COPILOT")),
         "pi" => Some(("PI:", "PI")),
         "zcode" => Some(("ZC:", "ZCODE")),
+        "kimi" => Some(("KM:", "KIMI")),
         _ => None,
     }
 }

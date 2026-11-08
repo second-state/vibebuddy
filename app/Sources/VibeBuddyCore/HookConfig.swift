@@ -4,14 +4,14 @@ import Foundation
 /// Claude Code's user-level settings.json and Codex's hooks.json share one shape:
 /// `hooks.<event>: [ { hooks: [ { type: "command", command, timeout } ] } ]`.
 public enum HookAgent: String, CaseIterable {
-    case codex, claude, opencode, copilot, pi, zcode
+    case codex, claude, opencode, copilot, pi, zcode, kimi
 
     /// The events merged into a shared config; empty for agents whose whole file VibeBuddy owns.
     public var events: [String] {
         switch self {
         case .codex: return ["UserPromptSubmit", "PermissionRequest", "PostToolUse", "Stop", "Interrupt", "SessionEnd"]
         case .claude: return ["UserPromptSubmit", "PermissionRequest", "PostToolUse", "Stop", "StopFailure", "SubagentStart", "SubagentStop", "SessionEnd"]
-        case .opencode, .copilot, .pi, .zcode: return []
+        case .opencode, .copilot, .pi, .zcode, .kimi: return []
         }
     }
 
@@ -28,6 +28,7 @@ public enum HookAgent: String, CaseIterable {
         case .copilot: return "GitHub Copilot CLI"
         case .pi: return "Pi"
         case .zcode: return "ZCode"
+        case .kimi: return "Kimi Code CLI"
         }
     }
 }

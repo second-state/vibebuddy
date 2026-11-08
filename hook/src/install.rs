@@ -239,6 +239,7 @@ struct Change {
 enum Contents {
     Merged(Map<String, Value>),
     Zcode(crate::zcode::Plan),
+    Kimi { before: Option<String>, after: String },
     /// None deletes the file.
     Owned(Option<String>),
 }
@@ -307,6 +308,7 @@ fn apply_with(
     match &change.after {
         Contents::Merged(root) => write(path, root),
         Contents::Zcode(plan) => plan.apply(),
+        Contents::Kimi { before, after } => write_kimi(path, before.as_deref(), after, home, before_commit),
         Contents::Owned(Some(text)) => {
             std::fs::create_dir_all(path.parent().unwrap_or(home)).map_err(fail)?;
             std::fs::write(path, text).map_err(fail)

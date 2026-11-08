@@ -14,3 +14,4 @@ chrono.workspace = true
 libc = "0.2"
 regex.workspace = true
 serde_json.workspace = true
+toml_edit = "0.25.15"

@@ -5184,6 +5184,7 @@ dependencies = [
  "libc",
  "regex",
  "serde_json",
+ "toml_edit",
 ]
 
 [[package]]
