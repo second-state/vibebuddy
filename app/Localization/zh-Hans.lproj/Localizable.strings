@@ -5,6 +5,8 @@
 "daemon not responding · click to restart" = "daemon 异常 · 点击重启";
 "Box online · firmware %@" = "盒子在线 · 固件 %@";
 "Box not found" = "未找到盒子";
+"Box on another computer" = "盒子在别的电脑上";
+"Box with %@" = "盒子在 %@ 上";
 "Several devices found" = "找到多台设备";
 "This is the box" = "就是这台";
 "Choosing the box was rejected (%lld)" = "选择盒子未被接受（%lld）";
@@ -212,6 +214,8 @@
 "another computer" = "另一台电脑";
 "The box is plugged into %@." = "盒子正插在 %@ 上。";
 "The box is with %@." = "盒子正连着 %@。";
+"On another computer" = "在别的电脑上";
+"With %@" = "在 %@ 上";
 "Take over" = "接管";
 "Relay" = "中转";
 "Taking the box over was rejected (%lld)" = "接管盒子被拒绝（%lld）";
@@ -259,6 +263,8 @@
 "DAEMON NOT RUNNING" = "daemon 没在运行";
 "BOX ONLINE · %@" = "盒子在线 · %@";
 "NO BOX LINKED" = "没有连上盒子";
+"BOX ON ANOTHER COMPUTER" = "盒子在别的电脑上";
+"BOX WITH %@" = "盒子在 %@ 上";
 "app %@ · box fw %@" = "App %@ · 盒子固件 %@";
 "app %@" = "App %@";
 "This page comes with the next step of korekore." = "这一页会在 korekore 的下一步做好。";
@@ -270,6 +276,8 @@
 "box online · %@ · fw %@" = "盒子在线 · %@ · 固件 %@";
 "box online · %@" = "盒子在线 · %@";
 "no box linked" = "没有连上盒子";
+"box on another computer" = "盒子在别的电脑上";
+"box with %@" = "盒子在 %@ 上";
 "Who lives in the box" = "谁住在盒子里";
 "Who the box watches" = "盒子替你看着谁";
 "Hold K0 on the box and ask" = "按住盒子上的 K0 提问";

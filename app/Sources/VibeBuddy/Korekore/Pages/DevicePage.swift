@@ -84,7 +84,7 @@ struct KorekoreDevicePage: View {
                         }
                     }
                 }
-            } else if device?.pin == nil {
+            } else if device?.pin == nil, device?.busy == nil {
                 KCard {
                     VStack(alignment: .leading, spacing: 8) {
                         HStack(spacing: 10) {
@@ -233,6 +233,9 @@ struct KorekoreDevicePage: View {
     private var linkText: String {
         guard let device else { return String(localized: "daemon isn't running") }
         guard device.connected else {
+            if let busy = device.busy {
+                return busy.owner.isEmpty ? String(localized: "On another computer") : String(localized: "With \(busy.owner)")
+            }
             return device.candidates?.isEmpty == false ? String(localized: "Several devices found") : String(localized: "Box not found")
         }
         if device.relay == true { return String(localized: "Relay") }

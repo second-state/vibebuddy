@@ -47,7 +47,7 @@ Config is owned by the daemon and stored in `~/Library/Application Support/VibeB
 
 The icon is Kore, korekore's pixel character, with the face that matches the box: gray when the link is down or the daemon isn't up. Clicking it opens a panel (canvas: "Mac · Menu bar"):
 
-1. The box at a glance, on a dark strip like the box's screen: what the agents do and how many there are, then the link (`box online · usb · fw abc1234` / `no box linked` / `daemon not responding · click to restart`; a click then starts the daemon again)
+1. The box at a glance, on a dark strip like the box's screen: what the agents do and how many there are, then the link (`box online · usb · fw abc1234` / `box with <computer>` while another computer has the box / `no box linked` / `daemon not responding · click to restart`; a click then starts the daemon again)
 2. The current mode: On duty / Pomodoro / Leisure
 3. Today's stats: done, asks, busy
 4. Settings…
@@ -63,7 +63,7 @@ macOS notifications appear only when the link breaks: the device was connected a
 
 ## Settings window
 
-A sidebar on the left lists the pages: Character, Agents, Conversation, Device, General and Advanced. Below them, a small picture of the box shows what it shows now. The pages use the korekore theme, pixel art and fonts (M PLUS Rounded 1c, DotGothic16), which the App carries. The sections below still say "tab" for a page.
+A sidebar on the left lists the pages: Character, Agents, Conversation, Device, General and Advanced. Below them, a small picture of the box shows what it shows now. While another computer has the box (`device.busy`), the picture reads AWAY "with <computer>" instead of NO LINK "waiting for the Mac", the line under it says BOX WITH <COMPUTER>, and the Device page shows the Take over card without the Box not found help, its Link row saying "With <computer>". The Linux app does the same, and its tray menu says "Box with <computer>". The pages use the korekore theme, pixel art and fonts (M PLUS Rounded 1c, DotGothic16), which the App carries. The sections below still say "tab" for a page.
 
 **General**: Launch at login, the toggle for link-failure notifications, and Updates: a "Check for updates" switch (on by default in builds CI makes, off when built from source), "Check now", the outcome of the last check and a download link when a newer App is out. Next to the versions, "Report a Problem…" does what the menu item does. Below the manifest's `min_supported_app`, a banner at the top says the App is no longer supported; it can't be dismissed and nothing stops working.
 
