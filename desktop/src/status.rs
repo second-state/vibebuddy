@@ -98,6 +98,12 @@ impl Account {
         self.plan_button().is_some()
     }
 
+    /// The Relay switch on General: while the Paid plan is offered, and always for a Paid account, so stopping sales
+    /// doesn't take it from someone who pays for the Relay.
+    pub fn shows_relay_switch(&self) -> bool {
+        self.upgrade_offered || (self.signed_in && self.plan.as_ref().is_some_and(Plan::paid))
+    }
+
     /// The voice credit left in dollars, "$0.93", for the account card; None when the daemon doesn't know it. Cut
     /// down to the cent, so it never shows more than is left.
     pub fn voice_credit(&self) -> Option<String> {
@@ -244,7 +250,7 @@ pub struct Device {
     pub volume: Option<u8>,
     /// Which set of screens the box draws, `robot` or `korekore` (ADR-0021); None from firmware that predates the choice.
     pub screens: Option<String>,
-    /// The decoration the box draws over its screens, `off`, `leaves`, `snow` or `lights` (ADR-0022); None from firmware that
+    /// The decoration the box draws over its screens, `off`, `thanksgiving` or `christmas` (ADR-0022); None from firmware that
     /// predates decorations.
     pub decoration: Option<String>,
     /// Linked over the local network or the Relay; `port` is then the box's or the Relay's address.
@@ -463,9 +469,9 @@ mod tests {
 
     #[test]
     fn the_box_screens_parse() {
-        let device: Device = serde_json::from_str(r#"{"connected": true, "port": null, "bridge": false, "screens": "korekore", "decoration": "snow"}"#).expect("device");
+        let device: Device = serde_json::from_str(r#"{"connected": true, "port": null, "bridge": false, "screens": "korekore", "decoration": "christmas"}"#).expect("device");
         assert_eq!(device.screens.as_deref(), Some("korekore"));
-        assert_eq!(device.decoration.as_deref(), Some("snow"));
+        assert_eq!(device.decoration.as_deref(), Some("christmas"));
     }
 
     #[test]
@@ -589,6 +595,10 @@ mod tests {
         assert_eq!(Account { plan: None, ..offered.clone() }.plan_button(), None, "before the plan is read");
         // The plan row shows with its button: on Free only while the Paid plan is offered, always on Paid.
         assert!(!free.shows_plan_row() && offered.shows_plan_row() && paid.shows_plan_row());
+        // The Relay switch: while the Paid plan is offered, and always for a Paid account.
+        assert!(offered.shows_relay_switch() && !free.shows_relay_switch());
+        assert!(paid.shows_relay_switch(), "stopping sales doesn't take the Relay switch from a Paid account");
+        assert!(!Account { signed_in: false, ..paid.clone() }.shows_relay_switch(), "signed out");
     }
 
     #[test]

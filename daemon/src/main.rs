@@ -33,6 +33,7 @@ mod voice_writer;
 
 use std::convert::Infallible;
 use std::env;
+use std::io::IsTerminal;
 use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -234,7 +235,8 @@ async fn main() {
         .filter(|value| !value.trim().is_empty())
         .and_then(|value| EnvFilter::try_new(value).ok())
         .unwrap_or_else(|| EnvFilter::new("vibebuddyd=info"));
-    tracing_subscriber::fmt().with_env_filter(log_filter).init();
+    // Colours only for a terminal: the apps send the log to a file or the journal, where they show as escape codes.
+    tracing_subscriber::fmt().with_env_filter(log_filter).with_ansi(std::io::stdout().is_terminal()).init();
 
     let bind_address = env::var("VIBEBUDDY_BIND")
         .unwrap_or_else(|_| "127.0.0.1:7331".to_owned())
@@ -1082,7 +1084,7 @@ async fn post_screens(
 }
 
 /// The decorations the box can draw over its screens (ADR-0022).
-const DECORATIONS: [&str; 4] = ["off", "leaves", "snow", "lights"];
+const DECORATIONS: [&str; 3] = ["off", "thanksgiving", "christmas"];
 
 #[derive(serde::Deserialize)]
 struct DecorationRequest {
@@ -2157,8 +2159,8 @@ struct PlanRefusal {
     reason: Option<String>,
 }
 
-/// `{"url"}` on 200; otherwise the service's 409 (with its reason), 404 and 401 as they are (docs/api.md). A 409
-/// means the plan isn't what the App thought, so the account is read again and the status shows the plan it has.
+/// `{"url"}` on 200; otherwise the service's 409 (with its reason), 404 and 401 as they are (docs/api.md). After a
+/// 409, or a 404 from Checkout, the account is read again, so the status shows the plan and the offer as they are.
 async fn plan_page(state: &AppState, page: account::PlanPage, offered: bool) -> axum::response::Response {
     use axum::response::IntoResponse;
     let account = state.account.clone();
@@ -2172,16 +2174,23 @@ async fn plan_page(state: &AppState, page: account::PlanPage, offered: bool) -> 
         Err(error) => error,
     };
     warn!(%error, ?page, "the plan page didn't open");
+    // A 409 means the plan isn't what the App thought. A 404 from Checkout means the service stopped selling, and the
+    // account read before still says `upgrade_offered`. Either way, read the account again.
+    let read_again = match &error {
+        account::AccountError::Conflict(_) => true,
+        account::AccountError::NotOffered => offered && matches!(page, account::PlanPage::Checkout),
+        _ => false,
+    };
+    if read_again {
+        let account = state.account.clone();
+        if let Ok(Err(error)) = tokio::task::spawn_blocking(move || account.refresh()).await {
+            warn!(%error, "the account couldn't be read again");
+        }
+    }
     let (status, reason) = match &error {
         account::AccountError::NotSignedIn => (StatusCode::UNAUTHORIZED, None),
         account::AccountError::NotOffered => (StatusCode::NOT_FOUND, None),
-        account::AccountError::Conflict(reason) => {
-            let account = state.account.clone();
-            if let Ok(Err(error)) = tokio::task::spawn_blocking(move || account.refresh()).await {
-                warn!(%error, "the account couldn't be read again");
-            }
-            (StatusCode::CONFLICT, Some(reason.clone()))
-        }
+        account::AccountError::Conflict(reason) => (StatusCode::CONFLICT, Some(reason.clone())),
         other => (account_refusal(other).0, None),
     };
     state.notify_status();
@@ -2393,6 +2402,21 @@ mod tests {
         assert_eq!(plan_answer(&signed_out, account::PlanPage::Checkout, true).await.0, StatusCode::UNAUTHORIZED);
         assert_eq!(plan_answer(&signed_out, account::PlanPage::Portal, true).await.0, StatusCode::UNAUTHORIZED);
         assert_eq!(seen.lock().unwrap().len(), 1, "signed out, nothing more is asked");
+    }
+
+    #[tokio::test]
+    async fn a_checkout_404_reads_the_account_again_so_upgrade_goes_away() {
+        let (service, seen) = account::tests::serve(vec![
+            (404, r#"{"error":"not_found"}"#),
+            // The service stopped selling: the account now says so.
+            (200, r#"{"id":"a","github_id":1,"plan":{"name":"free"},"upgrade_offered":false}"#),
+        ]);
+        let state = signed_in_state(&service, "stopped");
+        state.account.read_upgrade_offered_for_tests(true);
+        assert_eq!(post_upgrade(State(state.clone())).await.status(), StatusCode::NOT_FOUND);
+        assert!(!state.snapshot().await.account.upgrade_offered);
+        let paths: Vec<String> = seen.lock().unwrap().iter().map(|request| request.split(' ').nth(1).unwrap().to_owned()).collect();
+        assert_eq!(paths, ["/v1/plan/checkout", "/v1/account"]);
     }
 
     #[tokio::test]
@@ -3119,13 +3143,13 @@ mod tests {
     #[tokio::test]
     async fn choosing_a_decoration_sends_it_to_the_device_and_an_unknown_one_is_refused() {
         let transport = Arc::new(RecordingTransport::default());
-        let request = DecorationRequest { name: "snow".to_owned() };
+        let request = DecorationRequest { name: "christmas".to_owned() };
         let (status, _) = post_decoration(State(test_state(transport.clone())), Json(request)).await;
         assert_eq!(status, StatusCode::ACCEPTED);
         let event = &transport.events()[0];
         assert_eq!(event.event, "device.decoration");
-        assert_eq!(event.extra["name"], "snow");
-        let request = DecorationRequest { name: "Snow".to_owned() };
+        assert_eq!(event.extra["name"], "christmas");
+        let request = DecorationRequest { name: "Christmas".to_owned() };
         let (status, Json(response)) = post_decoration(State(test_state(transport.clone())), Json(request)).await;
         assert_eq!(status, StatusCode::BAD_REQUEST);
         assert!(!response.accepted);

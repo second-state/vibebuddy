@@ -126,7 +126,11 @@ impl crate::App {
         let right = column![
             row![text("korekore").font(bold()).size(30).color(theme::INK), sprite(&sprites::TAG_YOUR_VIBEBUDDY, 2)].spacing(12).align_y(Alignment::End),
             text(tr("Kore kore!\nI'll call you when\nyour agents need you.", &[])).font(bold()).size(super::theme::typography::HERO.size).color(theme::INK),
-            text(tr("The install script has connected your agents and set korekore to start when you log in. Let's wake up the box first.", &[]))
+            text(if cfg!(windows) {
+                tr("The installer has connected your agents and set korekore to start when you log in. Let's wake up the box first.", &[])
+            } else {
+                tr("The install script has connected your agents and set korekore to start when you log in. Let's wake up the box first.", &[])
+            })
                 .font(regular())
                 .size(16)
                 .color(theme::MUTED),
@@ -261,7 +265,7 @@ impl crate::App {
         for (voice, face) in self.voices.iter().zip(&self.faces) {
             cards.push(self.character_card(voice.name.clone(), voice.tag.clone(), face.clone(), current.as_deref() == Some(voice.id), Some(voice.id), Message::UseVoice(voice.id)));
         }
-        let strip = scrollable(row(cards.into_iter().map(|card| container(card).width(180).into())).spacing(12).padding(Padding::ZERO.bottom(8)))
+        let strip = scrollable(row(cards.into_iter().map(|card| container(card).width(200).into())).spacing(12).padding(Padding::ZERO.bottom(8)))
             .direction(scrollable::Direction::Horizontal(scrollable::Scrollbar::default()));
         let operation = self.status.as_ref().and_then(|status| status.operation.as_ref()).filter(|operation| operation.kind == OperationKind::VoicePack);
         let progress: Option<Element<'_, Message>> = operation.and_then(|operation| match operation.state {
@@ -335,7 +339,11 @@ impl crate::App {
                     }),
                     column![
                         text(tr("All set. Yatta!", &[])).font(bold()).size(22).color(theme::INK),
-                        note(tr("korekore lives in the tray now, or in Omarchy's bar. Kore kore when someone needs you.", &[])),
+                        note(if cfg!(windows) {
+                            tr("korekore lives in the tray now. Kore kore when someone needs you.", &[])
+                        } else {
+                            tr("korekore lives in the tray now, or in Omarchy's bar. Kore kore when someone needs you.", &[])
+                        }),
                     ]
                     .spacing(4),
                 ]

@@ -566,7 +566,7 @@ impl crate::App {
         let detail = if forced {
             tr("On while the daemon runs with VIBEBUDDY_RESIDENT_SESSION=1.", &[])
         } else {
-            tr("Hold K0 on the box and ask. Codex or Claude Code on this computer answers, with your own account or key, and the buddy speaks the reply. Your voice goes to VibeBuddy's speech service.", &[])
+            tr("Hold K0 on the box and ask. Codex or Claude Code on this computer answers, with your own account or key, and the buddy speaks the reply. Your voice goes to VibeBuddy's voice service, or to Groq with your own key.", &[])
         };
         let toggle = (self.resident_info.is_some() && !forced).then_some(Message::VoiceCommands(!on));
         rows([row![
@@ -812,9 +812,12 @@ impl crate::App {
                 column![
                     row![badge(&sprites::KORE_SLEEP, true, theme::INK), heading(tr("Box not found", &[]))].spacing(10).align_y(Alignment::Center),
                     note(tr("Not showing up? Use a cable that carries data, not just power.", &[])),
-                    note(tr("If the daemon log on the Advanced tab says “Permission denied”, your account can't open the box's port yet: restart the computer once, then replug the box.", &[])),
-                    note(tr("Still nothing? Hold K0 on the box while you plug in the cable. The box starts in download mode with a dark screen, ready to be flashed with VibeBuddy firmware.", &[])),
                 ]
+                .push(
+                    // The serial group a Linux account joins at install takes effect at the next login; Windows has none.
+                    (!cfg!(windows)).then(|| note(tr("If the daemon log on the Advanced tab says “Permission denied”, your account can't open the box's port yet: restart the computer once, then replug the box.", &[]))),
+                )
+                .push(note(tr("Still nothing? Hold K0 on the box while you plug in the cable. The box starts in download mode with a dark screen, ready to be flashed with VibeBuddy firmware.", &[])))
                 .spacing(8),
             ));
         }
@@ -1118,7 +1121,7 @@ impl crate::App {
             setting(tr("Launch at login", &[]), switch(self.launch_at_login, Some(Message::LaunchAtLogin(!self.launch_at_login)))),
             setting(tr("Tell me when the box disconnects or the daemon fails", &[]), switch(notify, have_status.then_some(Message::NotifyLink(!notify)))),
         ];
-        if self.plan_offered() {
+        if self.status.as_ref().is_some_and(|status| status.account.shows_relay_switch()) {
             settings.push(setting(tr("Reach the box through the Relay when it's away from this computer", &[]), switch(relay, have_status.then_some(Message::Relay(!relay)))));
         }
         let settings = rows(settings);
@@ -1243,17 +1246,21 @@ impl crate::App {
             column![
                 daemon,
                 row![
-                    // The daemon logs to the journal here, not a file; the folder holds the hook's log.
+                    // On Linux the daemon logs to the journal, not a file; the folder holds the hook's log.
                     small_card(
                         tr("Logs", &[]),
-                        tr("The daemon's log in the journal, and the hook's log as a file.", &[]),
+                        if cfg!(windows) {
+                            tr("The daemon's log and the hook's log, both files.", &[])
+                        } else {
+                            tr("The daemon's log in the journal, and the hook's log as a file.", &[])
+                        },
                         row![pill(tr("Show daemon log", &[]), Fill::Paper, Some(Message::ShowDaemonLog)), pill(tr("Open logs folder", &[]), Fill::Paper, Some(Message::OpenLogsFolder))]
                             .spacing(8)
                             .into(),
                     ),
                     small_card(
                         tr("Diagnostics", &[]),
-                        tr("Logs, config and both sides' build IDs in one file, for a bug report.", &[]),
+                        tr("Logs, config and both sides' build IDs in one folder, for a bug report.", &[]),
                         pill(tr("Export diagnostics…", &[]), Fill::Paper, Some(Message::ExportDiagnostics)).into(),
                     ),
                 ]

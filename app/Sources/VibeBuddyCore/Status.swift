@@ -129,6 +129,10 @@ public struct AccountStatus: Codable, Equatable {
     /// True when the plan row has a button: Manage plan on Paid, Upgrade on Free while the Paid plan is offered.
     public var showsPlanRow: Bool { planButton != nil }
 
+    /// The Relay switch on General: while the Paid plan is offered, and always for a Paid account, so stopping sales
+    /// doesn't take it from someone who pays for the Relay.
+    public var showsRelaySwitch: Bool { upgradeOffered || (signedIn && plan?.paid == true) }
+
     /// The voice credit left in dollars, "$0.93", for the account card; nil when the daemon doesn't know it. Cut down
     /// to the cent, so it never shows more than is left.
     public var voiceCredit: String? {
@@ -241,7 +245,7 @@ public struct DeviceState: Codable, Equatable {
     public var volume: Int?
     /// Which set of screens the box draws, `robot` or `korekore` (ADR-0021); nil from firmware that predates the choice, and from older daemons.
     public var screens: String?
-    /// The decoration the box draws over its screens, `off`, `leaves`, `snow` or `lights` (ADR-0022); nil from firmware that predates decorations, and from older daemons.
+    /// The decoration the box draws over its screens, `off`, `thanksgiving` or `christmas` (ADR-0022); nil from firmware that predates decorations, and from older daemons.
     public var decoration: String?
     /// Connected but running other firmware, as the daemon judged it; absent from older daemons.
     public var foreignFirmware: Bool?

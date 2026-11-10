@@ -35,11 +35,11 @@ install -Dm644 "${share}/vibebuddyd.service" "${units}/vibebuddyd.service"
 # The app has no lifecycle of its own to supervise: the launcher and the login autostart both just run it.
 pkill -f -x "${bin}/vibebuddy-desktop" || true
 install -Dm755 "${built}/vibebuddy-desktop" "${bin}/vibebuddy-desktop"
-# An absolute Exec, since autostart may run before ~/.local/bin is on PATH.
-for entry in "${data}/applications/vibebuddy.desktop" "${config}/autostart/vibebuddy.desktop"; do
-    mkdir -p "$(dirname "${entry}")"
-    sed "s|^Exec=.*|Exec=${bin}/vibebuddy-desktop|" "${share}/vibebuddy.desktop" > "${entry}"
-done
+# An absolute Exec, since autostart may run before ~/.local/bin is on PATH. The launcher opens Settings; the start
+# at login stays in the tray.
+mkdir -p "${data}/applications" "${config}/autostart"
+sed "s|^Exec=.*|Exec=${bin}/vibebuddy-desktop --settings|" "${share}/vibebuddy.desktop" > "${data}/applications/vibebuddy.desktop"
+sed "s|^Exec=.*|Exec=${bin}/vibebuddy-desktop|" "${share}/vibebuddy.desktop" > "${config}/autostart/vibebuddy.desktop"
 install -Dm644 "${share}/vibebuddy.svg" "${data}/icons/hicolor/scalable/apps/vibebuddy.svg"
 systemctl --user daemon-reload
 systemctl --user enable --now vibebuddyd.service

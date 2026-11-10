@@ -52,7 +52,7 @@ pub struct DeviceState {
     /// Which set of screens the box draws, `robot` or `korekore` (ADR-0021), stored on the device; None from firmware that
     /// predates the choice.
     pub screens: Option<String>,
-    /// The decoration the box draws over its screens, `off`, `leaves`, `snow` or `lights` (ADR-0022), stored on the device; None
+    /// The decoration the box draws over its screens, `off`, `thanksgiving` or `christmas` (ADR-0022), stored on the device; None
     /// from firmware that predates decorations.
     pub decoration: Option<String>,
     /// The connected port's USB serial number, which tells this device from another ESP32-S3.
@@ -494,7 +494,7 @@ mod tests {
         assert!(!state.apply(&line("VOLUME ERROR")), "an error does not change the volume");
         assert!(state.apply(&line("SCREENS KOREKORE")));
         assert!(!state.apply(&line("SCREENS ERROR")), "an unknown style does not change the screens");
-        assert!(state.apply(&line("DECORATION SNOW")));
+        assert!(state.apply(&line("DECORATION CHRISTMAS")));
         assert!(!state.apply(&line("DECORATION ERROR")), "an unknown decoration does not change it");
         assert_eq!(
             state,
@@ -515,7 +515,7 @@ mod tests {
                 voice: Some("builtin".to_owned()),
                 volume: Some(65),
                 screens: Some("korekore".to_owned()),
-                decoration: Some("snow".to_owned()),
+                decoration: Some("christmas".to_owned()),
                 usb_serial: None,
                 box_key: None,
                 paired: false,
@@ -761,7 +761,7 @@ mod tests {
     fn a_new_connection_forgets_everything_the_previous_device_said() {
         let mut state = DeviceState::default();
         state.apply(&DeviceMessage::Connected { port: "/dev/cu.x".to_owned(), bridge: false, usb_serial: None });
-        for said in ["MODE DUTY", "VOICES ahu", "VOLUME 50", "SCREENS ROBOT", "DECORATION LEAVES"] {
+        for said in ["MODE DUTY", "VOICES ahu", "VOLUME 50", "SCREENS ROBOT", "DECORATION THANKSGIVING"] {
             state.apply(&line(said));
         }
         state.apply(&DeviceMessage::Disconnected);
