@@ -1071,6 +1071,16 @@ async fn spawn_codex(codex_home: &Path) -> Result<(Pipes, Option<String>), Resid
 fn codex_command(program: &Path, codex_home: &Path) -> tokio::process::Command {
     let mut command = tokio::process::Command::new(program);
     command.env("CODEX_HOME", codex_home);
+    without_window(&mut command);
+    command
+}
+
+/// On Windows, starts a console program with no window of its own. The daemon may have no console for it to share
+/// (K2 lets go of the daemon's own to look for a terminal's), and then each start, such as `codex.cmd` through
+/// cmd.exe for the login check every 30 s, opens a console window that takes the focus.
+pub(crate) fn without_window(command: &mut tokio::process::Command) -> &mut tokio::process::Command {
+    #[cfg(windows)]
+    command.creation_flags(0x0800_0000); // CREATE_NO_WINDOW
     command
 }
 
@@ -1194,7 +1204,7 @@ fn find_codex() -> Option<PathBuf> {
 }
 
 /// Each directory on `path` joined with each name, in PATH's order.
-fn on_path<'a>(path: &std::ffi::OsStr, names: &'a [&'a str]) -> impl Iterator<Item = PathBuf> + 'a {
+pub(crate) fn on_path<'a>(path: &std::ffi::OsStr, names: &'a [&'a str]) -> impl Iterator<Item = PathBuf> + 'a {
     std::env::split_paths(path).collect::<Vec<_>>().into_iter().flat_map(move |dir| names.iter().map(move |name| dir.join(name)))
 }
 

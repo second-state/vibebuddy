@@ -281,7 +281,11 @@ fn is_installed(target: Target, home: &Path, binary: &str) -> bool {
                     .is_some_and(|groups| groups.iter().any(|group| commands(group).any(|command| command == wanted)))
             })
         }
-        Target::Owned(_) => std::fs::read_to_string(&path).is_ok_and(|text| text.contains(binary)),
+        // Our files hold the path as a JSON string, so a Windows path's backslashes are doubled there.
+        Target::Owned(_) => {
+            let quoted = Value::String(binary.to_owned()).to_string();
+            std::fs::read_to_string(&path).is_ok_and(|text| text.contains(&quoted))
+        }
     }
 }
 
@@ -531,6 +535,20 @@ mod tests {
         assert_eq!(describe_owned_file(None, Some("a\n\nb\n")), ["+ a", "+ b"]);
         assert_eq!(describe_owned_file(Some("a\n"), None), ["- a"]);
         assert!(describe_owned_file(Some("a"), Some("a")).is_empty());
+    }
+
+    #[test]
+    fn an_owned_file_is_installed_with_a_windows_path() {
+        let home = std::env::temp_dir().join(format!("vibebuddy-hook-owned-{}", std::process::id()));
+        let binary = r"C:\Users\me\AppData\Local\Programs\VibeBuddy\vibebuddy-hook.exe";
+        for agent in [cli_agents::Agent::Copilot, cli_agents::Agent::OpenCode, cli_agents::Agent::Pi] {
+            let target = Target::Owned(agent);
+            assert!(!is_installed(target, &home, binary));
+            apply(&plan(target, &home, binary, true).unwrap(), &home).unwrap();
+            assert!(is_installed(target, &home, binary), "{}", target.argument());
+            assert!(!is_installed(target, &home, r"C:\elsewhere\vibebuddy-hook.exe"));
+        }
+        let _ = std::fs::remove_dir_all(home);
     }
 
     #[test]
