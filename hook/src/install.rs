@@ -85,7 +85,10 @@ fn is_ours(command: &str) -> bool {
 }
 
 fn command(binary: &str, agent: Agent) -> String {
-    format!("\"{binary}\" {}", agent.argument())
+    let call = format!("\"{binary}\" {}", agent.argument());
+    // Codex on Windows runs a hook's command in PowerShell, where a quoted path is a string, not a call: `&` calls
+    // it. Claude Code runs hooks in Git Bash there, as everywhere else.
+    if cfg!(windows) && agent == Agent::Codex { format!("& {call}") } else { call }
 }
 
 /// Adds our hook to every event that lacks it and drops our stale entries; everything else keeps its place.
@@ -430,6 +433,12 @@ mod tests {
     use super::*;
 
     const BINARY: &str = "/home/me/.local/bin/vibebuddy-hook";
+    /// What our Codex entries run: PowerShell on Windows calls the quoted path with `&`.
+    const CODEX_CALL: &str = if cfg!(windows) {
+        "& \"/home/me/.local/bin/vibebuddy-hook\" codex"
+    } else {
+        "\"/home/me/.local/bin/vibebuddy-hook\" codex"
+    };
 
     fn object(value: Value) -> Map<String, Value> {
         let Value::Object(map) = value else {
@@ -445,7 +454,7 @@ mod tests {
         assert_eq!(hooks.len(), Agent::Codex.events().len());
         assert_eq!(
             hooks["Stop"],
-            json!([{ "hooks": [{ "type": "command", "command": format!("\"{BINARY}\" codex"), "timeout": 2 }] }])
+            json!([{ "hooks": [{ "type": "command", "command": CODEX_CALL, "timeout": 2 }] }])
         );
     }
 
@@ -484,6 +493,14 @@ mod tests {
     }
 
     #[test]
+    fn a_codex_entry_that_powershell_cannot_run_is_replaced() {
+        let old = object(json!({ "hooks": { "Stop": [{ "hooks": [{ "type": "command", "command": format!("\"{BINARY}\" codex") }] }] } }));
+        let fresh = install(old, Agent::Codex, BINARY);
+        let stop: Vec<&str> = fresh["hooks"]["Stop"].as_array().into_iter().flatten().flat_map(commands).collect();
+        assert_eq!(stop, [CODEX_CALL]);
+    }
+
+    #[test]
     fn uninstalling_drops_what_it_empties() {
         assert_eq!(
             uninstall(install(Map::new(), Agent::Codex, BINARY)),
@@ -504,7 +521,7 @@ mod tests {
         let after = install(before.clone(), Agent::Codex, BINARY);
         let lines = describe_change(&before, &after);
         assert_eq!(lines.len(), Agent::Codex.events().len());
-        assert!(lines.contains(&format!("+ Stop: \"{BINARY}\" codex")));
+        assert!(lines.contains(&format!("+ Stop: {CODEX_CALL}")));
         assert_eq!(describe_change(&after, &uninstall(after.clone())).first().map(|line| &line[..2]), Some("- "));
         assert!(describe_change(&after, &after).is_empty());
     }

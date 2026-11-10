@@ -100,6 +100,24 @@ pub fn notify(title: &str, body: &str) -> Result<(), String> {
         .map_err(|error| format!("cannot show a notification: {error}"))
 }
 
+/// The primary screen less the taskbar, in the logical pixels iced sizes windows in.
+pub fn work_area() -> Option<iced::Rectangle> {
+    use windows_sys::Win32::Foundation::RECT;
+    use windows_sys::Win32::UI::HiDpi::GetDpiForSystem;
+    use windows_sys::Win32::UI::WindowsAndMessaging::{SPI_GETWORKAREA, SystemParametersInfoW};
+    let mut area = RECT { left: 0, top: 0, right: 0, bottom: 0 };
+    // SAFETY: SPI_GETWORKAREA writes one RECT to the pointer it is given.
+    let found = unsafe { SystemParametersInfoW(SPI_GETWORKAREA, 0, (&raw mut area).cast(), 0) };
+    // SAFETY: no arguments; it reads the DPI the process was made aware of.
+    let scale = unsafe { GetDpiForSystem() } as f32 / 96.0;
+    (found != 0 && scale > 0.0).then(|| iced::Rectangle {
+        x: area.left as f32 / scale,
+        y: area.top as f32 / scale,
+        width: (area.right - area.left) as f32 / scale,
+        height: (area.bottom - area.top) as f32 / scale,
+    })
+}
+
 /// Launch at login is a value under the user's Run key.
 pub fn launch_at_login() -> bool {
     reg(&["query", RUN_KEY, "/v", "VibeBuddy"]).is_ok()
@@ -130,7 +148,7 @@ pub fn daemon_log() -> Option<PathBuf> {
     crate::state_dir().map(|dir| dir.join("vibebuddyd.log"))
 }
 
-fn previous_daemon_log() -> Option<PathBuf> {
+pub fn previous_daemon_log() -> Option<PathBuf> {
     crate::state_dir().map(|dir| dir.join("vibebuddyd.previous.log"))
 }
 

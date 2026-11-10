@@ -16,7 +16,7 @@ struct KorekoreAdvancedPage: View {
                         // A menu bar app has no Dock icon, so Finder could open behind; selecting the file brings it forward.
                         NSWorkspace.shared.activateFileViewerSelecting([Resources.logsDirectory.appendingPathComponent("vibebuddyd.log")])
                     }
-                    card(String(localized: "Diagnostics"), String(localized: "Logs, config and both sides' build IDs in one file, for a bug report."),
+                    card(String(localized: "Diagnostics"), String(localized: "Logs, config and both sides' build IDs in one folder, for a bug report."),
                          button: String(localized: "Export diagnostics…"), action: exportDiagnostics)
                 }
                 VStack(alignment: .leading, spacing: 2) {
