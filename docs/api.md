@@ -41,29 +41,59 @@ The daemon sends the token as `Authorization: Bearer <token>` and keeps it in `c
 - `GET /v1/account` answers
 
   ```json
-  {"id":"…","email":null,"github_id":60097,"created_at":"2026-10-23T08:44:49.885Z","plan":{"name":"free"},"today":{"day":"2026-10-23","commands":1,"replies":1},"limits":{"commands":20,"replies":20}}
+  {"id":"…","email":null,"github_id":60097,"created_at":"2026-10-23T08:44:49.885Z","plan":{"name":"free"},"voice_credit_micro_usd":933100}
   ```
 
-  An account has an `email` or a `github_id`, never both. `plan` is `{"name":"free"}` or `{"name":"paid","period_end":"…","characters":12300,"characters_limit":100000}` (ADR-0020), where `characters` counts the billing period's spoken replies against the monthly allowance. `today` counts voice in the current UTC day, and `limits` is the daily allowance of the account's plan.
+  An account has an `email` or a `github_id`, never both. `plan` is `{"name":"free"}` or `{"name":"paid","period_end":"…"}` (ADR-0023). `voice_credit_micro_usd` is the voice credit left in Token Station, in millionths of a US dollar (ADR-0024). It is absent before the account first uses the voice service, and when Token Station can't be read at that moment; the request doesn't fail then. The daemon passes it on in `/v1/status` as `account.voice_credit_micro_usd`, and the App shows it in dollars on the account card ("Voice credit $0.93"), cut down to the cent. With no value, the App shows no line.
+  The plan stays Paid for one day after `period_end`, while Stripe takes the next payment. A cancel keeps it Paid to `period_end`.
 - `POST /v1/sign-out` revokes this session only: 204.
-- `DELETE /v1/account` deletes the account with all its sessions and usage: 204.
+- `DELETE /v1/account` deletes the account with all its sessions: 204.
+
+### The Paid plan
+
+The user pays for the Paid plan, and changes the card or cancels, in Stripe's own pages in the browser (ADR-0024). The App never sees a card. The service offers these pages only where Stripe is set up; elsewhere both calls answer 404.
+
+- `POST /v1/plan/checkout` (session) answers `{"url":"<Stripe Checkout URL>"}`, a monthly subscription for this account. It answers 409 `{"reason":"already_paid"}` while the account is Paid, and while its Stripe customer has a subscription that is paid or can still be paid.
+- `POST /v1/plan/portal` (session) answers `{"url":"<Customer Portal URL>"}`. It answers 409 `{"reason":"no_subscription"}` when the account has no Stripe customer.
+- Both answer 401 without a valid session, and 404 where Stripe isn't set up.
+- Stripe's pages send the browser back to `GET /v1/plan/return`, a plain page that says to go back to the App. The service tells the App nothing: the App reads the account again when it comes back to the front. The plan changes only when Stripe's `invoice.paid` reaches the service, which can come later. So after it opens Checkout, the App also reads the account every 3 s for a minute, or until the plan is Paid.
+
+The daemon passes these through, so the session stays with the daemon:
+
+- `POST /v1/account/upgrade` calls `/v1/plan/checkout`, and `POST /v1/account/manage-plan` calls `/v1/plan/portal`. On 200 each answers `{"url":"…"}`, which the App opens in the system browser. The daemon passes only a URL that starts with `https://checkout.stripe.com/` for Checkout, or `https://billing.stripe.com/` for the portal. Any other URL gets 502, and the App opens nothing.
+- The service's 409 comes back as 409 `{"accepted":false,"message":"…","reason":"already_paid"}` (or `no_subscription`). The daemon then reads the account again, so the status shows the plan the account has.
+- 401: not signed in, or the service no longer takes the session (the daemon then signs out). The daemon doesn't call the service when it has no session.
+- 404: the service doesn't offer the pages. `upgrade` also answers 404, without calling the service, while the daemon's switch for Upgrade is off.
+- 502 when the service can't be reached, sends a URL that isn't Stripe's, or answers something else. 503 when the computer is signed in but this build's service is off (`VIBEBUDDY_TTS_BASE_URL=off`). The session is checked first, so with no session the answer is 401 here too.
+
+**Upgrade is off until sales open**, which is when Token Station offers synthesis. The one switch is `UPGRADE_OFFERED` in `daemon/src/account.rs`. The daemon reports it as `account.upgrade_offered` in `/v1/status`, and both Apps show Upgrade only when it is true. Manage plan doesn't depend on it.
 
 ## Voice
 
 Both calls need `Authorization: Bearer <session>` and answer 401 without a valid one. Only daemons call them: the box's audio reaches the daemon over the link, however the box is linked (ADR-0018).
 
-Production serves no voice (ADR-0020): every call below gets `403 {"reason":"own_key"}` there, before the session is checked, and voice comes from the user's own keys. Staging does the same. So no daemon calls them unless `VIBEBUDDY_TTS_BASE_URL` names a service; given that 403 anyway, it tells the box `own_key` for a command and leaves a reply as text. The service's `SERVE_VOICE` setting turns voice back on as described below, for testing or a later Paid plan.
+The service serves voice through Token Station only (ADR-0024). Each account has a Token Station key, which the service makes on the account's first voice call and keeps; it never goes to a computer. The first call also gives the account a gift of 1 dollar of voice credit. The service keeps no limits of its own: an account may spend its voice credit, and no more.
+
+The daemon calls the service when the computer is signed in and the user has no own key for that use (docs/resident-session.md). A call that the service refuses is not tried again.
 
 ### Recognizing a voice command
 
 ```text
-POST /v1/voice/transcribe[?language=zh]
+POST /v1/voice/transcribe
 Content-Type: audio/wav
 
 <one turn as 16-bit mono PCM WAV, at most 2 MB>
 ```
 
-It answers `{"text":"What is the weather tomorrow?","language":"English"}`. `language` (ISO 639-1) is optional; unset, the recognizer detects it, and the answer names it as the recognizer does (`English` from Groq, `en` from Workers AI). A body that isn't a WAV, or a malformed language, gets 400; a larger body 413; when every recognizer fails, 502.
+It answers `{"text":"What is the weather tomorrow?","language":"english"}`. The recognizer detects the language; `language` is its Whisper-style name, and it can be absent. A body that isn't a WAV gets 400; a larger body 413; a recognition that fails, 502.
+
+When the account's voice credit is used up, the call gets
+
+```text
+403 {"reason":"own_key"}
+```
+
+and the daemon tells the box `own_key` (SET VOICE KEY). A 429 is a rate limit, with Token Station's `Retry-After` and a plain-text body: the daemon reports the turn as `unavailable`, and voice stays on.
 
 ### Speaking a reply
 
@@ -72,7 +102,7 @@ POST /v1/voice/speak
 {"text":"…","voice":"elevenlabs:<voice_id>"}
 ```
 
-It streams back `audio/mpeg`: MPEG-2 Layer III, 24 kHz mono, 48 kbps, the only rate the box's speaker runs at; it may begin with an ID3 tag. `text` is 1 to 1000 characters. `voice` names the vendor and its voice: `elevenlabs:<voice_id>` or `volc:<speaker>` (a Doubao 1.0 voice); the daemon maps each Character to one. A bad request gets 400; a synthesis that fails before any audio 502; one that fails midway cuts the stream short.
+Token Station doesn't offer synthesis yet, so for now every call gets `403 {"reason":"own_key"}`, and the reply stays text. When it does, the call streams back `audio/mpeg`: MPEG-2 Layer III, 24 kHz mono, 48 kbps, the only rate the box's speaker runs at; it may begin with an ID3 tag. `text` is 1 to 1000 characters. `voice` names the vendor and its voice: `elevenlabs:<voice_id>` or `volc:<speaker>` (a Doubao 1.0 voice); the daemon maps each Character to one.
 
 ### Speaking a Character's line
 
@@ -81,24 +111,6 @@ POST /v1/voice/speak
 {"text":"…","voice":"elevenlabs:<voice_id>","for":"character"}
 ```
 
-A line for a Character the user is making (ADR-0020). It streams back `audio/pcm;rate=16000`: 16 kHz mono 16-bit little-endian PCM, which the daemon trims, normalizes and packs as ADPCM. Only the Paid plan gets it; on Free the call gets `403 {"reason":"plan"}`. It counts its characters only against the monthly allowance, never the daily replies; past it the call gets `429 {"reason":"monthly"}` until the next period. A synthesis failure is 502: lines never come in another voice.
-
-### The daily allowance
-
-Each recognition counts one command and each spoken reply one reply, against the account's UTC day. On Free that is 20 commands and 20 replies; on the Paid plan, 100 commands, and spoken replies count their characters against the monthly allowance first (ADR-0020). The reply that crosses the monthly allowance still passes; after it, replies count against Free's daily replies until the period ends. The service sets the numbers. A use is counted once the request is found valid. Past either limit the call gets
-
-```text
-429 {"reason":"allowance"}
-```
-
-until 00:00 UTC. `GET /v1/account` shows where the day stands.
-
-When voice as a whole reaches its daily spending cap, every call gets
-
-```text
-429 {"reason":"global_cap"}
-```
-
-until 00:00 UTC, whatever the account's allowance.
+A line for a Character the user is making (ADR-0023). It gets `403 {"reason":"own_key"}` for now too, as all synthesis does. When synthesis is offered, it streams back `audio/pcm;rate=16000`: 16 kHz mono 16-bit little-endian PCM, which the daemon trims, normalizes and packs as ADPCM.
 
 The `/v0/voice/…` calls take the same bodies without a session and run on staging only, until the daemon has moved to v1.

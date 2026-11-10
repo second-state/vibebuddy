@@ -52,7 +52,7 @@ pub struct DeviceState {
     /// Which set of screens the box draws, `robot` or `korekore` (ADR-0021), stored on the device; None from firmware that
     /// predates the choice.
     pub screens: Option<String>,
-    /// The decoration the box draws over its screens, `off`, `leaves`, `snow` or `lights` (ADR-0022), stored on the device; None
+    /// The decoration the box draws over its screens, `off`, `thanksgiving` or `christmas` (ADR-0022), stored on the device; None
     /// from firmware that predates decorations.
     pub decoration: Option<String>,
     /// The connected port's USB serial number, which tells this device from another ESP32-S3.
@@ -65,8 +65,11 @@ pub struct DeviceState {
     pub computer_key: Option<String>,
     /// Every computer the box is paired with, as it last listed them.
     pub paired_computers: Vec<PairedComputer>,
-    /// The Wi-Fi network the box is set to join, by name; the password stays on the box.
+    /// The Wi-Fi network the box is on or trying now, by name; the password stays on the box.
     pub wifi_network: Option<String>,
+    /// Every network the box knows, most recently joined first (ADR-0023). Firmware from before several networks
+    /// knows one: the one it names.
+    pub wifi_networks: Vec<String>,
     /// The address the box got on that network.
     pub wifi_address: Option<String>,
     /// Why the box couldn't join it, from its last `WIFI FAILED <why>` (see [`wifi_failure`]); None once it joins,
@@ -74,7 +77,7 @@ pub struct DeviceState {
     pub wifi_error: Option<String>,
     /// The Relay this computer uses, `wss://host`; None without a key. Set by the daemon, not the box.
     pub relay_server: Option<String>,
-    /// Why the Relay won't carry this computer's link (ADR-0020): `signed_out`, `plan`, or `unavailable` (it
+    /// Why the Relay won't carry this computer's link (ADR-0023): `signed_out`, `plan`, or `unavailable` (it
     /// couldn't check the plan; tried again later). Set by the daemon from [`crate::relay::RelayConfig::refused`].
     pub relay_refused: Option<String>,
     /// The Relay the box uses, as it last said (`RELAY URL`); it follows the computer on the cable.
@@ -118,6 +121,16 @@ pub struct PairedComputer {
 
 impl DeviceState {
     /// Takes in one device message; returns whether the state changed.
+    /// Another network: the address and any failure were the old one's. The same name again (every hello
+    /// repeats it) changes nothing.
+    fn set_wifi_network(&mut self, network: &str) {
+        if self.wifi_network.as_deref().is_some_and(|old| old != network) {
+            self.wifi_address = None;
+            self.wifi_error = None;
+        }
+        self.wifi_network = Some(network.to_owned());
+    }
+
     pub fn apply(&mut self, message: &DeviceMessage) -> bool {
         let before = self.clone();
         match message {
@@ -151,6 +164,7 @@ impl DeviceState {
                 self.paired = false;
                 self.paired_computers.clear();
                 self.wifi_network = None;
+                self.wifi_networks.clear();
                 self.wifi_address = None;
                 self.wifi_error = None;
                 self.wifi_seen.clear();
@@ -196,6 +210,7 @@ impl DeviceState {
                 self.paired = false;
                 self.paired_computers.clear();
                 self.wifi_network = None;
+                self.wifi_networks.clear();
                 self.wifi_address = None;
                 self.wifi_error = None;
                 self.wifi_seen.clear();
@@ -237,6 +252,7 @@ impl DeviceState {
                         self.paired = false;
                         self.paired_computers.clear();
                         self.wifi_network = None;
+                        self.wifi_networks.clear();
                         self.wifi_address = None;
                     }
                     self.box_key = Some(key.to_owned());
@@ -244,21 +260,30 @@ impl DeviceState {
                     self.paired = true;
                 } else if let Some(url) = line.strip_prefix("RELAY URL ") {
                     self.box_relay = Some(url.trim().to_owned());
-                } else if let Some(network) = line.strip_prefix("WIFI NETWORK ") {
-                    // Another network: the address and any failure were the old one's. The same name comes again
-                    // with every hello and changes nothing.
+                } else if line.starts_with("WIFI NETWORKS ") {
+                    // A `WIFI KNOWN <ssid>` follows for each network the box knows.
+                    self.wifi_networks.clear();
+                } else if let Some(network) = line.strip_prefix("WIFI KNOWN ") {
                     let network = network.trim();
-                    if self.wifi_network.as_deref().is_some_and(|old| old != network) {
-                        self.wifi_address = None;
-                        self.wifi_error = None;
+                    if !network.is_empty() && !self.wifi_networks.iter().any(|known| known == network) {
+                        self.wifi_networks.push(network.to_owned());
                     }
-                    self.wifi_network = Some(network.to_owned());
+                } else if let Some(network) = line.strip_prefix("WIFI NETWORK ") {
+                    let network = network.trim();
+                    self.set_wifi_network(network);
+                    // Firmware from before several networks lists none: it knows this one.
+                    if !self.wifi_networks.iter().any(|known| known == network) {
+                        self.wifi_networks = vec![network.to_owned()];
+                    }
                 } else if line.trim() == "WIFI FORGOTTEN" {
                     self.wifi_network = None;
+                    self.wifi_networks.clear();
                     self.wifi_address = None;
                     self.wifi_error = None;
-                } else if line.starts_with("WIFI CONNECTING ") {
-                    // Joining again, say with a new password for the same network: the last join's address is gone.
+                } else if let Some(network) = line.strip_prefix("WIFI CONNECTING ") {
+                    // The box tries its networks in turn: the one it tries is the one shown. Joining the same one
+                    // again, say with a new password, keeps its last failure until it joins, but not its address.
+                    self.set_wifi_network(network.trim());
                     self.wifi_address = None;
                 } else if let Some(why) = line.strip_prefix("WIFI FAILED ") {
                     self.wifi_address = None;
@@ -390,9 +415,9 @@ pub struct Status {
     pub updates: crate::updates::UpdateStatus,
     /// The person's VibeBuddy account (ADR-0018).
     pub account: crate::account::AccountStatus,
-    /// Which of the user's own keys for spoken replies are set, and refused (ADR-0020); never a key.
+    /// Which of the user's own keys for spoken replies are set, and refused (ADR-0023); never a key.
     pub voice_keys: crate::voice_keys::VoiceKeysStatus,
-    /// The Character being made, or the last one made, since the daemon started (ADR-0020).
+    /// The Character being made, or the last one made, since the daemon started (ADR-0023).
     pub making: Option<crate::making::MakingStatus>,
 }
 
@@ -474,7 +499,7 @@ mod tests {
         assert!(!state.apply(&line("VOLUME ERROR")), "an error does not change the volume");
         assert!(state.apply(&line("SCREENS KOREKORE")));
         assert!(!state.apply(&line("SCREENS ERROR")), "an unknown style does not change the screens");
-        assert!(state.apply(&line("DECORATION SNOW")));
+        assert!(state.apply(&line("DECORATION CHRISTMAS")));
         assert!(!state.apply(&line("DECORATION ERROR")), "an unknown decoration does not change it");
         assert_eq!(
             state,
@@ -495,13 +520,14 @@ mod tests {
                 voice: Some("builtin".to_owned()),
                 volume: Some(65),
                 screens: Some("korekore".to_owned()),
-                decoration: Some("snow".to_owned()),
+                decoration: Some("christmas".to_owned()),
                 usb_serial: None,
                 box_key: None,
                 paired: false,
                 computer_key: None,
                 paired_computers: Vec::new(),
                 wifi_network: None,
+                wifi_networks: Vec::new(),
                 wifi_address: None,
                 wifi_error: None,
                 relay_server: None,
@@ -620,6 +646,36 @@ mod tests {
     }
 
     #[test]
+    fn the_box_lists_the_networks_it_knows() {
+        let mut state = DeviceState::default();
+        for text in ["WIFI NETWORKS 2", "WIFI KNOWN Home", "WIFI KNOWN Office", "WIFI NETWORK Home"] {
+            state.apply(&line(text));
+        }
+        assert_eq!(state.wifi_networks, ["Home", "Office"]);
+        assert_eq!(state.wifi_network.as_deref(), Some("Home"));
+        // Away from home, the box tries the office network: that is the one it shows, with its own failure.
+        state.apply(&line("WIFI FAILED NoAccessPointFound"));
+        state.apply(&line("WIFI CONNECTING Office"));
+        assert_eq!((state.wifi_network.as_deref(), state.wifi_error.as_deref()), (Some("Office"), None));
+        state.apply(&line("WIFI CONNECTED"));
+        for text in ["WIFI NETWORKS 2", "WIFI KNOWN Office", "WIFI KNOWN Home", "WIFI NETWORK Office"] {
+            state.apply(&line(text));
+        }
+        assert_eq!(state.wifi_networks, ["Office", "Home"]);
+        state.apply(&line("WIFI FORGOTTEN"));
+        assert!(state.wifi_networks.is_empty());
+    }
+
+    #[test]
+    fn firmware_from_before_several_networks_knows_the_one_it_names() {
+        let mut state = DeviceState::default();
+        state.apply(&line("WIFI NETWORK Home"));
+        assert_eq!(state.wifi_networks, ["Home"]);
+        state.apply(&line("WIFI NETWORK Office"));
+        assert_eq!(state.wifi_networks, ["Office"], "it was set over the old one");
+    }
+
+    #[test]
     fn the_wifi_network_follows_the_box() {
         let mut state = DeviceState::default();
         state.apply(&line("WIFI NETWORK Home 5G"));
@@ -721,7 +777,7 @@ mod tests {
     fn a_new_connection_forgets_everything_the_previous_device_said() {
         let mut state = DeviceState::default();
         state.apply(&DeviceMessage::Connected { port: "/dev/cu.x".to_owned(), bridge: false, usb_serial: None });
-        for said in ["MODE DUTY", "VOICES ahu", "VOLUME 50", "SCREENS ROBOT", "DECORATION LEAVES"] {
+        for said in ["MODE DUTY", "VOICES ahu", "VOLUME 50", "SCREENS ROBOT", "DECORATION THANKSGIVING"] {
             state.apply(&line(said));
         }
         state.apply(&DeviceMessage::Disconnected);

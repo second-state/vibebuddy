@@ -64,7 +64,7 @@ struct DaemonClient {
         guard code == 202 else { throw DaemonError(message: DaemonClient.message(in: data) ?? String(localized: "Changing the box screens was rejected (\(code))")) }
     }
 
-    /// `name` is `off`, `leaves`, `snow` or `lights`; the box reports a DECORATION line once it has stored it, which is when the status follows.
+    /// `name` is `off`, `thanksgiving` or `christmas`; the box reports a DECORATION line once it has stored it, which is when the status follows.
     func setDecoration(_ name: String) async throws {
         let body = try JSONSerialization.data(withJSONObject: ["name": name])
         let (code, data) = try await post("/v1/device/decoration", body: body, contentType: "application/json")
@@ -104,8 +104,10 @@ struct DaemonClient {
         guard code == 202 else { throw DaemonError(message: DaemonClient.message(in: data) ?? String(localized: "Scanning for networks was rejected (\(code))")) }
     }
 
-    func forgetWifi() async throws {
-        let (code, data) = try await post("/v1/device/wifi/forget", body: Data(), contentType: "application/json")
+    /// Forgets one of the networks the box knows.
+    func forgetWifi(ssid: String) async throws {
+        let body = try JSONSerialization.data(withJSONObject: ["ssid": ssid])
+        let (code, data) = try await post("/v1/device/wifi/forget", body: body, contentType: "application/json")
         guard code == 202 else { throw DaemonError(message: DaemonClient.message(in: data) ?? String(localized: "Forgetting Wi-Fi was rejected (\(code))")) }
     }
 
@@ -163,6 +165,19 @@ struct DaemonClient {
 
     /// Deletes the account on the service; when the service doesn't, the daemon stays signed in.
     func deleteAccount() async throws { try await accountCall("/v1/account", method: "DELETE") }
+
+    /// A Stripe page for the account card's plan button: Checkout for Upgrade, the Customer Portal for Manage plan.
+    /// After a 409 the daemon also reads the account again, two calls of up to 20 s each, so this waits longer.
+    func planPage(_ button: AccountStatus.PlanButton) async -> PlanPageAnswer {
+        var request = request(button == .upgrade ? "/v1/account/upgrade" : "/v1/account/manage-plan", method: "POST")
+        request.timeoutInterval = 50
+        do {
+            let (data, response) = try await URLSession.shared.data(for: request)
+            return PlanPageAnswer(code: (response as? HTTPURLResponse)?.statusCode ?? 0, data: data)
+        } catch {
+            return .failed(error.localizedDescription)
+        }
+    }
 
     /// The daemon asks the service, which it gives 20 s, so this waits longer than the usual 10 s.
     private func accountCall(_ path: String, method: String) async throws {

@@ -94,7 +94,7 @@ pub fn screen<'a, M: 'a>(picture: &BoxPicture, scale: f32) -> Element<'a, M> {
         let (word, line) = match picture.away_with.as_deref() {
             Some("") => ("AWAY", "with another computer".to_owned()),
             Some(owner) => ("AWAY", format!("with {owner}")),
-            None => ("NO LINK", "waiting for the Mac".to_owned()),
+            None => ("NO LINK", "waiting for the computer".to_owned()),
         };
         container(
             column![
@@ -293,6 +293,15 @@ pub fn settings<'a, M: Clone + 'a>(
         .height(Length::Fill)
         .style(|_| container::Style { background: Some(theme::CREAM.into()), ..container::Style::default() })
         .into()
+}
+
+/// What the last action said, above the page: green when it worked, pink when it failed.
+pub fn notice<'a, M: 'a>(notice: &Result<String, String>) -> Element<'a, M> {
+    let (message, color) = match notice {
+        Ok(message) => (message, theme::DONE_TEXT),
+        Err(error) => (error, theme::KORE_PINK_TEXT),
+    };
+    text(message.clone()).font(rounded(iced::font::Weight::Bold)).size(13).color(color).into()
 }
 
 /// Stands in for a page that comes with a later step of the korekore UI.

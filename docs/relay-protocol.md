@@ -43,7 +43,7 @@ One socket per key: a new connection from the same box, or the same computer, re
 
 A `v` that isn't an integer gets `{"t":"error","code":"auth"}` and close 4001. A `v` older than the Relay's minimum gets `{"t":"error","code":"upgrade"}` and close 4005: the client stops retrying and says an update is needed. The minimum is 1 today. The Relay raises its version when it adds something clients may rely on, and its minimum only when it drops support for old clients.
 
-The Relay carries a link only for a computer whose account is on the Paid plan (ADR-0020); the box needs no account. After the paired check it asks the VibeBuddy service about the session, and refuses:
+The Relay carries a link only for a computer whose account is on the Paid plan (ADR-0023); the box needs no account. After the paired check it asks the VibeBuddy service about the session, and refuses:
 
 - no session, or one the service doesn't know: `{"t":"error","code":"signed_out"}` and close 4006;
 - an account on Free: `{"t":"error","code":"plan"}` and close 4007;

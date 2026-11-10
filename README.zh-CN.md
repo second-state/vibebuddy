@@ -160,11 +160,11 @@ App 和盒子固件分开发布，VibeBuddy 会检查两者有没有新版本（
 
 ### Wi-Fi 和中转
 
-让盒子连上 Wi-Fi（插着线，在设置 → 设备里设置）后，不插线也能连到它：电脑和盒子在同一个网络时走局域网，不在时通过 VibeBuddy 中转。插着线时总是优先走 USB，几种方式之间切换不会断开（[ADR-0012](docs/adr/0012-the-relay-is-a-closed-cloudflare-service-with-pairing-not-accounts.md)）。
+让盒子连上 Wi-Fi（插着线，在设置 → 设备里设置）后，不插线也能连到它：电脑和盒子在同一个网络时走局域网，不在时通过 VibeBuddy 中转。插着线时总是优先走 USB，几种方式之间切换不会断开（[ADR-0012](docs/adr/0012-the-relay-is-a-closed-cloudflare-service-with-pairing-not-accounts.md)）。盒子最多记住 5 个网络（比如公司和家里），找到哪个就连哪个（[ADR-0023](docs/adr/0023-the-box-remembers-several-wi-fi-networks.md)）；设置 → 设备里列出这些网络，每个都能单独忘掉。
 
 - **配对**：盒子和每台电脑都有自己的密钥。电脑插上盒子时自动配对；没配对过的，不管走网络还是中转都连不上盒子。
 - **中转能看到什么**：中转跑在 Cloudflare 上，地址是 `relay.korekore.ai`。盒子连着 Wi-Fi 时会一直和它保持一个连接，传的是盒子的密钥、和它配对的电脑的名字；有电脑通过中转连着盒子时，还有驱动盒子的那些消息。这些消息（Agent 状态、任务标题、项目名）在电脑和盒子之间用配对时交换的密钥做端到端加密，中转既读不到也改不了；它能看到的是哪台电脑连着哪个盒子、什么时候连的、传了多少数据。局域网连接也用同样的方式加密。更早的固件在通过 USB 更新之前仍是明文连接。
-- **怎么关掉**：设置 → 通用 →「盒子不在本机旁边时，通过 VibeBuddy 中转连接它」。关掉后这台电脑不会再连中转。盒子连着 Wi-Fi 时仍会连中转；要让它停下，就让盒子忘掉这个网络。
+- **怎么关掉**：设置 → 通用 →「盒子不在本机旁边时，通过 VibeBuddy 中转连接它」。关掉后这台电脑不会再连中转。盒子连着 Wi-Fi 时仍会连中转；要让它停下，就让盒子忘掉这些网络。
 
 ### 把盒子交给别人
 
@@ -264,7 +264,7 @@ cargo run -p vibebuddyd
 
 默认只监听 `127.0.0.1:7331`，并按 Espressif USB Serial/JTAG 的 `VID:PID 303A:1001` 自动发现设备。可用 `VIBEBUDDY_BIND` 修改监听地址、`VIBEBUDDY_SERIAL_PORT` 显式指定串口，或用 `VIBEBUDDY_USB_SERIAL` 在多块相同设备中选择目标；不指定时，daemon 连之前报出过 VibeBuddy 固件的那块；插着好几块、又都不是那块时，App 会问哪一块是盒子。这两个变量设了都会显示在 App 的设备页上，免得忘了撤的固定被当成找不到盒子。运行其他固件（比如 Muse）的盒子，daemon 不会往里写任何东西。HTTP `202 Accepted` 表示事件进入有界发送队列；设备实际接收结果以 daemon 记录的设备响应为准。
 
-语音指令是体验版，默认关闭：在 Mac 或 Linux 的设置 → 对话里打开“语音指令”开关，盒子长按 K0 就成了按住说话。语音识别要用你自己的 [Groq](https://console.groq.com/keys) 密钥：在设置 → 通用的“自己的密钥”里填上（没填时盒子显示 SET VOICE KEY）。口头回复要用你自己的 ElevenLabs 密钥；没有密钥时回复只显示文字。由你自己的 Codex 来回答；也可以换成你自己的 Claude Code，配你自己的 Anthropic API 密钥（不能用 Claude 订阅）。这一页还列出你最近的语音指令和氛围小助手的口头回复，也在这里选由谁回答、填 API 密钥。开发时可以用 `VIBEBUDDY_RESIDENT_SESSION=1` 让它一直开着。详见 [`docs/resident-session.md`](docs/resident-session.md)。
+语音指令是体验版，默认关闭：在 Mac 或 Linux 的设置 → 对话里打开“语音指令”开关，盒子长按 K0 就成了按住说话。登录 VibeBuddy 账户后，我们的语音服务识别你的语音，用的是你的语音额度。新账户第一次发语音指令时获赠 1 美元语音额度。设置 → 通用里显示还剩多少。在设置 → 通用的“自己的密钥”里填上你自己的 [Groq](https://console.groq.com/keys) 密钥后，录音改为直接发给 Groq。两样都没有时，盒子显示 SET VOICE KEY。口头回复暂时还要用你自己的 ElevenLabs 密钥；没有密钥时回复只显示文字。由你自己的 Codex 来回答；也可以换成你自己的 Claude Code，配你自己的 Anthropic API 密钥（不能用 Claude 订阅）。这一页还列出你最近的语音指令和氛围小助手的口头回复，也在这里选由谁回答、填 API 密钥。开发时可以用 `VIBEBUDDY_RESIDENT_SESSION=1` 让它一直开着。详见 [`docs/resident-session.md`](docs/resident-session.md)。
 
 daemon 平时由 App 看管。没有 App 的开发机可以用 [`packaging/com.vibebuddy.vibebuddyd.plist`](packaging/com.vibebuddy.vibebuddyd.plist) 装成 LaunchAgent，但两者不能同时跑，会抢串口。daemon 还为 App 提供 `GET /v1/status`、SSE `/v1/status/stream`、`/v1/config`、`/v1/device/{identify,volume,choice,screenshot,voice-pack,firmware}` 与 `/v1/daemon/restart`。
 

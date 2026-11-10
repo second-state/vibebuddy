@@ -219,7 +219,7 @@ struct KorekoreDevicePage: View {
         }
     }
 
-    /// Why the Relay won't carry the link, shown while the box is away (ADR-0020).
+    /// Why the Relay won't carry the link, shown while the box is away (ADR-0023).
     private var relayRefusal: String? {
         guard AccountPlan.shown else { return nil }
         return switch device?.relayRefused {
@@ -381,8 +381,8 @@ struct KorekoreFirmwareUnavailable: View {
     }
 }
 
-/// The Wi-Fi network the box joins (ADR-0012). Set over the cable only; the password goes to the box and is kept
-/// nowhere else, so it is never shown again.
+/// The Wi-Fi networks the box joins (ADR-0012, ADR-0023). Set over the cable only; the password goes to the box and
+/// is kept nowhere else, so it is never shown again. The box remembers up to five and joins whichever it finds.
 struct KorekoreWifiCard: View {
     @ObservedObject var model: AppModel
     let device: DeviceState
@@ -426,10 +426,7 @@ struct KorekoreWifiCard: View {
                 if device.network == true {
                     KNote(String(localized: "Plug in the cable to change the box's network."))
                 } else if device.wifiNetwork != nil && device.wifiError == nil && !editing {
-                    HStack(spacing: 8) {
-                        Button(String(localized: "Change network")) { editing = true }.kButton()
-                        Button(String(localized: "Forget")) { model.forgetWifi() }.kButton().disabled(model.operationRunning)
-                    }
+                    Button(String(localized: "Add network")) { editing = true }.kButton()
                 } else {
                     HStack(spacing: 8) {
                         KMenu(selection: ssid, options: [("", String(localized: "Choose…"))]
@@ -447,10 +444,22 @@ struct KorekoreWifiCard: View {
                         }
                         .kButton(.sun)
                         .disabled(ssid.isEmpty || ssid.utf8.count > 32 || password.utf8.count > 63 || model.operationRunning)
-                        if device.wifiNetwork != nil {
-                            Button(String(localized: "Forget")) { model.forgetWifi() }.kButton().disabled(model.operationRunning)
+                    }
+                }
+                if !known.isEmpty {
+                    Text("Remembered networks").font(.rounded(13, weight: 700)).padding(.top, 4)
+                    ForEach(known, id: \.self) { network in
+                        HStack {
+                            Text(verbatim: network).font(.rounded(13))
+                            Spacer()
+                            if device.network != true {
+                                Button(String(localized: "Forget")) { model.forgetWifi(ssid: network) }.kButton().disabled(model.operationRunning)
+                            }
                         }
                     }
+                    Text("The box remembers up to 5 networks and joins the one it finds.")
+                        .font(.rounded(12, weight: 400)).foregroundStyle(Theme.Colors.muted)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
                 Text("On the same network, a paired computer drives the box without the cable.")
                     .font(.rounded(12, weight: 400)).foregroundStyle(Theme.Colors.muted)
@@ -458,6 +467,9 @@ struct KorekoreWifiCard: View {
             }
         }
     }
+
+    /// What the box knows; an older daemon names only the network it is on.
+    private var known: [String] { device.wifiNetworks ?? device.wifiNetwork.map { [$0] } ?? [] }
 
     private func row<Value: View>(_ label: String, @ViewBuilder value: () -> Value) -> some View {
         HStack {

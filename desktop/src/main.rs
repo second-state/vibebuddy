@@ -44,7 +44,8 @@ const CONVERSATION_LIMIT: usize = 20;
 const RESTARTED: &str = "--restarted";
 /// Followed by a voice id: written once the restarted copy sees the box answer, then forgotten.
 const WRITE_VOICE: &str = "--write-voice";
-/// Passed by the Omarchy bar plugin: open Settings, even from a launch that would otherwise stay in the background.
+/// Passed by the Start menu, the app launcher and the Omarchy bar plugin: open Settings, even from a launch that would
+/// otherwise stay in the background. The start at login leaves it out and stays in the tray.
 const SETTINGS: &str = "--settings";
 
 /// The running copy's socket, handed to the subscription that listens on it.
@@ -147,19 +148,16 @@ enum Message {
     JoinWifi,
     /// Show the fields again to join another network.
     ChangeWifi,
-    ForgetWifi,
+    ForgetWifi(String),
     ScanWifi,
     Identify,
     UseVoice(&'static str),
     /// A form of address for a language, or none.
     PickAddress(assets::Language, Option<&'static str>),
-    ChooseDrawings,
-    Drawings(Result<Option<Vec<character::Image>>, String>),
-    PickLender(Lender),
     UseRobot,
     UseCustom,
     CopyPrompt,
-    /// Making a Character (ADR-0020): open the form in place of the Character tab, or (false) leave it.
+    /// Making a Character (ADR-0023): open the form in place of the Character tab, or (false) leave it.
     MakeCharacter(bool),
     MakeBase(Lender),
     /// A preset's lines, for the form if it still starts from that preset.
@@ -257,6 +255,14 @@ enum Message {
     SignIn,
     SignInUrl(Result<String, String>),
     SignOut,
+    /// Upgrade or Manage plan: ask the daemon for the Stripe page, then open it in the browser.
+    OpenPlanPage(status::PlanButton),
+    PlanPage(status::PlanButton, client::PlanAnswer),
+    /// Read the account again while waiting for Stripe to confirm a payment: the watch it belongs to, and how many
+    /// reads are left.
+    WatchPlan(u32, u32),
+    /// The settings window came to the front, for instance back from Stripe's pages in the browser.
+    WindowFocused,
     AskDeleteAccount(bool),
     DeleteAccount,
     /// Signing out or deleting the account finished; the account itself comes with the next status.
@@ -306,17 +312,14 @@ struct App {
     characters: custom::Settings,
     /// The user's own Character on the card: its look, its four frames to show, and who lends it voice and lines.
     custom_look: Option<(Vec<u8>, Vec<image::Handle>)>,
-    /// `custom_look` is the look last written (with `characters.custom_lender`), not one just chosen.
-    custom_look_written: bool,
     lender: Option<Lender>,
-    custom_problem: Option<String>,
     /// The robot's face for its card.
     robot_face: Option<image::Handle>,
     /// Each decoration's preview over each set of box screens, keyed `<screens>-<decoration>`, and the frame up now.
     decoration_frames: Vec<(&'static str, Vec<image::Handle>)>,
     decoration_frame: usize,
     decoration_pointed: Option<BoxDecoration>,
-    /// The Characters made on this computer, each one's face, and the voices one can be made with (ADR-0020); asked
+    /// The Characters made on this computer, each one's face, and the voices one can be made with (ADR-0023); asked
     /// when the daemon comes up and whenever a job changes state.
     made: Vec<making::MadeCharacter>,
     made_faces: Vec<(String, image::Handle)>,
@@ -363,6 +366,12 @@ struct App {
     signing_in: bool,
     /// Deleting the account waits for a second click, since it can't be undone.
     confirm_delete_account: bool,
+    /// A plan button's request is running: a second click would open a second Checkout.
+    plan_busy: bool,
+    /// What the plan row says while the app waits for Stripe to confirm a payment.
+    paying: Option<String>,
+    /// Bumped by each new watch for the Paid plan, so an older one stops.
+    plan_watch: u32,
     /// The own keys being typed, by provider; cleared once the daemon has one, and never filled from the daemon.
     own_key_drafts: [String; 3],
     /// The outcome of the last action, shown at the bottom of the window.
@@ -468,9 +477,7 @@ impl App {
             faces: Vec::new(),
             characters: custom::Settings::load(),
             custom_look: None,
-            custom_look_written: false,
             lender: None,
-            custom_problem: None,
             robot_face: None,
             decoration_frames: decoration_frames(),
             decoration_frame: 0,
@@ -501,6 +508,9 @@ impl App {
             resident_setting_error: None,
             signing_in: false,
             confirm_delete_account: false,
+            plan_busy: false,
+            paying: None,
+            plan_watch: 0,
             own_key_drafts: Default::default(),
             notice: None,
             language: UiLanguage::saved(),
@@ -532,7 +542,6 @@ impl App {
         app.custom_look = custom::custom_look_file()
             .and_then(|path| std::fs::read(path).ok())
             .and_then(|look| character::look_frames(&look).map(|frames| (look, frames.iter().map(|frame| handle(frame, 2)).collect())));
-        app.custom_look_written = app.custom_look.is_some();
         // Debug builds only: open the window on a given section or first-run step, for checking it on a desktop
         // without a pointer (VIBEBUDDY_KOREKORE_SECTION=device, VIBEBUDDY_KOREKORE_GUIDE=1).
         #[cfg(debug_assertions)]
@@ -564,6 +573,19 @@ impl App {
         Theme::Light
     }
 
+    fn plan_paid(&self) -> bool {
+        self.status.as_ref().and_then(|status| status.account.plan.as_ref()).is_some_and(status::Plan::paid)
+    }
+
+    /// Reads the account every 3 s for a minute, or until it is on the Paid plan: the plan changes only when Stripe's
+    /// payment reaches the service, which can be after the window comes back.
+    fn watch_for_paid(&mut self, note: String) -> Task<Message> {
+        self.paying = Some(note);
+        self.plan_watch = self.plan_watch.wrapping_add(1);
+        let watch = self.plan_watch;
+        Task::perform(tokio::time::sleep(Duration::from_secs(3)), move |()| Message::WatchPlan(watch, 20))
+    }
+
     fn subscription(&self) -> Subscription<Message> {
         #[cfg(target_os = "linux")]
         let (tray, instance) = (
@@ -587,11 +609,18 @@ impl App {
         } else {
             Subscription::none()
         };
+        // Only while General, which shows the account, is in an open window: read the plan again on coming back.
+        let account_focus = if self.settings.is_some() && self.tab == Tab::General {
+            iced::event::listen_with(|event, _, _| matches!(event, iced::Event::Window(window::Event::Focused)).then_some(Message::WindowFocused))
+        } else {
+            Subscription::none()
+        };
         Subscription::batch([
             Subscription::run(client::status_updates).map(Message::Daemon),
             decorations,
             iced::time::every(Duration::from_secs(2)).map(|_| Message::PluginTick),
             window::close_events().map(Message::WindowClosed),
+            account_focus,
             tray,
             instance,
             conversation,
@@ -672,9 +701,25 @@ impl App {
                     return window::gain_focus(id);
                 }
                 // The design's 960 × 772, down to 900 × 760.
+                #[allow(unused_mut)]
+                let (mut size, mut min_size, mut position): (iced::Size, iced::Size, _) = (iced::Size::new(960.0, 772.0), iced::Size::new(900.0, 760.0), window::Position::default());
+                // A 1080p screen at 150 % has less room than that above the taskbar, and Windows puts each new window
+                // further down: no taller than the room there, and in the middle of it. The pages scroll.
+                #[cfg(windows)]
+                if let Some(area) = windows::work_area() {
+                    // The title bar and the frame.
+                    let room = area.height - 40.0;
+                    size.height = size.height.min(room);
+                    min_size.height = min_size.height.min(room);
+                    position = window::Position::Specific(iced::Point::new(
+                        area.x + (area.width - size.width).max(0.0) / 2.0,
+                        area.y + (room - size.height).max(0.0) / 2.0,
+                    ));
+                }
                 let (id, open) = window::open(window::Settings {
-                    size: iced::Size::new(960.0, 772.0),
-                    min_size: Some(iced::Size::new(900.0, 760.0)),
+                    size,
+                    min_size: Some(min_size),
+                    position,
                     // Kore's badge, as the Mac app shows in the Dock; Wayland takes the icon from the desktop entry instead.
                     icon: window::icon::from_rgba(korekore::app_icon(256), 256, 256).ok(),
                     #[cfg(target_os = "linux")]
@@ -708,6 +753,7 @@ impl App {
             Message::NotThisOne => self.not_this_one = true,
             Message::Tab(tab) => {
                 self.tab = tab;
+                self.notice = None;
                 // Agents can be installed or set up behind the app's back; look again whenever the tab opens.
                 if tab == Tab::Agents {
                     return Task::done(Message::RefreshAgents);
@@ -903,7 +949,7 @@ impl App {
                 let password = std::mem::take(&mut self.wifi_password);
                 return Task::perform(client::set_wifi(self.wifi_ssid.clone(), password), Message::Done);
             }
-            Message::ForgetWifi => return Task::perform(client::forget_wifi(), Message::Done),
+            Message::ForgetWifi(ssid) => return Task::perform(client::forget_wifi(ssid), Message::Done),
             Message::ScanWifi => return Task::perform(client::scan_wifi(), Message::Done),
             Message::Identify => return Task::perform(client::identify(), Message::Done),
             Message::UseVoice(id) => {
@@ -932,25 +978,6 @@ impl App {
                     return Task::done(Message::UseCustom);
                 }
             }
-            Message::ChooseDrawings => return Task::perform(custom::choose_drawings(), Message::Drawings),
-            Message::Drawings(Ok(None)) => {}
-            Message::Drawings(Ok(Some(drawings))) => {
-                match character::build_look(&drawings) {
-                    Some(look) => {
-                        let frames = character::look_frames(&look).unwrap_or_default();
-                        self.custom_look = Some((look, frames.iter().map(|frame| handle(frame, 2)).collect()));
-                        self.custom_look_written = false;
-                        self.custom_problem = None;
-                    }
-                    None => self.custom_problem = Some(tr("No figure found: use a plain white or transparent background.", &[])),
-                }
-                return self.show_custom_look();
-            }
-            Message::Drawings(Err(error)) => {
-                self.custom_problem = Some(error);
-                return self.show_custom_look();
-            }
-            Message::PickLender(lender) => self.lender = Some(lender),
             Message::UseRobot => {
                 self.characters.robot_lender = None;
                 self.characters.save();
@@ -964,7 +991,6 @@ impl App {
                 }
                 self.characters.custom_lender = Some(lender.id.to_owned());
                 self.characters.save();
-                self.custom_look_written = true;
                 let form = assets::language_of(lender.id).and_then(|language| self.characters.address(language)).map(str::to_owned);
                 let write = async move {
                     let pack = assets::read_character(lender.id, form.as_deref()).await?.with_look(look, CUSTOM);
@@ -1151,8 +1177,6 @@ impl App {
                 let Some((look, _)) = form.look else { return Task::none() };
                 let frames = character::look_frames(&look).unwrap_or_default();
                 self.custom_look = Some((look, frames.iter().map(|frame| handle(frame, 2)).collect()));
-                self.custom_look_written = false;
-                self.custom_problem = None;
                 self.lender = Some(form.base);
                 return Task::done(Message::UseCustom);
             }
@@ -1232,8 +1256,6 @@ impl App {
                     let _ = std::fs::remove_file(path);
                 }
                 self.custom_look = None;
-                self.custom_look_written = false;
-                self.custom_problem = None;
                 let lender = self.characters.custom_lender.take().and_then(|id| self.voices.iter().find(|voice| voice.id == id).map(|voice| voice.id));
                 self.characters.save();
                 let current = self.status.as_ref().and_then(|status| status.device.voice.clone());
@@ -1382,6 +1404,52 @@ impl App {
                     Message::AccountDone(result.map_err(|error| tr("Couldn't sign out: %@", &[&error])))
                 });
             }
+            Message::OpenPlanPage(button) => {
+                self.plan_busy = true;
+                return Task::perform(client::plan_page(button), move |answer| Message::PlanPage(button, answer));
+            }
+            Message::PlanPage(button, answer) => {
+                self.plan_busy = false;
+                match answer {
+                    client::PlanAnswer::Open(url) => match open_target(std::ffi::OsStr::new(&url)) {
+                        Err(error) => self.notice = Some(Err(tr("Couldn't open the plan page: %@", &[&error]))),
+                        Ok(()) if button == status::PlanButton::Upgrade => return self.watch_for_paid(tr("Waiting for the payment…", &[])),
+                        Ok(()) => {}
+                    },
+                    // The status shows signed out.
+                    client::PlanAnswer::NotSignedIn => {}
+                    // The daemon has read the account again. Still Free: Stripe has the payment, the service not yet.
+                    client::PlanAnswer::Conflict(reason) if reason == "already_paid" => {
+                        if !self.plan_paid() {
+                            return self.watch_for_paid(tr("Your payment is being processed.", &[]));
+                        }
+                    }
+                    client::PlanAnswer::Conflict(_) => self.notice = Some(Err(tr("This Paid plan can't be managed here.", &[]))),
+                    client::PlanAnswer::NotOffered => self.notice = Some(Err(tr("The Paid plan isn't offered here.", &[]))),
+                    client::PlanAnswer::Failed(message) => {
+                        let why = message.unwrap_or_else(|| tr("the daemon didn't say why", &[]));
+                        self.notice = Some(Err(tr("Couldn't open the plan page: %@", &[&why])));
+                    }
+                }
+            }
+            Message::WatchPlan(watch, left) => {
+                if watch != self.plan_watch {
+                    return Task::none();
+                }
+                if self.plan_paid() || self.settings.is_none() || left == 0 {
+                    self.paying = None;
+                    return Task::none();
+                }
+                return Task::batch([
+                    Task::perform(client::refresh_account(), |_| Message::AccountDone(Ok(()))),
+                    Task::perform(tokio::time::sleep(Duration::from_secs(3)), move |()| Message::WatchPlan(watch, left - 1)),
+                ]);
+            }
+            Message::WindowFocused => {
+                if self.status.as_ref().is_some_and(|status| status.account.signed_in) {
+                    return Task::perform(client::refresh_account(), |_| Message::AccountDone(Ok(())));
+                }
+            }
             Message::AskDeleteAccount(asking) => self.confirm_delete_account = asking,
             Message::DeleteAccount => {
                 self.confirm_delete_account = false;
@@ -1424,11 +1492,6 @@ impl App {
 
     /// Pushes the menu and the face's color to the tray; a no-op until the tray is up.
     /// Asks for the Characters made here, and the voices once.
-    /// The korekore Character page opens the look's card below the grid; go down to it.
-    fn show_custom_look(&self) -> Task<Message> {
-        iced::widget::operation::snap_to_end(korekore::pages::CHARACTER_PAGE)
-    }
-
     fn refresh_made(&self) -> Task<Message> {
         let voices = if self.character_voices.is_empty() {
             Task::perform(client::character_voices(), Message::CharacterVoices)
@@ -1502,7 +1565,9 @@ impl App {
     fn korekore(&self, section: korekore::Section) -> Element<'_, Message> {
         let sections: Vec<korekore::Section> = korekore::Section::ALL.into_iter().collect();
         let picture = korekore::picture::BoxPicture::derive(self.status.as_ref());
-        korekore::view::settings(&picture, &sections, section, env!("CARGO_PKG_VERSION"), Message::Korekore, self.korekore_page(section))
+        // Pages have no place of their own for what an action said, so it goes above whichever page shows.
+        let page = iced::widget::column![].push(self.notice.as_ref().map(korekore::view::notice)).push(self.korekore_page(section)).spacing(10);
+        korekore::view::settings(&picture, &sections, section, env!("CARGO_PKG_VERSION"), Message::Korekore, page.into())
     }
 
     fn updates(&self) -> Option<&status::Updates> {
@@ -1562,7 +1627,8 @@ fn launch(program: &str, args: &[&std::ffi::OsStr]) -> Result<(), String> {
 }
 
 /// Logs, config and both sides' build IDs in one folder under Downloads, with no hook payloads; the folder opens when
-/// it's ready. The daemon's log comes from the journal, two days of it.
+/// it's ready. The daemon's log comes from the journal, two days of it; on Windows from the file the app writes it to,
+/// with the run before.
 async fn export_diagnostics(summary: String, config: Option<Config>) -> Result<String, String> {
     let seconds = SystemTime::now()
         .duration_since(SystemTime::UNIX_EPOCH)
@@ -1574,6 +1640,10 @@ async fn export_diagnostics(summary: String, config: Option<Config>) -> Result<S
     #[cfg(windows)]
     if let Some(log) = windows::daemon_log().filter(|path| path.is_file()) {
         tokio::fs::copy(log, target.join("vibebuddyd.log")).await.map_err(fail)?;
+    }
+    #[cfg(windows)]
+    if let Some(log) = windows::previous_daemon_log().filter(|path| path.is_file()) {
+        tokio::fs::copy(log, target.join("vibebuddyd.previous.log")).await.map_err(fail)?;
     }
     #[cfg(not(windows))]
     {
@@ -1679,13 +1749,11 @@ fn decoration_frames() -> Vec<(&'static str, Vec<image::Handle>)> {
     }
     let strips = [
         strip!("robot-off"),
-        strip!("robot-leaves"),
-        strip!("robot-snow"),
-        strip!("robot-lights"),
+        strip!("robot-thanksgiving"),
+        strip!("robot-christmas"),
         strip!("korekore-off"),
-        strip!("korekore-leaves"),
-        strip!("korekore-snow"),
-        strip!("korekore-lights"),
+        strip!("korekore-thanksgiving"),
+        strip!("korekore-christmas"),
     ];
     strips
         .into_iter()
@@ -1702,12 +1770,12 @@ fn decoration_frames() -> Vec<(&'static str, Vec<image::Handle>)> {
         .collect()
 }
 
-/// One entry of the decoration picker: `off`, `leaves`, `snow` or `lights` (ADR-0022).
+/// One entry of the decoration picker: `off`, `thanksgiving` or `christmas` (ADR-0022).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 struct BoxDecoration(&'static str);
 
 impl BoxDecoration {
-    const ALL: [BoxDecoration; 4] = [BoxDecoration("off"), BoxDecoration("leaves"), BoxDecoration("snow"), BoxDecoration("lights")];
+    const ALL: [BoxDecoration; 3] = [BoxDecoration("off"), BoxDecoration("thanksgiving"), BoxDecoration("christmas")];
 
     fn of(name: &str) -> Option<BoxDecoration> {
         Self::ALL.into_iter().find(|decoration| decoration.0 == name)
@@ -1717,9 +1785,8 @@ impl BoxDecoration {
 impl std::fmt::Display for BoxDecoration {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str(&match self.0 {
-            "leaves" => tr("Falling leaves", &[]),
-            "snow" => tr("Snow", &[]),
-            "lights" => tr("Lights", &[]),
+            "thanksgiving" => tr("Thanksgiving", &[]),
+            "christmas" => tr("Christmas", &[]),
             _ => tr("Off", &[]),
         })
     }

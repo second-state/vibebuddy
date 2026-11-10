@@ -55,8 +55,24 @@ pub static SCAN: Signal<CriticalSectionRawMutex, ()> = Signal::new();
 pub static ADDRESS: Watch<CriticalSectionRawMutex, Option<core::net::Ipv4Addr>, ADDRESS_READERS> = Watch::new();
 /// The mDNS task and the Relay task.
 const ADDRESS_READERS: usize = 2;
-/// The network to join, or None to leave Wi-Fi; signalled at boot and whenever the user changes it.
-pub static CREDENTIALS: Signal<CriticalSectionRawMutex, Option<(String, String)>> = Signal::new();
+/// The networks to join; signalled at boot and whenever the user changes them.
+pub static CREDENTIALS: Signal<CriticalSectionRawMutex, Networks> = Signal::new();
+
+/// The networks the box knows, name and password, most recently joined first; none means leave Wi-Fi.
+#[derive(Clone, Default)]
+pub struct Networks {
+    pub known: Vec<(String, String)>,
+    /// Try the first one before any other: the user just set it.
+    pub first_now: bool,
+}
+
+/// How one try at a network ended.
+enum Attempt {
+    Joined,
+    Failed,
+    /// The user changed the networks while the box was trying.
+    Changed(Networks),
+}
 
 static OUT: [Pipe<CriticalSectionRawMutex, PIPE_BYTES>; SLOTS] = [Pipe::new(), Pipe::new()];
 static CLOSE: [Signal<CriticalSectionRawMutex, ()>; SLOTS] = [Signal::new(), Signal::new()];
@@ -100,7 +116,7 @@ pub fn close(conn: u32) {
     }
 }
 
-/// Starts Wi-Fi and the server. Nothing joins a network until [`CREDENTIALS`] names one. Returns the
+/// Starts Wi-Fi and the server. Nothing joins a network until [`CREDENTIALS`] names some. Returns the
 /// network stack for the Relay task, or None if Wi-Fi didn't start.
 pub fn start(spawner: &Spawner, wifi: esp_hal::peripherals::WIFI<'static>) -> Option<Stack<'static>> {
     let Ok(mut controller) = WifiController::new(wifi, ControllerConfig::default()) else {
@@ -132,104 +148,133 @@ fn line(text: String) {
     let _ = EVENTS.try_send(NetEvent::Line(text));
 }
 
+/// Joins one of the known networks and stays on it (ADR-0023). Each round scans, then tries the known networks
+/// it heard, strongest first, or every known network if it heard none; when all fail it waits 10 s and goes again.
 #[embassy_executor::task]
 async fn connection(mut controller: WifiController<'static>) {
-    let mut wanted: Option<(String, String)> = None;
-    loop {
-        // Wait for a network to join, or a change while not connected.
-        if wanted.is_none() {
+    let mut networks = Networks::default();
+    'round: loop {
+        // Wait for a network to join, scanning when asked.
+        if networks.known.is_empty() {
             match select(CREDENTIALS.wait(), SCAN.wait()).await {
-                embassy_futures::select::Either::First(next) => wanted = next,
-                embassy_futures::select::Either::Second(()) => report_scan(&mut controller).await,
-            }
-            continue;
-        }
-        let Some((ssid, password)) = wanted.clone() else { continue };
-        let auth = if password.is_empty() {
-            AuthenticationMethodConfig::Open
-        } else {
-            match password.as_str().try_into() {
-                Ok(password) => AuthenticationMethodConfig::Wpa2Personal(password),
-                Err(_) => {
-                    line(String::from("WIFI FAILED password"));
-                    wanted = CREDENTIALS.wait().await;
-                    continue;
+                embassy_futures::select::Either::First(next) => networks = next,
+                embassy_futures::select::Either::Second(()) => {
+                    report_scan(&mut controller).await;
                 }
             }
-        };
-        let Ok(ssid_value) = ssid.as_str().try_into() else {
-            line(String::from("WIFI FAILED ssid"));
-            wanted = CREDENTIALS.wait().await;
-            continue;
-        };
-        let config = Config::Station(StationConfig::default().with_ssid(ssid_value).with_authentication(auth));
-        if controller.set_config(&config).is_err() {
-            line(String::from("WIFI FAILED config"));
-            wanted = CREDENTIALS.wait().await;
             continue;
         }
-        line(alloc::format!("WIFI CONNECTING {ssid}"));
-        match select(controller.connect_async(), CREDENTIALS.wait()).await {
-            embassy_futures::select::Either::First(Ok(_)) => {
-                line(String::from("WIFI CONNECTED"));
-                // Scans can run while connected; the station stays on its network.
-                let next = loop {
-                    match select3(controller.wait_for_disconnect_async(), CREDENTIALS.wait(), SCAN.wait()).await {
-                        Either3::First(_) => break None,
-                        Either3::Second(next) => break Some(next),
-                        Either3::Third(()) => report_scan(&mut controller).await,
-                    }
-                };
-                match next {
-                    None => line(String::from("WIFI DISCONNECTED")),
-                    Some(next) => {
-                        let _ = controller.disconnect_async().await;
-                        wanted = next;
-                        if wanted.is_none() {
-                            line(String::from("WIFI DISCONNECTED"));
+        let seen = report_scan(&mut controller).await;
+        let known: Vec<&str> = networks.known.iter().map(|(ssid, _)| ssid.as_str()).collect();
+        let seen: Vec<&str> = seen.iter().map(String::as_str).collect();
+        let order = vibebuddy_firmware_core::link::join_order(&known, &seen, core::mem::take(&mut networks.first_now));
+        for index in order {
+            let (ssid, password) = networks.known[index].clone();
+            match attempt(&mut controller, &ssid, &password).await {
+                Attempt::Failed => {}
+                Attempt::Changed(next) => {
+                    networks = next;
+                    continue 'round;
+                }
+                Attempt::Joined => {
+                    // The main loop moves it first in the record; this copy follows, for the next round.
+                    let joined = networks.known.remove(index);
+                    networks.known.insert(0, joined);
+                    // Scans can run while connected; the station stays on its network.
+                    loop {
+                        match select3(controller.wait_for_disconnect_async(), CREDENTIALS.wait(), SCAN.wait()).await {
+                            Either3::First(_) => {
+                                line(String::from("WIFI DISCONNECTED"));
+                                continue 'round;
+                            }
+                            Either3::Second(next) => {
+                                let _ = controller.disconnect_async().await;
+                                networks = next;
+                                if networks.known.is_empty() {
+                                    line(String::from("WIFI DISCONNECTED"));
+                                }
+                                continue 'round;
+                            }
+                            Either3::Third(()) => {
+                                report_scan(&mut controller).await;
+                            }
                         }
-                        continue;
                     }
                 }
             }
-            embassy_futures::select::Either::First(Err(error)) => {
-                // The driver's reason alone (`AuthenticationExpired`, `NoAccessPointFound`): the daemon tells the
-                // user what it means.
-                match error {
-                    esp_radio::wifi::ConnectionError::Failed(info) => line(alloc::format!("WIFI FAILED {:?}", info.reason)),
-                    error => line(alloc::format!("WIFI FAILED {error:?}")),
-                }
-                report_scan(&mut controller).await;
-            }
-            embassy_futures::select::Either::Second(next) => {
-                // Dropping the wait doesn't stop the driver's attempt, and the driver refuses a new config while it
-                // is still connecting: a wrong password keeps it at that for over 10 s, so a quick second Join
-                // failed with `config`.
-                let _ = controller.disconnect_async().await;
-                wanted = next;
-                continue;
+        }
+        // Try again in a while, sooner if the user changes the networks.
+        if let embassy_futures::select::Either::Second(next) = select(Timer::after(Duration::from_secs(10)), CREDENTIALS.wait()).await {
+            networks = next;
+        }
+    }
+}
+
+/// One try at one network: `WIFI CONNECTING <ssid>`, then `WIFI CONNECTED` or `WIFI FAILED <why>`.
+async fn attempt(controller: &mut WifiController<'static>, ssid: &str, password: &str) -> Attempt {
+    let auth = if password.is_empty() {
+        AuthenticationMethodConfig::Open
+    } else {
+        match password.try_into() {
+            Ok(password) => AuthenticationMethodConfig::Wpa2Personal(password),
+            Err(_) => {
+                line(String::from("WIFI FAILED password"));
+                return Attempt::Failed;
             }
         }
-        // Try again in a while, sooner if the user sets another network.
-        if let embassy_futures::select::Either::Second(next) = select(Timer::after(Duration::from_secs(10)), CREDENTIALS.wait()).await {
-            wanted = next;
+    };
+    let Ok(ssid_value) = ssid.try_into() else {
+        line(String::from("WIFI FAILED ssid"));
+        return Attempt::Failed;
+    };
+    let config = Config::Station(StationConfig::default().with_ssid(ssid_value).with_authentication(auth));
+    if controller.set_config(&config).is_err() {
+        line(String::from("WIFI FAILED config"));
+        return Attempt::Failed;
+    }
+    line(alloc::format!("WIFI CONNECTING {ssid}"));
+    match select(controller.connect_async(), CREDENTIALS.wait()).await {
+        embassy_futures::select::Either::First(Ok(_)) => {
+            line(String::from("WIFI CONNECTED"));
+            Attempt::Joined
+        }
+        embassy_futures::select::Either::First(Err(error)) => {
+            // The driver's reason alone (`AuthenticationExpired`, `NoAccessPointFound`): the daemon tells the
+            // user what it means.
+            match error {
+                esp_radio::wifi::ConnectionError::Failed(info) => line(alloc::format!("WIFI FAILED {:?}", info.reason)),
+                error => line(alloc::format!("WIFI FAILED {error:?}")),
+            }
+            Attempt::Failed
+        }
+        embassy_futures::select::Either::Second(next) => {
+            // Dropping the wait doesn't stop the driver's attempt, and the driver refuses a new config while it
+            // is still connecting: a wrong password keeps it at that for over 10 s, so a quick second Join
+            // failed with `config`.
+            let _ = controller.disconnect_async().await;
+            Attempt::Changed(next)
         }
     }
 }
 
 /// `WIFI SEEN <rssi> <channel> <ssid>` for what the box can hear, strongest first: when it can't join,
-/// this tells a 5 GHz-only network or a mistyped name from a box that hears nothing.
-async fn report_scan(controller: &mut WifiController<'static>) {
+/// this tells a 5 GHz-only network or a mistyped name from a box that hears nothing. Returns the names in that
+/// order; none if the scan failed.
+async fn report_scan(controller: &mut WifiController<'static>) -> Vec<String> {
     let config = esp_radio::wifi::scan::ScanConfig::default().with_max(12);
     match controller.scan_async(&config).await {
         Ok(mut found) => {
             found.sort_by_key(|ap| core::cmp::Reverse(ap.signal_strength));
             line(alloc::format!("WIFI SEEN {}", found.len()));
-            for ap in found {
+            for ap in &found {
                 line(alloc::format!("WIFI SEEN {} {} {}", ap.signal_strength, ap.channel, ap.ssid.as_str()));
             }
+            found.into_iter().map(|ap| String::from(ap.ssid.as_str())).collect()
         }
-        Err(error) => line(alloc::format!("WIFI SCAN FAILED {error:?}")),
+        Err(error) => {
+            line(alloc::format!("WIFI SCAN FAILED {error:?}"));
+            Vec::new()
+        }
     }
 }
 

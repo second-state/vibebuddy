@@ -77,14 +77,18 @@ do {
     """.utf8))
     check(refused.relayRefused == "plan" && busy.relayRefused == nil, "the Relay's refusal decodes")
     let screens = try StatusCoding.decoder().decode(DeviceState.self, from: Data("""
-    {"connected":true,"bridge":false,"screens":"korekore","decoration":"snow"}
+    {"connected":true,"bridge":false,"screens":"korekore","decoration":"christmas"}
     """.utf8))
     check(screens.screens == "korekore" && busy.screens == nil, "the box screens decode, and are nil from older firmware")
-    check(screens.decoration == "snow" && busy.decoration == nil, "the decoration decodes, and is nil from older firmware")
+    check(screens.decoration == "christmas" && busy.decoration == nil, "the decoration decodes, and is nil from older firmware")
     let seen = try StatusCoding.decoder().decode(DeviceState.self, from: Data("""
     {"connected":true,"bridge":false,"wifi_seen":[{"ssid":"ByteTrade","rssi":-49}]}
     """.utf8))
     check(seen.wifiSeen == [SeenNetwork(ssid: "ByteTrade", rssi: -49)], "scan results decode")
+    let known = try StatusCoding.decoder().decode(DeviceState.self, from: Data("""
+    {"connected":true,"bridge":false,"wifi_network":"Home","wifi_networks":["Home","Office"]}
+    """.utf8))
+    check(known.wifiNetworks == ["Home", "Office"] && wifi.wifiNetworks == nil, "the networks the box knows decode, and are nil from older daemons")
     check(status.account == nil, "an older daemon: no account")
     let account = try StatusCoding.decoder().decode(AccountStatus.self, from: Data("""
     {"available":true,"signed_in":true,"email":null,"github_id":583231,"github_login":"octocat"}
@@ -116,23 +120,54 @@ do {
     check(!sent.contains("\"id\"") && sent.contains(#""occasion":"done""#), "a new Character is sent without an id: \(sent)")
     let manifest = try StatusCoding.decoder().decode(CharacterRequest.self, from: Data(#"{"name":"Owl","base":"ada","voice":"luna","lines":[{"occasion":"done","text":"Done."}]}"#.utf8))
     check(manifest == request, "a manifest reads back as the request it was")
-    let used = try StatusCoding.decoder().decode(AccountStatus.self, from: Data("""
-    {"available":true,"signed_in":true,"github_id":1,"today":{"day":"2026-10-24","commands":7,"commands_limit":100},"refused":"allowance"}
+    let credited = try StatusCoding.decoder().decode(AccountStatus.self, from: Data("""
+    {"available":true,"signed_in":true,"github_id":1,"plan":{"name":"free"},"voice_credit_micro_usd":933100}
     """.utf8))
-    check(used.today == AccountUsage(day: "2026-10-24", commands: 7, commandsLimit: 100) && used.refused == "allowance", "today's voice use decodes")
-    // Refused voice comes back at the next 00:00 UTC, in the computer's own time.
-    let afternoon = ISO8601DateFormatter().date(from: "2026-10-27T15:59:00Z")!
-    check(AccountStatus.voiceComesBack(after: afternoon, in: TimeZone(secondsFromGMT: 8 * 3600)!) == "08:00", "voice comes back at 08:00 in UTC+8")
-    check(AccountStatus.voiceComesBack(after: afternoon, in: TimeZone(secondsFromGMT: -5 * 3600)!) == "19:00", "voice comes back at 19:00 in UTC-5")
-    check(AccountStatus.voiceComesBack(after: ISO8601DateFormatter().date(from: "2026-12-31T23:59:59Z")!, in: TimeZone(identifier: "UTC")!) == "00:00", "and at 00:00 in UTC")
+    check(credited.voiceCreditMicroUSD == 933_100 && credited.voiceCredit == "$0.93", "the voice credit decodes and shows in dollars")
+    let unused = try StatusCoding.decoder().decode(AccountStatus.self, from: Data("""
+    {"available":true,"signed_in":true,"github_id":1,"plan":{"name":"free"}}
+    """.utf8))
+    check(unused.voiceCreditMicroUSD == nil && unused.voiceCredit == nil, "no voice credit before the first use: nothing to show")
+    // Cut down to the cent: a credit just under a dollar never shows as a whole one.
+    check(AccountStatus(available: true, signedIn: true, voiceCreditMicroUSD: 999_933).voiceCredit == "$0.99", "$0.99, not $1.00")
+    check(AccountStatus(available: true, signedIn: true, voiceCreditMicroUSD: 1_000_000).voiceCredit == "$1.00", "the gift is $1.00")
+    check(AccountStatus(available: true, signedIn: true, voiceCreditMicroUSD: 12_345_678).voiceCredit == "$12.34", "and more than ten dollars")
+    check(AccountStatus(available: true, signedIn: true, voiceCreditMicroUSD: 0).voiceCredit == "$0.00", "used up")
     let free = try StatusCoding.decoder().decode(AccountStatus.self, from: Data("""
     {"available":true,"signed_in":true,"plan":{"name":"free"}}
     """.utf8))
     check(free.plan == AccountPlan(name: "free") && free.plan?.paid == false, "the Free plan decodes")
     let paid = try StatusCoding.decoder().decode(AccountPlan.self, from: Data("""
-    {"name":"paid","period_end":"2026-11-24T00:00:00.000Z","characters":12300,"characters_limit":100000}
+    {"name":"paid","period_end":"2026-11-24T00:00:00.000Z"}
     """.utf8))
-    check(paid.paid && paid.periodEnd == Date(timeIntervalSince1970: 1_795_478_400) && paid.characters == 12300 && paid.charactersLimit == 100_000, "the Paid plan decodes")
+    check(paid.paid && paid.periodEnd == Date(timeIntervalSince1970: 1_795_478_400), "the Paid plan decodes")
+
+    // Upgrade and Manage plan (#185): the daemon's switch decides Upgrade, an older daemon reads as off.
+    check(free.upgradeOffered == false && free.planButton == nil, "the switch off (or an older daemon): no Upgrade on Free")
+    let offered = try StatusCoding.decoder().decode(AccountStatus.self, from: Data("""
+    {"available":true,"signed_in":true,"plan":{"name":"free"},"upgrade_offered":true}
+    """.utf8))
+    check(offered.planButton == .upgrade, "the switch on: Upgrade on Free")
+    var paidAccount = offered
+    paidAccount.plan = paid
+    check(paidAccount.planButton == .managePlan, "Manage plan on Paid")
+    paidAccount.upgradeOffered = false
+    check(paidAccount.planButton == .managePlan, "Manage plan doesn't wait for the switch")
+    var signedOut = offered
+    signedOut.signedIn = false
+    check(signedOut.planButton == nil, "no plan button when signed out")
+    check(AccountStatus(available: true, signedIn: true, upgradeOffered: true).planButton == nil, "no plan button before the plan is read")
+
+    // The daemon's answers to /v1/account/upgrade and /v1/account/manage-plan.
+    let answer = { (code: Int, body: String) in PlanPageAnswer(code: code, data: Data(body.utf8)) }
+    check(answer(200, #"{"url":"https://checkout.stripe.com/c/pay/cs_test_1"}"#) == .open(URL(string: "https://checkout.stripe.com/c/pay/cs_test_1")!), "a URL to open")
+    check(answer(200, #"{"accepted":true}"#) == .failed(nil), "200 without a URL is a failure")
+    check(answer(409, #"{"accepted":false,"message":"the service refused: already_paid","reason":"already_paid"}"#) == .conflict("already_paid"), "already paid")
+    check(answer(409, #"{"accepted":false,"message":"…","reason":"no_subscription"}"#) == .conflict("no_subscription"), "no subscription")
+    check(answer(404, #"{"accepted":false,"message":"the plan isn't offered here"}"#) == .notOffered, "not offered")
+    check(answer(401, #"{"accepted":false,"message":"not signed in"}"#) == .notSignedIn, "not signed in")
+    check(answer(502, #"{"accepted":false,"message":"the service couldn't be reached"}"#) == .failed("the service couldn't be reached"), "another failure keeps its message")
+    check(answer(404, "") == .notOffered, "an older daemon without the route: not offered")
 } catch {
     check(false, "status decoding threw: \(error)")
 }
@@ -387,7 +422,8 @@ let ownEleven = VoiceKeysStatus(elevenlabs: .init(set: true), volc: .init(set: t
 let signedIn = AccountStatus(available: true, signedIn: true)
 check(MakingReadiness.of(eleven, keys: ownEleven, account: nil) == .ownKey, "an own key for the voice's provider is enough")
 check(MakingReadiness.of(volc, keys: ownEleven, account: signedIn) == (AccountPlan.shown ? .paidPlan : .ownKeyOnly), "a refused key doesn't count: VibeBuddy's voices, on the Paid plan when it is shown")
-check(MakingReadiness.of(volc, keys: nil, account: AccountStatus(available: true, signedIn: false)) == (AccountPlan.shown ? .signIn : .ownKeyOnly), "signed out and no key")
+check(MakingReadiness.of(eleven, keys: nil, account: AccountStatus(available: true, signedIn: false)) == (AccountPlan.shown ? .signIn : .ownKeyOnly), "signed out and no key")
+check(MakingReadiness.of(volc, keys: nil, account: signedIn) == .retired && !MakingReadiness.retired.canStart, "Volcano Engine's voices without a key for it: pick another voice")
 check(MakingReadiness.of(eleven, keys: nil, account: nil) == .ownKeyOnly && !MakingReadiness.ownKeyOnly.canStart, "no service and no key")
 let mine = CharacterVoice(id: "own-1a2b3c4d", provider: "volc", voice: "S_me", language: "", gender: "", name: "Me", own: true)
 check(MakingReadiness.of(mine, keys: ownEleven, account: signedIn) == .ownKeyOnly, "a voice of the user's own needs their own key, not the Paid plan")

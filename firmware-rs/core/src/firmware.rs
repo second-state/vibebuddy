@@ -629,9 +629,9 @@ impl Firmware {
         self.apply_lan(board, alloc::vec![LanOutput::Line(line.to_vec())]);
     }
 
-    /// The network to join, for the device layer.
-    pub fn wifi(&self) -> Option<&Wifi> {
-        self.link.as_ref().and_then(|(_, link)| link.wifi.as_ref())
+    /// The networks to join, most recently joined first, for the device layer.
+    pub fn wifi(&self) -> &[Wifi] {
+        self.link.as_ref().map_or(&[], |(_, link)| link.wifi.as_slice())
     }
 
     /// The Relay to connect to: what the computer on the cable last set, or the firmware's default.
@@ -651,6 +651,21 @@ impl Firmware {
         if !joined {
             self.wifi_address = None;
         }
+    }
+
+    /// The device layer joined this network: it becomes the first, the one the menu shows and an older firmware
+    /// joins. The record is saved, and the computer told, only when the order changes. The device layer doesn't
+    /// reconnect: it is on the network already.
+    pub fn joined_wifi<B: Board>(&mut self, board: &mut B, ssid: &str) {
+        self.wifi_joined = true;
+        let Some((store, link)) = self.link.as_mut() else { return };
+        if !link.joined_wifi(ssid) {
+            return;
+        }
+        if store.save(board.flash(), link).is_err() {
+            return Self::write_literal(board, "LINK SAVE ERROR\n");
+        }
+        self.report_wifi(board);
     }
 
     /// The device layer got an address on Wi-Fi (its `WIFI ADDRESS` line). The box reports that line once, as the
@@ -1663,11 +1678,12 @@ impl Firmware {
             }
             // Dimmed is what isn't working: no link, a network not joined, a Relay not connected.
             View::Network => {
-                let wifi = match self.wifi() {
+                // The first network is the one joined last, so the one joined now while joined.
+                let wifi = match self.wifi().first() {
                     None => line(b"WIFI", b"OFF", Tone::Dim),
                     Some(wifi) => line(b"WIFI", wifi.ssid.as_bytes(), if self.wifi_joined { Tone::Plain } else { Tone::Dim }),
                 };
-                let relay = if self.wifi().is_none() {
+                let relay = if self.wifi().is_empty() {
                     line(b"RELAY", b"OFF", Tone::Dim)
                 } else if self.relay_up {
                     line(b"RELAY", self.relay_name(), Tone::Plain)
@@ -2018,7 +2034,7 @@ impl Firmware {
             }
             // Which screens the box draws, robot or korekore (ADR-0021); without a style it is just a query.
             "device.screens" => self.set_screens(board, string(fields, "style"), now),
-            // The decoration over the screens, off, leaves or snow (ADR-0022); without a name it is just a query.
+            // The decoration over the screens, off, thanksgiving or christmas (ADR-0022); without a name it is just a query.
             "device.decoration" => self.set_decoration(board, string(fields, "name"), now),
             // Voice commands (docs/protocol.md): the computer offers them, then answers each turn.
             "voice.available" => {
@@ -2107,15 +2123,29 @@ impl Firmware {
         if let Some((_, link)) = &self.link {
             Self::write_literal(board, "LINK NOISE\n");
             Self::write_value_line(board, "BOX KEY ", link::encode_key(&link.public_key()).as_bytes());
-            // The network's name only; the password never leaves the box.
-            if let Some(wifi) = &link.wifi {
-                Self::write_value_line(board, "WIFI NETWORK ", wifi.ssid.as_bytes());
+            if !link.wifi.is_empty() {
+                self.report_wifi(board);
                 if let Some(address) = &self.wifi_address {
                     Self::write_value_line(board, "WIFI ADDRESS ", address.as_bytes());
                 }
             }
             Self::write_value_line(board, "RELAY URL ", self.relay_url().as_bytes());
         }
+    }
+
+    /// The networks the box knows, by name only: the passwords never leave the box. `WIFI NETWORKS <count>`
+    /// starts the list and a `WIFI KNOWN <ssid>` follows for each, most recently joined first; then
+    /// `WIFI NETWORK <ssid>` names the first, as firmware before several networks did (ADR-0023).
+    fn report_wifi<B: Board>(&self, board: &mut B) {
+        let networks = self.wifi();
+        let Some(first) = networks.first() else {
+            return Self::write_literal(board, "WIFI FORGOTTEN\n");
+        };
+        Self::write_value_line(board, "WIFI NETWORKS ", alloc::format!("{}", networks.len()).as_bytes());
+        for wifi in networks {
+            Self::write_value_line(board, "WIFI KNOWN ", wifi.ssid.as_bytes());
+        }
+        Self::write_value_line(board, "WIFI NETWORK ", first.ssid.as_bytes());
     }
 
     fn handle_pairing<B: Board>(&mut self, board: &mut B, fields: &BTreeMap<alloc::string::String, Value>, event: &str) {
@@ -2162,24 +2192,27 @@ impl Firmware {
         let Some((store, link)) = self.link.as_mut() else {
             return Self::write_literal(board, "WIFI UNAVAILABLE\n");
         };
+        let first = link.wifi.first().cloned();
         if event == "device.wifi.set" {
+            // A new network, or a new password for a known one: it goes first and is joined now.
             let ssid = string(fields, "ssid").unwrap_or("");
             let password = string(fields, "password").unwrap_or("");
             if ssid.is_empty() || ssid.len() > link::MAX_SSID_BYTES || password.len() > link::MAX_PASSWORD_BYTES {
                 return Self::write_literal(board, "WIFI INVALID\n");
             }
-            link.wifi = Some(Wifi { ssid: ssid.into(), password: password.into() });
+            link.remember_wifi(ssid, password);
+        } else if let Some(ssid) = string(fields, "ssid") {
+            link.forget_wifi(ssid);
         } else {
-            link.wifi = None;
+            // Without a name, as an App from before several networks sends it: every network goes.
+            link.wifi.clear();
         }
         if store.save(board.flash(), link).is_err() {
             return Self::write_literal(board, "LINK SAVE ERROR\n");
         }
-        self.wifi_changed = true;
-        match &link.wifi {
-            Some(wifi) => Self::write_value_line(board, "WIFI NETWORK ", wifi.ssid.as_bytes()),
-            None => Self::write_literal(board, "WIFI FORGOTTEN\n"),
-        }
+        // The box joins again only if the network it should be on changed: forgetting another one leaves it be.
+        self.wifi_changed |= event == "device.wifi.set" || link.wifi.first() != first.as_ref();
+        self.report_wifi(board);
     }
 
     /// `device.relay.set {"url": "wss://host"}`. The computer sends it on every link over the cable, so

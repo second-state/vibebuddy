@@ -2,12 +2,19 @@ import KorekoreUI
 import SwiftUI
 import VibeBuddyCore
 
-/// The account (ADR-0018) and the user's own keys (ADR-0020), at the top of the General page: the design has no
+/// The account (ADR-0018) and the user's own keys (ADR-0023), at the top of the General page: the design has no
 /// Account page or sidebar tile, so it sits with the other settings.
 struct KorekoreAccountCard: View {
     @ObservedObject var model: AppModel
     /// The browser is open on the sign-in page; cleared when the status says signed in.
     @State private var waiting = false
+    /// A plan button's request is running: a second click would open a second Checkout.
+    @State private var planBusy = false
+    /// What the plan row says while the App waits for Stripe to confirm a payment.
+    @State private var paying: String?
+    /// Reads the account every few seconds after Checkout opens, since the plan changes only when Stripe's payment
+    /// reaches the service, which can be after the App comes back.
+    @State private var watching: Task<Void, Never>?
 
     private var account: AccountStatus? { model.status?.account }
 
@@ -54,7 +61,7 @@ struct KorekoreAccountCard: View {
                     if let groq = keys.groq {
                         KDivider()
                         row {
-                            KNote(String(localized: "Voice commands need your own Groq key for speech recognition, from console.groq.com. Your recordings go straight to Groq, billed to your account there."))
+                            KNote(String(localized: "When you are signed in, voice commands go through VibeBuddy's voice service and use your voice credit. With your own Groq key, from console.groq.com, your recordings go straight to Groq instead, billed to your account there."))
                         }
                         KDivider()
                         KorekoreOwnKeyRow(title: "Groq", key: groq,
@@ -66,8 +73,13 @@ struct KorekoreAccountCard: View {
             }
         }
         .onChange(of: account?.signedIn) { waiting = false }
-        // Reading the day's use and the plan costs a request to the service, so only when the page is shown.
+        .onDisappear { watching?.cancel(); paying = nil }
+        // Reading the plan and the voice credit costs a request to the service, so only when the page is shown.
         .task { if account?.signedIn == true { try? await model.client.refreshAccount() } }
+        // Back from Stripe's pages in the browser: read the plan and the voice credit again.
+        .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
+            if account?.signedIn == true { Task { try? await model.client.refreshAccount() } }
+        }
     }
 
     @ViewBuilder private func signedIn(_ account: AccountStatus) -> some View {
@@ -76,26 +88,26 @@ struct KorekoreAccountCard: View {
             Button(String(localized: "Sign out")) { signOut() }.kButton()
             Button(String(localized: "Delete account…")) { confirmDelete() }.kButton()
         }
-        if AccountPlan.shown, let plan = account.plan {
+        // The plan row shows with its button even while the plan is hidden: Upgrade has its own switch, and a Paid
+        // user must always be able to manage the plan.
+        if let plan = account.plan, AccountPlan.shown || account.planButton != nil {
             KDivider()
             row {
                 Text("Plan").font(.rounded(14))
                 Spacer()
+                if let paying, !plan.paid { KTag(paying, color: Theme.Colors.waitText) }
                 KTag(plan.paid ? String(localized: "Paid plan") : String(localized: "Free"), color: plan.paid ? Theme.Colors.doneText : Theme.Colors.ink)
-            }
-            if plan.paid, let used = plan.characters, let limit = plan.charactersLimit, let end = plan.periodEnd {
-                KDivider()
-                row {
-                    KTag(String(localized: "This month: \(used.formatted()) of \(limit.formatted()) characters · renews \(end.formatted(.dateTime.day().month(.abbreviated)))"))
+                switch account.planButton {
+                case .upgrade: Button(String(localized: "Upgrade")) { openPlanPage(.upgrade) }.kButton(.sun).disabled(planBusy)
+                case .managePlan: Button(String(localized: "Manage plan")) { openPlanPage(.managePlan) }.kButton().disabled(planBusy)
+                case nil: EmptyView()
                 }
             }
         }
-        if let refusal {
+        // Nothing before the first use of our voice service.
+        if let credit = account.voiceCredit {
             KDivider()
-            row { KTag(refusal, color: Theme.Colors.korePinkText) }
-        } else if let today = account.today {
-            KDivider()
-            row { KTag(String(localized: "Voice today: \(today.commands) of \(today.commandsLimit)")) }
+            row { KTag(String(localized: "Voice credit \(credit)")) }
         }
     }
 
@@ -104,15 +116,6 @@ struct KorekoreAccountCard: View {
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.vertical, 12)
             .padding(.horizontal, 16)
-    }
-
-    /// Why voice is refused today, if it is.
-    private var refusal: String? {
-        switch account?.refused {
-        case nil: nil
-        case "global_cap": String(localized: "Voice is paused for everyone today. It comes back at \(AccountStatus.voiceComesBack()).")
-        default: String(localized: "Today's voice is used up. It comes back at \(AccountStatus.voiceComesBack()).")
-        }
     }
 
     private var signedInText: String {
@@ -146,6 +149,43 @@ struct KorekoreAccountCard: View {
         }
     }
 
+    /// Opens Checkout or the Customer Portal in the browser; the account is read again when the App comes back.
+    private func openPlanPage(_ button: AccountStatus.PlanButton) {
+        planBusy = true
+        Task {
+            let answer = await model.client.planPage(button)
+            planBusy = false
+            switch answer {
+            case .open(let url):
+                NSWorkspace.shared.open(url)
+                if button == .upgrade { watchForPaid(String(localized: "Waiting for the payment…")) }
+            // The daemon has read the account again. Still Free: Stripe has the payment, the service not yet.
+            case .conflict("already_paid"):
+                if model.status?.account?.plan?.paid != true { watchForPaid(String(localized: "Your payment is being processed.")) }
+            // The status shows signed out.
+            case .notSignedIn: break
+            case .conflict: model.lastError = String(localized: "This Paid plan can't be managed here.")
+            case .notOffered: model.lastError = String(localized: "The Paid plan isn't offered here.")
+            case .failed(let message):
+                model.lastError = String(localized: "Couldn't open the plan page: \(message ?? String(localized: "the daemon didn't say why"))")
+            }
+        }
+    }
+
+    /// Reads the account every 3 s for a minute, or until it is on the Paid plan.
+    private func watchForPaid(_ note: String) {
+        paying = note
+        watching?.cancel()
+        watching = Task {
+            for _ in 0..<20 {
+                try? await Task.sleep(for: .seconds(3))
+                if Task.isCancelled || model.status?.account?.plan?.paid == true { break }
+                try? await model.client.refreshAccount()
+            }
+            if !Task.isCancelled { paying = nil }
+        }
+    }
+
     private func signOut() {
         Task {
             do { try await model.client.signOut() } catch { model.lastError = String(localized: "Couldn't sign out: \(error.localizedDescription)") }
@@ -164,7 +204,7 @@ struct KorekoreAccountCard: View {
     }
 }
 
-/// One provider's own key for spoken replies (ADR-0020). It is typed once and never shown again: the daemon only says
+/// One provider's own key for spoken replies (ADR-0023). It is typed once and never shown again: the daemon only says
 /// whether it has one.
 struct KorekoreOwnKeyRow: View {
     let title: String
