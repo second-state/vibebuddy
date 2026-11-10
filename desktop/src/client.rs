@@ -77,7 +77,7 @@ pub async fn set_screens(style: &'static str) -> Result<(), String> {
     post("/v1/device/screens", Some(serde_json::json!({ "style": style }))).await
 }
 
-/// `name` is `off`, `leaves`, `snow` or `lights`; the box reports a DECORATION line once it has stored it, and the status follows.
+/// `name` is `off`, `thanksgiving` or `christmas`; the box reports a DECORATION line once it has stored it, and the status follows.
 pub async fn set_decoration(name: &'static str) -> Result<(), String> {
     post("/v1/device/decoration", Some(serde_json::json!({ "name": name }))).await
 }
@@ -193,8 +193,7 @@ pub struct ResidentInfo {
     #[serde(default)]
     pub anthropic_key_set: Option<bool>,
     /// Why the box can't take voice commands right now besides `problem`: `bridge_firmware`, `bridge_slow`,
-    /// `own_key`, `signed_out`, `allowance` or `global_cap`. None when nothing else holds voice back, and from an older
-    /// daemon.
+    /// `own_key` or `signed_out`. None when nothing else holds voice back, and from an older daemon.
     #[serde(default)]
     pub voice_off: Option<String>,
 }
@@ -203,14 +202,11 @@ impl ResidentInfo {
     /// Why holding K0 does nothing right now, said for the user, as on the Mac; None when nothing but `problem` holds
     /// voice back, or for a reason this app doesn't know.
     pub fn voice_off_note(&self) -> Option<String> {
-        let back = || crate::status::voice_comes_back(chrono::Utc::now(), &chrono::Local);
         Some(match self.voice_off.as_deref()? {
             "bridge_firmware" => tr("The box is on its UART bridge, and its firmware can't carry voice there. Update the firmware, or plug the cable into the box's native USB port.", &[]),
             "bridge_slow" => tr("The box is on its UART bridge, which didn't hold the speed voice needs. Plug the cable into the box's native USB port, or plug it in again to try once more.", &[]),
-            "own_key" => tr("Voice commands need your own Groq key for speech recognition. Set it under Your own keys on the General page.", &[]),
+            "own_key" => tr("Voice commands need this computer signed in to VibeBuddy, or your own Groq key. Sign in, or set the key under Your own keys, on the General page.", &[]),
             "signed_out" => tr("Voice needs this computer signed in to VibeBuddy. Sign in on the General page.", &[]),
-            "allowance" => tr("Today's voice is used up. It comes back at %@.", &[&back()]),
-            "global_cap" => tr("Voice is paused for everyone today. It comes back at %@.", &[&back()]),
             _ => return None,
         })
     }
@@ -475,6 +471,51 @@ pub async fn sign_in() -> Result<String, String> {
     serde_json::from_value::<SignIn>(body).map(|sign_in| sign_in.url).map_err(|error| error.to_string())
 }
 
+/// The daemon's answer to `POST /v1/account/upgrade` or `/v1/account/manage-plan` (docs/api.md).
+#[derive(Clone, Debug, PartialEq)]
+pub enum PlanAnswer {
+    /// The Stripe page to open in the browser.
+    Open(String),
+    /// The service's 409 reason, `already_paid` or `no_subscription`: the plan isn't what the app showed, and the
+    /// daemon has read the account again.
+    Conflict(String),
+    /// 404: Stripe isn't set up for this service, the switch is off, or the daemon is too old for the route.
+    NotOffered,
+    /// 401: the status then shows signed out.
+    NotSignedIn,
+    /// Anything else, with the daemon's message when it gave one.
+    Failed(Option<String>),
+}
+
+impl PlanAnswer {
+    fn new(status: u16, body: serde_json::Value) -> Self {
+        let text = |key: &str| body[key].as_str().map(str::to_owned);
+        match status {
+            200 => text("url").map_or(Self::Failed(None), Self::Open),
+            409 => Self::Conflict(text("reason").unwrap_or_default()),
+            404 => Self::NotOffered,
+            401 => Self::NotSignedIn,
+            _ => Self::Failed(text("message")),
+        }
+    }
+}
+
+/// A Stripe page for the account card's plan button: Checkout for Upgrade, the Customer Portal for Manage plan.
+pub async fn plan_page(button: crate::status::PlanButton) -> PlanAnswer {
+    let path = match button {
+        crate::status::PlanButton::Upgrade => "upgrade",
+        crate::status::PlanButton::ManagePlan => "manage-plan",
+    };
+    // After a 409 the daemon also reads the account again, two calls of up to 20 s each.
+    match reqwest::Client::new().post(format!("{BASE}/v1/account/{path}")).timeout(Duration::from_secs(50)).send().await {
+        Ok(response) => {
+            let status = response.status().as_u16();
+            PlanAnswer::new(status, response.json().await.unwrap_or_default())
+        }
+        Err(error) => PlanAnswer::Failed(Some(error.to_string())),
+    }
+}
+
 /// Ends this computer's session only.
 /// Has the daemon read today's voice use from the service; it comes back in the status.
 pub async fn refresh_account() -> Result<(), String> {
@@ -520,6 +561,19 @@ mod tests {
     use super::*;
 
     #[test]
+    fn the_plan_page_answers_decode() {
+        let answer = |status: u16, body: &str| PlanAnswer::new(status, serde_json::from_str(body).unwrap_or_default());
+        assert_eq!(answer(200, r#"{"url":"https://checkout.stripe.com/c/pay/cs_test_1"}"#), PlanAnswer::Open("https://checkout.stripe.com/c/pay/cs_test_1".to_owned()));
+        assert_eq!(answer(200, r#"{"accepted":true}"#), PlanAnswer::Failed(None), "200 without a URL");
+        assert_eq!(answer(409, r#"{"accepted":false,"message":"…","reason":"already_paid"}"#), PlanAnswer::Conflict("already_paid".to_owned()));
+        assert_eq!(answer(409, r#"{"accepted":false,"message":"…","reason":"no_subscription"}"#), PlanAnswer::Conflict("no_subscription".to_owned()));
+        assert_eq!(answer(404, r#"{"accepted":false,"message":"the plan isn't offered here"}"#), PlanAnswer::NotOffered);
+        assert_eq!(answer(404, ""), PlanAnswer::NotOffered, "an older daemon without the route");
+        assert_eq!(answer(401, r#"{"accepted":false,"message":"not signed in"}"#), PlanAnswer::NotSignedIn);
+        assert_eq!(answer(502, r#"{"accepted":false,"message":"the service couldn't be reached"}"#), PlanAnswer::Failed(Some("the service couldn't be reached".to_owned())));
+    }
+
+    #[test]
     fn events_split_across_chunks_are_reassembled() {
         let mut buffer = b"event: status\ndata: {\"today\":{\"done\":2}}\n\nevent: status\ndata: {\"today\":".to_vec();
         let statuses = drain_events(&mut buffer);
@@ -555,7 +609,7 @@ mod tests {
         assert_eq!(parse(r#"{"enabled":true}"#).voice_off_note(), None, "an older daemon says nothing");
         let bridge = parse(r#"{"enabled":true,"ready":true,"voice_off":"bridge_firmware"}"#);
         assert!(bridge.voice_off_note().is_some_and(|note| note.contains("UART bridge")), "{bridge:?}");
-        assert!(parse(r#"{"enabled":true,"voice_off":"allowance"}"#).voice_off_note().is_some_and(|note| note.contains("comes back at")));
+        assert_eq!(parse(r#"{"enabled":true,"voice_off":"allowance"}"#).voice_off_note(), None, "no daily allowance any more");
         assert!(parse(r#"{"enabled":true,"voice_off":"own_key"}"#).voice_off_note().is_some_and(|note| note.contains("Groq")));
         assert_eq!(parse(r#"{"enabled":true,"voice_off":"something_new"}"#).voice_off_note(), None);
     }

@@ -3,12 +3,13 @@
 //!
 //! Behind [`Synthesizer`] so the backend can change. A voice from a provider the user has their own key for
 //! ([`crate::voice_keys`]) goes straight to that provider, ElevenLabs or Volcano Engine, and never to the voice
-//! service; a provider refusing the key leaves that reply silent rather than spending the service's allowance.
-//! Every other reply goes to the voice service in `vibebuddy-cloud`,
-//! `POST {base}/v1/voice/speak` with `{"text","voice"}` and the account's session (ADR-0018, docs/api.md), answering a chunked `audio/mpeg` stream (MPEG-2 Layer III,
-//! 24 kHz mono, 48 kbps) that starts as soon as there is audio. Builds other than releases use staging; a release
-//! has none until the production service is deployed. `VIBEBUDDY_TTS_BASE_URL` sets the base by hand, or `off`;
-//! speech recognition ([`crate::speech`]) goes to the same service.
+//! service; a provider refusing the key leaves that reply silent rather than spending the account's voice credit.
+//! Every other reply goes, when signed in, to our voice service in `vibebuddy-cloud`, `POST {base}/v1/voice/speak`
+//! with `{"text","voice"}` and the account's session (ADR-0024, docs/api.md), answering a chunked `audio/mpeg` stream
+//! (MPEG-2 Layer III, 24 kHz mono, 48 kbps) that starts as soon as there is audio. Until Token Station offers
+//! synthesis, the service answers 403 `{"reason":"own_key"}`, and the reply stays text. The base is the account's:
+//! production in a release, staging otherwise; `VIBEBUDDY_TTS_BASE_URL` sets it by hand, or `off`. Speech recognition
+//! ([`crate::speech`]) goes to the same service.
 
 use std::io::Read;
 use std::path::{Path, PathBuf};
@@ -80,9 +81,6 @@ impl VoiceService {
                 return Err(refusal.to_string());
             }
             return Err(format!("the voice service answered {status}: {}", answer.trim()));
-        }
-        if let Some(session) = &self.session {
-            session.note_reply(text);
         }
         forward(response.into_body().into_reader(), &host, on_audio)
     }
@@ -203,8 +201,10 @@ impl Synthesizer for Synthesis {
         Ok(())
     }
 
+    /// With an own key for the voice's provider, or our service while signed in.
     fn speaks(&self, voice: &str) -> bool {
-        self.service.is_some() || Provider::of(voice).is_some_and(|(provider, _)| self.keys.key(provider).is_some())
+        let signed_in = |service: &VoiceService| service.session.as_ref().is_none_or(|session| session.token().is_some());
+        self.service.as_ref().is_some_and(signed_in) || Provider::of(voice).is_some_and(|(provider, _)| self.keys.key(provider).is_some())
     }
 }
 
@@ -372,23 +372,16 @@ pub(crate) fn voice_field<'a>(file: &'a str, key: &str) -> Option<&'a str> {
     file.lines().find_map(|line| line.strip_prefix(key)?.strip_prefix('='))
 }
 
-/// The synthesizer: the user's own keys, and the voice service the environment configures, if any.
-pub fn from_env(session: Option<Arc<Account>>, keys: Arc<VoiceKeys>) -> Arc<dyn Synthesizer> {
-    let service = configure(voice_base(std::env::var(BASE_URL_VARIABLE).ok()), session);
+/// The synthesizer: the user's own keys, and our voice service at the account's base, with its session.
+pub fn new(session: Arc<Account>, keys: Arc<VoiceKeys>) -> Arc<dyn Synthesizer> {
+    let service = configure(session.base(), Some(session));
     Arc::new(Synthesis { service, keys, elevenlabs_url: ELEVENLABS_URL.to_owned(), volc_url: VOLC_URL.to_owned() })
 }
 
-/// The service's base URL, for the account: the variable's, else production in a release
+/// The service's base URL, for the account and our voice service: the variable's, else production in a release
 /// and staging outside one. None when it is `off` or not http(s).
 pub fn service_base(base_url: Option<String>, release: bool) -> Option<String> {
     checked(base_url, if release { PRODUCTION_URL } else { STAGING_URL })
-}
-
-/// The voice service's base URL, for spoken replies, speech recognition ([`crate::speech`]) and Characters' lines:
-/// only the variable's. Neither production nor staging serves voice (ADR-0023), so every build gets its voice from the
-/// user's own keys alike; the variable is for testing a service that does.
-pub fn voice_base(base_url: Option<String>) -> Option<String> {
-    base_url.map(|url| url.trim().to_owned()).filter(|url| !url.is_empty() && url != "off").and_then(|url| checked(Some(url), STAGING_URL))
 }
 
 fn checked(base_url: Option<String>, default: &str) -> Option<String> {
@@ -459,20 +452,13 @@ mod tests {
     }
 
     #[test]
-    fn the_account_is_staging_outside_a_release_production_in_one_and_voice_only_where_the_variable_says() {
+    fn the_service_is_staging_outside_a_release_and_production_in_one() {
         let service = |url: Option<&str>, release| service_base(url.map(str::to_owned), release);
         assert_eq!(service(None, false).as_deref(), Some(STAGING_URL));
         assert_eq!(service(None, true).as_deref(), Some(PRODUCTION_URL));
         assert_eq!(service(Some("http://127.0.0.1:8787"), true).as_deref(), Some("http://127.0.0.1:8787"));
         assert_eq!(service(Some("off"), false), None);
         assert_eq!(service(Some("api.korekore.ai"), false), None);
-
-        // No service serves voice: any build has a voice service only when the variable names one.
-        let voice = |url: Option<&str>| configure(voice_base(url.map(str::to_owned)), None).is_some();
-        assert!(!voice(None));
-        assert!(voice(Some("http://127.0.0.1:8787")));
-        assert!(!voice(Some("off")));
-        assert!(!voice(Some("api.korekore.ai")));
     }
 
     /// Serves one canned HTTP answer on a local port; returns the base URL and the request it got.
@@ -586,6 +572,30 @@ mod tests {
         let request = service_server.join().unwrap();
         assert!(request.starts_with("POST /v1/voice/speak HTTP/1.1\r\n"), "{request}");
         assert!(!request.contains("sk_own_eleven"));
+    }
+
+    #[test]
+    fn own_key_from_our_service_leaves_the_reply_as_text_and_signed_out_nothing_is_tried() {
+        let dir = crate::voice_keys::tests::scratch("synthesis-own-key");
+        let session = Arc::new(crate::account::signed_in_for_tests(&dir, "tok_reply"));
+        let (base, server) = serve(b"HTTP/1.1 403 Forbidden\r\nContent-Length: 20\r\nConnection: close\r\n\r\n{\"reason\":\"own_key\"}".to_vec());
+        let synthesis = Synthesis {
+            service: Some(VoiceService { base_url: base, session: Some(session.clone()) }),
+            keys: own_keys(&[]),
+            elevenlabs_url: "http://127.0.0.1:9".to_owned(),
+            volc_url: "http://127.0.0.1:9".to_owned(),
+        };
+        assert!(synthesis.speaks("elevenlabs:voice1"), "signed in, our service is asked");
+        let (result, audio) = speak_with(&synthesis, "elevenlabs:voice1");
+        assert!(result.unwrap_err().contains("own_key"));
+        assert!(audio.is_empty());
+        let request = server.join().unwrap();
+        assert!(request.starts_with("POST /v1/voice/speak HTTP/1.1\r\n") && request.to_ascii_lowercase().contains("authorization: bearer tok_reply"), "{request}");
+        assert!(session.token().is_some(), "a refusal, not a lost session");
+
+        session.forget();
+        assert!(!synthesis.speaks("elevenlabs:voice1"), "signed out and no own key: the reply stays text");
+        let _ = std::fs::remove_dir_all(dir);
     }
 
     #[test]

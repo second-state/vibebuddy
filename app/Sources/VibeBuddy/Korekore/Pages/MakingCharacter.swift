@@ -2,8 +2,28 @@ import KorekoreUI
 import SwiftUI
 import VibeBuddyCore
 
-/// A Character the user made (ADR-0023), as a Character card: its look, its name, Use or Resume, and Delete. The
-/// design has no card of its own for it.
+/// The delete button on a Character card the user made: a paper pill with a trash can, the size of the ▶ beside Use
+/// on a preset's card. It asks before deleting.
+struct KorekoreTrashButton: View {
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            Image(systemName: "trash")
+                .font(.system(size: 10, weight: .bold))
+                .frame(width: 24, height: 22)
+                .foregroundStyle(Theme.Colors.ink)
+                .background(Theme.Colors.paper, in: Capsule())
+                .overlay(Capsule().strokeBorder(Theme.Colors.ink, lineWidth: Theme.Stroke.base))
+        }
+        .buttonStyle(.plain)
+        .help(String(localized: "Delete…"))
+        .accessibilityLabel(String(localized: "Delete…"))
+    }
+}
+
+/// A Character the user made (ADR-0023), as a Character card: its look, its name, Use or Resume with a trash can
+/// beside it. The design has no card of its own for it.
 struct KorekoreMadeCard: View {
     @ObservedObject var model: AppModel
     let made: MadeCharacter
@@ -33,23 +53,19 @@ struct KorekoreMadeCard: View {
                     if inUse {
                         KTag(String(localized: "In use"), color: Theme.Colors.korePinkText)
                     } else if made.complete {
+                        KorekoreTrashButton(action: confirmDelete)
                         Button(String(localized: "Use")) { model.writeMadeCharacter(made) }.kButton()
                             .disabled(model.operationRunning || !connected)
                     } else if making && model.status?.making?.id == made.id {
                         KTag(String(localized: "Making…"), color: Theme.Colors.waitText)
                     } else {
+                        KorekoreTrashButton(action: confirmDelete)
                         Button(String(localized: "Resume")) { model.resumeCharacter(made.id) }.kButton()
                             .disabled(making)
                     }
                 }
                 Text(verbatim: detail).font(.rounded(12, weight: 400)).foregroundStyle(Theme.Colors.muted)
                     .lineLimit(2, reservesSpace: true)
-                HStack {
-                    Spacer()
-                    Button(String(localized: "Delete…")) { confirmDelete() }.kButton()
-                        .disabled(inUse || (making && model.status?.making?.id == made.id))
-                        .help(inUse ? String(localized: "It's on the box: put another character on the box to delete this one.") : "")
-                }
             }
         }
     }

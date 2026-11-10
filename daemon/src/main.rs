@@ -308,9 +308,8 @@ async fn main() {
             None => resident,
         })
     });
-    let session = Some(state.account.clone());
     state.voice_keys = Arc::new(voice_keys::VoiceKeys::new(config::config_dir().as_deref()));
-    let synthesizer = synthesis::from_env(session.clone(), state.voice_keys.clone());
+    let synthesizer = synthesis::new(state.account.clone(), state.voice_keys.clone());
     let made = config::config_dir().map(|dir| dir.join("characters"));
     if let Some(made) = &made {
         let _ = making::DIR.set(made.clone());
@@ -319,12 +318,13 @@ async fn main() {
     let _ = making::OWN.set((own_voices.clone(), state.voice_keys.clone()));
     state.making = Arc::new(making::Maker::new(
         made,
-        synthesis::voice_base(env::var(synthesis::BASE_URL_VARIABLE).ok()),
+        state.account.base(),
         state.account.clone(),
         state.voice_keys.clone(),
         own_voices,
     ));
-    state.voice = Arc::new(voice::Voice::new(speech::from_env(session, Some(state.voice_keys.clone())), state.resident.clone()).with_synthesizer(Some(synthesizer)));
+    let recognizer = speech::new(state.account.clone(), state.voice_keys.clone());
+    state.voice = Arc::new(voice::Voice::new(Some(recognizer), state.resident.clone()).with_synthesizer(Some(synthesizer)));
     if let Some(resident) = state.resident.clone() {
         let wearing = wearing(&state).await;
         tokio::spawn(async move { resident.warm(&wearing).await });
@@ -522,8 +522,8 @@ async fn voice_offer(state: &AppState) -> Option<Event> {
 }
 
 /// Why voice commands can't be taken right now, for the Conversation tab: the bridge at 115200 (`bridge_firmware`
-/// when the firmware can't move it, `bridge_slow` when moving it failed), or the recognizer's refusal (`signed_out`, `own_key`,
-/// `allowance`, `global_cap`). The resident session not being ready is the tab's `problem` already.
+/// when the firmware can't move it, `bridge_slow` when moving it failed), or the recognizer's refusal (`signed_out`,
+/// `own_key`). The resident session not being ready is the tab's `problem` already.
 async fn voice_off(state: &AppState) -> Option<String> {
     let device = state.device.lock().await.clone();
     if device.connected && device.bridge && device.bridge_baud.is_some_and(|baud| baud != serial_transport::FAST_BAUD_RATE) {
@@ -547,8 +547,8 @@ async fn wearing(state: &AppState) -> persona::Wearing {
 }
 
 /// Tells a box that has reported its build whether voice is on now, and if not why, after the resident session's
-/// readiness or the account flipped (the user's Codex installed or gone, logged in or out, the service refusing
-/// voice for the day or the day ending), or the UART bridge's rate settled. Told `false`, a long K0 gives up the
+/// readiness or the account flipped (the user's Codex installed or gone, signed in or out), or the UART bridge's rate
+/// settled. Told `false`, a long K0 gives up the
 /// Pomodoro phase as it did before voice.
 async fn offer_voice_again(state: &AppState) {
     let booted = {
@@ -571,26 +571,12 @@ fn follow_account(state: &AppState) {
             offer_voice_again(&follower).await;
         }
     });
-    // Today's usage is only shown. A refusal for the day also withdraws voice until the UTC day ends or a read of
-    // the account shows voice again; the day's end changes both without a word from the service.
-    let mut usage = state.account.watch_usage();
+    // The plan and the voice credit are only shown.
+    let mut details = state.account.watch_details();
     let follower = state.clone();
-    let mut refusal = state.account.voice_refusal();
     tokio::spawn(async move {
-        loop {
-            let now = chrono::Utc::now();
-            let day_ends = account::next_utc_day(now) - now;
-            tokio::select! {
-                changed = usage.changed() => if changed.is_err() { break },
-                // A second late, so the clock is surely in the new day.
-                () = tokio::time::sleep(day_ends.to_std().unwrap_or_default() + Duration::from_secs(1)) => {}
-            }
+        while details.changed().await.is_ok() {
             follower.notify_status();
-            let today = follower.account.voice_refusal();
-            if today != refusal {
-                refusal = today;
-                offer_voice_again(&follower).await;
-            }
         }
     });
     // So is why the Relay turned this computer away.
@@ -834,6 +820,8 @@ fn app(state: AppState) -> Router {
         .route("/v1/account/callback", get(get_account_callback))
         .route("/v1/account/sign-out", post(post_sign_out))
         .route("/v1/account/refresh", post(post_account_refresh))
+        .route("/v1/account/upgrade", post(post_upgrade))
+        .route("/v1/account/manage-plan", post(post_manage_plan))
         .with_state(state)
 }
 
@@ -1084,7 +1072,7 @@ async fn post_screens(
 }
 
 /// The decorations the box can draw over its screens (ADR-0022).
-const DECORATIONS: [&str; 4] = ["off", "leaves", "snow", "lights"];
+const DECORATIONS: [&str; 3] = ["off", "thanksgiving", "christmas"];
 
 #[derive(serde::Deserialize)]
 struct DecorationRequest {
@@ -1828,7 +1816,7 @@ struct ResidentInfo {
     /// Whether an Anthropic API key is stored; the key itself is never sent back.
     anthropic_key_set: bool,
     /// Why the box can't take voice commands right now besides `problem`: `bridge_firmware`, `bridge_slow`,
-    /// `signed_out`, `own_key`, `allowance` or `global_cap` (see [`voice_off`]).
+    /// `signed_out` or `own_key` (see [`voice_off`]).
     voice_off: Option<String>,
 }
 
@@ -2124,13 +2112,68 @@ async fn post_sign_out(State(state): State<AppState>) -> (StatusCode, Json<ApiRe
     }
 }
 
-/// Reads today's voice use and the plan from the service, for the App's Account tab; the status stream carries them.
+/// Reads the plan and the voice credit from the service, for the App's account card; the status stream carries them.
 async fn post_account_refresh(State(state): State<AppState>) -> (StatusCode, Json<ApiResponse>) {
     let account = state.account.clone();
-    match tokio::task::spawn_blocking(move || account.refresh_usage()).await.unwrap_or_else(|error| Err(account::AccountError::Service(error.to_string()))) {
+    match tokio::task::spawn_blocking(move || account.refresh()).await.unwrap_or_else(|error| Err(account::AccountError::Service(error.to_string()))) {
         Ok(()) => (StatusCode::OK, Json(ApiResponse { accepted: true, message: "refreshed".to_owned() })),
         Err(error) => account_refusal(&error),
     }
+}
+
+/// Opens the Paid plan's Stripe Checkout: the App opens the URL in the browser. Behind [`account::UPGRADE_OFFERED`].
+async fn post_upgrade(State(state): State<AppState>) -> axum::response::Response {
+    plan_page(&state, account::PlanPage::Checkout, account::UPGRADE_OFFERED).await
+}
+
+/// Opens Stripe's Customer Portal, where a Paid user changes the card or cancels.
+async fn post_manage_plan(State(state): State<AppState>) -> axum::response::Response {
+    plan_page(&state, account::PlanPage::Portal, true).await
+}
+
+#[derive(Serialize)]
+struct PlanPageResponse {
+    url: String,
+}
+
+#[derive(Serialize)]
+struct PlanRefusal {
+    accepted: bool,
+    message: String,
+    /// The service's reason on a 409: `already_paid` or `no_subscription`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    reason: Option<String>,
+}
+
+/// `{"url"}` on 200; otherwise the service's 409 (with its reason), 404 and 401 as they are (docs/api.md). A 409
+/// means the plan isn't what the App thought, so the account is read again and the status shows the plan it has.
+async fn plan_page(state: &AppState, page: account::PlanPage, offered: bool) -> axum::response::Response {
+    use axum::response::IntoResponse;
+    let account = state.account.clone();
+    let result = if offered {
+        tokio::task::spawn_blocking(move || account.plan_page(page)).await.unwrap_or_else(|error| Err(account::AccountError::Service(error.to_string())))
+    } else {
+        Err(account::AccountError::NotOffered)
+    };
+    let error = match result {
+        Ok(url) => return Json(PlanPageResponse { url }).into_response(),
+        Err(error) => error,
+    };
+    warn!(%error, ?page, "the plan page didn't open");
+    let (status, reason) = match &error {
+        account::AccountError::NotSignedIn => (StatusCode::UNAUTHORIZED, None),
+        account::AccountError::NotOffered => (StatusCode::NOT_FOUND, None),
+        account::AccountError::Conflict(reason) => {
+            let account = state.account.clone();
+            if let Ok(Err(error)) = tokio::task::spawn_blocking(move || account.refresh()).await {
+                warn!(%error, "the account couldn't be read again");
+            }
+            (StatusCode::CONFLICT, Some(reason.clone()))
+        }
+        other => (account_refusal(other).0, None),
+    };
+    state.notify_status();
+    (status, Json(PlanRefusal { accepted: false, message: error.to_string(), reason })).into_response()
 }
 
 async fn delete_account(State(state): State<AppState>) -> (StatusCode, Json<ApiResponse>) {
@@ -2149,6 +2192,8 @@ fn account_refusal(error: &account::AccountError) -> (StatusCode, Json<ApiRespon
         account::AccountError::NotSignedIn => StatusCode::CONFLICT,
         account::AccountError::UnknownSignIn => StatusCode::BAD_REQUEST,
         account::AccountError::Service(_) => StatusCode::BAD_GATEWAY,
+        account::AccountError::Conflict(_) => StatusCode::CONFLICT,
+        account::AccountError::NotOffered => StatusCode::NOT_FOUND,
     };
     (status, Json(ApiResponse { accepted: false, message: error.to_string() }))
 }
@@ -2265,6 +2310,75 @@ mod tests {
         let (status, _) = post_sign_out(State(state.clone())).await;
         assert_eq!(status, StatusCode::CONFLICT);
         assert!(!state.snapshot().await.account.available);
+    }
+
+    /// The answer's status and JSON body.
+    async fn plan_answer(state: &AppState, page: account::PlanPage, offered: bool) -> (StatusCode, serde_json::Value) {
+        let response = plan_page(state, page, offered).await;
+        let status = response.status();
+        let body = http_body_util::BodyExt::collect(response.into_body()).await.unwrap().to_bytes();
+        (status, serde_json::from_slice(&body).unwrap())
+    }
+
+    fn signed_in_state(service: &str, name: &str) -> AppState {
+        let mut state = test_state(Arc::new(RecordingTransport::default()));
+        let dir = std::env::temp_dir().join(format!("vibebuddy-plan-{name}-{}", std::process::id()));
+        account::signed_in_for_tests(&dir, "tok");
+        state.account = Arc::new(account::Account::new(Some(service.to_owned()), Some(&dir), 7331));
+        state
+    }
+
+    #[tokio::test]
+    async fn upgrade_and_manage_plan_pass_the_service_through() {
+        let (service, seen) = account::tests::serve(vec![
+            (200, r#"{"url":"https://checkout.stripe.com/c/pay/cs_test_1"}"#),
+            (200, r#"{"url":"https://billing.stripe.com/p/session/test_1"}"#),
+            (409, r#"{"reason":"already_paid"}"#),
+            // The daemon reads the account again after `already_paid`, so the status shows the Paid plan.
+            (200, r#"{"id":"a","github_id":1,"plan":{"name":"paid","period_end":"2026-12-06T00:00:00.000Z"},"voice_credit_micro_usd":5000000}"#),
+            (404, r#"{"error":"not_found"}"#),
+            (401, r#"{"error":"unauthorized"}"#),
+        ]);
+        let state = signed_in_state(&service, "through");
+        assert_eq!(plan_answer(&state, account::PlanPage::Checkout, true).await, (StatusCode::OK, serde_json::json!({"url": "https://checkout.stripe.com/c/pay/cs_test_1"})));
+        assert_eq!(plan_answer(&state, account::PlanPage::Portal, true).await, (StatusCode::OK, serde_json::json!({"url": "https://billing.stripe.com/p/session/test_1"})));
+
+        let (status, body) = plan_answer(&state, account::PlanPage::Checkout, true).await;
+        assert_eq!((status, body["reason"].as_str()), (StatusCode::CONFLICT, Some("already_paid")));
+        let paid = state.snapshot().await.account;
+        assert_eq!((paid.plan.map(|plan| plan.name), paid.voice_credit_micro_usd), (Some("paid".to_owned()), Some(5_000_000)));
+
+        let (status, body) = plan_answer(&state, account::PlanPage::Portal, true).await;
+        assert_eq!((status, body["accepted"].as_bool()), (StatusCode::NOT_FOUND, Some(false)));
+        assert_eq!(plan_answer(&state, account::PlanPage::Portal, true).await.0, StatusCode::UNAUTHORIZED);
+        assert!(!state.snapshot().await.account.signed_in, "a revoked session signs out");
+
+        let seen = seen.lock().unwrap();
+        let paths: Vec<&str> = seen.iter().map(|request| request.split(' ').nth(1).unwrap()).collect();
+        assert_eq!(paths, ["/v1/plan/checkout", "/v1/plan/portal", "/v1/plan/checkout", "/v1/account", "/v1/plan/portal", "/v1/plan/portal"]);
+        assert!(seen.iter().all(|request| request.to_ascii_lowercase().contains("authorization: bearer tok")), "the session goes with each call");
+    }
+
+    #[tokio::test]
+    async fn the_plan_routes_ask_nothing_when_signed_out_or_while_upgrade_is_off() {
+        let (service, seen) = account::tests::serve(vec![(200, r#"{"url":"https://checkout.stripe.com/c/pay/cs_test_1"}"#)]);
+        let state = signed_in_state(&service, "off");
+        let (status, body) = plan_answer(&state, account::PlanPage::Checkout, false).await;
+        assert_eq!((status, body["accepted"].as_bool()), (StatusCode::NOT_FOUND, Some(false)));
+        assert_eq!(state.snapshot().await.account.upgrade_offered, account::UPGRADE_OFFERED);
+        // The route itself follows the switch: off, it asks the service nothing.
+        let expected = if account::UPGRADE_OFFERED { StatusCode::OK } else { StatusCode::NOT_FOUND };
+        assert_eq!(post_upgrade(State(state.clone())).await.status(), expected);
+        if !account::UPGRADE_OFFERED {
+            assert!(seen.lock().unwrap().is_empty());
+        }
+
+        let mut signed_out = test_state(Arc::new(RecordingTransport::default()));
+        let dir = std::env::temp_dir().join(format!("vibebuddy-plan-out-{}", std::process::id()));
+        signed_out.account = Arc::new(account::Account::new(Some(service), Some(&dir), 7331));
+        assert_eq!(plan_answer(&signed_out, account::PlanPage::Checkout, true).await.0, StatusCode::UNAUTHORIZED);
+        assert_eq!(plan_answer(&signed_out, account::PlanPage::Portal, true).await.0, StatusCode::UNAUTHORIZED);
+        assert_eq!(seen.lock().unwrap().len(), usize::from(account::UPGRADE_OFFERED), "only an Upgrade with the switch on asks");
     }
 
     #[tokio::test]
@@ -2776,31 +2890,18 @@ mod tests {
         let _ = std::fs::remove_dir_all(dir);
     }
 
-    /// Asks the account why voice is off, as the voice service does.
-    struct AccountRecognizer(Arc<account::Account>);
-
-    impl speech::Recognizer for AccountRecognizer {
-        fn recognize(&self, _wav: &[u8]) -> Result<speech::Transcript, speech::RecognitionError> {
-            Ok(speech::Transcript::default())
-        }
-
-        fn refusal(&self) -> Option<&'static str> {
-            if self.0.token().is_none() {
-                return Some("signed_out");
-            }
-            self.0.voice_refusal()
-        }
-    }
-
     #[tokio::test]
-    async fn a_refusal_for_the_day_withdraws_voice_with_its_reason_until_a_read_shows_voice_again() {
-        let dir = resident::tests::temp_dir("main-refusal-offer");
+    async fn signing_out_with_no_groq_key_tells_the_box_to_set_one() {
+        let dir = resident::tests::temp_dir("main-own-key-offer");
         let transport = Arc::new(RecordingTransport::default());
         let mut state = test_state(transport.clone());
         let resident = Arc::new(resident::tests::resident(&dir, &resident::tests::logged_in(), Arc::default()));
         resident.note(None);
         state.account = Arc::new(account::signed_in_for_tests(&dir.join("config"), "tok"));
-        state.voice = Arc::new(voice::Voice::new(Some(Arc::new(AccountRecognizer(state.account.clone()))), Some(resident)));
+        state.voice_keys = Arc::new(voice_keys::VoiceKeys::new(Some(&dir.join("config"))));
+        // The daemon's own recognizer: no Groq key, so our service while signed in.
+        let recognizer = speech::new(state.account.clone(), state.voice_keys.clone());
+        state.voice = Arc::new(voice::Voice::new(Some(recognizer), Some(resident)));
         let offers = || {
             transport
                 .events()
@@ -2813,31 +2914,20 @@ mod tests {
         publish_device_message(&state, DeviceMessage::Connected { port: "/dev/cu.x".to_owned(), bridge: false, usb_serial: None }).await;
         publish_device_message(&state, DeviceMessage::Line("DISPLAY READY BUILD v9 2026-10-01".to_owned())).await;
         follow_account(&state);
-        assert_eq!(offers(), [(serde_json::json!(true), None, None)]);
-
-        state.account.note_refusal("allowance");
-        settle().await;
-        let (on, reason, message) = offers()[1].clone();
-        assert_eq!((on, reason), (serde_json::json!(false), Some(serde_json::json!("allowance"))));
-        assert_eq!(message, voice::refusal_message("allowance"));
-        // A rebooted box is told again, reason and all.
-        publish_device_message(&state, DeviceMessage::Line("DISPLAY READY BUILD v9 2026-10-01".to_owned())).await;
-        assert_eq!(offers().len(), 3);
-        assert_eq!(offers()[2].1, Some(serde_json::json!("allowance")));
-
-        // Usage that leaves the refusal as it was tells the box nothing new.
-        state.account.read_usage_for_tests(20, 20);
-        settle().await;
-        assert_eq!(offers().len(), 3);
-        // A read that shows commands left (a higher limit) brings voice back.
-        state.account.read_usage_for_tests(20, 100);
-        settle().await;
-        assert_eq!(offers().len(), 4);
-        assert_eq!(offers()[3], (serde_json::json!(true), None, None));
+        follow_voice_keys(&state);
+        assert_eq!(offers(), [(serde_json::json!(true), None, None)], "signed in, voice goes to our service");
 
         state.account.forget();
         settle().await;
-        assert_eq!(offers().last().unwrap().1, Some(serde_json::json!("signed_out")));
+        let (on, reason, message) = offers().last().unwrap().clone();
+        assert_eq!((on, reason), (serde_json::json!(false), Some(serde_json::json!("own_key"))));
+        assert_eq!(message.as_deref(), Some("Set a Groq key on the computer to talk to me."));
+        assert_eq!(voice_off(&state).await.as_deref(), Some("own_key"));
+
+        // A Groq key brings voice back, signed out or not.
+        state.voice_keys.set(&[(voice_keys::Provider::Groq, Some("gsk_test".to_owned()))]).unwrap();
+        settle().await;
+        assert_eq!(offers().last().unwrap(), &(serde_json::json!(true), None, None));
         let _ = std::fs::remove_dir_all(dir);
     }
 
@@ -3015,13 +3105,13 @@ mod tests {
     #[tokio::test]
     async fn choosing_a_decoration_sends_it_to_the_device_and_an_unknown_one_is_refused() {
         let transport = Arc::new(RecordingTransport::default());
-        let request = DecorationRequest { name: "snow".to_owned() };
+        let request = DecorationRequest { name: "christmas".to_owned() };
         let (status, _) = post_decoration(State(test_state(transport.clone())), Json(request)).await;
         assert_eq!(status, StatusCode::ACCEPTED);
         let event = &transport.events()[0];
         assert_eq!(event.event, "device.decoration");
-        assert_eq!(event.extra["name"], "snow");
-        let request = DecorationRequest { name: "Snow".to_owned() };
+        assert_eq!(event.extra["name"], "christmas");
+        let request = DecorationRequest { name: "Christmas".to_owned() };
         let (status, Json(response)) = post_decoration(State(test_state(transport.clone())), Json(request)).await;
         assert_eq!(status, StatusCode::BAD_REQUEST);
         assert!(!response.accepted);

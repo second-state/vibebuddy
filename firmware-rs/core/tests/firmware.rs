@@ -533,30 +533,48 @@ fn the_box_screens_switch_and_survive_a_reboot() {
 fn the_decoration_switches_moves_holds_still_for_input_and_survives_a_reboot() {
     let (mut firmware, mut board, _) = booted(blank_flash());
     let plain = board.frame.clone();
-    assert_eq!(send(&mut firmware, &mut board, r#"{"version":1,"event":"device.decoration","name":"snow"}"#), ["DECORATION SNOW"]);
-    assert_ne!(board.frame, plain, "the snow is drawn at once");
+    assert_eq!(send(&mut firmware, &mut board, r#"{"version":1,"event":"device.decoration","name":"christmas"}"#), ["DECORATION CHRISTMAS"]);
+    assert_ne!(board.frame, plain, "the decoration is drawn at once");
     // The state colour's rows are the screens' own.
     assert_eq!(board.frame[..4 * 320 * 2], plain[..4 * 320 * 2]);
-    assert_eq!(send(&mut firmware, &mut board, r#"{"version":1,"event":"device.decoration","name":"tinsel"}"#), ["DECORATION ERROR", "DECORATION SNOW"]);
-    assert_eq!(send(&mut firmware, &mut board, r#"{"version":1,"event":"device.decoration"}"#), ["DECORATION SNOW"]);
+    assert_eq!(send(&mut firmware, &mut board, r#"{"version":1,"event":"device.decoration","name":"tinsel"}"#), ["DECORATION ERROR", "DECORATION CHRISTMAS"]);
+    assert_eq!(send(&mut firmware, &mut board, r#"{"version":1,"event":"device.decoration"}"#), ["DECORATION CHRISTMAS"]);
 
-    // Idle, the screens draw twice a second; the snow moves in between.
+    // Idle, the screens draw twice a second; the decoration moves in between.
     let before = board.frame.clone();
     board.advance(decoration::FRAME_MS);
     firmware.poll(&mut board);
-    assert_ne!(board.frame, before, "the snow falls between the screens' own frames");
+    assert_ne!(board.frame, before, "the decoration moves between the screens' own frames");
 
-    // While the box needs input, nothing but the buddy moves.
+    // While the box needs input, nothing but the buddy and the lights moves.
     send(&mut firmware, &mut board, r#"{"version":1,"event":"agent.input_required","suppress_audio":true}"#);
+    // The lights twinkle on in the rows under the state colour, where they hang.
+    let lights = |frame: &[u8]| frame[4 * 320 * 2..32 * 320 * 2].to_vec();
+    let asking = lights(&board.frame);
+    let mut twinkled = false;
+    for _ in 0..10 {
+        board.advance(decoration::FRAME_MS);
+        firmware.poll(&mut board);
+        twinkled |= lights(&board.frame) != asking;
+    }
+    assert!(twinkled, "the lights twinkle while the box asks");
+    assert_eq!(
+        send(&mut firmware, &mut board, r#"{"version":1,"event":"device.decoration","name":"thanksgiving"}"#),
+        ["DECORATION THANKSGIVING"]
+    );
     let asking = board.frame.clone();
     board.advance(decoration::FRAME_MS);
     firmware.poll(&mut board);
-    assert_eq!(board.frame, asking, "the snow holds still while the box asks");
+    assert_eq!(board.frame, asking, "a decoration without lights holds still while the box asks");
+    assert_eq!(
+        send(&mut firmware, &mut board, r#"{"version":1,"event":"device.decoration","name":"christmas"}"#),
+        ["DECORATION CHRISTMAS"]
+    );
 
     let flash = board.flash;
     let (mut firmware, mut board, _) = booted(flash);
     let lines = send(&mut firmware, &mut board, r#"{"version":1,"event":"device.hello"}"#);
-    assert!(lines.contains(&"DECORATION SNOW".to_owned()), "{lines:?}");
+    assert!(lines.contains(&"DECORATION CHRISTMAS".to_owned()), "{lines:?}");
     assert_eq!(send(&mut firmware, &mut board, r#"{"version":1,"event":"device.decoration","name":"off"}"#), ["DECORATION OFF"]);
 }
 

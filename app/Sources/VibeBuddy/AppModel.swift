@@ -313,7 +313,15 @@ final class AppModel: ObservableObject {
     private static let customLenderKey = "custom.lender"
 
     /// The user's own Character as last written: its look and the Character lending voice and lines.
+    #if DEBUG
+    /// Snapshots only: a Character of the user's own to show in place of the one kept on disk.
+    var sampleCustomCharacter: (look: Data, lender: String)?
+    #endif
+
     var savedCustomCharacter: (look: Data, lender: String)? {
+        #if DEBUG
+        if let sampleCustomCharacter { return sampleCustomCharacter }
+        #endif
         guard let look = try? Data(contentsOf: Self.customLookURL),
               let lender = UserDefaults.standard.string(forKey: Self.customLenderKey) else { return nil }
         return (look, lender)

@@ -31,14 +31,13 @@ struct KorekoreCharacterPage: View {
                     ForEach(model.madeCharacters) { made in
                         KorekoreMadeCard(model: model, made: made)
                     }
+                    // Drawings of the user's own, kept or on the box.
+                    if model.status?.device.voice == CustomCharacter.id || model.savedCustomCharacter != nil {
+                        KorekoreCustomCard(model: model)
+                    }
                     makeYourOwn
                 }
                 .padding(.bottom, Theme.Sticker.sm)
-                // Drawings of the user's own, kept or on the box: they can change them, the Character lending its voice, or
-                // delete them.
-                if model.status?.device.voice == CustomCharacter.id || model.savedCustomCharacter != nil {
-                    KorekoreCustomLook(model: model)
-                }
             }
             .padding(.bottom, 8)
         }
@@ -94,17 +93,7 @@ struct KorekoreCharacterPage: View {
                         KTag(String(localized: "In use"), color: Theme.Colors.korePinkText)
                     } else {
                         if let previewID {
-                            Button { model.togglePreview(previewID) } label: {
-                                Image(systemName: model.previewingVoice == previewID ? "stop.fill" : "play.fill")
-                                    .font(.system(size: 9, weight: .heavy))
-                                    .frame(width: 24, height: 22)
-                                    .foregroundStyle(Theme.Colors.ink)
-                                    .background(Theme.Colors.paper, in: Capsule())
-                                    .overlay(Capsule().strokeBorder(Theme.Colors.ink, lineWidth: Theme.Stroke.base))
-                            }
-                            .buttonStyle(.plain)
-                            .disabled(model.operationRunning)
-                            .accessibilityLabel(String(localized: "Preview \(name)"))
+                            KorekorePreviewButton(model: model, voice: previewID, name: name)
                         }
                         if let use {
                             Button(String(localized: "Use"), action: use).kButton()
@@ -190,8 +179,8 @@ struct KorekoreDecorationCard: View {
     @State private var pointed: String?
 
     private static let choices = [
-        ("off", String(localized: "Off")), ("leaves", String(localized: "Falling leaves")),
-        ("snow", String(localized: "Snow")), ("lights", String(localized: "Lights")),
+        ("off", String(localized: "Off")), ("thanksgiving", String(localized: "Thanksgiving")),
+        ("christmas", String(localized: "Christmas")),
     ]
     /// Loaded once a set of screens: the strips don't change while the app runs.
     @MainActor private static var frames: [String: [NSImage]] = [:]
@@ -313,105 +302,84 @@ struct KorekoreVolumeCard: View {
     }
 }
 
-/// A Character of the user's own: their drawings as the look, a preset Character's voice and lines (ADR-0009).
-struct KorekoreCustomLook: View {
+/// ▶ (■ while it plays): a voice's lines, played on this computer.
+struct KorekorePreviewButton: View {
     @ObservedObject var model: AppModel
-    @State private var frames: [RGBAImage] = []
-    @State private var look: Data?
-    @State private var lender = Resources.bundledVoices.first?.id ?? ""
-    @State private var problem: String?
-
-    private var inUse: Bool { model.status?.device.voice == CustomCharacter.id }
-    /// The box already wears this look with this lender, so writing it again would only redo it.
-    private var onTheBox: Bool { inUse && model.savedCustomCharacter.map { $0.look == look && $0.lender == lender } == true }
+    let voice: String
+    let name: String
 
     var body: some View {
-        KCard(stroke: Theme.Stroke.bold) {
-            VStack(alignment: .leading, spacing: 10) {
-                HStack {
-                    KHeading(String(localized: "Your own character"))
-                    Spacer()
-                    if inUse { KTag(String(localized: "In use"), color: Theme.Colors.korePinkText) }
-                }
-                HStack(alignment: .bottom, spacing: 14) {
-                    ForEach(frames.indices, id: \.self) { index in
-                        Image(nsImage: LookImages.image(frames[index], scale: 1)).interpolation(.none)
-                    }
-                }
-                .frame(maxWidth: .infinity, minHeight: 80)
-                .padding(12)
-                .background(Theme.Colors.boxCard, in: RoundedRectangle(cornerRadius: 12))
-                .overlay(RoundedRectangle(cornerRadius: 12)
-                    .strokeBorder(Theme.Colors.ink, style: StrokeStyle(lineWidth: Theme.Stroke.base, dash: [6, 4])))
-                KNote(String(localized: "One PNG or JPEG image: the figure four times in a 2 × 2 grid, on a plain white or transparent background. Top left normal, top right eyes closed, bottom left happy, bottom right sad. Any size: VibeBuddy cuts out each figure and makes it 48 × 64 pixels in 15 colors. No drawing yet? Copy a prompt into an image tool, such as ChatGPT or Gemini, with your character in place of the brackets."))
-                HStack {
-                    Button(String(localized: "Choose images…"), action: choose).kButton()
-                    Button(String(localized: "Copy a prompt")) {
-                        NSPasteboard.general.clearContents()
-                        NSPasteboard.general.setString(CustomCharacter.prompt, forType: .string)
-                    }
-                    .kButton()
-                }
-                if !frames.isEmpty {
-                    HStack {
-                        KNote(String(localized: "Voice and lines from"))
-                        Spacer()
-                        KMenu(selection: lender, options: Resources.bundledVoices.map { ($0.id, $0.name) }) { lender = $0 }
-                    }
-                    HStack {
-                        if model.savedCustomCharacter != nil {
-                            Button(String(localized: "Delete…"), action: confirmDelete).kButton()
-                        }
-                        Spacer()
-                        Button(String(localized: "Use this look"), action: use).kButton(.pink)
-                            .disabled(model.operationRunning || !(model.status?.device.connected ?? false) || onTheBox)
-                    }
-                }
-                if let problem {
-                    KTag(problem, color: Theme.Colors.korePinkText)
-                }
-            }
+        Button { model.togglePreview(voice) } label: {
+            Image(systemName: model.previewingVoice == voice ? "stop.fill" : "play.fill")
+                .font(.system(size: 9, weight: .heavy))
+                .frame(width: 24, height: 22)
+                .foregroundStyle(Theme.Colors.ink)
+                .background(Theme.Colors.paper, in: Capsule())
+                .overlay(Capsule().strokeBorder(Theme.Colors.ink, lineWidth: Theme.Stroke.base))
         }
-        .onAppear {
-            guard look == nil, let saved = model.savedCustomCharacter else { return }
-            look = saved.look
-            frames = LookBuilder.frames(of: saved.look) ?? []
-            lender = saved.lender
-        }
+        .buttonStyle(.plain)
+        .disabled(model.operationRunning)
+        .accessibilityLabel(String(localized: "Preview \(name)"))
+    }
+}
+
+/// A Character of the user's own (ADR-0009) as a Character card, like a made one: their first figure, ▶ and Use, a
+/// trash can in the corner, and the Character lending its voice and lines. Make your own makes it; to change it,
+/// delete it and make another.
+struct KorekoreCustomCard: View {
+    @ObservedObject var model: AppModel
+
+    private var inUse: Bool { model.status?.device.voice == CustomCharacter.id }
+    private var connected: Bool { model.status?.device.connected ?? false }
+    private var lenderName: String {
+        let lender = model.savedCustomCharacter?.lender
+        return VoiceCatalogEntry.all.first { $0.id == lender }?.name ?? lender ?? ""
     }
 
-    private func choose() {
-        LookImages.chooseLook { result in
-            switch result {
-            case .success(let built):
-                look = built
-                frames = LookBuilder.frames(of: built) ?? []
-                problem = nil
-            case .failure(let failure):
-                problem = failure.message
-            case nil:
-                break
+    var body: some View {
+        KCard(padding: EdgeInsets(top: 9, leading: 9, bottom: 9, trailing: 9),
+              outline: inUse ? Theme.Colors.korePink : Theme.Colors.ink,
+              stroke: inUse ? Theme.Stroke.bold : Theme.Stroke.base) {
+            VStack(alignment: .leading, spacing: 6) {
+                ZStack(alignment: .bottom) {
+                    Color.clear
+                    if let frame = model.savedCustomCharacter.flatMap({ LookBuilder.frames(of: $0.look) })?.first {
+                        Image(nsImage: LookImages.figure(frame)).interpolation(.none).padding(.bottom, 2)
+                    }
+                }
+                .frame(maxWidth: .infinity)
+                .frame(height: 104)
+                .background(Theme.Colors.boxCard, in: RoundedRectangle(cornerRadius: Theme.Radius.sm))
+                .clipShape(RoundedRectangle(cornerRadius: Theme.Radius.sm))
+                // The trash can sits in the stage's corner, so the name keeps its room beside ▶ and Use.
+                .overlay(alignment: .topTrailing) {
+                    if !inUse, model.savedCustomCharacter != nil {
+                        KorekoreTrashButton(action: confirmDelete).padding(6)
+                    }
+                }
+                HStack(spacing: 5) {
+                    Text("My character").font(.rounded(16)).lineLimit(1)
+                    Spacer(minLength: 4)
+                    if inUse {
+                        KTag(String(localized: "In use"), color: Theme.Colors.korePinkText)
+                    } else if let saved = model.savedCustomCharacter {
+                        // ▶ plays the lender's lines in its voice: what the box says when it wears this Character.
+                        KorekorePreviewButton(model: model, voice: saved.lender, name: String(localized: "My character"))
+                        Button(String(localized: "Use")) { _ = model.writeCustomCharacter(look: saved.look, lender: saved.lender) }.kButton()
+                            .disabled(model.operationRunning || !connected)
+                    }
+                }
+                Text("Your drawings · voice: \(lenderName)").font(.rounded(12, weight: 400)).foregroundStyle(Theme.Colors.muted)
+                    .lineLimit(2, reservesSpace: true)
             }
         }
     }
 
     private func confirmDelete() {
-        let lenderName = VoiceCatalogEntry.all.first { $0.id == model.savedCustomCharacter?.lender }?.name ?? lender
         KorekoreAlert.ask(title: String(localized: "Delete your own character? This can't be undone."),
                           message: inUse ? String(localized: "The box goes back to \(lenderName).") : nil,
-                          buttons: [String(localized: "Delete"), String(localized: "Cancel")], warning: true) { answer in
-            guard answer.button == 0 else { return }
-            model.deleteCustomCharacter()
-            look = nil
-            frames = []
-            problem = nil
-        }
-    }
-
-    private func use() {
-        guard let look, model.writeCustomCharacter(look: look, lender: lender) else {
-            problem = String(localized: "That character can't lend its voice; pick another.")
-            return
+                          buttons: [String(localized: "Delete"), String(localized: "Cancel")], warning: true) { [model] answer in
+            if answer.button == 0 { model.deleteCustomCharacter() }
         }
     }
 }

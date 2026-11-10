@@ -1578,11 +1578,19 @@ impl Display {
     }
 
     /// Whether the decoration moves now. It holds still while something needs the user, so the only motion is the
-    /// buddy asking; and while the menu is up or the screen is dimmed for the night.
+    /// buddy asking (and the lights' twinkle); and while the menu is up or the screen is dimmed for the night.
     fn decoration_moves(&self, scene: &Scene) -> bool {
         self.decoration != Decoration::Off
             && self.panel.is_none()
             && !self.needs_input()
+            && !(self.mode == Mode::Leisure && scene.leisure.view(scene.now_ms).dim)
+    }
+
+    /// Whether the decoration's lights twinkle now: they do while the box needs input too, but not while the menu is
+    /// up or the screen is dimmed for the night.
+    fn decoration_twinkles(&self, scene: &Scene) -> bool {
+        decoration::twinkles(self.decoration)
+            && self.panel.is_none()
             && !(self.mode == Mode::Leisure && scene.leisure.view(scene.now_ms).dim)
     }
 
@@ -1600,7 +1608,8 @@ impl Display {
             self.decoration_t = scene.now_ms;
         }
         self.decoration_at = scene.now_ms.wrapping_add(decoration::FRAME_MS);
-        decoration::draw(canvas, self.decoration, self.decoration_t);
+        let twinkle_ms = if self.decoration_twinkles(scene) { scene.now_ms } else { self.decoration_t };
+        decoration::draw(canvas, self.decoration, self.decoration_t, twinkle_ms);
     }
 
     pub fn refresh(&mut self, screen: &mut dyn Screen, scene: &Scene) {
@@ -1655,8 +1664,8 @@ impl Display {
             let _ = self.render(screen, scene);
         }
         if (now.wrapping_sub(self.next_animation_at) as i32) < 0 {
-            // Between the screens' own frames, a moving decoration still needs its own.
-            if self.decoration_moves(scene) && now.wrapping_sub(self.decoration_at) as i32 >= 0 {
+            // Between the screens' own frames, a moving or twinkling decoration still needs its own.
+            if (self.decoration_moves(scene) || self.decoration_twinkles(scene)) && now.wrapping_sub(self.decoration_at) as i32 >= 0 {
                 let _ = self.render(screen, scene);
             }
             return;

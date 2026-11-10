@@ -2,27 +2,24 @@
 //! messages as the current tabs in main.rs, laid out in the korekore look. Where the Mac shows a sheet, these show an
 //! inline panel, as the alerts board says for Linux.
 
-use iced::widget::{Space, button, column, container, image, row, scrollable, text};
+use iced::widget::{Space, button, column, container, image, row, scrollable, stack, text};
 use iced::{Alignment, Border, Element, Length, Padding};
 
 use super::Section;
 use super::controls::{
     Fill, pixel, badge, bar, bold, card, card_with, divider, field, heading, note, picker, pill, pill_sized, regular, rows, semibold,
-    setting, small, sprite, switch, tag,
+    setting, small, sprite, switch, tag, trash_pill,
 };
 use super::picture::BoxPicture;
 use super::{sprites, theme, view};
 use crate::i18n::{UiLanguage, tr};
 use crate::status::{self, OperationKind, OperationState};
-use crate::{AddressChoice, BUILTIN, BoxDecoration, BoxScreens, CUSTOM, Lender, Message, ROBOT, agents, assets, client, config_dir, short_time, wifi_failure};
+use crate::{AddressChoice, BUILTIN, BoxDecoration, BoxScreens, CUSTOM, Message, ROBOT, agents, assets, client, config_dir, short_time, wifi_failure};
 
 /// Leaves room for the scroll bar and the cards' shadows.
 pub(super) fn page<'a>(content: impl Into<Element<'a, Message>>) -> Element<'a, Message> {
     scrollable(container(content).padding(Padding::ZERO.right(14).bottom(8))).into()
 }
-
-/// The Character page's scroller, so the page can go down to the card Make your own look opens below the grid.
-pub(crate) const CHARACTER_PAGE: &str = "korekore-character";
 
 fn percent(progress: f32) -> String {
     format!("{:.0}%", progress * 100.0)
@@ -127,6 +124,10 @@ impl crate::App {
         for made in &self.made {
             cards.push(self.kk_made_card(made, job));
         }
+        let custom_in_use = current.as_deref() == Some(CUSTOM);
+        if self.custom_look.is_some() || custom_in_use {
+            cards.push(self.custom_look_card(custom_in_use));
+        }
         cards.push(self.kk_make_character());
         let mut grid = column![].spacing(12);
         let mut cards = cards.into_iter().peekable();
@@ -160,15 +161,12 @@ impl crate::App {
             ),
             _ => None,
         });
-        let custom = (self.custom_look.is_some() || self.custom_problem.is_some() || current.as_deref() == Some(CUSTOM))
-            .then(|| self.custom_look_card(current.as_deref() == Some(CUSTOM)));
         let content = column![rows(std::iter::once(volume_row.into()).chain(address.map(Into::into))), self.decoration_card()]
             .push(progress)
             .push(job.and_then(|job| self.kk_making_row(job)))
             .push(grid)
-            .push(custom)
             .spacing(14);
-        scrollable(container(content).padding(Padding::ZERO.right(14).bottom(8))).id(CHARACTER_PAGE).into()
+        scrollable(container(content).padding(Padding::ZERO.right(14).bottom(8))).into()
     }
 
     /// The decoration the box draws over its screens (ADR-0022), as a strip under the volume so it stays near the top
@@ -271,60 +269,53 @@ impl crate::App {
         card_with(content, theme::PAPER, outline, stroke).padding(9).into()
     }
 
+    /// The user's own drawings as a Character card, like a made one: their first figure, ▶ and Use, a trash can in the
+    /// corner, and who lends the voice and lines. Make your own makes it; to change it, delete it and make another.
     fn custom_look_card(&self, in_use: bool) -> Element<'_, Message> {
-        let online = self.online();
-        let busy = self.busy();
-        let lenders: Vec<Lender> = self.voices.iter().map(Lender::of).collect();
-        // The box already wears this look with this lender, so writing it again would only redo it.
-        let on_the_box = in_use && self.custom_look_written && self.characters.custom_lender.as_deref() == self.lender.map(|lender| lender.id);
-        let frames = self.custom_look.as_ref().map(|(_, frames)| {
-            container(row(frames.iter().map(|frame| image(frame.clone()).filter_method(image::FilterMethod::Nearest).into())).spacing(14))
-                .center_x(Length::Fill)
-                .padding(12)
-                .style(|_| container::Style {
-                    background: Some(theme::BOX_CARD.into()),
-                    border: Border { color: theme::INK, width: theme::STROKE_BASE, radius: 12.0.into() },
-                    ..container::Style::default()
-                })
-        });
-        let pick = self.custom_look.as_ref().map(|_| {
-            column![
-                row![note(tr("Voice and lines from", &[])), Space::new().width(Length::Fill), picker(lenders, self.lender, Message::PickLender)]
-                    .align_y(Alignment::Center),
-                row![]
-                    .push((self.characters.custom_lender.is_some() && !self.confirm_delete_custom).then(|| pill(tr("Delete…", &[]), Fill::Paper, Some(Message::AskDeleteCustom(true)))))
-                    .push(Space::new().width(Length::Fill))
-                    .push(pill(tr("Use this look", &[]), Fill::Pink, (online && !busy && self.lender.is_some() && !on_the_box).then_some(Message::UseCustom))),
+        let actions: Element<'_, Message> = if in_use {
+            tag(tr("In use", &[]), theme::KORE_PINK_TEXT)
+        } else {
+            let can_use = self.online() && !self.busy() && self.custom_look.is_some() && self.lender.is_some();
+            // ▶ plays the lender's lines in its voice: what the box says when it wears this Character.
+            let preview = self.characters.custom_lender.as_deref().and_then(assets::voice_id);
+            let playing = preview.is_some_and(|id| self.previewing.as_ref().is_some_and(|(playing, _)| playing == id));
+            row![]
+                .push(preview.map(|id| {
+                    // As narrow as the trash can was here, so "My character" still fits beside it.
+                    pill(if playing { "■".to_owned() } else { "▶".to_owned() }, Fill::Paper, (!self.busy()).then_some(Message::TogglePreview(id))).padding(Padding::from([4, 9]))
+                }))
+                .push(pill(tr("Use", &[]), Fill::Paper, can_use.then_some(Message::UseCustom)))
+                .spacing(5)
+                .into()
+        };
+        let lender = self.characters.custom_lender.as_deref().map(assets::voice_name).unwrap_or_default();
+        let face: Element<'_, Message> = match self.custom_look.as_ref().and_then(|(_, frames)| frames.first()) {
+            Some(face) => figure(face.clone()).into(),
+            None => Space::new().into(),
+        };
+        // The trash can sits in the stage's corner, so the name keeps its room beside ▶ and Use.
+        let trash = (!in_use).then(|| container(trash_pill(Some(Message::AskDeleteCustom(true)))).align_right(Length::Fill).padding(6));
+        let content = column![
+            stack![
+                container(face).center_x(Length::Fill).align_y(Alignment::End).height(104).padding(Padding::ZERO.bottom(4)).style(|_| stage(theme::BOX_CARD))
             ]
-            .spacing(8)
-        });
-        card_with(
-            column![
-                row![heading(tr("Your own character", &[])), Space::new().width(Length::Fill)]
-                    .push(in_use.then(|| tag(tr("In use", &[]), theme::KORE_PINK_TEXT))),
-            ]
-            .push(frames)
-            .push(note(tr("One PNG or JPEG image: the figure four times in a 2 × 2 grid, on a plain white or transparent background. Top left normal, top right eyes closed, bottom left happy, bottom right sad. Any size: VibeBuddy cuts out each figure and makes it 48 × 64 pixels in 15 colors. No drawing yet? Copy a prompt into an image tool, such as ChatGPT or Gemini, with your character in place of the brackets.", &[])))
-            .push(row![pill(tr("Choose images…", &[]), Fill::Paper, Some(Message::ChooseDrawings)), pill(tr("Copy a prompt", &[]), Fill::Paper, Some(Message::CopyPrompt))].spacing(8))
-            .push(pick)
-            .push(self.confirm_delete_custom.then(|| {
-                let lender = self.characters.custom_lender.as_deref().map(assets::voice_name).unwrap_or_default();
-                column![note(tr("Delete your own character? This can't be undone.", &[]))]
-                    .push(in_use.then(|| note(tr("The box goes back to %@.", &[&lender]))))
-                    .push(row![
-                        Space::new().width(Length::Fill),
-                        pill(tr("Cancel", &[]), Fill::Paper, Some(Message::AskDeleteCustom(false))),
-                        pill(tr("Delete", &[]), Fill::Pink, Some(Message::DeleteCustom)),
-                    ].spacing(6))
-                    .spacing(6)
-            }))
-            .push(self.custom_problem.as_ref().map(|problem| tag(problem, theme::KORE_PINK_TEXT)))
-            .spacing(10),
-            theme::PAPER,
-            theme::INK,
-            theme::STROKE_BOLD,
-        )
-        .into()
+            .push(trash),
+            row![text(tr("My character", &[])).font(bold()).size(16).width(Length::Fill), actions].spacing(3).align_y(Alignment::Center),
+            small(tr("Your drawings · voice: %@", &[&lender])),
+        ]
+        // Asking before deleting, for the moment it takes.
+        .push(self.confirm_delete_custom.then(|| {
+            column![note(tr("Delete your own character? This can't be undone.", &[]))]
+                .push(row![
+                    Space::new().width(Length::Fill),
+                    pill(tr("Cancel", &[]), Fill::Paper, Some(Message::AskDeleteCustom(false))),
+                    pill(tr("Delete", &[]), Fill::Pink, Some(Message::DeleteCustom)),
+                ].spacing(6))
+                .spacing(6)
+        }))
+        .spacing(6);
+        let (outline, stroke) = if in_use { (theme::KORE_PINK, theme::STROKE_BOLD) } else { (theme::INK, theme::STROKE_BASE) };
+        card_with(content, theme::PAPER, outline, stroke).padding(9).into()
     }
 
     // MARK: Agents
@@ -1022,13 +1013,23 @@ impl crate::App {
             wifi = wifi.push(row![pill(tr("Add network", &[]), Fill::Paper, Some(Message::ChangeWifi))]);
         } else {
             let valid = !self.wifi_ssid.is_empty() && self.wifi_ssid.len() <= 32 && self.wifi_password.len() <= 63;
-            let seen = device.wifi_seen.iter().take(8).map(|network| {
-                let fill = if network.ssid == self.wifi_ssid { Fill::Ink } else { Fill::Paper };
-                pill(format!("{}  {} dBm", network.ssid, network.rssi), fill, Some(Message::WifiSsid(network.ssid.clone()))).into()
-            });
+            // The networks the box heard, in a menu as on the Mac: a scan can hear a dozen or more.
+            let choices: Vec<NetworkChoice> = std::iter::once(NetworkChoice { ssid: String::new(), label: tr("Choose…", &[]) })
+                .chain(device.wifi_seen.iter().map(|network| NetworkChoice {
+                    ssid: network.ssid.clone(),
+                    label: format!("{}  {} dBm", network.ssid, network.rssi),
+                }))
+                .collect();
+            let chosen = choices.iter().find(|choice| choice.ssid == self.wifi_ssid).cloned().or_else(|| choices.first().cloned());
             wifi = wifi
-                .push(row![small(tr("Nearby networks", &[])), Space::new().width(Length::Fill), pill(tr("Scan", &[]), Fill::Paper, (!busy).then_some(Message::ScanWifi))].align_y(Alignment::Center))
-                .push(column(seen).spacing(4))
+                .push(
+                    row![
+                        picker(choices, chosen, |choice: NetworkChoice| Message::WifiSsid(choice.ssid)),
+                        pill(tr("Scan", &[]), Fill::Paper, (!busy).then_some(Message::ScanWifi))
+                    ]
+                    .spacing(8)
+                    .align_y(Alignment::Center),
+                )
                 .push(field(&tr("Network name", &[]), &self.wifi_ssid).on_input(Message::WifiSsid))
                 .push(field(&tr("Password", &[]), &self.wifi_password).secure(true).on_input(Message::WifiPassword))
                 .push(row![pill(tr("Join", &[]), Fill::Sun, (valid && !busy).then_some(Message::JoinWifi))]);
@@ -1383,4 +1384,17 @@ fn buddy(words: &str) -> Element<'_, Message> {
 /// three screen pixels on a 2× display.
 pub(super) fn figure(face: image::Handle) -> iced::widget::Image {
     image(face).filter_method(image::FilterMethod::Nearest).width(72).height(96)
+}
+
+/// One entry of the Wi-Fi menu: a network the box heard, or none yet.
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct NetworkChoice {
+    ssid: String,
+    label: String,
+}
+
+impl std::fmt::Display for NetworkChoice {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.label)
+    }
 }
