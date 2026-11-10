@@ -66,7 +66,7 @@ The user-level `~/.codex/hooks.json` calls this for the six events above:
 /usr/bin/python3 /Users/dragon/workspace/vibe-buddy/tools/codex-hook.py
 ```
 
-When the hook configuration is added or changed, Codex requires a new review keyed to the exact hash of the definition. Open `/hooks`, check the script path and the six events, then trust it; don't bypass the trust mechanism. Only new sessions or a reloaded Codex use the new configuration.
+When the hook configuration is added or changed, Codex requires a new review keyed to the exact hash of the definition. Open `/hooks`, check the script path and the six events, then trust it; don't bypass the trust mechanism. Only new sessions or a reloaded Codex use the new configuration. On Windows Codex runs each hook's command in PowerShell, so the command there is `& "<path>\vibebuddy-hook.exe" codex`: without `&` PowerShell reads the quoted path as a string and fails. Entries written without it by an earlier version are replaced on the next Connect, Repair or upgrade, and must be trusted again.
 
 A Codex subagent has its own lifecycle `session_id`, but that internal thread can't necessarily be opened by a desktop deeplink. The hook script reads only the `session_meta` on the first line of the transcript and derives `thread_id` locally from `source.subagent.thread_spawn.parent_thread_id`; neither the content nor the transcript path is sent to `vibebuddyd`. Activity deduplication still uses the subagent's `session_id + turn_id`; only K2 navigation uses the parent thread. Don't mix these two identities.
 

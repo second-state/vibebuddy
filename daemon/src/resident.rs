@@ -1177,19 +1177,25 @@ async fn enabled_mcp_servers(program: &Path, codex_home: &Path, base: &[String])
         .collect()
 }
 
-/// `VIBEBUDDY_CODEX`, else `codex` on PATH, else where installers put it: the daemon may run with launchd's bare PATH.
+/// The names Codex goes by on PATH. On Windows npm puts three files there: `codex`, a script for a Unix shell that
+/// Windows can't start, `codex.cmd` and `codex.ps1`; the standalone install is `codex.exe`.
+const CODEX_NAMES: &[&str] = if cfg!(windows) { &["codex.exe", "codex.cmd"] } else { &["codex"] };
+
+/// `VIBEBUDDY_CODEX`, else Codex on PATH, else where installers put it: the daemon may run with launchd's bare PATH.
 fn find_codex() -> Option<PathBuf> {
     if let Some(path) = std::env::var_os(CODEX_VARIABLE) {
         return Some(PathBuf::from(path));
     }
-    let home = std::env::var_os("HOME").map(PathBuf::from);
-    std::env::var_os("PATH")
-        .map(|path| std::env::split_paths(&path).map(|dir| dir.join("codex")).collect::<Vec<_>>())
-        .unwrap_or_default()
-        .into_iter()
+    let home = std::env::var_os("HOME").map(PathBuf::from).filter(|_| cfg!(unix));
+    on_path(&std::env::var_os("PATH").unwrap_or_default(), CODEX_NAMES)
         .chain(home.map(|home| home.join(".local/bin/codex")))
-        .chain(["/opt/homebrew/bin/codex", "/usr/local/bin/codex"].map(PathBuf::from))
+        .chain(["/opt/homebrew/bin/codex", "/usr/local/bin/codex"].map(PathBuf::from).into_iter().filter(|_| cfg!(unix)))
         .find(|path| path.is_file())
+}
+
+/// Each directory on `path` joined with each name, in PATH's order.
+fn on_path<'a>(path: &std::ffi::OsStr, names: &'a [&'a str]) -> impl Iterator<Item = PathBuf> + 'a {
+    std::env::split_paths(path).collect::<Vec<_>>().into_iter().flat_map(move |dir| names.iter().map(move |name| dir.join(name)))
 }
 
 /// The user's own Codex home: `CODEX_HOME`, else `~/.codex`.
@@ -1219,13 +1225,21 @@ fn link_auth(codex_home: &Path, user_codex_home: &Path) -> std::io::Result<()> {
     if std::fs::read_link(&link).is_ok_and(|current| current == target) {
         return Ok(());
     }
+    #[cfg(windows)]
+    if same_file(&link, &target) {
+        return Ok(());
+    }
     match std::fs::remove_file(&link) {
         Ok(()) => info!("replaced the resident Codex home's auth.json with a link to the user's"),
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
         Err(error) => return Err(error),
     }
+    // Two readiness checks can link at the same moment; the one that comes second finds the link made.
     #[cfg(unix)]
-    return std::os::unix::fs::symlink(&target, &link);
+    return std::os::unix::fs::symlink(&target, &link).or_else(|error| {
+        let made = error.kind() == std::io::ErrorKind::AlreadyExists && std::fs::read_link(&link).is_ok_and(|current| current == target);
+        if made { Ok(()) } else { Err(error) }
+    });
     // A file symlink on Windows needs Developer Mode or admin rights. Without them, a hard link shares the one file in
     // the same way, since Codex rewrites it in place; it is made again at every start, in case something replaced the
     // user's file. Without a login there is nothing to link to, and the session reports "not logged in".
@@ -1235,8 +1249,25 @@ fn link_auth(codex_home: &Path, user_codex_home: &Path) -> std::io::Result<()> {
             return Ok(());
         }
         info!("no symlink for the resident Codex home's auth.json ({error}); using a hard link");
-        std::fs::hard_link(&target, &link)
+        std::fs::hard_link(&target, &link).or_else(|error| {
+            if error.kind() == std::io::ErrorKind::AlreadyExists && same_file(&link, &target) { Ok(()) } else { Err(error) }
+        })
     });
+}
+
+/// Whether two paths open the same file (the same volume and file index), as a hard link or a symlink does.
+#[cfg(windows)]
+fn same_file(a: &Path, b: &Path) -> bool {
+    use std::os::windows::io::AsRawHandle;
+    use windows_sys::Win32::Storage::FileSystem::{BY_HANDLE_FILE_INFORMATION, GetFileInformationByHandle};
+    let id = |path: &Path| {
+        let file = std::fs::File::open(path).ok()?;
+        // SAFETY: the handle is open for the call, and the structure is plain data that the call fills in.
+        let mut info: BY_HANDLE_FILE_INFORMATION = unsafe { std::mem::zeroed() };
+        let filled = unsafe { GetFileInformationByHandle(file.as_raw_handle(), &mut info) } != 0;
+        filled.then_some((info.dwVolumeSerialNumber, info.nFileIndexHigh, info.nFileIndexLow))
+    };
+    id(a).is_some_and(|a| Some(a) == id(b))
 }
 
 /// The user's Codex memory summary (`memories/memory_summary.md`), cut at Codex's own cap; None if there is none.
@@ -1777,6 +1808,37 @@ pub(crate) mod tests {
         std::io::Write::write_all(&mut file, b"{}").unwrap();
         drop(file);
         assert_eq!(std::fs::read_to_string(user.join("auth.json")).unwrap(), "{}");
+
+        // A link already in place is the user's file, so it stays; a copy is not.
+        assert!(same_file(&link, &user.join("auth.json")));
+        std::fs::copy(user.join("auth.json"), dir.join("copy.json")).unwrap();
+        assert!(!same_file(&dir.join("copy.json"), &user.join("auth.json")));
+
+        // Readiness checks that prepare the home at the same moment all succeed.
+        std::fs::remove_file(&link).unwrap();
+        let threads: Vec<_> = (0..4)
+            .map(|_| {
+                let (home, user) = (home.clone(), user.clone());
+                std::thread::spawn(move || (0..20).try_for_each(|_| prepare_codex_home(&home, &user)))
+            })
+            .collect();
+        for thread in threads {
+            thread.join().unwrap().unwrap();
+        }
+        assert!(same_file(&link, &user.join("auth.json")));
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn codex_is_found_by_the_names_it_has_on_path() {
+        let dir = temp_dir("codex-names");
+        // What `npm install -g @openai/codex` leaves on Windows; a Mac or Linux PATH has only the first.
+        for name in ["codex", "codex.cmd", "codex.ps1"] {
+            std::fs::write(dir.join(name), "").unwrap();
+        }
+        let path = std::env::join_paths([dir.join("missing"), dir.clone()]).unwrap();
+        let found = on_path(&path, CODEX_NAMES).find(|path| path.is_file());
+        assert_eq!(found, Some(dir.join(if cfg!(windows) { "codex.cmd" } else { "codex" })));
         let _ = std::fs::remove_dir_all(dir);
     }
 
