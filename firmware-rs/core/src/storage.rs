@@ -252,9 +252,9 @@ pub(crate) mod tests {
         let mut flash = MemoryFlash::new(0x10000);
         let (mut store, _) = SettingsStore::open(&mut flash, NVS).unwrap();
         for screens in [Screens::Robot, Screens::Korekore] {
-            let snow = Settings { screens, decoration: Decoration::Snow, ..settings(3) };
-            store.save(&mut flash, &snow).unwrap();
-            assert_eq!(SettingsStore::open(&mut flash, NVS).unwrap().1, Some(snow));
+            let christmas = Settings { screens, decoration: Decoration::Christmas, ..settings(3) };
+            store.save(&mut flash, &christmas).unwrap();
+            assert_eq!(SettingsStore::open(&mut flash, NVS).unwrap().1, Some(christmas));
         }
     }
 

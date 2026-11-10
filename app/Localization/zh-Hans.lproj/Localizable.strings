@@ -533,9 +533,8 @@
 "Changing the box screens was rejected (%lld)" = "更换盒子界面未被接受（%lld）";
 "Decoration" = "装饰";
 "Off" = "关";
-"Falling leaves" = "落叶";
-"Snow" = "下雪";
-"Lights" = "彩灯";
+"Thanksgiving" = "感恩节";
+"Christmas" = "圣诞";
 "Drawn over the box's screens, whatever Character it wears." = "画在盒子界面上，不管盒子用的是哪个角色。";
 "Update the box's firmware to choose a decoration." = "更新盒子固件后才能选择装饰。";
 "Changing the decoration was rejected (%lld)" = "更换装饰未被接受（%lld）";
