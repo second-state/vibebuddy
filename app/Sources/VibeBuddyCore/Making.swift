@@ -114,11 +114,12 @@ public struct MakingStatus: Codable, Equatable, Sendable {
     public var failed: Bool { state == "failed" }
     public var progress: Double { total > 0 ? Double(done) / Double(total) : 0 }
 
-    /// Why it stopped, said for the user; `provider` names the voice's provider. Nil unless it failed.
-    public func explanation(provider: String) -> String? {
+    /// Why it stopped, said for the user; `provider` names the voice's provider, and the Paid plan is named only when
+    /// `planOffered` (`AccountStatus.upgradeOffered`). Nil unless it failed.
+    public func explanation(provider: String, planOffered: Bool) -> String? {
         guard failed else { return nil }
         switch reason {
-        case "plan" where !AccountPlan.shown: return String(localized: "Set your own key for \(provider) on the General tab first.")
+        case "plan" where !planOffered: return String(localized: "Set your own key for \(provider) on the General tab first.")
         case "plan": return String(localized: "Making a Character with VibeBuddy's voices needs the Paid plan, or your own key for \(provider).")
         case "monthly": return String(localized: "This month's Characters on the Paid plan are used up. The lines made so far are kept: resume next month, or with your own key for \(provider).")
         case "global_cap": return String(localized: "VibeBuddy's voices are paused for today. The lines made so far are kept: resume tomorrow.")
@@ -150,9 +151,9 @@ public enum MakingReadiness: Equatable, Sendable {
         let key = voice.provider == "volc" ? keys?.volc : keys?.elevenlabs
         if let key, key.set, !key.refused { return .ownKey }
         if voice.provider == "volc", !voice.own, keys?.showsVolc != true { return .retired }
-        // A voice in the user's own account: VibeBuddy's voice service can't speak it. Nor, while the Paid plan is
-        // hidden, any voice.
-        if voice.own || !AccountPlan.shown { return .ownKeyOnly }
+        // A voice in the user's own account: VibeBuddy's voice service can't speak it. Nor, while the Paid plan isn't
+        // offered, any voice.
+        if voice.own || account?.upgradeOffered != true { return .ownKeyOnly }
         if account?.signedIn == true { return .paidPlan }
         return account?.available == true ? .signIn : .ownKeyOnly
     }

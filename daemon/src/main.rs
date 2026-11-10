@@ -255,6 +255,16 @@ async fn main() {
         config::config_dir().as_deref(),
         bind_address.port(),
     ));
+    // Read the plan, and whether the Paid plan is offered, once at start: the Apps then don't wait for the account
+    // card to ask before they show the Relay switch or VibeBuddy's voices.
+    if account.token().is_some() {
+        let account = account.clone();
+        tokio::task::spawn_blocking(move || {
+            if let Err(error) = account.refresh() {
+                warn!(%error, "the account couldn't be read at start");
+            }
+        });
+    }
     let mut serial_config = SerialConfig::from_env(known_box_file());
     let mut relay_config = None;
     // Paired, the box can also be reached over the local network when it isn't on the cable (ADR-0012).
@@ -2123,9 +2133,11 @@ async fn post_account_refresh(State(state): State<AppState>) -> (StatusCode, Jso
     }
 }
 
-/// Opens the Paid plan's Stripe Checkout: the App opens the URL in the browser. Behind [`account::UPGRADE_OFFERED`].
+/// Opens the Paid plan's Stripe Checkout: the App opens the URL in the browser. Only when the account says
+/// [`account::AccountStatus::upgrade_offered`].
 async fn post_upgrade(State(state): State<AppState>) -> axum::response::Response {
-    plan_page(&state, account::PlanPage::Checkout, account::UPGRADE_OFFERED).await
+    let offered = state.account.status().upgrade_offered;
+    plan_page(&state, account::PlanPage::Checkout, offered).await
 }
 
 /// Opens Stripe's Customer Portal, where a Paid user changes the card or cancels.
@@ -2147,8 +2159,8 @@ struct PlanRefusal {
     reason: Option<String>,
 }
 
-/// `{"url"}` on 200; otherwise the service's 409 (with its reason), 404 and 401 as they are (docs/api.md). A 409
-/// means the plan isn't what the App thought, so the account is read again and the status shows the plan it has.
+/// `{"url"}` on 200; otherwise the service's 409 (with its reason), 404 and 401 as they are (docs/api.md). After a
+/// 409, or a 404 from Checkout, the account is read again, so the status shows the plan and the offer as they are.
 async fn plan_page(state: &AppState, page: account::PlanPage, offered: bool) -> axum::response::Response {
     use axum::response::IntoResponse;
     let account = state.account.clone();
@@ -2162,16 +2174,23 @@ async fn plan_page(state: &AppState, page: account::PlanPage, offered: bool) -> 
         Err(error) => error,
     };
     warn!(%error, ?page, "the plan page didn't open");
+    // A 409 means the plan isn't what the App thought. A 404 from Checkout means the service stopped selling, and the
+    // account read before still says `upgrade_offered`. Either way, read the account again.
+    let read_again = match &error {
+        account::AccountError::Conflict(_) => true,
+        account::AccountError::NotOffered => offered && matches!(page, account::PlanPage::Checkout),
+        _ => false,
+    };
+    if read_again {
+        let account = state.account.clone();
+        if let Ok(Err(error)) = tokio::task::spawn_blocking(move || account.refresh()).await {
+            warn!(%error, "the account couldn't be read again");
+        }
+    }
     let (status, reason) = match &error {
         account::AccountError::NotSignedIn => (StatusCode::UNAUTHORIZED, None),
         account::AccountError::NotOffered => (StatusCode::NOT_FOUND, None),
-        account::AccountError::Conflict(reason) => {
-            let account = state.account.clone();
-            if let Ok(Err(error)) = tokio::task::spawn_blocking(move || account.refresh()).await {
-                warn!(%error, "the account couldn't be read again");
-            }
-            (StatusCode::CONFLICT, Some(reason.clone()))
-        }
+        account::AccountError::Conflict(reason) => (StatusCode::CONFLICT, Some(reason.clone())),
         other => (account_refusal(other).0, None),
     };
     state.notify_status();
@@ -2362,25 +2381,42 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn the_plan_routes_ask_nothing_when_signed_out_or_while_upgrade_is_off() {
+    async fn the_plan_routes_ask_nothing_when_signed_out_or_while_upgrade_is_not_offered() {
         let (service, seen) = account::tests::serve(vec![(200, r#"{"url":"https://checkout.stripe.com/c/pay/cs_test_1"}"#)]);
         let state = signed_in_state(&service, "off");
-        let (status, body) = plan_answer(&state, account::PlanPage::Checkout, false).await;
-        assert_eq!((status, body["accepted"].as_bool()), (StatusCode::NOT_FOUND, Some(false)));
-        assert_eq!(state.snapshot().await.account.upgrade_offered, account::UPGRADE_OFFERED);
-        // The route itself follows the switch: off, it asks the service nothing.
-        let expected = if account::UPGRADE_OFFERED { StatusCode::OK } else { StatusCode::NOT_FOUND };
-        assert_eq!(post_upgrade(State(state.clone())).await.status(), expected);
-        if !account::UPGRADE_OFFERED {
-            assert!(seen.lock().unwrap().is_empty());
-        }
+        // Not read yet, or the service said false or had no such field: the route asks the service nothing.
+        assert!(!state.snapshot().await.account.upgrade_offered);
+        assert_eq!(post_upgrade(State(state.clone())).await.status(), StatusCode::NOT_FOUND);
+        state.account.read_upgrade_offered_for_tests(false);
+        assert_eq!(post_upgrade(State(state.clone())).await.status(), StatusCode::NOT_FOUND);
+        assert!(seen.lock().unwrap().is_empty());
+        // The service offers it: the route asks for Checkout.
+        state.account.read_upgrade_offered_for_tests(true);
+        assert!(state.snapshot().await.account.upgrade_offered);
+        assert_eq!(post_upgrade(State(state.clone())).await.status(), StatusCode::OK);
+        assert_eq!(seen.lock().unwrap().len(), 1);
 
         let mut signed_out = test_state(Arc::new(RecordingTransport::default()));
         let dir = std::env::temp_dir().join(format!("vibebuddy-plan-out-{}", std::process::id()));
         signed_out.account = Arc::new(account::Account::new(Some(service), Some(&dir), 7331));
         assert_eq!(plan_answer(&signed_out, account::PlanPage::Checkout, true).await.0, StatusCode::UNAUTHORIZED);
         assert_eq!(plan_answer(&signed_out, account::PlanPage::Portal, true).await.0, StatusCode::UNAUTHORIZED);
-        assert_eq!(seen.lock().unwrap().len(), usize::from(account::UPGRADE_OFFERED), "only an Upgrade with the switch on asks");
+        assert_eq!(seen.lock().unwrap().len(), 1, "signed out, nothing more is asked");
+    }
+
+    #[tokio::test]
+    async fn a_checkout_404_reads_the_account_again_so_upgrade_goes_away() {
+        let (service, seen) = account::tests::serve(vec![
+            (404, r#"{"error":"not_found"}"#),
+            // The service stopped selling: the account now says so.
+            (200, r#"{"id":"a","github_id":1,"plan":{"name":"free"},"upgrade_offered":false}"#),
+        ]);
+        let state = signed_in_state(&service, "stopped");
+        state.account.read_upgrade_offered_for_tests(true);
+        assert_eq!(post_upgrade(State(state.clone())).await.status(), StatusCode::NOT_FOUND);
+        assert!(!state.snapshot().await.account.upgrade_offered);
+        let paths: Vec<String> = seen.lock().unwrap().iter().map(|request| request.split(' ').nth(1).unwrap().to_owned()).collect();
+        assert_eq!(paths, ["/v1/plan/checkout", "/v1/account"]);
     }
 
     #[tokio::test]

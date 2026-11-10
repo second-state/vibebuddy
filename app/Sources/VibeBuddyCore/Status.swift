@@ -94,8 +94,9 @@ public struct AccountStatus: Codable, Equatable {
     /// The voice credit left, in millionths of a US dollar (ADR-0024); nil before the account first uses our voice
     /// service, when the service couldn't read it, and from older daemons.
     public var voiceCreditMicroUSD: Int?
-    /// Whether to show Upgrade on Free: the daemon's one switch (`account::UPGRADE_OFFERED`), off until sales open.
-    /// False from older daemons.
+    /// The one switch for the Paid plan: the service's answer, which the daemon reads with the plan. While it is false,
+    /// the App doesn't offer the Paid plan: no Upgrade, no Free plan row, no Relay switch or refusals, and no making a
+    /// Character with VibeBuddy's voices. False when signed out, and from older daemons and services.
     public var upgradeOffered: Bool
     enum CodingKeys: String, CodingKey {
         case available, signedIn = "signed_in", email, githubID = "github_id", githubLogin = "github_login", plan, voiceCreditMicroUSD = "voice_credit_micro_usd"
@@ -117,12 +118,20 @@ public struct AccountStatus: Codable, Equatable {
 
     public enum PlanButton: Equatable { case upgrade, managePlan }
 
-    /// The account card's plan button: Manage plan on Paid, Upgrade on Free while the switch is on, none otherwise.
+    /// The account card's plan button: Manage plan on Paid, Upgrade on Free while the Paid plan is offered, none
+    /// otherwise.
     public var planButton: PlanButton? {
         guard signedIn, let plan else { return nil }
         if plan.paid { return .managePlan }
         return upgradeOffered ? .upgrade : nil
     }
+
+    /// True when the plan row has a button: Manage plan on Paid, Upgrade on Free while the Paid plan is offered.
+    public var showsPlanRow: Bool { planButton != nil }
+
+    /// The Relay switch on General: while the Paid plan is offered, and always for a Paid account, so stopping sales
+    /// doesn't take it from someone who pays for the Relay.
+    public var showsRelaySwitch: Bool { upgradeOffered || (signedIn && plan?.paid == true) }
 
     /// The voice credit left in dollars, "$0.93", for the account card; nil when the daemon doesn't know it. Cut down
     /// to the cent, so it never shows more than is left.
@@ -142,9 +151,6 @@ public struct AccountPlan: Codable, Equatable {
         self.name = name; self.periodEnd = periodEnd
     }
     public var paid: Bool { name == "paid" }
-    /// Whether the App shows the Paid plan. Off until the plan is on sale (2026-10-28): the plan row, the Relay switch
-    /// and its refusals, and making a Character with VibeBuddy's voices are hidden. The daemon doesn't change.
-    public static let shown = false
 }
 
 /// The daemon's answer to `POST /v1/account/upgrade` or `/v1/account/manage-plan` (docs/api.md).
@@ -154,7 +160,7 @@ public enum PlanPageAnswer: Equatable {
     /// The service's 409 reason, `already_paid` or `no_subscription`: the plan isn't what the App showed, and the
     /// daemon has read the account again.
     case conflict(String)
-    /// 404: Stripe isn't set up for this service, the switch is off, or the daemon is too old for the route.
+    /// 404: Stripe isn't set up for this service, the Paid plan isn't offered, or the daemon is too old for the route.
     case notOffered
     /// 401: the status then shows signed out.
     case notSignedIn

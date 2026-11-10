@@ -573,6 +573,11 @@ impl App {
         Theme::Light
     }
 
+    /// The one switch for the Paid plan: the daemon's `account.upgrade_offered`, false without a status.
+    fn plan_offered(&self) -> bool {
+        self.status.as_ref().is_some_and(|status| status.account.upgrade_offered)
+    }
+
     fn plan_paid(&self) -> bool {
         self.status.as_ref().and_then(|status| status.account.plan.as_ref()).is_some_and(status::Plan::paid)
     }

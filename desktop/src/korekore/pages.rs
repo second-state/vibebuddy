@@ -726,7 +726,7 @@ impl crate::App {
                 column![small(tr("Firmware", &[])), firmware].spacing(2),
                 screens,
             ]
-            .push(device.filter(|device| !device.connected).and_then(status::Device::relay_refusal).map(|why| text(why).font(regular()).size(12).color(theme::KORE_PINK_TEXT)))
+            .push(device.filter(|device| !device.connected).and_then(|device| device.relay_refusal(self.plan_offered())).map(|why| text(why).font(regular()).size(12).color(theme::KORE_PINK_TEXT)))
             .push(Space::new().height(Length::Fill))
             .push((outdated && online && !can_flash).then(|| note(tr("Plug in the cable to update the box's firmware.", &[]))))
             .push((outdated && can_flash).then(|| {
@@ -1121,7 +1121,7 @@ impl crate::App {
             setting(tr("Launch at login", &[]), switch(self.launch_at_login, Some(Message::LaunchAtLogin(!self.launch_at_login)))),
             setting(tr("Tell me when the box disconnects or the daemon fails", &[]), switch(notify, have_status.then_some(Message::NotifyLink(!notify)))),
         ];
-        if status::Plan::SHOWN {
+        if self.status.as_ref().is_some_and(|status| status.account.shows_relay_switch()) {
             settings.push(setting(tr("Reach the box through the Relay when it's away from this computer", &[]), switch(relay, have_status.then_some(Message::Relay(!relay)))));
         }
         let settings = rows(settings);

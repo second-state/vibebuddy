@@ -104,8 +104,9 @@ do {
     {"id":"night-owl-1a2b3c4d","name":"Night Owl","state":"failed","done":2,"total":6,"reason":"plan","error":"making a Character with our voices needs the Paid plan"}
     """.utf8))
     check(making.failed && !making.running && making.reason == "plan" && making.progress == 2.0 / 6.0, "making decodes")
-    let planText = AccountPlan.shown ? "Paid plan, or your own key for ElevenLabs" : "your own key for ElevenLabs"
-    check(making.explanation(provider: "ElevenLabs")?.contains(planText) == true, "a plan refusal names the provider, and the Paid plan when it is shown")
+    check(making.explanation(provider: "ElevenLabs", planOffered: true)?.contains("Paid plan, or your own key for ElevenLabs") == true, "a plan refusal names the provider and the Paid plan when it is offered")
+    let notOffered = making.explanation(provider: "ElevenLabs", planOffered: false)
+    check(notOffered?.contains("your own key for ElevenLabs") == true && notOffered?.contains("Paid plan") == false, "and only the own key when it isn't")
     let made = try StatusCoding.decoder().decode([MadeCharacter].self, from: Data(#"[{"id":"night-owl-1a2b3c4d","name":"Night Owl","base":"ada","voice":"luna","lines":55,"complete":false}]"#.utf8))
     check(made == [MadeCharacter(id: "night-owl-1a2b3c4d", name: "Night Owl", base: "ada", voice: "luna", lines: 55, complete: false)], "made Characters decode")
     let voices = try StatusCoding.decoder().decode([CharacterVoice].self, from: Data(#"[{"id":"ada","provider":"elevenlabs","voice":"tcSs","language":"en","gender":"female","name":"Ada"},{"id":"wanwanxiaohe","provider":"volc","voice":"zh_f","language":"zh","gender":"female","name":"Xiaohe"}]"#.utf8))
@@ -157,6 +158,15 @@ do {
     signedOut.signedIn = false
     check(signedOut.planButton == nil, "no plan button when signed out")
     check(AccountStatus(available: true, signedIn: true, upgradeOffered: true).planButton == nil, "no plan button before the plan is read")
+    // The plan row: with Upgrade on Free while offered, and always on Paid with Manage plan.
+    check(free.showsPlanRow == false && offered.showsPlanRow, "the Free plan row only while the Paid plan is offered")
+    check(paidAccount.showsPlanRow, "a Paid account always sees its plan row")
+    // The Relay switch: while the Paid plan is offered, and always for a Paid account.
+    check(offered.showsRelaySwitch && !free.showsRelaySwitch, "the Relay switch follows the offer on Free")
+    check(paidAccount.showsRelaySwitch, "stopping sales doesn't take the Relay switch from a Paid account")
+    var paidSignedOut = paidAccount
+    paidSignedOut.signedIn = false
+    check(!paidSignedOut.showsRelaySwitch, "signed out, no Relay switch")
 
     // The daemon's answers to /v1/account/upgrade and /v1/account/manage-plan.
     let answer = { (code: Int, body: String) in PlanPageAnswer(code: code, data: Data(body.utf8)) }
@@ -421,9 +431,12 @@ let volc = CharacterVoice(id: "wanwanxiaohe", provider: "volc", voice: "z", lang
 let ownEleven = VoiceKeysStatus(elevenlabs: .init(set: true), volc: .init(set: true, refused: true))
 let signedIn = AccountStatus(available: true, signedIn: true)
 check(MakingReadiness.of(eleven, keys: ownEleven, account: nil) == .ownKey, "an own key for the voice's provider is enough")
-check(MakingReadiness.of(volc, keys: ownEleven, account: signedIn) == (AccountPlan.shown ? .paidPlan : .ownKeyOnly), "a refused key doesn't count: VibeBuddy's voices, on the Paid plan when it is shown")
-check(MakingReadiness.of(eleven, keys: nil, account: AccountStatus(available: true, signedIn: false)) == (AccountPlan.shown ? .signIn : .ownKeyOnly), "signed out and no key")
+let signedInOffered = AccountStatus(available: true, signedIn: true, upgradeOffered: true)
+check(MakingReadiness.of(volc, keys: ownEleven, account: signedInOffered) == .paidPlan, "a refused key doesn't count: VibeBuddy's voices, on the Paid plan when it is offered")
+check(MakingReadiness.of(volc, keys: ownEleven, account: signedIn) == .ownKeyOnly, "and only an own key when it isn't")
+check(MakingReadiness.of(eleven, keys: nil, account: AccountStatus(available: true, signedIn: false)) == .ownKeyOnly, "signed out and no key: the daemon says not offered")
 check(MakingReadiness.of(volc, keys: nil, account: signedIn) == .retired && !MakingReadiness.retired.canStart, "Volcano Engine's voices without a key for it: pick another voice")
+check(MakingReadiness.of(volc, keys: nil, account: signedInOffered) == .retired, "retired comes before the Paid plan")
 check(MakingReadiness.of(eleven, keys: nil, account: nil) == .ownKeyOnly && !MakingReadiness.ownKeyOnly.canStart, "no service and no key")
 let mine = CharacterVoice(id: "own-1a2b3c4d", provider: "volc", voice: "S_me", language: "", gender: "", name: "Me", own: true)
 check(MakingReadiness.of(mine, keys: ownEleven, account: signedIn) == .ownKeyOnly, "a voice of the user's own needs their own key, not the Paid plan")
