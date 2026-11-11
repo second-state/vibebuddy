@@ -723,6 +723,10 @@ impl crate::App {
                 row![small(tr("Box screens", &[])), Space::new().width(Length::Fill), value].align_y(Alignment::Center).into()
             }
         };
+        let relay_line = device
+            .filter(|_| self.status.as_ref().is_some_and(|status| status.account.shows_relay_switch()))
+            .and_then(status::Device::relay_line);
+        let relay_shown = relay_line.is_some();
         let the_box = card(
             column![
                 heading(tr("The box", &[])),
@@ -731,7 +735,15 @@ impl crate::App {
                 screens,
             ]
             .push(device.filter(|device| !device.connected).and_then(|device| device.relay_refusal(self.plan_offered())).map(|why| text(why).font(regular()).size(12).color(theme::KORE_PINK_TEXT)))
-            .push(Space::new().height(Length::Fill))
+            // Which Relay this computer uses; only where the Relay switch shows on General.
+            .push(relay_line.map(|line| column![small(tr("Relay", &[])), text(line).font(pixel(13.0).0).size(pixel(13.0).1).color(theme::INK)].spacing(2)))
+            .push(device.filter(|device| device.relay_mismatch()).map(|_| {
+                text(tr("The box uses another Relay than this computer, so they can't meet through it. Plug in the cable once to move the box to this computer's Relay.", &[]))
+                    .font(regular())
+                    .size(12)
+                    .color(theme::KORE_PINK_TEXT)
+            }))
+            .push(Space::new().height(if relay_shown { Length::Fixed(8.0) } else { Length::Fill }))
             .push((outdated && online && !can_flash).then(|| note(tr("Plug in the cable to update the box's firmware.", &[]))))
             .push((outdated && can_flash).then(|| {
                 pill_sized(tr("Update to %@", &[&offer.map(|offer| offer.version.clone()).unwrap_or_default()]), Fill::Pink, 13.0, (!busy).then_some(Message::AskFirmwareUpdate(true)))
@@ -740,7 +752,8 @@ impl crate::App {
             .push(pill_sized(tr("Make the box blink", &[]), Fill::Sun, 13.0, (online && !busy).then_some(Message::Identify)).width(Length::Fill))
             .push(pill_sized(tr("Flash from file…", &[]), Fill::Paper, 13.0, (can_flash && !busy).then_some(Message::FlashFromFile)).width(Length::Fill))
             .spacing(10)
-            .height(Length::Fixed(290.0)),
+            // The Relay lines make the card taller than the screen beside it; it grows to fit them.
+            .height(if relay_shown { Length::Shrink } else { Length::Fixed(290.0) }),
         );
         let top = row![column![screen, screen_actions].spacing(8), the_box].spacing(14);
         let firmware_state = self.firmware_state(can_flash, downloaded);
@@ -1159,13 +1172,13 @@ impl crate::App {
         page(
             column![]
                 .push(unsupported)
+                .push(container(text(tr("Updates", &[])).font(bold()).size(15).color(theme::INK)).padding(Padding::ZERO.left(4)))
+                .push(updates_card)
+                .push(upgrade)
                 .push(self.kk_account())
                 .push(container(text(tr("This computer", &[])).font(bold()).size(15).color(theme::INK)).padding(Padding::ZERO.left(4)))
                 .push(settings)
                 .push(self.restart_offer.as_ref().map(|offer| self.restart_panel(offer)))
-                .push(container(text(tr("Updates", &[])).font(bold()).size(15).color(theme::INK)).padding(Padding::ZERO.left(4)))
-                .push(updates_card)
-                .push(upgrade)
                 .push(about)
                 .spacing(14),
         )

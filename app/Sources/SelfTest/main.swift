@@ -76,6 +76,12 @@ do {
     {"connected":false,"bridge":false,"relay_refused":"plan"}
     """.utf8))
     check(refused.relayRefused == "plan" && busy.relayRefused == nil, "the Relay's refusal decodes")
+    let relays = try StatusCoding.decoder().decode(DeviceState.self, from: Data("""
+    {"connected":true,"bridge":false,"relay_server":"wss://relay-staging.korekore.ai","box_relay":"wss://relay.korekore.ai"}
+    """.utf8))
+    check(RelayKind(relays.relayServer ?? "") == .staging && RelayKind(relays.boxRelay ?? "") == .production, "the two Relays decode and are named")
+    check(relays.relayMismatch && !busy.relayMismatch, "a box on another Relay is a mismatch; an unknown one isn't")
+    check(RelayKind("ws://127.0.0.1:8787") == .other("127.0.0.1"), "another Relay is named by its host")
     let screens = try StatusCoding.decoder().decode(DeviceState.self, from: Data("""
     {"connected":true,"bridge":false,"screens":"korekore","decoration":"christmas"}
     """.utf8))

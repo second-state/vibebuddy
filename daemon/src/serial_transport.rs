@@ -367,14 +367,21 @@ async fn serial_worker(
                 let relay_link = relay::link(relay_config, &box_key, wait).await;
                 busy_logged = reported_busy.into_inner().unwrap_or_else(std::sync::PoisonError::into_inner);
                 match relay_link {
-                    Ok(mut stream) => {
+                    Ok(relay::Linked { mut stream, box_here }) => {
                         let url = relay_config.url();
-                        info!(%url, "linked through the Relay");
                         busy_logged = None;
                         busy_retry = None;
                         relay_retry = None;
                         let linked_at = Instant::now();
-                        let _ = device_event_sender.send(DeviceMessage::ConnectedRelay { url: url.clone() }).await;
+                        // The link is up only once the box is on the Relay too; until then the bridge reports it
+                        // arriving (`linked` again), as it does when the box comes back.
+                        if box_here {
+                            info!(%url, "linked through the Relay");
+                            let _ = device_event_sender.send(DeviceMessage::ConnectedRelay { url: url.clone() }).await;
+                        } else {
+                            info!(%url, "linked through the Relay, but the box isn't on it");
+                            let _ = device_event_sender.send(DeviceMessage::Disconnected).await;
+                        }
                         linked = true;
                         let end = run_session(
                             &mut stream,
