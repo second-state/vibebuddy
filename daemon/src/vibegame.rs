@@ -884,4 +884,98 @@ pub(crate) mod tests {
             assert!(viewer_frame(&Event::named(name), false).is_none(), "{name} isn't sent to a VibeGame");
         }
     }
+
+    /// The VibeGame app's own side (`vibegame-app/core`), served on a TCP port as QingOS serves the app.
+    struct AppVibeGame {
+        address: String,
+        key: String,
+        server: Arc<Mutex<vibegame_core::server::Server>>,
+        events: mpsc::UnboundedReceiver<Value>,
+    }
+
+    async fn app_vibegame() -> AppVibeGame {
+        use vibegame_core::server::{Out, Server};
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap().to_string();
+        let random = Box::new(|bytes: &mut [u8]| getrandom::fill(bytes).unwrap());
+        let server = Server::new(vibegame_core::identity::Identity::from_seed([9; 32]), Vec::new(), "test", random, 0);
+        let key = server.identity().key();
+        let server = Arc::new(Mutex::new(server));
+        let writers: Arc<Mutex<HashMap<u64, mpsc::UnboundedSender<Option<String>>>>> = Arc::default();
+        let (events_tx, events) = mpsc::unbounded_channel();
+        let shared = Arc::clone(&server);
+        tokio::spawn(async move {
+            let carry_out = move |out: Vec<Out>, writers: &Mutex<HashMap<u64, mpsc::UnboundedSender<Option<String>>>>| {
+                for out in out {
+                    match out {
+                        Out::Send(id, line) => drop(writers.lock().unwrap().get(&id).map(|w| w.send(Some(line)))),
+                        Out::Close(id) => drop(writers.lock().unwrap().get(&id).map(|w| w.send(None))),
+                        Out::Event(event) => drop(events_tx.send(event)),
+                        Out::Computers | Out::Linked(_) | Out::Unlinked => {}
+                    }
+                }
+            };
+            let carry_out = Arc::new(carry_out);
+            for id in 1u64.. {
+                let Ok((stream, _)) = listener.accept().await else { return };
+                let (read, mut write) = stream.into_split();
+                let (tx, mut rx) = mpsc::unbounded_channel::<Option<String>>();
+                writers.lock().unwrap().insert(id, tx);
+                tokio::spawn(async move {
+                    while let Some(Some(line)) = rx.recv().await {
+                        if write.write_all(format!("{line}\n").as_bytes()).await.is_err() {
+                            return;
+                        }
+                    }
+                });
+                let (server, writers, carry_out) = (Arc::clone(&shared), Arc::clone(&writers), Arc::clone(&carry_out));
+                let opened = server.lock().unwrap().open(id, 0);
+                carry_out(opened, &writers);
+                tokio::spawn(async move {
+                    let mut lines = BufReader::new(read).lines();
+                    while let Ok(Some(line)) = lines.next_line().await {
+                        let out = server.lock().unwrap().line(id, &line, 0);
+                        carry_out(out, &writers);
+                    }
+                    let out = server.lock().unwrap().closed(id);
+                    carry_out(out, &writers);
+                });
+            }
+        });
+        AppVibeGame { address, key, server, events }
+    }
+
+    #[tokio::test]
+    async fn the_vibegame_app_pairs_and_links_with_this_daemon() {
+        let mut vibegame = app_vibegame().await;
+        let (changed, _) = broadcast::channel(16);
+        let (hub, mut inbound) = Hub::new(Some(identity()), None, Some(vibegame.address.clone()), changed);
+        let code = vibegame.server.lock().unwrap().code().unwrap().to_owned();
+        let wrong = if code == "000000" { "111111" } else { "000000" };
+        assert_eq!(hub.pair(&vibegame.key, wrong).await, Err(PairError::Code));
+        hub.pair(&vibegame.key, &code).await.unwrap();
+        assert_eq!(vibegame.server.lock().unwrap().computers()[0].name, "dragon's MacBook");
+        assert_eq!(hub.pair(&vibegame.key, &code).await, Err(PairError::Closed), "the code is used up");
+
+        tokio::spawn(Arc::clone(&hub).run());
+        wait_connected(&hub, &vibegame.key).await;
+        let status = hub.status().await;
+        assert_eq!(status[0].name, format!("VibeGame {}", &vibegame.key[..8]), "the name from vibegame.hello");
+        hub.send(&Event::named("agent.idle"));
+        let event = tokio::time::timeout(Duration::from_secs(10), vibegame.events.recv()).await.unwrap().unwrap();
+        assert_eq!((event["event"].as_str(), event["quiet"].as_bool()), (Some("agent.idle"), Some(false)));
+
+        let out = vibegame.server.lock().unwrap().send(r#"{"version":1,"event":"button","button":"K2","action":"press"}"#);
+        let vibegame_core::server::Out::Send(_, sealed) = &out[0] else { panic!("{out:?}") };
+        assert!(!sealed.starts_with('{'), "sealed");
+        let _ = inbound.try_recv();
+        assert!(hub.forget(&vibegame.key));
+        for _ in 0..100 {
+            if vibegame.server.lock().unwrap().computers().is_empty() {
+                return;
+            }
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+        panic!("the VibeGame app kept the computer after vibegame.unpair");
+    }
 }

@@ -17,7 +17,7 @@ This document is the contract between three pieces of work: the daemon and the t
 The VibeGame is the server, as the box is on the local network. The computer finds it and connects.
 
 - The VibeGame accepts TCP on port **7342**.
-- It answers mDNS (DNS-SD) for **`_vibebuddy-vibegame._tcp`** on port 7342. The instance name is `VibeGame <first 8 characters of the VibeGame key>`. The TXT record has `key=<VibeGame key>`, `name=<device name>` and `paired=0` or `paired=1`.
+- It answers mDNS (DNS-SD) for **`_vibebuddy-vibegame._tcp`** on port 7342. The instance name is `VibeGame <first 8 characters of the VibeGame key>`. The TXT record has `key=<VibeGame key>`, `name=<device name>` and `paired=0` or `paired=1`. QingOS gives an app no device name, so the app uses the instance name as `name`, here and in `vibegame.hello`. The app calls `mdns_set` as it starts; until then QingOS answers with the app's name (`vibebuddy`) and no TXT, and it withdraws that answer when the app's own comes.
 - The service type is not `_vibebuddy._tcp`, so the daemon's box discovery never picks up a VibeGame, and older daemons never see one.
 - The daemon browses `_vibebuddy-vibegame._tcp` all the time. It remembers the last address of each paired VibeGame, as it does for the box (`box-address`). `VIBEBUDDY_VIBEGAME_ADDR=host:port` fixes one address and turns discovery off, for QEMU and tests. With no TXT record there, the daemon connects once to read the key from `link.noise`, and closes; it names that VibeGame `VibeGame <first 8 characters of the key>` until its `vibegame.hello` gives a name.
 
@@ -67,12 +67,13 @@ The same lines it sends the box, built from the same snapshot (`activity.rs`, `o
 
 ## On the VibeGame
 
-- **Screens**: not paired (the code), looking for a computer, and on duty (state, cards, stats). It draws its own screens for 720×480; it does not copy the box's code. The look follows the robot screens. 
-- **Menu**: **Pair a computer** (shows a code, for a second computer and up), **Forget computers**, and **Mute**.
-- **Sound**: the robot's lines for `input_required`, `done` and `failed`, packed into the app as WAV, at most 3 s each. Not when `quiet` is true or the VibeGame is muted. Other Characters come later.
-- **Pomodoro**: runs in the app, as on the box: START starts, pauses and goes on; holding START gives up. SELECT switches between on duty and Pomodoro.
+- **Screens**: not paired (the code, and the name the computer shows it by), looking for a computer, and on duty (state, cards, stats). Needs input, done and failed take the whole screen, as on the box; done goes back to the cards after 5 s. A full-screen QingOS app draws 240×160 with a 256-colour palette, and QingOS shows it three times as big on the 720×480 screen, so the app draws at 240×160. It does not copy the box's code: the layout and colours follow korekore's box screens, and the buddy is the robot, drawn by the app. Screenshots: [`design/vibegame/screenshots/`](design/vibegame/screenshots/).
+- **Keys**: on duty, A sends `button` K2. Up and down pick a card; A then sends `focus` for it, and B (or 8 s) lets go of it. X opens the menu; B closes it and leaves the pairing screen of a VibeGame that has computers.
+- **Menu**: **Pair a computer** (shows a code, for a second computer and up), **Forget computers** (asks first), and **Mute**.
+- **Sound**: the robot's lines for `input_required`, `done` and `failed`, packed into the app as WAV (`vibegame-app/assets/`, made from `voices/jessica/` by `vibegame-app/tools/make-sounds.py`). The app plays them with `tone_wav`, which takes at most 2 s, so they are 16 kHz mono; the longest is 1.5 s. It picks the line as the box does: by the event, none with `suppress_audio`, and `announcement` first. Not when `quiet` is true, the VibeGame is muted in the menu, or QingOS's mute is on. Other Characters come later.
+- **Pomodoro**: runs in the app, as on the box: 25 minutes of focus and 5 of break, each started by START. START starts, pauses and goes on, and shows the Pomodoro; holding START gives up. SELECT switches between on duty and Pomodoro. A phase that ends plays a short chime (the robot's voice has no line for it short enough), unless muted. The computer never hears of it.
 - **Lid**: closing the lid stops the app (QingOS ADR 0030). When it opens, the app waits for the computer to connect again and shows the state it sends. A VibeGame does not remind anyone while it is closed (dragon, 2026-11-11).
-- **No link**: after 15 s with no line from the computer, the buddy closes its eyes and the screen turns gray, as on the box.
+- **No link**: after 15 s with no line from the computer, the buddy closes its eyes and the screen turns gray, as on the box; the cards stay. A connection that closes is not enough on its own, since the daemon connects again within 2 s.
 
 ## The daemon's API
 
@@ -90,4 +91,6 @@ Mac and Linux, in the same PR (AGENTS.md):
 ## Testing without the VibeGame
 
 - `uv run tools/simulate-vibegame.py` answers on port 7342 as a VibeGame: it shows a pairing code, pairs and links as above, prints what it gets, and sends A (`a`) and `focus` (`f <task id>`) from the keyboard. With `VIBEBUDDY_VIBEGAME_ADDR=127.0.0.1:7342` the daemon talks to it; with `--mdns` it also answers mDNS through `dns-sd` (macOS) or `avahi-publish` (Linux), so discovery is tested too. `--state FILE` keeps its key and computers between runs.
+- `vibegame-app/` has its own tests: `cargo test --workspace` there checks pairing, the link and the events against snow (the daemon's Noise library), the keys and the menu with QingOS's test doubles, and draws every screen; with `VIBEGAME_SHOTS=<folder>` it saves them as PNGs. The daemon's test `the_vibegame_app_pairs_and_links_with_this_daemon` runs the daemon's own pairing and link against the app's core.
+- `vibegame run` in `vibegame-app/` plays the app in a window on port 7342, with a vibegame CLI built against qingos-sdk 0ff2e32 or later (older ones have no `listen`); then `VIBEBUDDY_VIBEGAME_ADDR=127.0.0.1:7342` connects a daemon to it.
 - QEMU's user network does not pass multicast, so mDNS is checked on the real handheld only. In QEMU, forward port 7342 and use `VIBEBUDDY_VIBEGAME_ADDR`.

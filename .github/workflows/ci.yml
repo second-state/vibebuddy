@@ -38,6 +38,26 @@ jobs:
       - name: Tool tests
         run: python3 -m unittest discover -s tools -p "test_*.py"
 
+  vibegame-app:
+    # The VibeGame app (vibegame-app/, its own workspace): its tests on the host, and the wasm32 build QingOS takes.
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: vibegame-app
+    steps:
+      - uses: actions/checkout@v4
+      - name: Toolchain
+        run: rustup update stable --no-self-update && rustup default stable && rustup target add wasm32-unknown-unknown && rustup component add clippy
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: vibegame-app
+      - name: Test
+        run: cargo test --workspace --locked
+      - name: Clippy
+        run: cargo clippy --workspace --all-targets --locked
+      - name: Build for QingOS
+        run: cargo build --release --target wasm32-unknown-unknown --locked
+
   windows:
     # The same crates on Windows, where nothing ships yet: it keeps them building and their tests passing there.
     runs-on: windows-latest

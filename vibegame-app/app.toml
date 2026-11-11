@@ -1,0 +1,14 @@
+# The VibeGame app's manifest for QingOS (docs/vibegame.md).
+[app]
+name      = "vibebuddy"
+title     = "VibeBuddy"
+title_zh  = "VibeBuddy"
+version   = "0.1.0"
+command   = "bin/vibebuddy.cwasm"
+screen    = "full"
+cover     = "assets/cover.png"
+rate_hz   = 60
+memory_mb = 16
+# The computer connects here; QingOS answers mDNS for the type while the app runs.
+listen    = 7342
+mdns      = "_vibebuddy-vibegame._tcp"
