@@ -5811,8 +5811,20 @@ dependencies = [
  "vibebuddy-firmware-core",
  "vibebuddy-manifest",
  "vibebuddy-protocol",
+ "vibegame-core",
  "windows-sys 0.61.2",
  "zip",
+]
+
+[[package]]
+name = "vibegame-core"
+version = "0.1.0"
+dependencies = [
+ "base64 0.22.1",
+ "clatter",
+ "ed25519-dalek",
+ "rand_core 0.6.4",
+ "serde_json",
 ]
 
 [[package]]

@@ -1,7 +1,8 @@
 [workspace]
 members = ["daemon", "desktop", "firmware-rs/core", "hook", "manifest", "protocol"]
-# The device firmware builds separately with the Xtensa toolchain; see firmware-rs/device.
-exclude = ["firmware-rs/device", "firmware-rs/vendor/nanomp3-core"]
+# The device firmware builds separately with the Xtensa toolchain; see firmware-rs/device. The VibeGame app is its
+# own workspace, for wasm32; the daemon's tests use its core.
+exclude = ["firmware-rs/device", "firmware-rs/vendor/nanomp3-core", "vibegame-app"]
 resolver = "3"
 
 [workspace.package]

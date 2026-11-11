@@ -6,6 +6,8 @@
 !.env.example
 eim_config.toml
 target/
+# `vibegame run` keeps the VibeGame app's data here.
+/vibegame-app/save/
 build/
 sdkconfig
 sdkconfig.old
