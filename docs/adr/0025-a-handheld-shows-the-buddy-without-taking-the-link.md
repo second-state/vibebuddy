@@ -1,0 +1,27 @@
+---
+status: accepted
+---
+
+# A handheld shows the buddy without taking the link
+
+On 2026-11-11 dragon decided that VibeBuddy also runs on the game handheld that runs QingOS (the Anbernic RG 34XXSP): the buddy, the task cards and the lines, on a device people hold in their hands. The protocol is in [`handheld.md`](../handheld.md).
+
+- **The handheld is the server, as the box is on the local network.** It accepts connections on its own port and answers mDNS under its own service type; the daemon finds it and connects. The daemon already finds, connects to and handshakes with a box this way, so most of that code serves the handheld too.
+- **It does not take the link.** ADR-0011 stays: a computer links to one box. A handheld is another kind of device beside it. It gets the same snapshot as the box and can only ask for what K2 and a tap ask for. It never gets pairing, Wi-Fi, firmware, Character packs or voice. So a person with a box and a handheld uses both.
+- **When both are there, the box speaks.** The daemon marks each event `quiet` while a box is linked, and the handheld then shows without playing. One announcement, one line.
+- **Pairing reads a code off the screen.** The handheld has no cable, so the six-digit code it shows is the proof that the person is at it. The computer sends the code inside a Noise XX session, and after that they connect with Noise IK as a box does.
+- **Over Wi-Fi only, local network first.** The Relay comes later; whether it stays on the Paid plan is not decided.
+- **The handheld app lives in this repo** (`handheld/`), so the protocol and both ends change in one PR. QingOS builds it into its image from a pinned commit. It is a wasm app built on QingOS's public `qapp`.
+- **It is free.** People pay for the handheld, not for this app.
+
+## Considered options
+
+- **The handheld connects to the daemon.** The handheld would need to find the computer, and the daemon a new server. Rejected: the same amount of new work on the handheld, and none of the daemon's box code reused.
+- **The handheld is a box.** Rejected: it would take the link, so the box and the handheld could not be used together, and pairing would need a cable.
+- **The handheld app lives in QingOS's repo.** Rejected: every protocol change would need two PRs in two repos, and the app could not use this repo's GPL code and CC BY-SA assets without care.
+
+## Consequences
+
+- The daemon gets a second discovery, a list of paired handhelds, and a writer per handheld that gets every state event. The apps get a Handhelds part on the Device page.
+- QingOS gets two capabilities for apps: accepting connections on a declared port, and an mDNS answer declared in the manifest (longzhi/qingos).
+- A pairing done with an attacker in the middle is not detected (see `handheld.md`). Approving an Agent's request from the handheld needs a stronger pairing first.
