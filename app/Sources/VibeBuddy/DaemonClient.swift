@@ -85,6 +85,31 @@ struct DaemonClient {
         guard code == 202 else { throw DaemonError(message: DaemonClient.message(in: data) ?? String(localized: "Removing the computer was rejected (\(code))")) }
     }
 
+    /// Pairs with a VibeGame by the six digits it shows (docs/vibegame.md).
+    func pairVibeGame(key: String, code: String) async throws {
+        let body = try JSONSerialization.data(withJSONObject: ["key": key, "code": code])
+        let (status, data) = try await post("/v1/vibegames/pair", body: body, contentType: "application/json")
+        guard status == 200 else {
+            let reason = (try? JSONSerialization.jsonObject(with: data) as? [String: Any])?["error"] as? String
+            throw DaemonError(message: DaemonClient.vibeGamePairError(reason))
+        }
+    }
+
+    static func vibeGamePairError(_ reason: String?) -> String {
+        switch reason {
+        case "code": return String(localized: "That isn't the code on the VibeGame. Check it and try again.")
+        case "full": return String(localized: "This VibeGame has four computers already. Forget them on the VibeGame first.")
+        case "closed": return String(localized: "The VibeGame isn't showing a code. Choose Pair a computer in its menu.")
+        default: return String(localized: "Couldn't reach the VibeGame. Check that it's on and on the same Wi-Fi.")
+        }
+    }
+
+    func forgetVibeGame(key: String) async throws {
+        let body = try JSONSerialization.data(withJSONObject: ["key": key])
+        let (code, data) = try await post("/v1/vibegames/forget", body: body, contentType: "application/json")
+        guard code == 200 else { throw DaemonError(message: DaemonClient.message(in: data) ?? String(localized: "Forgetting the VibeGame was rejected (\(code))")) }
+    }
+
     /// Takes the box from the computer that has it; the daemon's next try over the network or the Relay asks outright.
     func takeOver() async throws {
         let (code, data) = try await post("/v1/device/takeover", body: Data(), contentType: "application/json")

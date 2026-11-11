@@ -19,32 +19,34 @@ The VibeGame is the server, as the box is on the local network. The computer fin
 - The VibeGame accepts TCP on port **7342**.
 - It answers mDNS (DNS-SD) for **`_vibebuddy-vibegame._tcp`** on port 7342. The instance name is `VibeGame <first 8 characters of the VibeGame key>`. The TXT record has `key=<VibeGame key>`, `name=<device name>` and `paired=0` or `paired=1`.
 - The service type is not `_vibebuddy._tcp`, so the daemon's box discovery never picks up a VibeGame, and older daemons never see one.
-- The daemon browses `_vibebuddy-vibegame._tcp` all the time. It remembers the last address of each paired VibeGame, as it does for the box (`box-address`). `VIBEBUDDY_VIBEGAME_ADDR=host:port` fixes one address and turns discovery off, for QEMU and tests.
+- The daemon browses `_vibebuddy-vibegame._tcp` all the time. It remembers the last address of each paired VibeGame, as it does for the box (`box-address`). `VIBEBUDDY_VIBEGAME_ADDR=host:port` fixes one address and turns discovery off, for QEMU and tests. With no TXT record there, the daemon connects once to read the key from `link.noise`, and closes; it names that VibeGame `VibeGame <first 8 characters of the key>` until its `vibegame.hello` gives a name.
 
 ## Pairing without a cable
 
 The box pairs over USB, because the cable proves the person is at the box. The VibeGame has no cable, so the person proves it by reading a code off the VibeGame's screen.
 
-1. A VibeGame with no paired computer shows a pairing code and the words "Open VibeBuddy on your computer and pick this VibeGame". The code is six random digits. The VibeGame makes a new code after three wrong tries, and after 10 minutes.
-2. The App lists every unpaired VibeGame the daemon has found (`paired=0`), by `name`. The person picks one and types the code.
-3. The daemon connects and runs **`Noise_XX_25519_ChaChaPoly_SHA256`**, prologue `vibebuddy-vibegame-pair-v1`, computer as initiator. Both ends use their Ed25519 keys converted to X25519, as for the box link (`noise_link.rs`). The computer checks that the VibeGame's static key is the `key` in TXT.
-4. Inside the session the computer sends `{"version":1,"event":"vibegame.pair","code":"123456","name":"dragon's MacBook"}`.
-5. The VibeGame answers `{"version":1,"event":"vibegame.paired"}` and keeps the computer's key and name, or answers `{"version":1,"event":"vibegame.pair_error","reason":"code"}` (wrong code) or `"reason":"full"` (four computers already). It closes the connection either way.
-6. The daemon keeps the VibeGame's key and name in `vibegames.json` in its state directory, and connects again as below.
+1. A VibeGame with no paired computer shows a pairing code and the words "Open VibeBuddy on your computer and pick this VibeGame". A VibeGame that has computers already shows one when the person picks **Pair a computer** in its menu. The code is six random digits. The VibeGame makes a new code after three wrong tries, and after 10 minutes.
+2. The App lists every VibeGame the daemon has found that isn't paired with this computer, by `name`, whatever its TXT `paired` says: a VibeGame paired with another computer can pair with this one too. The person picks one and types the code.
+3. The daemon connects. The VibeGame sends `link.noise` first, as on every connection (see below), and the computer checks that its key is the `key` in TXT. The computer then sends `{"version":1,"event":"vibegame.pair_start"}` in the clear, so the VibeGame knows that a pairing handshake follows and not a link.
+4. They run **`Noise_XX_25519_ChaChaPoly_SHA256`**, prologue `vibebuddy-vibegame-pair-v1`, computer as initiator, one handshake message per line as unpadded base64url, all three with empty payloads. Both ends use their Ed25519 keys converted to X25519, as for the box link (`noise_link.rs`). The computer checks that the VibeGame's static key is the `key` in TXT.
+5. Inside the session the computer sends `{"version":1,"event":"vibegame.pair","code":"123456","name":"dragon's MacBook"}`.
+6. The VibeGame answers `{"version":1,"event":"vibegame.paired"}` and keeps the computer's key and name, or answers `{"version":1,"event":"vibegame.pair_error","reason":"code"}` (wrong code), `"reason":"full"` (four computers already) or `"reason":"closed"` (it shows no code now). It closes the connection either way. The computer's key it keeps is the X25519 static key Noise showed it, which is what the link's handshake shows it again; it never needs the Ed25519 form.
+7. The daemon keeps the VibeGame's key, name and last address in `vibegames.json` in its state directory, and connects again as below.
 
-A VibeGame keeps up to four paired computers. "Forget computers" on the VibeGame forgets them all; "Forget" in the App forgets one VibeGame on that computer and sends `{"version":1,"event":"vibegame.unpair"}` if it is connected.
+A VibeGame keeps up to four paired computers. "Forget computers" on the VibeGame forgets them all; "Forget" in the App forgets one VibeGame on that computer and sends `{"version":1,"event":"vibegame.unpair"}` if it is connected; the VibeGame then forgets that computer and closes.
 
 **What this does not stop.** An attacker on the same network who is in the middle at the moment of pairing could pass the code along and pair with both ends. The code is checked once, online, with three tries, so guessing does not work. A VibeGame only shows status and asks to open a window, so we accept this for now. Approving an Agent's request from the VibeGame (not in this version) needs a stronger pairing first.
 
 ## The connection
 
-After pairing, the computer connects with **`Noise_IK_25519_ChaChaPoly_SHA256`**, prologue `vibebuddy-vibegame-v1`, computer as initiator, knowing the VibeGame's key. Framing is the box's: one line per handshake message, then one Noise transport message per line, each the ciphertext of one VibeBuddy Protocol line, as unpadded base64url (`protocol.md`, "Local network link").
+After pairing, the computer connects with **`Noise_IK_25519_ChaChaPoly_SHA256`**, prologue `vibebuddy-vibegame-v1`, computer as initiator, knowing the VibeGame's key. Framing is the box's: one line per handshake message, then one Noise transport message per line, each the ciphertext of one VibeBuddy Protocol line, as unpadded base64url (`protocol.md`, "Local network link"). Both handshake messages have empty payloads.
 
-- The VibeGame sends `{"version":1,"event":"link.noise","vibegame":"<VibeGame key>"}` in the clear first, as the box does with `box`.
-- A computer that is not paired gets `link.error` (`auth`) in the clear, and the VibeGame closes.
+- The VibeGame sends `{"version":1,"event":"link.noise","vibegame":"<VibeGame key>"}` in the clear first, on every connection, as the box does with `box`. A first line from the computer that starts with `{` is `vibegame.pair_start` (above); anything else is the first IK message.
+- A computer that is not paired gets `{"version":1,"event":"link.error","code":"auth"}` in the clear, and the VibeGame closes. A daemon that gets it forgets that VibeGame on its side too, so the App offers it for pairing again: the person forgot the computers on the VibeGame.
 - The VibeGame talks to one computer at a time. A second paired computer gets a sealed `link.busy` with `reason` `linked` and `owner`, and is closed. The first one keeps it until it goes away; a computer that has been silent for 15 s is gone. There is no takeover: the VibeGame is not shared the way the box is.
 - After the handshake the VibeGame sends `{"version":1,"event":"vibegame.hello","build":"…","name":"…","screen":[720,480]}`.
 - The daemon connects to every paired VibeGame it can reach, at the same time as it links to a box.
+- **Connecting again.** QingOS closes the app's port, ends its connections and withdraws its mDNS answer whenever the app stops: another app in front, the menu key (to change the volume, say), the lid. It opens them again when the app is in front again. So a lost VibeGame is normal, not a fault: the daemon tries it again 2 s after the connection ends, then every 2 s, and 15 s after a `link.busy`. It needs no takeover time. On each connection the daemon sends a heartbeat and the screen as it is now (a state event with `suppress_audio`), so the VibeGame catches up without speaking. Connecting is not an announcement: it never brings the daily greeting or a welcome back, which follow the Agents' activity, not the VibeGame.
 
 ## What the computer sends
 
@@ -54,7 +56,7 @@ The same lines it sends the box, built from the same snapshot (`activity.rs`, `o
 - **`buddy.say`** for the daily greeting, as for the box.
 - **`device.heartbeat`** every 5 s, with `build`, `hour` and `day`.
 - **`quiet`**: every state event and `buddy.say` carries `"quiet":true` while a box is linked to this computer, and `"quiet":false` while none is. A quiet VibeGame shows everything and plays nothing. The daemon decides, because only it knows whether a box is linked (dragon, 2026-11-11: when both are there, the box speaks).
-- **The occasion is shared.** The daemon picks one occasion per announcement and sends it to the box and the VibeGame alike, so "first done of the day" is counted once.
+- **The occasion is shared.** The daemon picks one occasion per announcement and sends it to the box and the VibeGame alike, so "first done of the day" is counted once. The VibeGame gets the very line the box gets, plus `quiet`.
 - **Not sent**: anything that looks after a box (`device.*` except the heartbeat, `xfer.*`, Character packs, Wi-Fi, Relay, screens, decorations) and voice commands (`voice.*`). The VibeGame ignores any event it does not know.
 
 ## What the VibeGame sends
@@ -66,6 +68,7 @@ The same lines it sends the box, built from the same snapshot (`activity.rs`, `o
 ## On the VibeGame
 
 - **Screens**: not paired (the code), looking for a computer, and on duty (state, cards, stats). It draws its own screens for 720×480; it does not copy the box's code. The look follows the robot screens. 
+- **Menu**: **Pair a computer** (shows a code, for a second computer and up), **Forget computers**, and **Mute**.
 - **Sound**: the robot's lines for `input_required`, `done` and `failed`, packed into the app as WAV, at most 3 s each. Not when `quiet` is true or the VibeGame is muted. Other Characters come later.
 - **Pomodoro**: runs in the app, as on the box: START starts, pauses and goes on; holding START gives up. SELECT switches between on duty and Pomodoro.
 - **Lid**: closing the lid stops the app (QingOS ADR 0030). When it opens, the app waits for the computer to connect again and shows the state it sends. A VibeGame does not remind anyone while it is closed (dragon, 2026-11-11).
@@ -73,18 +76,18 @@ The same lines it sends the box, built from the same snapshot (`activity.rs`, `o
 
 ## The daemon's API
 
-- `GET /v1/status` gets `vibegames`: one item per VibeGame found or paired, with `key`, `name`, `paired`, `connected` and `address`.
-- `POST /v1/vibegames/pair` with `{"key","code"}`: pairs. Answers 200, or 400 with `{"error":"code"}`, `{"error":"full"}` or `{"error":"unreachable"}`.
-- `POST /v1/vibegames/forget` with `{"key"}`: forgets one VibeGame.
+- `GET /v1/status` gets `vibegames`: one item per VibeGame found or paired, with `key`, `name`, `paired` (with this computer), `connected` and `address`. Paired ones come first.
+- `POST /v1/vibegames/pair` with `{"key","code"}`: pairs. Answers 200, or 400 with `{"error":"code"}`, `{"error":"full"}`, `{"error":"closed"}` or `{"error":"unreachable"}`.
+- `POST /v1/vibegames/forget` with `{"key"}`: forgets one VibeGame. Answers 200, or 404 when it isn't paired.
 
 ## The apps
 
 Mac and Linux, in the same PR (AGENTS.md):
 
-- The Device page gets a **VibeGames** part: VibeGames found and not paired, each with **Pair…**, which asks for the six digits; paired VibeGames, with connected or not and **Forget**.
+- The Device page gets a **VibeGames** part: VibeGames found and not paired, each with **Pair…**, which asks for the six digits; paired VibeGames, with connected or not and **Forget**, which asks first. A pairing that fails says why, from the API's `error`: a wrong code, four computers already, no code on the screen (choose Pair a computer on the VibeGame), or not reached. Daemons older than this report no `vibegames`, and then the part isn't shown.
 - zh-Hans strings on both sides: 掌机、配对…、输入掌机上显示的六位数、忘掉这台掌机.
 
 ## Testing without the VibeGame
 
-- `tools/simulate-vibegame.py` (to write) answers on port 7342 as a VibeGame, prints what it gets, and sends A and `focus` from the keyboard. With `VIBEBUDDY_VIBEGAME_ADDR=127.0.0.1:7342` the daemon talks to it.
+- `uv run tools/simulate-vibegame.py` answers on port 7342 as a VibeGame: it shows a pairing code, pairs and links as above, prints what it gets, and sends A (`a`) and `focus` (`f <task id>`) from the keyboard. With `VIBEBUDDY_VIBEGAME_ADDR=127.0.0.1:7342` the daemon talks to it; with `--mdns` it also answers mDNS through `dns-sd` (macOS) or `avahi-publish` (Linux), so discovery is tested too. `--state FILE` keeps its key and computers between runs.
 - QEMU's user network does not pass multicast, so mDNS is checked on the real handheld only. In QEMU, forward port 7342 and use `VIBEBUDDY_VIBEGAME_ADDR`.

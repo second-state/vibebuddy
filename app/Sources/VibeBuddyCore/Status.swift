@@ -20,10 +20,12 @@ public struct Status: Codable, Equatable {
     /// The Character being made, or the last one made since the daemon started (ADR-0023); absent when there is none,
     /// and from older daemons.
     public var making: MakingStatus?
+    /// Every VibeGame paired with this computer or found on the network (ADR-0025); absent from older daemons.
+    public var vibegames: [VibeGame]?
 
-    enum CodingKeys: String, CodingKey { case daemon, device, today, hooks, operation, config, updates, account, voiceKeys = "voice_keys", making, activities }
+    enum CodingKeys: String, CodingKey { case daemon, device, today, hooks, operation, config, updates, account, voiceKeys = "voice_keys", making, activities, vibegames }
 
-    public init(daemon: DaemonInfo, device: DeviceState, today: TodaySummary, hooks: HooksSeen, operation: DeviceOperation?, config: DaemonConfig, updates: UpdateStatus? = nil, account: AccountStatus? = nil, voiceKeys: VoiceKeysStatus? = nil, making: MakingStatus? = nil, activities: [ActivitySummary]? = nil) {
+    public init(daemon: DaemonInfo, device: DeviceState, today: TodaySummary, hooks: HooksSeen, operation: DeviceOperation?, config: DaemonConfig, updates: UpdateStatus? = nil, account: AccountStatus? = nil, voiceKeys: VoiceKeysStatus? = nil, making: MakingStatus? = nil, activities: [ActivitySummary]? = nil, vibegames: [VibeGame]? = nil) {
         self.daemon = daemon
         self.device = device
         self.today = today
@@ -35,6 +37,26 @@ public struct Status: Codable, Equatable {
         self.account = account
         self.voiceKeys = voiceKeys
         self.making = making
+        self.vibegames = vibegames
+    }
+}
+
+/// A VibeGame, the game handheld that shows the buddy beside the box (ADR-0025, docs/vibegame.md).
+public struct VibeGame: Codable, Equatable, Identifiable {
+    public var key: String
+    public var name: String
+    /// Paired with this computer.
+    public var paired: Bool
+    public var connected: Bool
+    public var address: String?
+    public var id: String { key }
+
+    public init(key: String, name: String, paired: Bool, connected: Bool, address: String? = nil) {
+        self.key = key
+        self.name = name
+        self.paired = paired
+        self.connected = connected
+        self.address = address
     }
 }
 

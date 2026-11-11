@@ -419,6 +419,8 @@ pub struct Status {
     pub voice_keys: crate::voice_keys::VoiceKeysStatus,
     /// The Character being made, or the last one made, since the daemon started (ADR-0023).
     pub making: Option<crate::making::MakingStatus>,
+    /// Every VibeGame paired with this computer or found on the network (ADR-0025).
+    pub vibegames: Vec<crate::vibegame::VibeGameStatus>,
 }
 
 /// What the apps explain for `WIFI FAILED <why>`: `wrong_password` (the network turned the box away, which a
