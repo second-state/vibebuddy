@@ -124,6 +124,38 @@ pub async fn unpair(key: String) -> Result<(), String> {
     post("/v1/device/unpair", Some(serde_json::json!({ "key": key }))).await
 }
 
+/// Pairs with a VibeGame by the six digits it shows (docs/vibegame.md); the error is for the user.
+pub async fn pair_vibegame(key: String, code: String) -> Result<(), String> {
+    let response = reqwest::Client::new()
+        .post(format!("{BASE}/v1/vibegames/pair"))
+        .json(&serde_json::json!({ "key": key, "code": code }))
+        .send()
+        .await
+        .map_err(|error| error.to_string())?;
+    if response.status().is_success() {
+        return Ok(());
+    }
+    #[derive(Deserialize)]
+    struct Refusal {
+        error: String,
+    }
+    let reason = response.json::<Refusal>().await.map(|refusal| refusal.error).unwrap_or_default();
+    Err(vibegame_pair_error(&reason))
+}
+
+pub fn vibegame_pair_error(reason: &str) -> String {
+    match reason {
+        "code" => tr("That isn't the code on the VibeGame. Check it and try again.", &[]),
+        "full" => tr("This VibeGame has four computers already. Forget them on the VibeGame first.", &[]),
+        "closed" => tr("The VibeGame isn't showing a code. Choose Pair a computer in its menu.", &[]),
+        _ => tr("Couldn't reach the VibeGame. Check that it's on and on the same Wi-Fi.", &[]),
+    }
+}
+
+pub async fn forget_vibegame(key: String) -> Result<(), String> {
+    post("/v1/vibegames/forget", Some(serde_json::json!({ "key": key }))).await
+}
+
 /// Takes the box from the computer that has it; the daemon's next try over the network or the Relay asks outright.
 pub async fn take_over() -> Result<(), String> {
     post("/v1/device/takeover", None).await

@@ -591,3 +591,20 @@
 "This computer: %@ · Box: %@" = "本机：%@ · 盒子：%@";
 "The box uses another Relay than this Mac, so they can't meet through it. Plug in the cable once to move the box to this Mac's Relay." = "盒子用的中转和这台 Mac 不同，两边无法通过中转连上。插上数据线连一次，盒子就会改用这台 Mac 的中转。";
 "The box uses another Relay than this computer, so they can't meet through it. Plug in the cable once to move the box to this computer's Relay." = "盒子用的中转和本机不同，两边无法通过中转连上。插上数据线连一次，盒子就会改用本机的中转。";
+
+/* VibeGames (ADR-0025) */
+"VibeGames" = "掌机";
+"Connected" = "已连接";
+"Not connected" = "未连接";
+"Pair…" = "配对…";
+"Pair" = "配对";
+"Enter the six digits the VibeGame shows" = "输入掌机上显示的六位数";
+"No VibeGame found on this network." = "这个网络上没找到掌机。";
+"A VibeGame shows the buddy beside the box, over Wi-Fi. While the box is linked, the VibeGame shows and doesn't speak." = "掌机通过 Wi-Fi 和盒子一起显示氛围小助手。盒子连着时，掌机只显示，不出声。";
+"Forget this VibeGame?" = "忘掉这台掌机？";
+"It stops getting this computer's cards. To use it again, pair it again with the code it shows." = "它不再收到这台电脑的任务卡。要再用，用它显示的配对码重新配对。";
+"That isn't the code on the VibeGame. Check it and try again." = "这不是掌机上显示的配对码。核对后再试。";
+"This VibeGame has four computers already. Forget them on the VibeGame first." = "这台掌机已经配对了四台电脑。先在掌机上忘掉电脑。";
+"The VibeGame isn't showing a code. Choose Pair a computer in its menu." = "掌机没有显示配对码。在掌机的菜单里选「配对电脑」。";
+"Couldn't reach the VibeGame. Check that it's on and on the same Wi-Fi." = "连不上掌机。检查它开着，并且和这台电脑在同一个 Wi-Fi 上。";
+"Forgetting the VibeGame was rejected (%lld)" = "忘掉掌机被拒绝（%lld）";

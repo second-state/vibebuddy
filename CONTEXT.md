@@ -205,6 +205,7 @@ Fixed wording for the App's English UI and English logs. Use these words when wr
 | Chinese | English | Notes |
 |---|---|---|
 | 盒子 | box | The device itself; lowercase in the UI, capitalized at the start of a sentence |
+| 掌机 | VibeGame | The game handheld that shows the buddy (ADR-0025); never "handheld" on its own in the UI. Its menu item for a second computer is Pair a computer |
 | 氛围小助手 | the buddy | The character; the product name is still VibeBuddy |
 | 链路 | link | The "Link" section of the settings window; when it drops, say disconnected |
 | 接入 / 修复 / 移除 | Connect / Repair / Remove | The three hook actions; the settings tab is called Agents, and an agent that isn't connected shows Not set up |

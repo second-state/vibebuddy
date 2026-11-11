@@ -770,6 +770,7 @@ impl crate::App {
                 .push(self.confirm_panel())
                 .push(firmware_state)
                 .push(networked)
+                .push(self.vibegames_card())
                 .spacing(14),
         )
     }
@@ -1068,6 +1069,54 @@ impl crate::App {
             wifi = wifi.push(small(tr("The box remembers up to 5 networks and joins the one it finds.", &[])));
         }
         card(wifi.push(small(tr("On the same network, a paired computer drives the box without the cable.", &[])))).width(Length::FillPortion(1)).into()
+    }
+
+    /// VibeGames (ADR-0025): the ones found on the network, to pair by the code they show, and the paired ones. They
+    /// show the buddy beside the box and never take its link. Older daemons don't report them: no card.
+    fn vibegames_card(&self) -> Option<Element<'_, Message>> {
+        let vibegames = self.status.as_ref()?.vibegames.as_ref()?;
+        let rows = vibegames.iter().map(|vibegame| {
+            let mut action = row![].spacing(8).align_y(Alignment::Center);
+            if vibegame.paired {
+                action = action.push(if vibegame.connected { tag(tr("Connected", &[]), theme::DONE_TEXT) } else { tag(tr("Not connected", &[]), theme::MUTED_2) });
+                if self.vibegame_forgetting.as_ref() != Some(&vibegame.key) {
+                    action = action.push(pill(tr("Forget", &[]), Fill::Paper, Some(Message::AskForgetVibeGame(Some(vibegame.key.clone())))));
+                }
+            } else if self.vibegame_pairing.as_ref() != Some(&vibegame.key) {
+                action = action.push(pill(tr("Pair…", &[]), Fill::Sun, Some(Message::PairVibeGame(Some(vibegame.key.clone())))));
+            }
+            let mut body = column![row![text(vibegame.name.clone()).font(semibold()).size(13).color(theme::INK).width(Length::Fill), action].align_y(Alignment::Center)].spacing(8);
+            if !vibegame.paired && self.vibegame_pairing.as_ref() == Some(&vibegame.key) {
+                let ready = self.vibegame_code.len() == 6 && !self.vibegame_sending;
+                body = body
+                    .push(field(&tr("Enter the six digits the VibeGame shows", &[]), &self.vibegame_code).on_input(Message::VibeGameCode).on_submit_maybe(ready.then_some(Message::SendVibeGameCode)))
+                    .push(self.vibegame_error.as_ref().map(|error| note(error.clone())))
+                    .push(row![pill(tr("Pair", &[]), Fill::Sun, ready.then_some(Message::SendVibeGameCode)), pill(tr("Cancel", &[]), Fill::Paper, Some(Message::PairVibeGame(None)))].spacing(8));
+            }
+            if vibegame.paired && self.vibegame_forgetting.as_ref() == Some(&vibegame.key) {
+                body = body
+                    .push(text(tr("Forget this VibeGame?", &[])).font(bold()).size(13).color(theme::INK))
+                    .push(note(tr("It stops getting this computer's cards. To use it again, pair it again with the code it shows.", &[])))
+                    .push(row![pill(tr("Forget", &[]), Fill::Pink, Some(Message::ForgetVibeGame(vibegame.key.clone()))), pill(tr("Cancel", &[]), Fill::Paper, Some(Message::AskForgetVibeGame(None)))].spacing(8));
+            }
+            container(body)
+                .padding(Padding::from([6, 10]))
+                .style(|_| container::Style {
+                    border: Border { color: theme::LINE, width: theme::STROKE_BASE, radius: theme::RADIUS_SM.into() },
+                    ..container::Style::default()
+                })
+                .into()
+        });
+        Some(
+            card(
+                column![heading(tr("VibeGames", &[]))]
+                    .extend(rows)
+                    .push(vibegames.is_empty().then(|| note(tr("No VibeGame found on this network.", &[]))))
+                    .push(small(tr("A VibeGame shows the buddy beside the box, over Wi-Fi. While the box is linked, the VibeGame shows and doesn't speak.", &[])))
+                    .spacing(8),
+            )
+            .into(),
+        )
     }
 
     fn paired_card<'a>(&'a self, device: &'a status::Device) -> Element<'a, Message> {
