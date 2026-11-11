@@ -42,9 +42,9 @@ _Avoid_: appcast (Sparkle's feed for the macOS App only), update server, feed
 The connection between one computer and the box. A box has at most one link at a time, to one computer, and a computer links to at most one box. A link is carried over USB, over the local network, or through the Relay; when more than one is available, USB wins, then the local network, then the Relay. Moving the link from one way to another is not a drop; the link drops only when no way is left. When the link drops, the buddy closes its eyes and turns gray; a link failure is the only thing the App announces on its own.
 _Avoid_: connection, USB, serial port, Wi-Fi (those are ways of carrying the link)
 
-**Handheld (掌机)**:
-A game handheld that runs QingOS and shows the buddy: the task cards, today's stats and the lines, over Wi-Fi (ADR-0025, [`docs/handheld.md`](docs/handheld.md)). It is not a box and never holds the link; a computer links to one box and may at the same time talk to its paired handhelds. While a box is linked, the handheld shows and doesn't speak. It pairs by a six-digit code on its screen, not over a cable.
-_Avoid_: viewer, second box, companion, client
+**VibeGame (掌机)**:
+Our game handheld, which runs QingOS, when it shows the buddy: the task cards, today's stats and the lines, over Wi-Fi (ADR-0025, [`docs/vibegame.md`](docs/vibegame.md)). It is not a box and never holds the link; a computer links to one box and may at the same time talk to its paired VibeGames. While a box is linked, the VibeGame shows and doesn't speak. It pairs by a six-digit code on its screen, not over a cable.
+_Avoid_: handheld on its own, viewer, second box, companion, client
 
 **Relay (中转)**:
 VibeBuddy's online service that carries a link when the computer and the box can't reach each other directly, such as when they are on different networks. It passes the link along and decides nothing about Agents. It carries a link only for an account on the Paid plan. It is never required: a box works over USB or the local network without it.
