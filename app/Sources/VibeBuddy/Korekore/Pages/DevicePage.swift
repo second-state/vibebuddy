@@ -165,6 +165,13 @@ struct KorekoreDevicePage: View {
                 if !connected, let relayRefusal {
                     KNote(relayRefusal, color: Theme.Colors.korePinkText)
                 }
+                if let relayLine {
+                    field(String(localized: "Relay")) { Text(verbatim: relayLine) }
+                    if device?.relayMismatch == true {
+                        KNote(String(localized: "The box uses another Relay than this Mac, so they can't meet through it. Plug in the cable once to move the box to this Mac's Relay."),
+                              color: Theme.Colors.korePinkText)
+                    }
+                }
                 field(String(localized: "Firmware")) { firmwareLine }
                 field(String(localized: "Box screens")) { screensChoice }
                 if connected, device?.screens == nil {
@@ -227,6 +234,21 @@ struct KorekoreDevicePage: View {
         case "signed_out": String(localized: "Sign in to use the Relay.")
         case "plan": String(localized: "The Relay needs the Paid plan.")
         default: String(localized: "The Relay can't check the account right now. VibeBuddy tries again later.")
+        }
+    }
+
+    /// Which Relay this Mac uses, and the box's when it differs; only where the Relay switch shows on General.
+    private var relayLine: String? {
+        guard model.status?.account?.showsRelaySwitch == true, let mine = device?.relayServer else { return nil }
+        guard let device, device.relayMismatch, let theirs = device.boxRelay else { return Self.relayName(mine) }
+        return String(localized: "This Mac: \(Self.relayName(mine)) · Box: \(Self.relayName(theirs))")
+    }
+
+    private static func relayName(_ address: String) -> String {
+        switch RelayKind(address) {
+        case .production: String(localized: "Production")
+        case .staging: String(localized: "Staging")
+        case .other(let host): host
         }
     }
 

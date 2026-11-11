@@ -279,10 +279,38 @@ public struct DeviceState: Codable, Equatable {
     public var rolledBack: Bool?
     /// Why the Relay won't carry the link (ADR-0023): `signed_out`, `plan` or `unavailable`. Absent from older daemons.
     public var relayRefused: String?
-    enum CodingKeys: String, CodingKey { case transfer, rolledBack = "rolled_back", relayRefused = "relay_refused", wifiNetwork = "wifi_network", wifiNetworks = "wifi_networks", wifiAddress = "wifi_address", wifiError = "wifi_error", wifiSeen = "wifi_seen", relay, busy, connected, port, bridge, network, mode, firmwareBuild = "firmware_build", firmwareVersion = "firmware_version", voice, volume, screens, decoration, foreignFirmware = "foreign_firmware", pin, candidates, unsupportedBoard = "unsupported_board", boxKey = "box_key", computerKey = "computer_key", pairedComputers = "paired_computers" }
+    /// The Relay this computer uses, and the one the box last said it uses (docs/relay-protocol.md, "Which Relay").
+    /// Absent from older daemons; the box's also until the box has said.
+    public var relayServer: String?
+    public var boxRelay: String?
+    enum CodingKeys: String, CodingKey { case transfer, rolledBack = "rolled_back", relayRefused = "relay_refused", relayServer = "relay_server", boxRelay = "box_relay", wifiNetwork = "wifi_network", wifiNetworks = "wifi_networks", wifiAddress = "wifi_address", wifiError = "wifi_error", wifiSeen = "wifi_seen", relay, busy, connected, port, bridge, network, mode, firmwareBuild = "firmware_build", firmwareVersion = "firmware_version", voice, volume, screens, decoration, foreignFirmware = "foreign_firmware", pin, candidates, unsupportedBoard = "unsupported_board", boxKey = "box_key", computerKey = "computer_key", pairedComputers = "paired_computers" }
     public init(connected: Bool, port: String? = nil, bridge: Bool = false, mode: String? = nil, firmwareBuild: String? = nil, firmwareVersion: String? = nil, voice: String? = nil, volume: Int? = nil, foreignFirmware: Bool? = nil) {
         self.connected = connected; self.port = port; self.bridge = bridge; self.mode = mode; self.firmwareBuild = firmwareBuild; self.firmwareVersion = firmwareVersion; self.voice = voice; self.volume = volume
         self.foreignFirmware = foreignFirmware
+    }
+}
+
+/// Which Relay an address names: ours in production, ours in staging, or another, such as one under `wrangler dev`.
+public enum RelayKind: Equatable {
+    case production
+    case staging
+    case other(String)
+
+    public init(_ address: String) {
+        let host = URL(string: address.trimmingCharacters(in: .whitespaces))?.host ?? address
+        switch host {
+        case "relay.korekore.ai": self = .production
+        case "relay-staging.korekore.ai": self = .staging
+        default: self = .other(host)
+        }
+    }
+}
+
+extension DeviceState {
+    /// The box uses another Relay than this computer, so the two can't meet through it. Unknown until the box has said.
+    public var relayMismatch: Bool {
+        guard let relayServer, let boxRelay else { return false }
+        return RelayKind(relayServer) != RelayKind(boxRelay)
     }
 }
 

@@ -18,6 +18,29 @@ struct KorekoreGeneralPage: View {
                               color: Theme.Colors.ink)
                     }
                 }
+                Text("Updates").font(.rounded(15)).padding(.leading, 4)
+                KRows {
+                    KRow(String(localized: "Check for updates")) {
+                        KToggle(String(localized: "Check for updates"),
+                                isOn: Binding(get: { model.status?.config.checkUpdates ?? model.updates?.enabled ?? false }, set: { model.setCheckUpdates($0) }))
+                            .disabled(model.status == nil)
+                    }
+                    KDivider()
+                    HStack(spacing: 12) {
+                        updateLine.frame(maxWidth: .infinity, alignment: .leading)
+                        if let app = model.updates?.app {
+                            if model.updater.available {
+                                Button(String(localized: "Install \(app.version)…")) { model.installApp(app) }.kButton(.sun)
+                            } else {
+                                Button(String(localized: "Download \(app.version)")) { model.installApp(app) }.kButton(.sun)
+                            }
+                        }
+                        Button(String(localized: "Check now")) { model.checkForUpdates() }.kButton()
+                            .disabled(!(model.updates?.enabled ?? false))
+                    }
+                    .padding(.vertical, 12)
+                    .padding(.horizontal, 16)
+                }
                 KorekoreAccountCard(model: model)
                 Text("This Mac").font(.rounded(15)).padding(.leading, 4)
                 KRows {
@@ -46,29 +69,6 @@ struct KorekoreGeneralPage: View {
                                 .disabled(model.status == nil)
                         }
                     }
-                }
-                Text("Updates").font(.rounded(15)).padding(.leading, 4)
-                KRows {
-                    KRow(String(localized: "Check for updates")) {
-                        KToggle(String(localized: "Check for updates"),
-                                isOn: Binding(get: { model.status?.config.checkUpdates ?? model.updates?.enabled ?? false }, set: { model.setCheckUpdates($0) }))
-                            .disabled(model.status == nil)
-                    }
-                    KDivider()
-                    HStack(spacing: 12) {
-                        updateLine.frame(maxWidth: .infinity, alignment: .leading)
-                        if let app = model.updates?.app {
-                            if model.updater.available {
-                                Button(String(localized: "Install \(app.version)…")) { model.installApp(app) }.kButton(.sun)
-                            } else {
-                                Button(String(localized: "Download \(app.version)")) { model.installApp(app) }.kButton(.sun)
-                            }
-                        }
-                        Button(String(localized: "Check now")) { model.checkForUpdates() }.kButton()
-                            .disabled(!(model.updates?.enabled ?? false))
-                    }
-                    .padding(.vertical, 12)
-                    .padding(.horizontal, 16)
                 }
                 KCard(padding: EdgeInsets(top: 14, leading: 16, bottom: 14, trailing: 16)) {
                     HStack(spacing: 14) {

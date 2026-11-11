@@ -585,3 +585,9 @@
 "On while the daemon runs with VIBEBUDDY_RESIDENT_SESSION=1." = "daemon 带着 VIBEBUDDY_RESIDENT_SESSION=1 运行时一直开启。";
 "Hold K0 on the box and ask. Codex or Claude Code on this computer answers, with your own account or key, and the buddy speaks the reply. Your voice goes to VibeBuddy's voice service, or to Groq with your own key." = "按住盒子上的 K0 提问。由这台电脑上的 Codex 或 Claude Code 用你自己的账号或密钥回答，再由伙伴念出来。你的语音会发到 VibeBuddy 的语音服务，填了自己的 Groq 密钥时发到 Groq。";
 "Your drawings · voice: %@" = "你的画 · 声音：%@";
+"Production" = "正式";
+"Staging" = "测试";
+"This Mac: %@ · Box: %@" = "这台 Mac：%@ · 盒子：%@";
+"This computer: %@ · Box: %@" = "本机：%@ · 盒子：%@";
+"The box uses another Relay than this Mac, so they can't meet through it. Plug in the cable once to move the box to this Mac's Relay." = "盒子用的中转和这台 Mac 不同，两边无法通过中转连上。插上数据线连一次，盒子就会改用这台 Mac 的中转。";
+"The box uses another Relay than this computer, so they can't meet through it. Plug in the cable once to move the box to this computer's Relay." = "盒子用的中转和本机不同，两边无法通过中转连上。插上数据线连一次，盒子就会改用本机的中转。";

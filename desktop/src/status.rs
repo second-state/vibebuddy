@@ -286,6 +286,10 @@ pub struct Device {
     pub wifi_seen: Vec<SeenNetwork>,
     /// Why the Relay won't carry the link (ADR-0023): `signed_out`, `plan` or `unavailable`.
     pub relay_refused: Option<String>,
+    /// The Relay this computer uses, and the one the box last said it uses (docs/relay-protocol.md, "Which Relay");
+    /// none from older daemons, and the box's also until the box has said.
+    pub relay_server: Option<String>,
+    pub box_relay: Option<String>,
 }
 
 #[derive(Clone, Debug, Default, Deserialize, PartialEq)]
@@ -346,6 +350,34 @@ impl Device {
             "plan" => tr("The Relay needs the Paid plan.", &[]),
             _ => tr("The Relay can't check the account right now. VibeBuddy tries again later.", &[]),
         })
+    }
+
+    /// The box uses another Relay than this computer, so the two can't meet through it. Unknown until the box has said.
+    pub fn relay_mismatch(&self) -> bool {
+        match (&self.relay_server, &self.box_relay) {
+            (Some(mine), Some(theirs)) => relay_name(mine) != relay_name(theirs),
+            _ => false,
+        }
+    }
+
+    /// Which Relay this computer uses, and the box's when it differs.
+    pub fn relay_line(&self) -> Option<String> {
+        let mine = relay_name(self.relay_server.as_deref()?);
+        Some(match self.box_relay.as_deref() {
+            Some(theirs) if self.relay_mismatch() => tr("This computer: %@ · Box: %@", &[&mine, &relay_name(theirs)]),
+            _ => mine,
+        })
+    }
+}
+
+/// A Relay by its address: ours in production or staging, or another, such as one under `wrangler dev`, by its host.
+fn relay_name(address: &str) -> String {
+    let host = address.trim().split_once("://").map_or(address.trim(), |(_, rest)| rest);
+    let host = host.split(['/', ':']).next().unwrap_or(host);
+    match host {
+        "relay.korekore.ai" => tr("Production", &[]),
+        "relay-staging.korekore.ai" => tr("Staging", &[]),
+        other => other.to_owned(),
     }
 }
 
@@ -574,6 +606,21 @@ mod tests {
         assert_eq!(device.relay_refusal(true).as_deref(), Some("The Relay needs the Paid plan."));
         assert_eq!(device.relay_refusal(false), None, "nothing about the Paid plan while it isn't offered");
         assert_eq!(Device::default().relay_refusal(true), None);
+    }
+
+    #[test]
+    fn the_two_relays_are_named_and_a_mismatch_is_seen() {
+        let device: Device =
+            serde_json::from_str(r#"{"connected":true,"relay_server":"wss://relay-staging.korekore.ai","box_relay":"wss://relay.korekore.ai"}"#).expect("device");
+        assert!(device.relay_mismatch());
+        assert_eq!(device.relay_line().as_deref(), Some("This computer: Staging · Box: Production"));
+        let same = Device { box_relay: Some("wss://relay-staging.korekore.ai/".to_owned()), ..device.clone() };
+        assert!(!same.relay_mismatch());
+        assert_eq!(same.relay_line().as_deref(), Some("Staging"));
+        let unknown = Device { box_relay: None, ..device.clone() };
+        assert!(!unknown.relay_mismatch(), "the box hasn't said");
+        assert_eq!(Device { relay_server: Some("ws://127.0.0.1:8787".to_owned()), ..unknown }.relay_line().as_deref(), Some("127.0.0.1"));
+        assert_eq!(Device::default().relay_line(), None, "an older daemon");
     }
 
     #[test]
