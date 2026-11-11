@@ -11,7 +11,7 @@ On 2026-11-11 dragon decided that VibeBuddy also runs on the game handheld that 
 - **When both are there, the box speaks.** The daemon marks each event `quiet` while a box is linked, and the VibeGame then shows without playing. One announcement, one line.
 - **Pairing reads a code off the screen.** The VibeGame has no cable, so the six-digit code it shows is the proof that the person is at it. The computer sends the code inside a Noise XX session, and after that they connect with Noise IK as a box does.
 - **Over Wi-Fi only, local network first.** The Relay comes later; whether it stays on the Paid plan is not decided.
-- **The VibeGame app lives in this repo** (`vibegame/`), so the protocol and both ends change in one PR. QingOS builds it into its image from a pinned commit. It is a wasm app built on QingOS's public `qapp`.
+- **The VibeGame app lives in this repo** (`vibegame-app/`), so the protocol and both ends change in one PR. QingOS builds it into its image from a pinned commit. It is a wasm app built on QingOS's public `qapp`.
 - **It is free.** People pay for the VibeGame, not for this app.
 
 ## Considered options

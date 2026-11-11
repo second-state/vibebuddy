@@ -2,9 +2,9 @@
 
 VibeGame is our game handheld that runs QingOS. It also shows the buddy (ADR-0025). It gets the same task cards, today's stats and announcements as the box, over Wi-Fi. It does not take the link: a computer still links to one box, and the box and a VibeGame work at the same time.
 
-The first handheld is the Anbernic RG 34XXSP: a 720×480 screen, a D-pad, A B X Y, L1 R1, START, SELECT, a speaker, and Wi-Fi. It has no USB device port we can use and no microphone. On QingOS the VibeGame is a full-screen app; its code is in [`vibegame/`](../vibegame/).
+The first handheld is the Anbernic RG 34XXSP: a 720×480 screen, a D-pad, A B X Y, L1 R1, START, SELECT, a speaker, and Wi-Fi. It has no USB device port we can use and no microphone. On QingOS the VibeGame is a full-screen app; its code is in [`vibegame-app/`](../vibegame-app/).
 
-This document is the contract between three pieces of work: the daemon and the two apps (this repo), the VibeGame app (this repo, `vibegame/`), and QingOS (longzhi/qingos: the capability to accept connections and to answer mDNS). Change it before you change any of them.
+This document is the contract between three pieces of work: the daemon and the two apps (this repo), the VibeGame app (this repo, `vibegame-app/`), and QingOS (longzhi/qingos: the capability to accept connections and to answer mDNS). Change it before you change any of them.
 
 ## Words
 
