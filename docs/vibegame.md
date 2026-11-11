@@ -84,7 +84,7 @@ The same lines it sends the box, built from the same snapshot (`activity.rs`, `o
 
 Mac and Linux, in the same PR (AGENTS.md):
 
-- The Device page gets a **VibeGames** part: VibeGames found and not paired, each with **Pair…**, which asks for the six digits; paired VibeGames, with connected or not and **Forget**.
+- The Device page gets a **VibeGames** part: VibeGames found and not paired, each with **Pair…**, which asks for the six digits; paired VibeGames, with connected or not and **Forget**, which asks first. A pairing that fails says why, from the API's `error`: a wrong code, four computers already, no code on the screen (choose Pair a computer on the VibeGame), or not reached. Daemons older than this report no `vibegames`, and then the part isn't shown.
 - zh-Hans strings on both sides: 掌机、配对…、输入掌机上显示的六位数、忘掉这台掌机.
 
 ## Testing without the VibeGame

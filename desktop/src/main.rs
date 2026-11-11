@@ -142,6 +142,14 @@ enum Message {
     ChooseBox(String),
     /// Forget another computer on the box, by its key.
     Unpair(String),
+    /// VibeGames (ADR-0025): open the code field for one, by key, or close it (None).
+    PairVibeGame(Option<String>),
+    VibeGameCode(String),
+    SendVibeGameCode,
+    VibeGamePaired(Result<(), String>),
+    /// Ask before forgetting a VibeGame, by key, or stop asking (None).
+    AskForgetVibeGame(Option<String>),
+    ForgetVibeGame(String),
     TakeOver,
     WifiSsid(String),
     WifiPassword(String),
@@ -338,6 +346,13 @@ struct App {
     wifi_password: String,
     /// The fields are open again for another network; once one is set they fold away.
     wifi_editing: bool,
+    /// The VibeGame whose pairing code is being typed, what is typed, whether it is being sent, and why it didn't pair.
+    vibegame_pairing: Option<String>,
+    vibegame_code: String,
+    vibegame_sending: bool,
+    vibegame_error: Option<String>,
+    /// The VibeGame waiting for a second click to be forgotten.
+    vibegame_forgetting: Option<String>,
     /// Read from the autostart entry at start, then kept as the toggle writes it.
     launch_at_login: bool,
     /// The Character being previewed, and how to stop it.
@@ -493,6 +508,11 @@ impl App {
             wifi_ssid: String::new(),
             wifi_password: String::new(),
             wifi_editing: false,
+            vibegame_pairing: None,
+            vibegame_code: String::new(),
+            vibegame_sending: false,
+            vibegame_error: None,
+            vibegame_forgetting: None,
             launch_at_login: launch_at_login(),
             previewing: None,
             agents: Vec::new(),
@@ -945,6 +965,30 @@ impl App {
             Message::SetDecoration(decoration) => return Task::perform(client::set_decoration(decoration.0), Message::Done),
             Message::ChooseBox(usb_serial) => return Task::perform(client::choose_box(usb_serial), Message::Done),
             Message::Unpair(key) => return Task::perform(client::unpair(key), Message::Done),
+            Message::PairVibeGame(key) => {
+                self.vibegame_pairing = key;
+                self.vibegame_code.clear();
+                self.vibegame_error = None;
+            }
+            Message::VibeGameCode(code) => self.vibegame_code = code.chars().filter(char::is_ascii_digit).take(6).collect(),
+            Message::SendVibeGameCode => {
+                if let Some(key) = self.vibegame_pairing.clone() {
+                    self.vibegame_sending = true;
+                    return Task::perform(client::pair_vibegame(key, self.vibegame_code.clone()), Message::VibeGamePaired);
+                }
+            }
+            Message::VibeGamePaired(result) => {
+                self.vibegame_sending = false;
+                match result {
+                    Ok(()) => self.vibegame_pairing = None,
+                    Err(error) => self.vibegame_error = Some(error),
+                }
+            }
+            Message::AskForgetVibeGame(key) => self.vibegame_forgetting = key,
+            Message::ForgetVibeGame(key) => {
+                self.vibegame_forgetting = None;
+                return Task::perform(client::forget_vibegame(key), Message::Done);
+            }
             Message::TakeOver => return Task::perform(client::take_over(), Message::Done),
             Message::WifiSsid(ssid) => self.wifi_ssid = ssid,
             Message::WifiPassword(password) => self.wifi_password = password,
