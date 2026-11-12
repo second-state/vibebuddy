@@ -147,7 +147,7 @@ pub fn vibegame_pair_error(reason: &str) -> String {
     match reason {
         "code" => tr("That isn't the code on the VibeGame. Check it and try again.", &[]),
         "full" => tr("This VibeGame has four computers already. Forget them on the VibeGame first.", &[]),
-        "closed" => tr("The VibeGame isn't showing a code. Choose Pair a computer in its menu.", &[]),
+        "closed" => tr("The VibeGame isn't showing a code. Choose PAIR in its menu.", &[]),
         _ => tr("Couldn't reach the VibeGame. Check that it's on and on the same Wi-Fi.", &[]),
     }
 }

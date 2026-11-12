@@ -99,7 +99,7 @@ struct DaemonClient {
         switch reason {
         case "code": return String(localized: "That isn't the code on the VibeGame. Check it and try again.")
         case "full": return String(localized: "This VibeGame has four computers already. Forget them on the VibeGame first.")
-        case "closed": return String(localized: "The VibeGame isn't showing a code. Choose Pair a computer in its menu.")
+        case "closed": return String(localized: "The VibeGame isn't showing a code. Choose PAIR in its menu.")
         default: return String(localized: "Couldn't reach the VibeGame. Check that it's on and on the same Wi-Fi.")
         }
     }
