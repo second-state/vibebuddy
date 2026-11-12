@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # The release wasm must draw what the host tests draw: `vibeplay shot` takes each scene from the wasm, with fixed data
 # and a key script, and tests/wasm_shots.rs replays them on the host and compares. It needs a vibeplay CLI with
-# 640 × 480 frames (vibeplay-sdk 9e8e424 or later); VIBEPLAY=<path> picks one. With KEEP=<folder> the shots stay there.
+# 640 × 480 frames (vibeplay-sdk v0.3.0 or later); VIBEPLAY=<path> picks one. With KEEP=<folder> the shots stay there.
 set -euo pipefail
 
 app_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"

@@ -14,5 +14,5 @@ VIBEPLAY_SHOTS=shots cargo test --test app shots        # every screen as a PNG,
 tools/compare-box-screens.sh                            # the screens against the firmware's previews, pixel for pixel
 VIBEPLAY=<vibeplay CLI> tools/compare-wasm-shots.sh     # the release wasm's screens against the tests'
 cargo build --release --target wasm32-unknown-unknown   # what QingOS runs
-vibeplay run                                            # play it in a window (vibeplay CLI from vibeplay-sdk 9e8e424 or later)
+vibeplay run                                            # play it in a window (vibeplay CLI from vibeplay-sdk v0.3.0 or later)
 ```
