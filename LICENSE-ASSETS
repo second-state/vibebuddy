@@ -23,7 +23,7 @@ Covered:
 - vibegame-app/assets/*.wav: the built-in voice's input_required, done
   and failed lines, made into WAV for the VibeGame, licensed like the
   voice they were made from; and vibegame-app/assets/cover.png, the
-  robot drawn by the VibeGame app.
+  robot drawn by the firmware's code, at half size.
 - docs/brand/*.svg: the buddy in each of its states, exported pixel for
   pixel from the firmware's drawing code.
 - Any artwork added to the repository later (images, sprite sheets,

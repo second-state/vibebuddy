@@ -3,36 +3,32 @@
 use qapp::full::{Channel, Keys, key, tone, tone_wav};
 use qapp::host;
 use serde_json::{Value, json};
-use vibegame_core::duty::{Duty, Sound};
+use vibegame_core::buddy::{Buddy, News, Sound};
+use vibegame_core::firmware::display::{Panel, PanelKind, Screens, Tone};
+use vibegame_core::firmware::pomodoro::Tally;
+use vibegame_core::frame::{self, BIG_BYTES};
 use vibegame_core::identity::{self, Identity};
-use vibegame_core::pomodoro::{Phase, Pomodoro};
+use vibegame_core::pairing::{Own, OwnScreens};
 use vibegame_core::server::{Out, Server};
 
 /// Frames a second: the time is counted in frames, so the app's clock stops with it.
 pub const FPS: u64 = 60;
-/// A card picked with the D-pad stays picked this long.
-const PICK_MS: u64 = 8000;
 /// START held this long gives up the Pomodoro phase.
 const HOLD_FRAMES: u64 = 45;
 /// The heartbeat is every 5 s: this long with no line from the computer means no link.
 pub const NO_LINK_MS: u64 = 15_000;
-
-/// Which screen the app shows while it is paired.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Page {
-    Duty,
-    Pomodoro,
-}
+/// The box's frame: 320 × 240, two bytes a pixel.
+const SMALL_BYTES: usize = 320 * 240 * 2;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum MenuItem {
     Pair,
     Forget,
+    Screens,
     Mute,
-    Close,
 }
 
-pub const MENU: [MenuItem; 4] = [MenuItem::Pair, MenuItem::Forget, MenuItem::Mute, MenuItem::Close];
+pub const MENU: [MenuItem; 4] = [MenuItem::Pair, MenuItem::Forget, MenuItem::Screens, MenuItem::Mute];
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Menu {
@@ -43,14 +39,11 @@ pub struct Menu {
 
 pub struct App {
     pub server: Server,
-    pub duty: Duty,
-    pub pomodoro: Pomodoro,
+    pub buddy: Buddy,
+    own: OwnScreens,
     pub keys: Keys,
     pub frames: u64,
-    pub page: Page,
     pub menu: Option<Menu>,
-    /// The card picked with the D-pad, and when.
-    pub picked: Option<(usize, u64)>,
     /// When the linked computer last sent a line; None until a computer links.
     pub heard: Option<u64>,
     pub muted: bool,
@@ -58,6 +51,11 @@ pub struct App {
     pub system_muted: bool,
     sounds: [Option<Vec<u8>>; 3],
     start_down: Option<u64>,
+    /// The screen as it is now, at the box's size, and as last shown at the VibeGame's.
+    small: Vec<u8>,
+    shown: Vec<u8>,
+    big: Vec<u8>,
+    fresh: bool,
 }
 
 fn random(bytes: &mut [u8]) {
@@ -76,6 +74,24 @@ fn identity() -> Identity {
     Identity::from_seed(seed)
 }
 
+fn saved(name: &str) -> Value {
+    host::data_read(name).and_then(|bytes| serde_json::from_slice(&bytes).ok()).unwrap_or(Value::Null)
+}
+
+fn tally(saved: &Value) -> Option<Tally> {
+    let number = |key: &str| saved[key].as_u64().map(|n| n as u32);
+    Some(Tally { day: number("day")?, completed: number("completed")?, focus_s: number("focus_s")? })
+}
+
+fn line(label: &[u8], value: &[u8], tone: Tone) -> (Vec<u8>, Vec<u8>, Tone) {
+    (label.to_vec(), value.to_vec(), tone)
+}
+
+/// A key and what it does now, along the bottom of a panel.
+fn hint(key: &'static [u8], action: &'static [u8]) -> (&'static [u8], &'static [u8]) {
+    (key, action)
+}
+
 impl Default for App {
     fn default() -> Self {
         Self::new()
@@ -85,25 +101,29 @@ impl Default for App {
 impl App {
     pub fn new() -> Self {
         let computers = host::data_read("computers").map(|bytes| identity::load_computers(&bytes)).unwrap_or_default();
-        let muted = host::data_read("settings")
-            .and_then(|bytes| serde_json::from_slice::<Value>(&bytes).ok())
-            .and_then(|settings| settings["muted"].as_bool())
-            .unwrap_or(false);
+        let settings = saved("settings");
+        let muted = settings["muted"].as_bool().unwrap_or(false);
+        // The box's screens are the robot's unless the person picked korekore's (ADR-0021).
+        let screens = settings["screens"].as_str().and_then(Screens::parse).unwrap_or_default();
         let server = Server::new(identity(), computers, env!("CARGO_PKG_VERSION"), Box::new(random), 0);
+        let mut seed = [0u8; 4];
+        random(&mut seed);
         let app = Self {
             server,
-            duty: Duty::default(),
-            pomodoro: Pomodoro::default(),
+            buddy: Buddy::new(screens, muted, tally(&saved("tally")), u32::from_le_bytes(seed), 0),
+            own: OwnScreens::new(),
             keys: Keys::default(),
             frames: 0,
-            page: Page::Duty,
             menu: None,
-            picked: None,
             heard: None,
             muted,
             system_muted: false,
             sounds: ["input_required.wav", "done.wav", "failed.wav"].map(host::asset_read),
             start_down: None,
+            small: vec![0; SMALL_BYTES],
+            shown: vec![0; SMALL_BYTES],
+            big: vec![0; BIG_BYTES],
+            fresh: true,
         };
         app.answer_mdns();
         app
@@ -112,6 +132,11 @@ impl App {
     /// Milliseconds since the app started, by its frames.
     pub fn now(&self) -> u64 {
         self.frames * 1000 / FPS
+    }
+
+    /// The firmware's clock is 32 bits of milliseconds and wraps, as on the box.
+    fn now32(&self) -> u32 {
+        self.now() as u32
     }
 
     fn answer_mdns(&self) {
@@ -136,11 +161,25 @@ impl App {
                 Out::Unlinked => {}
                 Out::Event(event) => {
                     self.heard = Some(self.now());
-                    if let Some(sound) = self.duty.apply(&event, self.now()) {
-                        self.play(sound);
-                    }
+                    let news = self.buddy.line(&event, self.now32());
+                    self.news(news);
                 }
             }
+        }
+    }
+
+    fn news(&mut self, news: News) {
+        if news.takes_screen && self.menu.is_some() {
+            self.menu = None;
+            self.buddy.set_panel(None, self.now32());
+        }
+        if news.tally {
+            let tally = self.buddy.tally();
+            let saved = json!({"day": tally.day, "completed": tally.completed, "focus_s": tally.focus_s});
+            let _ = host::data_write("tally", saved.to_string().as_bytes());
+        }
+        if let Some(sound) = news.sound {
+            self.play(sound);
         }
     }
 
@@ -152,20 +191,17 @@ impl App {
             Sound::InputRequired => 0,
             Sound::Done => 1,
             Sound::Failed => 2,
+            // A short chime when a Pomodoro phase ends: the robot's voice has no line for it that fits.
+            Sound::FocusEnded | Sound::BreakEnded => {
+                let hz = if sound == Sound::FocusEnded { 880 } else { 660 };
+                tone(Channel::Square1, hz, 180, 40);
+                tone(Channel::Square2, hz * 3 / 2, 360, 30);
+                return;
+            }
         };
         if let Some(wav) = &self.sounds[at] {
             tone_wav(wav);
         }
-    }
-
-    /// A short chime when a Pomodoro phase ends: the robot's voice has no line for it that fits.
-    fn chime(&self, ended: Phase) {
-        if self.muted || self.system_muted {
-            return;
-        }
-        let hz = if ended == Phase::Focus { 880 } else { 660 };
-        tone(Channel::Square1, hz, 180, 40);
-        tone(Channel::Square2, hz * 3 / 2, 360, 30);
     }
 
     pub fn conn_open(&mut self, id: u64) {
@@ -195,31 +231,35 @@ impl App {
     }
 
     fn save_settings(&self) {
-        let _ = host::data_write("settings", json!({"muted": self.muted}).to_string().as_bytes());
+        let screens = if self.buddy.screens() == Screens::Korekore { "korekore" } else { "robot" };
+        let _ = host::data_write("settings", json!({"muted": self.muted, "screens": screens}).to_string().as_bytes());
     }
 
-    /// One frame: keys, time, then the caller draws.
+    /// One of the VibeGame's own screens is up in place of the box's.
+    fn own_screen(&self) -> bool {
+        self.menu.is_none() && (self.server.code().is_some() || self.heard.is_none())
+    }
+
+    /// One frame: keys, time, then the screen.
     pub fn step(&mut self, buttons: u32) {
         self.frames += 1;
         self.keys.set(buttons);
         let now = self.now();
         let out = self.server.tick(now);
         self.carry_out(out);
-        self.duty.tick(now);
-        if let Some(ended) = self.pomodoro.tick(now) {
-            self.page = Page::Pomodoro;
-            self.chime(ended);
-        }
-        if self.picked.is_some_and(|(_, at)| now.saturating_sub(at) >= PICK_MS) {
-            self.picked = None;
-        }
-        self.keys_pressed(now);
+        let news = self.buddy.tick(self.now32(), self.link_alive(), self.menu.is_some() || self.own_screen());
+        self.news(news);
+        self.keys_pressed();
     }
 
-    fn keys_pressed(&mut self, now: u64) {
+    fn keys_pressed(&mut self) {
         let k = self.keys;
+        let now = self.now32();
+        if k.bits() != 0 && [key::A, key::B, key::X, key::Y, key::UP, key::DOWN, key::LEFT, key::RIGHT, key::START, key::SELECT].iter().any(|&key| k.pressed(key)) {
+            self.buddy.key(now);
+        }
         if self.menu.is_some() {
-            return self.menu_keys(now);
+            return self.menu_keys();
         }
         if self.server.code().is_some() {
             // The pairing screen: B goes back when there are computers already.
@@ -227,78 +267,105 @@ impl App {
                 self.server.hide_code();
             }
             if k.pressed(key::X) && !self.server.computers().is_empty() {
-                self.menu = Some(Menu { at: 0, confirm: false });
+                self.open_menu(Menu { at: 0, confirm: false });
             }
             return;
         }
         if k.pressed(key::X) {
-            self.menu = Some(Menu { at: 0, confirm: false });
-            return;
+            return self.open_menu(Menu { at: 0, confirm: false });
         }
         if k.pressed(key::SELECT) {
-            self.page = if self.page == Page::Duty { Page::Pomodoro } else { Page::Duty };
-            self.picked = None;
+            self.buddy.switch(now);
         }
-        // START: pressed and let go starts, pauses or goes on; held gives up.
+        // START: pressed and let go starts, pauses or goes on; held gives up, as K0 on the box.
         if k.pressed(key::START) {
             self.start_down = Some(self.frames);
         }
         if let Some(down) = self.start_down {
             if k.held(key::START) && self.frames - down == HOLD_FRAMES {
-                self.pomodoro.stop();
-                self.page = Page::Pomodoro;
+                self.buddy.stop(now);
             } else if k.released(key::START) {
                 if self.frames - down < HOLD_FRAMES {
-                    self.pomodoro.toggle(now);
-                    self.page = Page::Pomodoro;
+                    self.buddy.start(now);
                 }
                 self.start_down = None;
             }
         }
-        if self.page != Page::Duty || !self.link_alive() {
+        if !self.link_alive() {
             return;
         }
-        let cards = self.duty.tasks.len();
-        if cards > 0 && (k.pressed(key::DOWN) || k.pressed(key::UP)) {
-            let at = match (self.picked, k.pressed(key::DOWN)) {
-                (None, true) => 0,
-                (None, false) => cards - 1,
-                (Some((at, _)), true) => (at + 1) % cards,
-                (Some((at, _)), false) => (at + cards - 1) % cards,
-            };
-            self.picked = Some((at, now));
+        if k.pressed(key::DOWN) || k.pressed(key::UP) {
+            self.buddy.pick(k.pressed(key::DOWN), now);
         }
         if k.pressed(key::B) {
-            self.picked = None;
+            self.buddy.unpick();
         }
         if k.pressed(key::A) {
-            let task = self.picked.and_then(|(at, _)| self.duty.tasks.get(at)).and_then(|task| task.id.clone());
-            match task {
+            match self.buddy.picked() {
                 Some(task) => self.send(json!({"version": 1, "event": "focus", "task": task})),
                 None => self.send(json!({"version": 1, "event": "button", "button": "K2", "action": "press"})),
             }
-            self.picked = None;
+            self.buddy.unpick();
         }
     }
 
-    fn menu_keys(&mut self, now: u64) {
+    fn open_menu(&mut self, menu: Menu) {
+        self.menu = Some(menu);
+        let panel = self.panel(menu);
+        self.buddy.set_panel(Some(panel), self.now32());
+    }
+
+    /// The menu as a panel of the box's own (its menu's look), in either set of screens.
+    pub fn panel(&self, menu: Menu) -> Panel {
+        let paired = self.server.computers().len().to_string();
+        if menu.confirm {
+            return Panel {
+                kind: PanelKind::Facts,
+                title: b"FORGET ALL?".to_vec(),
+                lines: vec![line(b"COMPUTERS", paired.as_bytes(), Tone::Plain), line(b"THEN", b"PAIR AGAIN", Tone::Dim)],
+                selected: None,
+                hints: vec![hint(b"A", b"FORGET"), hint(b"B", b"BACK")],
+            };
+        }
+        let lines = MENU
+            .iter()
+            .map(|item| match item {
+                MenuItem::Pair => line(b"PAIR", b"NEW CODE", Tone::Dim),
+                MenuItem::Forget => line(b"FORGET ALL", paired.as_bytes(), Tone::Accent),
+                MenuItem::Screens => line(b"SCREENS", self.buddy.screens().name(), Tone::Accent),
+                MenuItem::Mute => line(b"MUTE", if self.muted { b"ON" } else { b"OFF" }, Tone::Accent),
+            })
+            .collect();
+        let verb: &'static [u8] = match MENU[menu.at] {
+            MenuItem::Pair | MenuItem::Forget => b"OPEN",
+            MenuItem::Screens => b"CHANGE",
+            MenuItem::Mute => b"TOGGLE",
+        };
+        Panel { kind: PanelKind::List, title: b"MENU".to_vec(), lines, selected: Some(menu.at), hints: vec![hint(b"A", verb), hint(b"B", b"CLOSE")] }
+    }
+
+    fn close_menu(&mut self) {
+        self.menu = None;
+        self.buddy.set_panel(None, self.now32());
+    }
+
+    fn menu_keys(&mut self) {
         let k = self.keys;
         let Some(mut menu) = self.menu else { return };
+        let now = self.now32();
         if menu.confirm {
             if k.pressed(key::A) {
-                let out = self.server.forget_all(now);
+                let out = self.server.forget_all(self.now());
                 self.carry_out(out);
-                self.duty = Duty::default();
                 self.heard = None;
-                self.menu = None;
+                self.close_menu();
             } else if k.pressed(key::B) {
-                self.menu = Some(Menu { confirm: false, ..menu });
+                self.open_menu(Menu { confirm: false, ..menu });
             }
             return;
         }
         if k.pressed(key::B) || k.pressed(key::X) {
-            self.menu = None;
-            return;
+            return self.close_menu();
         }
         if k.pressed(key::DOWN) {
             menu.at = (menu.at + 1) % MENU.len();
@@ -306,20 +373,71 @@ impl App {
         if k.pressed(key::UP) {
             menu.at = (menu.at + MENU.len() - 1) % MENU.len();
         }
-        self.menu = Some(menu);
         if k.pressed(key::A) {
             match MENU[menu.at] {
                 MenuItem::Pair => {
-                    self.server.show_code(now);
-                    self.menu = None;
+                    self.server.show_code(self.now());
+                    return self.close_menu();
                 }
-                MenuItem::Forget => self.menu = Some(Menu { confirm: true, ..menu }),
-                MenuItem::Mute => {
-                    self.muted = !self.muted;
+                MenuItem::Forget => menu.confirm = true,
+                MenuItem::Screens => {
+                    let screens = if self.buddy.screens() == Screens::Korekore { Screens::Robot } else { Screens::Korekore };
+                    self.buddy.set_screens(screens, now);
                     self.save_settings();
                 }
-                MenuItem::Close => self.menu = None,
+                MenuItem::Mute => {
+                    self.muted = !self.muted;
+                    self.buddy.set_muted(self.muted, now);
+                    self.save_settings();
+                }
             }
         }
+        self.open_menu(menu);
+    }
+
+    /// Draws the screen as it is now at the box's size; false while it is dark.
+    fn compose(&mut self) -> bool {
+        let now = self.now32();
+        let screens = self.buddy.screens();
+        let name = self.server.identity().name();
+        let own = match self.server.code() {
+            Some(code) if self.own_screen() => Some(Own::Pairing { code, name: &name, back: !self.server.computers().is_empty() }),
+            None if self.own_screen() => Some(Own::Looking { name: &name }),
+            _ => None,
+        };
+        if let Some(own) = own {
+            self.own.draw(own, screens, now, &mut self.small);
+            return true;
+        }
+        match self.buddy.frame() {
+            Some(frame) => {
+                self.small.copy_from_slice(frame);
+                true
+            }
+            None => {
+                self.small.fill(0);
+                false
+            }
+        }
+    }
+
+    /// The screen at the VibeGame's size (640 × 480 RGB565, high byte first), when it changed since the last call;
+    /// None when it is the same: QingOS keeps showing the last frame.
+    pub fn picture(&mut self) -> Option<&[u8]> {
+        let lit = self.compose();
+        if !self.fresh && self.small == self.shown {
+            return None;
+        }
+        self.fresh = false;
+        self.shown.copy_from_slice(&self.small);
+        frame::double(lit.then_some(&self.small[..]), &mut self.big);
+        Some(&self.big)
+    }
+
+    /// The screen at the VibeGame's size as it is now, changed or not: for screenshots.
+    pub fn shot(&mut self) -> &[u8] {
+        let lit = self.compose();
+        frame::double(lit.then_some(&self.small[..]), &mut self.big);
+        &self.big
     }
 }

@@ -28,14 +28,16 @@ vibegame-core = { path = "core" }
 serde_json = "1"
 # No rev, as vibegame-sdk has it, so the two are one crate; Cargo.lock pins it.
 qapp = { git = "https://github.com/second-state/qingos-sdk" }
-# For its font (English and GB2312).
-vibegame = { git = "https://github.com/second-state/vibegame-sdk" }
 
 [dev-dependencies]
 ed25519-dalek = "2"
 png = "0.17"
 # The daemon's Noise library, for the computer's side in the tests.
 snow = { version = "0.10", default-features = false, features = ["std", "default-resolver", "use-curve25519", "use-chacha20poly1305", "use-sha2", "use-getrandom"] }
+
+# As in the root workspace: the firmware's MP3 decoder, patched for the box's chip; the same code here.
+[patch.crates-io]
+nanomp3-core = { path = "../firmware-rs/vendor/nanomp3-core" }
 
 [profile.release]
 opt-level = "z"

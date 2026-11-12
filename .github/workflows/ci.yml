@@ -39,7 +39,8 @@ jobs:
         run: python3 -m unittest discover -s tools -p "test_*.py"
 
   vibegame-app:
-    # The VibeGame app (vibegame-app/, its own workspace): its tests on the host, and the wasm32 build QingOS takes.
+    # The VibeGame app (vibegame-app/, its own workspace): its tests on the host, the wasm32 build QingOS takes, and
+    # its screens against the box's.
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -57,6 +58,9 @@ jobs:
         run: cargo clippy --workspace --all-targets --locked
       - name: Build for QingOS
         run: cargo build --release --target wasm32-unknown-unknown --locked
+      - name: Same screens as the box
+        # The app draws with the firmware's code; this compares its screens with the firmware's previews.
+        run: tools/compare-box-screens.sh
 
   windows:
     # The same crates on Windows, where nothing ships yet: it keeps them building and their tests passing there.

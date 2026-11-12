@@ -605,6 +605,6 @@
 "It stops getting this computer's cards. To use it again, pair it again with the code it shows." = "它不再收到这台电脑的任务卡。要再用，用它显示的配对码重新配对。";
 "That isn't the code on the VibeGame. Check it and try again." = "这不是掌机上显示的配对码。核对后再试。";
 "This VibeGame has four computers already. Forget them on the VibeGame first." = "这台掌机已经配对了四台电脑。先在掌机上忘掉电脑。";
-"The VibeGame isn't showing a code. Choose Pair a computer in its menu." = "掌机没有显示配对码。在掌机的菜单里选「配对电脑」。";
+"The VibeGame isn't showing a code. Choose PAIR in its menu." = "掌机没有显示配对码。在掌机的菜单里选 PAIR。";
 "Couldn't reach the VibeGame. Check that it's on and on the same Wi-Fi." = "连不上掌机。检查它开着，并且和这台电脑在同一个 Wi-Fi 上。";
 "Forgetting the VibeGame was rejected (%lld)" = "忘掉掌机被拒绝（%lld）";

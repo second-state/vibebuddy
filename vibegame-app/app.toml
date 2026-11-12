@@ -6,6 +6,8 @@ title_zh  = "VibeBuddy"
 version   = "0.1.0"
 command   = "bin/vibebuddy.cwasm"
 screen    = "full"
+# The box's 320 × 240 screens at twice the size, in RGB565 (QingOS ADR 0036).
+frame     = "640x480"
 cover     = "assets/cover.png"
 rate_hz   = 60
 memory_mb = 16

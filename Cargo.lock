@@ -5825,6 +5825,8 @@ dependencies = [
  "ed25519-dalek",
  "rand_core 0.6.4",
  "serde_json",
+ "vibebuddy-firmware-core",
+ "vibebuddy-protocol",
 ]
 
 [[package]]
