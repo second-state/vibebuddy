@@ -250,8 +250,8 @@ fn buddy_rect(x_offset: i32) -> Rect {
     Rect { x: 104 + x_offset, y: 28, width: 112, height: 128 }
 }
 
-/// What the screens call the keys in their hints. The box's are K0, K1 and K2; the VibeGame shows the same screens
-/// and names its own keys (docs/vibegame.md).
+/// What the screens call the keys in their hints. The box's are K0, K1 and K2; the VibePlay shows the same screens
+/// and names its own keys (docs/vibeplay.md).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct KeyNames {
     /// Starts, pauses and goes on with the Pomodoro.
