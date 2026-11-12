@@ -27,7 +27,7 @@ mod status;
 mod transfer;
 mod synthesis;
 mod updates;
-mod vibegame;
+mod vibeplay;
 mod voice;
 mod voice_keys;
 mod voice_writer;
@@ -123,8 +123,8 @@ struct AppState {
     voice_keys: Arc<voice_keys::VoiceKeys>,
     /// Making a Character's line audio (ADR-0023); nothing can be made in tests unless one sets it.
     making: Arc<making::Maker>,
-    /// The paired VibeGames, which get a copy of what the box gets (ADR-0025); none in tests unless one sets it.
-    vibegames: Arc<vibegame::Hub>,
+    /// The paired VibePlays, which get a copy of what the box gets (ADR-0025); none in tests unless one sets it.
+    vibeplays: Arc<vibeplay::Hub>,
 }
 
 impl AppState {
@@ -142,7 +142,7 @@ impl AppState {
         let (status_changed, _) = broadcast::channel(64);
         let account = Arc::new(account::Account::new(None, None, 7331));
         let voice_keys = Arc::new(voice_keys::VoiceKeys::new(None));
-        let (vibegames, _) = vibegame::Hub::new(None, None, None, status_changed.clone());
+        let (vibeplays, _) = vibeplay::Hub::new(None, None, None, status_changed.clone());
         Self {
             transport,
             activities: Arc::new(Mutex::new(activities)),
@@ -168,7 +168,7 @@ impl AppState {
             making: Arc::new(making::Maker::new(None, None, account.clone(), voice_keys.clone(), Arc::new(own_voices::OwnVoices::new(None)))),
             account,
             voice_keys,
-            vibegames,
+            vibeplays,
         }
     }
 
@@ -204,7 +204,7 @@ impl AppState {
             account: self.account.status(),
             voice_keys: self.voice_keys.status(),
             making: self.making.status(),
-            vibegames: self.vibegames.status().await,
+            vibeplays: self.vibeplays.status().await,
         }
     }
 
@@ -348,14 +348,14 @@ async fn main() {
         tokio::spawn(async move { resident.warm(&wearing).await });
     }
     state.device.lock().await.pin = pin;
-    // VibeGames (ADR-0025): found over mDNS, or at VIBEBUDDY_VIBEGAME_ADDR, and kept connected once paired.
-    let (vibegames, vibegame_inbound) = vibegame::Hub::new(
+    // VibePlays (ADR-0025): found over mDNS, or at VIBEBUDDY_VIBEPLAY_ADDR, and kept connected once paired.
+    let (vibeplays, vibeplay_inbound) = vibeplay::Hub::new(
         state.identity.clone(),
         state.state_dir.clone(),
-        env::var(vibegame::ADDRESS_VARIABLE).ok().filter(|value| !value.is_empty()),
+        env::var(vibeplay::ADDRESS_VARIABLE).ok().filter(|value| !value.is_empty()),
         state.status_changed.clone(),
     );
-    state.vibegames = vibegames;
+    state.vibeplays = vibeplays;
     state.updates = Arc::new(Mutex::new(Updates::new(
         updates::Source::configured(),
         config::state_dir().map(|dir| dir.join("updates")),
@@ -371,8 +371,8 @@ async fn main() {
     tokio::spawn(send_heartbeats(state.clone()));
     tokio::spawn(poll_ci(state.clone()));
     tokio::spawn(handle_device_events(state.clone(), device_events));
-    tokio::spawn(state.vibegames.clone().run());
-    tokio::spawn(handle_vibegames(state.clone(), vibegame_inbound));
+    tokio::spawn(state.vibeplays.clone().run());
+    tokio::spawn(handle_vibeplays(state.clone(), vibeplay_inbound));
     tokio::spawn(check_for_updates(state.clone()));
     if let Some(resident) = state.resident.clone() {
         follow_resident_readiness(&state, resident);
@@ -413,8 +413,8 @@ async fn publish_device_message(state: &AppState, message: DeviceMessage) {
         let mut device = state.device.lock().await;
         let had_build = device.firmware_build.is_some();
         let changed = device.apply(&message);
-        // A box linked and running our firmware speaks; VibeGames then only show (ADR-0025).
-        state.vibegames.set_box_linked(device.connected && device.firmware_build.is_some());
+        // A box linked and running our firmware speaks; VibePlays then only show (ADR-0025).
+        state.vibeplays.set_box_linked(device.connected && device.firmware_build.is_some());
         (changed, !had_build && device.firmware_build.is_some(), device.usb_serial.clone())
     };
     // Our firmware reported its build: this device is the box, so prefer it when others are plugged in too.
@@ -510,28 +510,28 @@ async fn publish_device_message(state: &AppState, message: DeviceMessage) {
     }
 }
 
-/// What the daemon hears from its VibeGames (ADR-0025). None of it goes near the box's link (ADR-0011): a VibeGame
+/// What the daemon hears from its VibePlays (ADR-0025). None of it goes near the box's link (ADR-0011): a VibePlay
 /// that connects gets the screen as it is now, and its K2 and picked card do what the box's do.
-async fn handle_vibegames(state: AppState, mut inbound: tokio::sync::mpsc::UnboundedReceiver<vibegame::Inbound>) {
+async fn handle_vibeplays(state: AppState, mut inbound: tokio::sync::mpsc::UnboundedReceiver<vibeplay::Inbound>) {
     while let Some(message) = inbound.recv().await {
-        handle_vibegame(&state, message).await;
+        handle_vibeplay(&state, message).await;
     }
 }
 
-async fn handle_vibegame(state: &AppState, message: vibegame::Inbound) {
+async fn handle_vibeplay(state: &AppState, message: vibeplay::Inbound) {
     match message {
-        vibegame::Inbound::Connected(key) => {
+        vibeplay::Inbound::Connected(key) => {
             let now = chrono::Local::now();
-            state.vibegames.send_to(&key, &heartbeat_event(&build_identity(state.app_version.as_deref()), now.hour(), local_day(&now)));
+            state.vibeplays.send_to(&key, &heartbeat_event(&build_identity(state.app_version.as_deref()), now.hour(), local_day(&now)));
             let screen = {
                 let mut tracker = state.activities.lock().await;
                 let mut screen = tracker.viewer_screen();
                 tracker.stamp_live_fields(&mut screen);
                 screen
             };
-            state.vibegames.send_to(&key, &screen);
+            state.vibeplays.send_to(&key, &screen);
         }
-        vibegame::Inbound::Event(event) => {
+        vibeplay::Inbound::Event(event) => {
             if is_k2_press(&event) {
                 open_k2_source(state).await;
             } else if let Some(card) = tapped_card(&event) {
@@ -861,8 +861,8 @@ fn app(state: AppState) -> Router {
         )
         .route("/v1/device/screenshot", post(post_screenshot))
         .route("/v1/device/firmware", post(post_firmware))
-        .route("/v1/vibegames/pair", post(post_vibegame_pair))
-        .route("/v1/vibegames/forget", post(post_vibegame_forget))
+        .route("/v1/vibeplays/pair", post(post_vibeplay_pair))
+        .route("/v1/vibeplays/forget", post(post_vibeplay_forget))
         .route("/v1/daemon/restart", post(post_restart))
         .route("/v1/updates/check", post(post_check_updates))
         .route("/v1/resident", get(get_resident))
@@ -1622,7 +1622,7 @@ async fn send_heartbeats(state: AppState) {
             Ok(frame) => drop(state.transport.send(frame)),
             Err(error) => warn!(%error, "failed to encode heartbeat"),
         }
-        state.vibegames.send(&heartbeat);
+        state.vibeplays.send(&heartbeat);
     }
 }
 
@@ -1706,8 +1706,8 @@ async fn sweep_expired_activities(state: AppState) {
 fn send_event(state: &AppState, event: Event) {
     // What the box shows changed, so the apps' picture of it (the Activities in the status) did too.
     state.notify_status();
-    // The same line, occasion included, goes to every VibeGame: one announcement, one occasion (ADR-0025).
-    state.vibegames.send(&event);
+    // The same line, occasion included, goes to every VibePlay: one announcement, one occasion (ADR-0025).
+    state.vibeplays.send(&event);
     match event.to_ndjson() {
         Ok(frame) => {
             if let Err(error) = state.transport.send(frame) {
@@ -1734,7 +1734,7 @@ async fn post_event(
             );
         }
     };
-    state.vibegames.send(&event);
+    state.vibeplays.send(&event);
 
     match state.transport.send(frame) {
         Ok(()) => (
@@ -1858,33 +1858,33 @@ async fn forward(state: AppState, event: Option<Event>) -> (StatusCode, Json<Api
 }
 
 #[derive(serde::Deserialize)]
-struct VibeGamePairRequest {
+struct VibePlayPairRequest {
     key: String,
     code: String,
 }
 
-/// Pairs with a VibeGame by the code it shows: 200, or 400 with `code`, `full`, `closed` or `unreachable`.
-async fn post_vibegame_pair(State(state): State<AppState>, Json(request): Json<VibeGamePairRequest>) -> axum::response::Response {
+/// Pairs with a VibePlay by the code it shows: 200, or 400 with `code`, `full`, `closed` or `unreachable`.
+async fn post_vibeplay_pair(State(state): State<AppState>, Json(request): Json<VibePlayPairRequest>) -> axum::response::Response {
     use axum::response::IntoResponse;
-    match state.vibegames.pair(request.key.trim(), request.code.trim()).await {
+    match state.vibeplays.pair(request.key.trim(), request.code.trim()).await {
         Ok(()) => (StatusCode::OK, Json(serde_json::json!({"paired": true}))).into_response(),
         Err(error) => {
-            info!(?error, "pairing with a VibeGame failed");
+            info!(?error, "pairing with a VibePlay failed");
             (StatusCode::BAD_REQUEST, Json(serde_json::json!({"error": error.code()}))).into_response()
         }
     }
 }
 
 #[derive(serde::Deserialize)]
-struct VibeGameForgetRequest {
+struct VibePlayForgetRequest {
     key: String,
 }
 
-async fn post_vibegame_forget(State(state): State<AppState>, Json(request): Json<VibeGameForgetRequest>) -> (StatusCode, Json<ApiResponse>) {
-    if state.vibegames.forget(request.key.trim()) {
-        (StatusCode::OK, Json(ApiResponse { accepted: true, message: "forgot the VibeGame".to_owned() }))
+async fn post_vibeplay_forget(State(state): State<AppState>, Json(request): Json<VibePlayForgetRequest>) -> (StatusCode, Json<ApiResponse>) {
+    if state.vibeplays.forget(request.key.trim()) {
+        (StatusCode::OK, Json(ApiResponse { accepted: true, message: "forgot the VibePlay".to_owned() }))
     } else {
-        (StatusCode::NOT_FOUND, Json(ApiResponse { accepted: false, message: "no such paired VibeGame".to_owned() }))
+        (StatusCode::NOT_FOUND, Json(ApiResponse { accepted: false, message: "no such paired VibePlay".to_owned() }))
     }
 }
 
@@ -2409,50 +2409,50 @@ mod tests {
         )
     }
 
-    /// A state with a fake VibeGame paired and connected (ADR-0025).
-    async fn with_vibegame(state: &mut AppState) -> vibegame::tests::FakeVibeGame {
-        let mut fake = vibegame::tests::fake_vibegame(vibegame::tests::Behaviour::default()).await;
-        let (hub, inbound) = vibegame::tests::hub_for(&fake, None);
+    /// A state with a fake VibePlay paired and connected (ADR-0025).
+    async fn with_vibeplay(state: &mut AppState) -> vibeplay::tests::FakeVibePlay {
+        let mut fake = vibeplay::tests::fake_vibeplay(vibeplay::tests::Behaviour::default()).await;
+        let (hub, inbound) = vibeplay::tests::hub_for(&fake, None);
         hub.pair(&fake.key, "123456").await.unwrap();
-        state.vibegames = hub.clone();
+        state.vibeplays = hub.clone();
         tokio::spawn(hub.clone().run());
-        tokio::spawn(handle_vibegames(state.clone(), inbound));
-        vibegame::tests::wait_connected(&hub, &fake.key).await;
-        assert_eq!(vibegame::tests::next_line(&mut fake).await["event"], "device.heartbeat");
-        assert_eq!(vibegame::tests::next_line(&mut fake).await["event"], "agent.idle", "the screen as it is now");
+        tokio::spawn(handle_vibeplays(state.clone(), inbound));
+        vibeplay::tests::wait_connected(&hub, &fake.key).await;
+        assert_eq!(vibeplay::tests::next_line(&mut fake).await["event"], "device.heartbeat");
+        assert_eq!(vibeplay::tests::next_line(&mut fake).await["event"], "agent.idle", "the screen as it is now");
         fake
     }
 
     #[tokio::test]
-    async fn a_vibegame_does_not_touch_the_box_link() {
-        // ADR-0011: the box's link stays as it is. A VibeGame connecting, pressing K2 and picking a card sends the
+    async fn a_vibeplay_does_not_touch_the_box_link() {
+        // ADR-0011: the box's link stays as it is. A VibePlay connecting, pressing K2 and picking a card sends the
         // box nothing and changes nothing the daemon knows about the box.
         let transport = Arc::new(RecordingTransport::default());
         let mut state = test_state(transport.clone());
         let before = serde_json::to_value(state.device.lock().await.clone()).unwrap();
-        let fake = with_vibegame(&mut state).await;
+        let fake = with_vibeplay(&mut state).await;
         fake.send.send(r#"{"version":1,"event":"button","button":"K2","action":"press"}"#.to_owned()).unwrap();
         fake.send.send(r#"{"version":1,"event":"focus","task":"nothing"}"#.to_owned()).unwrap();
         tokio::time::sleep(Duration::from_millis(200)).await;
         assert!(transport.events().is_empty(), "the box got {:?}", transport.events());
         assert_eq!(serde_json::to_value(state.device.lock().await.clone()).unwrap(), before);
-        assert!(state.snapshot().await.vibegames[0].connected);
+        assert!(state.snapshot().await.vibeplays[0].connected);
     }
 
     #[tokio::test]
-    async fn a_vibegame_is_quiet_only_while_a_box_is_linked() {
+    async fn a_vibeplay_is_quiet_only_while_a_box_is_linked() {
         let transport = Arc::new(RecordingTransport::default());
         let mut state = test_state(transport.clone());
-        let mut fake = with_vibegame(&mut state).await;
+        let mut fake = with_vibeplay(&mut state).await;
         let done = |id: &str| {
             let mut event = Event::named("task.done");
             event.id = Some(id.to_owned());
             event
         };
-        // The line with this id; the box's own screen on linking reaches the VibeGame too, and is skipped.
-        async fn line_for(fake: &mut vibegame::tests::FakeVibeGame, id: &str) -> serde_json::Value {
+        // The line with this id; the box's own screen on linking reaches the VibePlay too, and is skipped.
+        async fn line_for(fake: &mut vibeplay::tests::FakeVibePlay, id: &str) -> serde_json::Value {
             loop {
-                let line = vibegame::tests::next_line(fake).await;
+                let line = vibeplay::tests::next_line(fake).await;
                 if line["id"] == id {
                     return line;
                 }
@@ -2467,7 +2467,7 @@ mod tests {
         let mut first_done = done("box");
         first_done.extra.insert("occasion".to_owned(), serde_json::json!("first_done_today"));
         send_event(&state, first_done);
-        // The box got the same line, one occasion for both, without `quiet`; the VibeGame got it with `quiet`.
+        // The box got the same line, one occasion for both, without `quiet`; the VibePlay got it with `quiet`.
         let line = line_for(&mut fake, "box").await;
         assert_eq!((line["quiet"].as_bool(), line["occasion"].as_str()), (Some(true), Some("first_done_today")));
         assert!(transport.events().iter().any(|event| event.id.as_deref() == Some("box") && !event.extra.contains_key("quiet")));

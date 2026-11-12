@@ -770,7 +770,7 @@ impl crate::App {
                 .push(self.confirm_panel())
                 .push(firmware_state)
                 .push(networked)
-                .push(self.vibegames_card())
+                .push(self.vibeplays_card())
                 .spacing(14),
         )
     }
@@ -1071,33 +1071,33 @@ impl crate::App {
         card(wifi.push(small(tr("On the same network, a paired computer drives the box without the cable.", &[])))).width(Length::FillPortion(1)).into()
     }
 
-    /// VibeGames (ADR-0025): the ones found on the network, to pair by the code they show, and the paired ones. They
+    /// VibePlays (ADR-0025): the ones found on the network, to pair by the code they show, and the paired ones. They
     /// show the buddy beside the box and never take its link. Older daemons don't report them: no card.
-    fn vibegames_card(&self) -> Option<Element<'_, Message>> {
-        let vibegames = self.status.as_ref()?.vibegames.as_ref()?;
-        let rows = vibegames.iter().map(|vibegame| {
+    fn vibeplays_card(&self) -> Option<Element<'_, Message>> {
+        let vibeplays = self.status.as_ref()?.vibeplays.as_ref()?;
+        let rows = vibeplays.iter().map(|vibeplay| {
             let mut action = row![].spacing(8).align_y(Alignment::Center);
-            if vibegame.paired {
-                action = action.push(if vibegame.connected { tag(tr("Connected", &[]), theme::DONE_TEXT) } else { tag(tr("Not connected", &[]), theme::MUTED_2) });
-                if self.vibegame_forgetting.as_ref() != Some(&vibegame.key) {
-                    action = action.push(pill(tr("Forget", &[]), Fill::Paper, Some(Message::AskForgetVibeGame(Some(vibegame.key.clone())))));
+            if vibeplay.paired {
+                action = action.push(if vibeplay.connected { tag(tr("Connected", &[]), theme::DONE_TEXT) } else { tag(tr("Not connected", &[]), theme::MUTED_2) });
+                if self.vibeplay_forgetting.as_ref() != Some(&vibeplay.key) {
+                    action = action.push(pill(tr("Forget", &[]), Fill::Paper, Some(Message::AskForgetVibePlay(Some(vibeplay.key.clone())))));
                 }
-            } else if self.vibegame_pairing.as_ref() != Some(&vibegame.key) {
-                action = action.push(pill(tr("Pair…", &[]), Fill::Sun, Some(Message::PairVibeGame(Some(vibegame.key.clone())))));
+            } else if self.vibeplay_pairing.as_ref() != Some(&vibeplay.key) {
+                action = action.push(pill(tr("Pair…", &[]), Fill::Sun, Some(Message::PairVibePlay(Some(vibeplay.key.clone())))));
             }
-            let mut body = column![row![text(vibegame.name.clone()).font(semibold()).size(13).color(theme::INK).width(Length::Fill), action].align_y(Alignment::Center)].spacing(8);
-            if !vibegame.paired && self.vibegame_pairing.as_ref() == Some(&vibegame.key) {
-                let ready = self.vibegame_code.len() == 6 && !self.vibegame_sending;
+            let mut body = column![row![text(vibeplay.name.clone()).font(semibold()).size(13).color(theme::INK).width(Length::Fill), action].align_y(Alignment::Center)].spacing(8);
+            if !vibeplay.paired && self.vibeplay_pairing.as_ref() == Some(&vibeplay.key) {
+                let ready = self.vibeplay_code.len() == 6 && !self.vibeplay_sending;
                 body = body
-                    .push(field(&tr("Enter the six digits the VibeGame shows", &[]), &self.vibegame_code).on_input(Message::VibeGameCode).on_submit_maybe(ready.then_some(Message::SendVibeGameCode)))
-                    .push(self.vibegame_error.as_ref().map(|error| note(error.clone())))
-                    .push(row![pill(tr("Pair", &[]), Fill::Sun, ready.then_some(Message::SendVibeGameCode)), pill(tr("Cancel", &[]), Fill::Paper, Some(Message::PairVibeGame(None)))].spacing(8));
+                    .push(field(&tr("Enter the six digits the VibePlay shows", &[]), &self.vibeplay_code).on_input(Message::VibePlayCode).on_submit_maybe(ready.then_some(Message::SendVibePlayCode)))
+                    .push(self.vibeplay_error.as_ref().map(|error| note(error.clone())))
+                    .push(row![pill(tr("Pair", &[]), Fill::Sun, ready.then_some(Message::SendVibePlayCode)), pill(tr("Cancel", &[]), Fill::Paper, Some(Message::PairVibePlay(None)))].spacing(8));
             }
-            if vibegame.paired && self.vibegame_forgetting.as_ref() == Some(&vibegame.key) {
+            if vibeplay.paired && self.vibeplay_forgetting.as_ref() == Some(&vibeplay.key) {
                 body = body
-                    .push(text(tr("Forget this VibeGame?", &[])).font(bold()).size(13).color(theme::INK))
+                    .push(text(tr("Forget this VibePlay?", &[])).font(bold()).size(13).color(theme::INK))
                     .push(note(tr("It stops getting this computer's cards. To use it again, pair it again with the code it shows.", &[])))
-                    .push(row![pill(tr("Forget", &[]), Fill::Pink, Some(Message::ForgetVibeGame(vibegame.key.clone()))), pill(tr("Cancel", &[]), Fill::Paper, Some(Message::AskForgetVibeGame(None)))].spacing(8));
+                    .push(row![pill(tr("Forget", &[]), Fill::Pink, Some(Message::ForgetVibePlay(vibeplay.key.clone()))), pill(tr("Cancel", &[]), Fill::Paper, Some(Message::AskForgetVibePlay(None)))].spacing(8));
             }
             container(body)
                 .padding(Padding::from([6, 10]))
@@ -1109,10 +1109,10 @@ impl crate::App {
         });
         Some(
             card(
-                column![heading(tr("VibeGames", &[]))]
+                column![heading(tr("VibePlays", &[]))]
                     .extend(rows)
-                    .push(vibegames.is_empty().then(|| note(tr("No VibeGame found on this network.", &[]))))
-                    .push(small(tr("A VibeGame shows the buddy beside the box, over Wi-Fi. While the box is linked, the VibeGame shows and doesn't speak.", &[])))
+                    .push(vibeplays.is_empty().then(|| note(tr("No VibePlay found on this network.", &[]))))
+                    .push(small(tr("A VibePlay shows the buddy beside the box, over Wi-Fi. While the box is linked, the VibePlay shows and doesn't speak.", &[])))
                     .spacing(8),
             )
             .into(),

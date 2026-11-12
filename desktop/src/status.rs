@@ -26,14 +26,14 @@ pub struct Status {
     /// The Character being made, or the last one made since the daemon started (ADR-0023); absent when there is none,
     /// and from older daemons.
     pub making: Option<crate::making::Making>,
-    /// Every VibeGame paired with this computer or found on the network (ADR-0025); absent from older daemons.
-    pub vibegames: Option<Vec<VibeGame>>,
+    /// Every VibePlay paired with this computer or found on the network (ADR-0025); absent from older daemons.
+    pub vibeplays: Option<Vec<VibePlay>>,
 }
 
-/// A VibeGame, the game handheld that shows the buddy beside the box (ADR-0025, docs/vibegame.md).
+/// A VibePlay, the game handheld that shows the buddy beside the box (ADR-0025, docs/vibeplay.md).
 #[derive(Clone, Debug, Default, Deserialize, PartialEq)]
 #[serde(default)]
-pub struct VibeGame {
+pub struct VibePlay {
     pub key: String,
     pub name: String,
     /// Paired with this computer.

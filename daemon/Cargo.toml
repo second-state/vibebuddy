@@ -53,6 +53,6 @@ windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Globali
 
 [dev-dependencies]
 http-body-util = "0.1"
-# The VibeGame app's pairing and link, so the tests check the daemon against the VibeGame's own side.
-vibegame-core = { path = "../vibegame-app/core" }
+# The VibePlay app's pairing and link, so the tests check the daemon against the VibePlay's own side.
+vibeplay-core = { path = "../vibeplay-app/core" }
 tokio = { workspace = true, features = ["test-util"] }

@@ -38,20 +38,20 @@ jobs:
       - name: Tool tests
         run: python3 -m unittest discover -s tools -p "test_*.py"
 
-  vibegame-app:
-    # The VibeGame app (vibegame-app/, its own workspace): its tests on the host, the wasm32 build QingOS takes, and
+  vibeplay-app:
+    # The VibePlay app (vibeplay-app/, its own workspace): its tests on the host, the wasm32 build QingOS takes, and
     # its screens against the box's.
     runs-on: ubuntu-latest
     defaults:
       run:
-        working-directory: vibegame-app
+        working-directory: vibeplay-app
     steps:
       - uses: actions/checkout@v4
       - name: Toolchain
         run: rustup update stable --no-self-update && rustup default stable && rustup target add wasm32-unknown-unknown && rustup component add clippy
       - uses: Swatinem/rust-cache@v2
         with:
-          workspaces: vibegame-app
+          workspaces: vibeplay-app
       - name: Test
         run: cargo test --workspace --locked
       - name: Clippy

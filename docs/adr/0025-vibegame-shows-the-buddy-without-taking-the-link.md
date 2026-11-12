@@ -4,7 +4,7 @@ status: accepted
 
 # VibeGame shows the buddy without taking the link
 
-On 2026-11-11 dragon decided that VibeBuddy also runs on the game handheld that runs QingOS (the Anbernic RG 34XXSP): the buddy, the task cards and the lines, on a device people hold in their hands. The protocol is in [`vibegame.md`](../vibegame.md).
+On 2026-11-11 dragon decided that VibeBuddy also runs on the game handheld that runs QingOS (the Anbernic RG 34XXSP): the buddy, the task cards and the lines, on a device people hold in their hands. The protocol is in [`vibegame.md`](../vibeplay.md).
 
 - **The VibeGame is the server, as the box is on the local network.** It accepts connections on its own port and answers mDNS under its own service type; the daemon finds it and connects. The daemon already finds, connects to and handshakes with a box this way, so most of that code serves the VibeGame too.
 - **It does not take the link.** ADR-0011 stays: a computer links to one box. A VibeGame is another kind of device beside it. It gets the same snapshot as the box and can only ask for what K2 and a tap ask for. It never gets pairing, Wi-Fi, firmware, Character packs or voice. So a person with a box and a VibeGame uses both.
@@ -25,3 +25,5 @@ On 2026-11-11 dragon decided that VibeBuddy also runs on the game handheld that 
 - The daemon gets a second discovery, a list of paired VibeGames, and a writer per VibeGame that gets every state event. The apps get a VibeGames part on the Device page.
 - QingOS gets two capabilities for apps: accepting connections on a declared port, and an mDNS answer declared in the manifest (longzhi/qingos).
 - A pairing done with an attacker in the middle is not detected (see `vibegame.md`). Approving an Agent's request from the VibeGame needs a stronger pairing first.
+
+On 2026-11-12 dragon renamed the VibeGame to VibePlay, in the code and the protocol as well: the name VibeGame was hard to find in search and other brands use it. The record above keeps the old name; [`vibeplay.md`](../vibeplay.md) has the current one.
