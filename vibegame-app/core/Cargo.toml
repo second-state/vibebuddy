@@ -1,6 +1,6 @@
 [package]
 name = "vibegame-core"
-description = "What the VibeGame app does, without the screen or QingOS: pairing, the link, the events (docs/vibegame.md)"
+description = "What the VibeGame app does, without QingOS: pairing, the link, and the box's screens (docs/vibegame.md)"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -13,6 +13,9 @@ clatter = { version = "2.3", default-features = false, features = ["use-25519", 
 ed25519-dalek = { version = "2", default-features = false }
 rand_core = { version = "0.6", default-features = false }
 serde_json = "1"
+# The box's screens, drawn by the box's own code (docs/vibegame.md): no_std, so it builds for wasm32 too.
+vibebuddy-firmware-core = { path = "../../firmware-rs/core" }
+vibebuddy-protocol = { path = "../../protocol", default-features = false }
 
 [dev-dependencies]
 # The daemon's Noise library, so the tests check this side against the other one.

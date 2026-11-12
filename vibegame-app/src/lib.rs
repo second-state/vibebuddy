@@ -1,33 +1,29 @@
 //! VibeBuddy on the VibeGame handheld: a full-screen QingOS app (docs/vibegame.md). The computer connects to it
-//! on the local network and sends the same task cards, stats and announcements the box gets.
+//! on the local network and sends the same task cards, stats and announcements the box gets, and the app draws them
+//! with the box's own code.
 //!
-//! - [`app`]: connections, keys, sounds and saved data.
-//! - [`screens`] and [`art`]: what is drawn.
-//! - `vibegame-core` (`core/`): pairing, the link and the events, without QingOS.
+//! - [`app`]: connections, keys, the menu, sounds and saved data.
+//! - `vibegame-core` (`core/`): pairing, the link, and the box's screens, without QingOS.
 
 pub mod app;
-pub mod art;
-pub mod screens;
 
 use std::sync::Mutex;
 
-use qapp::full::{Frame, buttons};
+use qapp::full::{Frame565, buttons};
 use qapp::{Conn, Event};
 
 use crate::app::App;
-use crate::art::Art;
 
 struct Running {
     app: App,
-    art: Art,
-    frame: Frame,
+    frame: Frame565,
 }
 
 static RUNNING: Mutex<Option<Running>> = Mutex::new(None);
 
 fn with<R>(f: impl FnOnce(&mut Running) -> R) -> R {
     let mut running = RUNNING.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
-    f(running.get_or_insert_with(|| Running { app: App::new(), art: Art::new(), frame: Frame::default() }))
+    f(running.get_or_insert_with(|| Running { app: App::new(), frame: Frame565::default() }))
 }
 
 qapp::main!(|app| {
@@ -45,8 +41,11 @@ qapp::main!(|app| {
     app.every(|| {
         with(|r| {
             r.app.step(buttons());
-            screens::draw(&r.app, &r.art, &mut r.frame);
-            r.frame.show();
+            // Only a frame that changed goes to QingOS, which keeps showing the last one (ADR 0036).
+            if let Some(picture) = r.app.picture() {
+                r.frame.pixels.copy_from_slice(picture);
+                r.frame.show();
+            }
         })
     });
 });
