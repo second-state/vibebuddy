@@ -40,12 +40,12 @@ pub fn start(identity: &Identity, box_key: &[u8; 32], payload: &[u8]) -> Result<
     start_with(identity, box_key, PROLOGUE, payload)
 }
 
-/// The X25519 key Noise sees for an Ed25519 key (a box's or a VibeGame's); None if it isn't a key.
+/// The X25519 key Noise sees for an Ed25519 key (a box's or a VibePlay's); None if it isn't a key.
 pub fn noise_public(key: &[u8; 32]) -> Option<[u8; 32]> {
     Some(ed25519_dalek::VerifyingKey::from_bytes(key).ok()?.to_montgomery().to_bytes())
 }
 
-/// [`start`] bound to another prologue: a VibeGame's link uses the same pattern (docs/vibegame.md).
+/// [`start`] bound to another prologue: a VibePlay's link uses the same pattern (docs/vibeplay.md).
 pub fn start_with(identity: &Identity, remote_key: &[u8; 32], prologue: &[u8], payload: &[u8]) -> Result<(Handshake, String), String> {
     let remote_public = noise_public(remote_key).ok_or_else(|| "not a key".to_owned())?;
     let secret = identity.noise_secret();
@@ -71,7 +71,7 @@ impl Handshake {
     }
 }
 
-/// Pairing with a VibeGame (docs/vibegame.md): `Noise_XX_25519_ChaChaPoly_SHA256`, this computer as initiator.
+/// Pairing with a VibePlay (docs/vibeplay.md): `Noise_XX_25519_ChaChaPoly_SHA256`, this computer as initiator.
 /// XX tells each side the other's key during the handshake, which is what pairing needs.
 pub struct Pairing(snow::HandshakeState);
 

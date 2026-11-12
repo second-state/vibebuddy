@@ -108,7 +108,7 @@ pub const SERVICE_TYPE: &str = "_vibebuddy._tcp.local.";
 pub struct Advertised {
     pub addresses: Vec<SocketAddr>,
     pub key: Option<String>,
-    /// The TXT `name`: what a VibeGame calls itself (docs/vibegame.md); boxes send none.
+    /// The TXT `name`: what a VibePlay calls itself (docs/vibeplay.md); boxes send none.
     pub name: Option<String>,
 }
 

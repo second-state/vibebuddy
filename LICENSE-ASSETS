@@ -20,9 +20,9 @@ Covered:
   personas and lines.
 - firmware/main/assets/*.pcm: a copy of the built-in voice, licensed like
   the voice it was copied from.
-- vibegame-app/assets/*.wav: the built-in voice's input_required, done
-  and failed lines, made into WAV for the VibeGame, licensed like the
-  voice they were made from; and vibegame-app/assets/cover.png, the
+- vibeplay-app/assets/*.wav: the built-in voice's input_required, done
+  and failed lines, made into WAV for the VibePlay, licensed like the
+  voice they were made from; and vibeplay-app/assets/cover.png, the
   robot drawn by the firmware's code, at half size.
 - docs/brand/*.svg: the buddy in each of its states, exported pixel for
   pixel from the firmware's drawing code.

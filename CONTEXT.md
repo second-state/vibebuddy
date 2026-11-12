@@ -42,9 +42,9 @@ _Avoid_: appcast (Sparkle's feed for the macOS App only), update server, feed
 The connection between one computer and the box. A box has at most one link at a time, to one computer, and a computer links to at most one box. A link is carried over USB, over the local network, or through the Relay; when more than one is available, USB wins, then the local network, then the Relay. Moving the link from one way to another is not a drop; the link drops only when no way is left. When the link drops, the buddy closes its eyes and turns gray; a link failure is the only thing the App announces on its own.
 _Avoid_: connection, USB, serial port, Wi-Fi (those are ways of carrying the link)
 
-**VibeGame (掌机)**:
-Our game handheld, which runs QingOS, when it shows the buddy: the task cards, today's stats and the lines, over Wi-Fi (ADR-0025, [`docs/vibegame.md`](docs/vibegame.md)). It is not a box and never holds the link; a computer links to one box and may at the same time talk to its paired VibeGames. While a box is linked, the VibeGame shows and doesn't speak. It pairs by a six-digit code on its screen, not over a cable.
-_Avoid_: handheld on its own, viewer, second box, companion, client
+**VibePlay (掌机)**:
+Our game handheld, which runs QingOS, when it shows the buddy: the task cards, today's stats and the lines, over Wi-Fi (ADR-0025, [`docs/vibeplay.md`](docs/vibeplay.md)). It is not a box and never holds the link; a computer links to one box and may at the same time talk to its paired VibePlays. While a box is linked, the VibePlay shows and doesn't speak. It pairs by a six-digit code on its screen, not over a cable.
+_Avoid_: handheld on its own, viewer, second box, companion, client, VibeGame (its old name)
 
 **Relay (中转)**:
 VibeBuddy's online service that carries a link when the computer and the box can't reach each other directly, such as when they are on different networks. It passes the link along and decides nothing about Agents. It carries a link only for an account on the Paid plan. It is never required: a box works over USB or the local network without it.
@@ -205,7 +205,7 @@ Fixed wording for the App's English UI and English logs. Use these words when wr
 | Chinese | English | Notes |
 |---|---|---|
 | 盒子 | box | The device itself; lowercase in the UI, capitalized at the start of a sentence |
-| 掌机 | VibeGame | The game handheld that shows the buddy (ADR-0025); never "handheld" on its own in the UI. Its menu item for a second computer is Pair a computer |
+| 掌机 | VibePlay | The game handheld that shows the buddy (ADR-0025); never "handheld" on its own in the UI. Its menu item for a second computer is PAIR |
 | 氛围小助手 | the buddy | The character; the product name is still VibeBuddy |
 | 链路 | link | The "Link" section of the settings window; when it drops, say disconnected |
 | 接入 / 修复 / 移除 | Connect / Repair / Remove | The three hook actions; the settings tab is called Agents, and an agent that isn't connected shows Not set up |

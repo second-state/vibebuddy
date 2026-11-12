@@ -64,12 +64,12 @@ do {
     """.utf8))
     check(paired.boxKey == "BOX" && paired.computerKey == "MINE", "pairing keys decode")
     check(paired.pairedComputers?.map(\.name) == ["dragon's MacBook", "omarchy"], "paired computers decode")
-    check(status.vibegames == nil, "an older daemon: no VibeGames, so no VibeGames part")
-    let vibegames = try StatusCoding.decoder().decode([VibeGame].self, from: Data("""
-    [{"key":"K1","name":"Desk VibeGame","paired":true,"connected":true,"address":"192.168.1.42:7342"},
-     {"key":"K2","name":"VibeGame K2","paired":false,"connected":false,"address":null}]
+    check(status.vibeplays == nil, "an older daemon: no VibePlays, so no VibePlays part")
+    let vibeplays = try StatusCoding.decoder().decode([VibePlay].self, from: Data("""
+    [{"key":"K1","name":"Desk VibePlay","paired":true,"connected":true,"address":"192.168.1.42:7342"},
+     {"key":"K2","name":"VibePlay K2","paired":false,"connected":false,"address":null}]
     """.utf8))
-    check(vibegames.map(\.paired) == [true, false] && vibegames[0].connected && vibegames[1].address == nil, "VibeGames decode")
+    check(vibeplays.map(\.paired) == [true, false] && vibeplays[0].connected && vibeplays[1].address == nil, "VibePlays decode")
     let wifi = try StatusCoding.decoder().decode(DeviceState.self, from: Data("""
     {"connected":true,"bridge":false,"network":true,"port":"192.168.1.23:7340","wifi_network":"Home","wifi_address":"192.168.1.23","wifi_error":"password"}
     """.utf8))

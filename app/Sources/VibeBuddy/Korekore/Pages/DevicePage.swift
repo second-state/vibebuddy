@@ -32,8 +32,8 @@ struct KorekoreDevicePage: View {
                         pairedComputers(device)
                     }
                 }
-                if let vibegames = model.status?.vibegames {
-                    KorekoreVibeGamesCard(model: model, vibegames: vibegames)
+                if let vibeplays = model.status?.vibeplays {
+                    KorekoreVibePlaysCard(model: model, vibeplays: vibeplays)
                 }
             }
             .padding(.bottom, Theme.Sticker.sm + 4)
@@ -381,21 +381,21 @@ struct KorekoreDevicePage: View {
     }
 }
 
-/// VibeGames (ADR-0025): the ones found on the network, to pair by the code they show, and the paired ones. They show
+/// VibePlays (ADR-0025): the ones found on the network, to pair by the code they show, and the paired ones. They show
 /// the buddy beside the box and never take its link.
-struct KorekoreVibeGamesCard: View {
+struct KorekoreVibePlaysCard: View {
     @ObservedObject var model: AppModel
-    let vibegames: [VibeGame]
-    /// The VibeGame whose code is being typed.
+    let vibeplays: [VibePlay]
+    /// The VibePlay whose code is being typed.
     @State private var pairing: String?
     @State private var code: String
     @State private var working = false
     @State private var error: String?
 
     /// `pairing` and `code` are set only for the snapshots.
-    init(model: AppModel, vibegames: [VibeGame], pairing: String? = nil, code: String = "") {
+    init(model: AppModel, vibeplays: [VibePlay], pairing: String? = nil, code: String = "") {
         self.model = model
-        self.vibegames = vibegames
+        self.vibeplays = vibeplays
         _pairing = State(initialValue: pairing)
         _code = State(initialValue: code)
     }
@@ -403,34 +403,34 @@ struct KorekoreVibeGamesCard: View {
     var body: some View {
         KCard {
             VStack(alignment: .leading, spacing: 8) {
-                KHeading(String(localized: "VibeGames"))
-                ForEach(vibegames) { vibegame in
+                KHeading(String(localized: "VibePlays"))
+                ForEach(vibeplays) { vibeplay in
                     VStack(alignment: .leading, spacing: 8) {
                         HStack {
-                            Text(verbatim: vibegame.name).font(.rounded(13, weight: 700))
+                            Text(verbatim: vibeplay.name).font(.rounded(13, weight: 700))
                             Spacer()
-                            if vibegame.paired {
-                                if vibegame.connected {
+                            if vibeplay.paired {
+                                if vibeplay.connected {
                                     KTag(String(localized: "Connected"), color: Theme.Colors.doneText)
                                 } else {
                                     KTag(String(localized: "Not connected"))
                                 }
-                                Button(String(localized: "Forget")) { forget(vibegame) }.kButton()
-                            } else if pairing != vibegame.key {
+                                Button(String(localized: "Forget")) { forget(vibeplay) }.kButton()
+                            } else if pairing != vibeplay.key {
                                 Button(String(localized: "Pair…")) {
-                                    pairing = vibegame.key
+                                    pairing = vibeplay.key
                                     code = ""
                                     error = nil
                                 }
                                 .kButton(.sun)
                             }
                         }
-                        if pairing == vibegame.key && !vibegame.paired {
-                            KField(String(localized: "Enter the six digits the VibeGame shows"), text: $code)
+                        if pairing == vibeplay.key && !vibeplay.paired {
+                            KField(String(localized: "Enter the six digits the VibePlay shows"), text: $code)
                                 .onChange(of: code) { code = String(code.filter(\.isNumber).prefix(6)) }
                             if let error { KNote(error, color: Theme.Colors.korePinkText) }
                             HStack(spacing: 8) {
-                                Button(String(localized: "Pair")) { pair(vibegame) }.kButton(.sun).disabled(code.count != 6 || working)
+                                Button(String(localized: "Pair")) { pair(vibeplay) }.kButton(.sun).disabled(code.count != 6 || working)
                                 Button(String(localized: "Cancel")) { pairing = nil }.kButton()
                             }
                         }
@@ -439,18 +439,18 @@ struct KorekoreVibeGamesCard: View {
                     .padding(.horizontal, 10)
                     .overlay(RoundedRectangle(cornerRadius: Theme.Radius.sm).strokeBorder(Theme.Colors.line, lineWidth: Theme.Stroke.base))
                 }
-                if vibegames.isEmpty {
-                    KNote(String(localized: "No VibeGame found on this network."))
+                if vibeplays.isEmpty {
+                    KNote(String(localized: "No VibePlay found on this network."))
                 }
-                KNote(String(localized: "A VibeGame shows the buddy beside the box, over Wi-Fi. While the box is linked, the VibeGame shows and doesn't speak."))
+                KNote(String(localized: "A VibePlay shows the buddy beside the box, over Wi-Fi. While the box is linked, the VibePlay shows and doesn't speak."))
             }
         }
     }
 
-    private func pair(_ vibegame: VibeGame) {
+    private func pair(_ vibeplay: VibePlay) {
         working = true
         Task {
-            let failure = await model.pairVibeGame(key: vibegame.key, code: code)
+            let failure = await model.pairVibePlay(key: vibeplay.key, code: code)
             working = false
             if let failure {
                 error = failure
@@ -460,12 +460,12 @@ struct KorekoreVibeGamesCard: View {
         }
     }
 
-    private func forget(_ vibegame: VibeGame) {
+    private func forget(_ vibeplay: VibePlay) {
         KorekoreAlert.ask(
-            title: String(localized: "Forget this VibeGame?"),
+            title: String(localized: "Forget this VibePlay?"),
             message: String(localized: "It stops getting this computer's cards. To use it again, pair it again with the code it shows."),
             buttons: [String(localized: "Forget"), String(localized: "Cancel")]) { [model] answer in
-            if answer.button == 0 { model.forgetVibeGame(key: vibegame.key) }
+            if answer.button == 0 { model.forgetVibePlay(key: vibeplay.key) }
         }
     }
 }

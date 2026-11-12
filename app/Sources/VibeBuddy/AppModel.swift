@@ -186,17 +186,17 @@ final class AppModel: ObservableObject {
 
     func takeOver() { run { try await self.client.takeOver() } }
 
-    /// Pairs with a VibeGame; nil when it paired, else why not, for the card to show beside the code.
-    func pairVibeGame(key: String, code: String) async -> String? {
+    /// Pairs with a VibePlay; nil when it paired, else why not, for the card to show beside the code.
+    func pairVibePlay(key: String, code: String) async -> String? {
         do {
-            try await client.pairVibeGame(key: key, code: code)
+            try await client.pairVibePlay(key: key, code: code)
             return nil
         } catch {
             return error.localizedDescription
         }
     }
 
-    func forgetVibeGame(key: String) { run { try await self.client.forgetVibeGame(key: key) } }
+    func forgetVibePlay(key: String) { run { try await self.client.forgetVibePlay(key: key) } }
 
     func setWifi(ssid: String, password: String) { run { try await self.client.setWifi(ssid: ssid, password: password) } }
 

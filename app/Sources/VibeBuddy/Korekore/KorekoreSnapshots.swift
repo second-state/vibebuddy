@@ -23,8 +23,8 @@ enum KorekoreSnapshots {
      "account":{"available":true,"signed_in":true,"github_id":1,"github_login":"kore-sample",
        "plan":{"name":"paid","period_end":"2026-11-24T00:00:00Z"},"voice_credit_micro_usd":933100},
      "voice_keys":{"elevenlabs":{"set":true,"refused":false},"volc":{"set":false,"refused":false}},
-     "vibegames":[{"key":"vg1","name":"Desk VibeGame","paired":true,"connected":true,"address":"192.168.1.42:7342"},
-                  {"key":"vg2","name":"Living-room VibeGame","paired":false,"connected":false,"address":"192.168.1.57:7342"}],
+     "vibeplays":[{"key":"vg1","name":"Desk VibePlay","paired":true,"connected":true,"address":"192.168.1.42:7342"},
+                  {"key":"vg2","name":"Living-room VibePlay","paired":false,"connected":false,"address":"192.168.1.57:7342"}],
      "activities":[{"agent":"claude-code","title":"CC:Add Chinese to the box","state":"working"},
                    {"agent":"codex","title":"CX:Fix voice reply","state":"working"},
                    {"agent":"github-actions","title":"CI:App tests","state":"working"}]}
@@ -133,9 +133,9 @@ enum KorekoreSnapshots {
                 message: String(localized: "The box's current firmware and data will be erased and can't be recovered. It restarts on its own when done; over the UART port this takes a few minutes."),
                 buttons: [String(localized: "Flash"), String(localized: "Cancel")], warning: true))),
         ]
-        // The VibeGames card sits below the window's fold: drawn on its own, with one being paired.
+        // The VibePlays card sits below the window's fold: drawn on its own, with one being paired.
         let cards: [(String, AnyView)] = [
-            ("card-vibegames", AnyView(KorekoreVibeGamesCard(model: model, vibegames: status.vibegames ?? [], pairing: "vg2", code: "4821"))),
+            ("card-vibeplays", AnyView(KorekoreVibePlaysCard(model: model, vibeplays: status.vibeplays ?? [], pairing: "vg2", code: "4821"))),
         ]
         for (name, view) in alerts + cards {
             let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 480, height: 300), styleMask: [.borderless], backing: .buffered, defer: false)

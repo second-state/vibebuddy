@@ -393,7 +393,7 @@ impl ActivityTracker {
         current
     }
 
-    /// The whole screen as it is now, for a VibeGame that just connected (ADR-0025). Like [`Self::current_screen`]
+    /// The whole screen as it is now, for a VibePlay that just connected (ADR-0025). Like [`Self::current_screen`]
     /// it never speaks, but it leaves the box's dedup alone: the box didn't get it.
     pub fn viewer_screen(&self) -> Event {
         let mut current = self.activity_snapshot().unwrap_or_else(|| event("agent.idle", "", ""));
