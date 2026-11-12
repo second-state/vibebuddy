@@ -406,6 +406,9 @@ async fn handle_device_events(
     }
 }
 
+/// The last line our firmware writes as it boots, `READY vibebuddy-fw <version>`.
+const BOOT_DONE_PREFIX: &str = "READY vibebuddy-fw ";
+
 /// Every device message goes through here: update device state, broadcast to operations waiting for acks, and K2 opens the source.
 /// Tests inject device messages here too, so it must not depend on the serial port.
 async fn publish_device_message(state: &AppState, message: DeviceMessage) {
@@ -486,8 +489,13 @@ async fn publish_device_message(state: &AppState, message: DeviceMessage) {
         offer_voice_again(state).await;
     }
     let _ = state.device_bus.send(message.clone());
-    // Ask right after connecting; the device reports its mode, firmware build and voice again.
-    if matches!(message, DeviceMessage::Connected { .. } | DeviceMessage::ConnectedNetwork { .. } | DeviceMessage::ConnectedRelay { .. }) {
+    // Ask right after connecting; the device reports its mode, firmware build and voice again. Ask again when the box
+    // finished booting: after a firmware update over the link it restarts while the bridge's port stays open, and
+    // what it says at boot leaves out its mode, screens and decoration.
+    let booted_again = matches!(&message, DeviceMessage::Line(line) if line.starts_with(BOOT_DONE_PREFIX));
+    if booted_again
+        || matches!(message, DeviceMessage::Connected { .. } | DeviceMessage::ConnectedNetwork { .. } | DeviceMessage::ConnectedRelay { .. })
+    {
         send_event(state, device_command("device.hello"));
         // Then this computer's cards, which replace any the box kept from another computer.
         let screen = {
@@ -2622,6 +2630,29 @@ mod tests {
         publish_device_message(&state, DeviceMessage::Line("DISPLAY READY BUILD v9 2026-10-01".to_owned())).await;
         waiting.await.unwrap();
         assert_eq!(state.operation.lock().await.as_ref().map(|operation| operation.state), Some(OperationState::Done));
+    }
+
+    #[tokio::test]
+    async fn a_box_that_restarts_under_an_open_link_is_asked_again() {
+        // A firmware update over the link restarts the box, but the bridge's port stays open: no `Connected`. What
+        // the box said at boot leaves out its mode, screens and decoration, so it must be asked again (seen with a
+        // box updated from 0.6.0 to 0.6.1, which kept the old firmware's missing decoration).
+        let transport = Arc::new(RecordingTransport::default());
+        let state = test_state(transport.clone());
+        publish_device_message(&state, DeviceMessage::Connected { port: "/dev/cu.x".to_owned(), bridge: true, usb_serial: None }).await;
+        publish_device_message(&state, DeviceMessage::Line("DISPLAY READY BUILD v0.6.0 2026-11-03".to_owned())).await;
+        let hellos = || transport.events().iter().filter(|event| event.event == "device.hello").count();
+        assert_eq!(hellos(), 1);
+
+        for line in ["DISPLAY READY BUILD firmware-v0.6.1 2026-11-10", "FIRMWARE VERSION 0.6.1", "READY vibebuddy-fw 0.6.1"] {
+            publish_device_message(&state, DeviceMessage::Line(line.to_owned())).await;
+        }
+        assert_eq!(hellos(), 2, "asked again once the box finished booting");
+        let last_hello = transport.events().iter().rposition(|event| event.event == "device.hello").unwrap();
+        assert!(transport.events().len() > last_hello + 1, "and given this computer's cards again");
+
+        publish_device_message(&state, DeviceMessage::Line("DECORATION OFF".to_owned())).await;
+        assert_eq!(state.device.lock().await.decoration.as_deref(), Some("off"));
     }
 
     #[tokio::test]
