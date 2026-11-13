@@ -47,7 +47,7 @@ The box starts Muse. Pair it with the Muse app as Muse's docs say.
 
 ## Switch
 
-- **To Vibe Buddy or to Muse:** hold K2 (the left key on the top edge), press RESET, and keep K2 down for one second. Pulling the cable and plugging it in again while you hold K2 also works.
+- **To Vibe Buddy or to Muse:** push K2 down first and hold it. Then press and release RESET. Keep K2 down for 2 more seconds. The bootloader reads K2 only in the first second after reset, so K2 must already be down when you release RESET. Pulling the cable and plugging it in again while you hold K2 also works.
 - Do not hold K0 at reset: K0 is BOOT, and it starts the chip's download mode.
 
 ## Remove Muse
