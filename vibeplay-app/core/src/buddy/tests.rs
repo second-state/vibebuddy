@@ -31,6 +31,33 @@ fn a_state_event_says_its_line_unless_quiet_or_suppressed() {
 }
 
 #[test]
+fn needs_input_and_failed_call_the_person_unless_quiet_or_suppressed() {
+    let mut buddy = Buddy::new(Screens::Robot, false, None, 1, 0);
+    let mut event = working();
+    event["event"] = json!("agent.input_required");
+    event["title"] = json!("CC:Add Chinese to the box");
+    let call = buddy.line(&event, 100).call;
+    assert_eq!(call, Some(("An agent needs you: CC:Add Chinese to the box".into(), "agent 要你：CC:Add Chinese to the box".into())));
+    assert_eq!(buddy.line(&event, 200).call, None, "already on the screen: no second call");
+    event["event"] = json!("task.done");
+    assert_eq!(buddy.line(&event, 300).call, None, "done does not call");
+    event["event"] = json!("task.error");
+    event["quiet"] = json!(true);
+    assert_eq!(buddy.line(&event, 400).call, None, "a box speaks for it");
+    event["event"] = json!("task.done");
+    buddy.line(&event, 500);
+    event["event"] = json!("task.error");
+    event["quiet"] = json!(false);
+    event["suppress_audio"] = json!(true);
+    assert_eq!(buddy.line(&event, 600).call, None, "a catch-up state after connecting again");
+    event["event"] = json!("task.done");
+    buddy.line(&event, 700);
+    event["event"] = json!("task.error");
+    event["suppress_audio"] = json!(false);
+    assert_eq!(buddy.line(&event, 800).call.map(|call| call.0), Some("A task failed: CC:Add Chinese to the box".into()));
+}
+
+#[test]
 fn up_and_down_pick_the_cards_that_can_be_focused() {
     let mut buddy = Buddy::new(Screens::Robot, false, None, 1, 0);
     buddy.line(&working(), 0);

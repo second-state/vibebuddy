@@ -546,7 +546,7 @@ dependencies = [
 [[package]]
 name = "qapp"
 version = "0.3.0"
-source = "git+https://github.com/second-state/qingos-sdk#15cd3fc8219128b48102f30f5774e26ae2dd2a85"
+source = "git+https://github.com/second-state/qingos-sdk#3ff0fe2e848ee6844b5116fe99a27654ea69f068"
 dependencies = [
  "anyhow",
  "chrono",
@@ -557,7 +557,7 @@ dependencies = [
 [[package]]
 name = "qtypes"
 version = "0.3.0"
-source = "git+https://github.com/second-state/qingos-sdk#15cd3fc8219128b48102f30f5774e26ae2dd2a85"
+source = "git+https://github.com/second-state/qingos-sdk#3ff0fe2e848ee6844b5116fe99a27654ea69f068"
 dependencies = [
  "serde",
  "serde_json",

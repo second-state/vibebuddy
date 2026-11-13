@@ -181,6 +181,10 @@ impl App {
         if let Some(sound) = news.sound {
             self.play(sound);
         }
+        // Another app is in front: QingOS pauses it and shows the line (QingOS ADR 0042). In front, QingOS shows nothing.
+        if let Some((en, zh)) = news.call {
+            host::call_person(&en, &zh);
+        }
     }
 
     fn play(&self, sound: Sound) {
