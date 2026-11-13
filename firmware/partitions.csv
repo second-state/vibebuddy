@@ -5,6 +5,9 @@
 # link holds the box's own key and the computers paired with it (ADR-0012); flashing leaves it alone too.
 # edition holds the company Character of a company edition (ADR-0026), written only at the factory: nothing
 # else writes it, so changing Character or updating the firmware keeps it. On an ordinary box it stays blank.
+# The rest is for Muse, which a user can flash next to Vibe Buddy (docs/muse.md): muse_tbl is Muse's own partition
+# table, which shows Muse only muse_nvs and its app, so Muse can't touch Vibe Buddy's data. boot_sel says which of
+# the two boots; the bootloader reads it, and toggles it when K2 is held at reset. Vibe Buddy never uses these.
 # Name,    Type, SubType, Offset,   Size
 nvs,       data, nvs,     0x9000,   0x6000
 phy_init,  data, phy,     0xf000,   0x1000
@@ -14,3 +17,7 @@ ota_1,     app,  ota_1,   0x610000, 4M
 otadata,   data, ota,     0xa10000, 0x2000
 link,      data, 0x41,    0xa12000, 0x2000
 edition,   data, 0x42,    0xa14000, 2M
+muse_tbl,  data, 0x43,    0xc14000, 0x1000
+muse_nvs,  data, 0x44,    0xc15000, 0xC000
+boot_sel,  data, 0x45,    0xc21000, 0x1000
+muse,      app,  test,    0xc30000, 0x3D0000

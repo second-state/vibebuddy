@@ -1,0 +1,5 @@
+# Muse's own partition table, at 0xc14000 (muse_tbl in firmware/partitions.csv). Muse reads only this table, so it
+# sees its own NVS and its app and nothing of Vibe Buddy's. The offsets must match firmware/partitions.csv.
+# Name,    Type, SubType, Offset,   Size
+nvs,       data, nvs,     0xc15000, 0xC000
+muse,      app,  test,    0xc30000, 0x3D0000

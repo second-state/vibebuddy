@@ -52,6 +52,10 @@ fn blank_flash() -> MemoryFlash {
         ("otadata", 1, 0, 0xA10000, 0x2000),
         ("link", 1, 0x41, 0xA12000, 0x2000),
         ("edition", 1, 0x42, 0xA14000, 0x200000),
+        ("muse_tbl", 1, 0x43, 0xC14000, 0x1000),
+        ("muse_nvs", 1, 0x44, 0xC15000, 0xC000),
+        ("boot_sel", 1, 0x45, 0xC21000, 0x1000),
+        ("muse", 0, 0x20, 0xC30000, 0x3D0000),
     ];
     for (index, (label, kind, subtype, offset, size)) in entries.iter().enumerate() {
         let at = 0x8000 + index * 32;
