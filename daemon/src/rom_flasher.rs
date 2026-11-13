@@ -492,7 +492,7 @@ mod tests {
         let table = std::fs::read(&out).unwrap();
         std::fs::remove_file(&out).ok();
         assert_eq!(blank_otadata(&table).map(|segment| (segment.address, segment.data.len())), Some((0xA1_0000, 0x2000)));
-        assert_eq!(blank_boot_sel(&table).map(|segment| (segment.address, segment.data.len())), Some((0xA2_1000, 0x1000)));
+        assert_eq!(blank_boot_sel(&table).map(|segment| (segment.address, segment.data.len())), Some((0xC2_1000, 0x1000)));
     }
 
     #[test]

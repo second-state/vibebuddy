@@ -12,10 +12,10 @@ Vibe Buddy is not part of Meta and Meta does not support this. We do not ship Mu
 
 | Partition | Offset | Size | For |
 |---|---|---|---|
-| `muse_tbl` | 0xa14000 | 4 KB | Muse's own partition table (`tools/muse/partitions.csv`) |
-| `muse_nvs` | 0xa15000 | 48 KB | Muse's NVS: Wi-Fi, token, settings, BLE bonds |
-| `boot_sel` | 0xa21000 | 4 KB | Which app starts: `MUSE` in the first word for Muse, anything else for Vibe Buddy |
-| `muse` | 0xa30000 | 4 MB | The Muse app (`app`, subtype `test`) |
+| `muse_tbl` | 0xc14000 | 4 KB | Muse's own partition table (`tools/muse/partitions.csv`) |
+| `muse_nvs` | 0xc15000 | 48 KB | Muse's NVS: Wi-Fi, token, settings, BLE bonds |
+| `boot_sel` | 0xc21000 | 4 KB | Which app starts: `MUSE` in the first word for Muse, anything else for Vibe Buddy |
+| `muse` | 0xc30000 | 3.8 MB | The Muse app (`app`, subtype `test`) |
 
 The bootloader (`firmware-rs/bootloader/bootloader_components/main/bootloader_start.c`) reads `boot_sel` at each start. When K2 is held for half a second from reset, it toggles `boot_sel`. It reads K2 only when the `muse` partition holds an image. A wake from deep sleep keeps the choice, because Muse powers off into deep sleep. When it chooses Muse, it does not read otadata, so a Vibe Buddy update waiting for its trial boot stays waiting. A damaged Muse image sets `boot_sel` back to Vibe Buddy.
 
@@ -55,5 +55,5 @@ The box starts Muse. Pair it with the Muse app as Muse's docs say.
 Install Vibe Buddy again from the Vibe Buddy app. The box then starts Vibe Buddy. The Muse image stays in its partition, so holding K2 at reset still starts it. To remove it, erase the `muse` partition:
 
 ```sh
-python -m esptool --chip esp32s3 -p PORT erase-region 0xa30000 0x400000
+python -m esptool --chip esp32s3 -p PORT erase-region 0xc30000 0x3d0000
 ```

@@ -2,4 +2,4 @@
 # devices/sdkconfig.muse-atk-dnesp32s3-box. It changes only where Muse sits in flash, so that it lives next to
 # Vibe Buddy (firmware/partitions.csv). build.sh adds the path of partitions.csv.
 CONFIG_PARTITION_TABLE_CUSTOM=y
-CONFIG_PARTITION_TABLE_OFFSET=0xa14000
+CONFIG_PARTITION_TABLE_OFFSET=0xc14000

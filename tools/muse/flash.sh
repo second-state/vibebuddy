@@ -31,9 +31,9 @@ python3 -m esptool --chip esp32s3 -p "${port}" -b 460800 --after hard-reset \
     write-flash --flash-mode keep --flash-freq keep --flash-size keep \
     0x0 "${repo_root}/firmware-rs/bootloader/bootloader.bin" \
     0x8000 "${table}" \
-    0xa14000 "${muse}/partition_table/partition-table.bin" \
-    0xa21000 "${boot_sel}" \
-    0xa30000 "${muse}/muse-gadget.bin"
+    0xc14000 "${muse}/partition_table/partition-table.bin" \
+    0xc21000 "${boot_sel}" \
+    0xc30000 "${muse}/muse-gadget.bin"
 
 if [ -n "${token}" ]; then
     python3 "${here}/send-token.py" "${port}" "${token}"
