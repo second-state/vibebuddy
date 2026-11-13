@@ -1,4 +1,4 @@
-//! Making a Character (ADR-0020, docs/characters.md): the lines the user wrote, spoken in a voice from
+//! Making a Character (ADR-0023, docs/characters.md): the lines the user wrote, spoken in a voice from
 //! `characters/voices.tsv`, made into audio pools the App packs with a look.
 //!
 //! `POST /v1/characters` starts one job at a time on its own thread. Each line is synthesized as 16 kHz PCM: with the
@@ -14,7 +14,7 @@
 //!   ADPCM, no look), written once every line is made: the App reads them as it reads a preset's;
 //! - `manifest.json`: the name, base, voice and lines asked for.
 //!
-//! A line already made is never made again, so a refusal (`plan`, `monthly`, `global_cap`, `signed_out`, or the
+//! A line already made is never made again, so a refusal (`plan`, `signed_out`, or the
 //! provider refusing the own key, `own_key`) stops the job, keeps the lines made, and starting the same Character again
 //! (its `id`) picks up where it stopped. Progress, the state and why it stopped are `making` in `/v1/status`.
 
@@ -223,7 +223,7 @@ pub struct MakingStatus {
     /// Pieces of audio made, of all there are: each line, and each form of address of those with one.
     pub done: usize,
     pub total: usize,
-    /// Why it stopped, for the App to explain: `plan`, `monthly`, `global_cap`, `signed_out`, `own_key` or `internal`; None for
+    /// Why it stopped, for the App to explain: `plan`, `signed_out`, `own_key` or `internal`; None for
     /// anything else, which `error` describes.
     pub reason: Option<&'static str>,
     pub error: Option<String>,
@@ -699,9 +699,10 @@ impl Maker {
                 self.account.forget();
                 Stop::because("signed_out", "signed out")
             }
-            (403, _) => Stop::because("plan", "making a Character with our voices needs the Paid plan"),
-            (429, Some("global_cap")) => Stop::because("global_cap", "voice is paused for today"),
-            (429, _) => Stop::because("monthly", "this month's Characters are used up"),
+            // `own_key`: the service doesn't make lines yet, or the voice credit is used up (ADR-0024). Older services
+            // said `plan`. Both mean an own key for the voice is needed; the App says so while the Paid plan isn't offered.
+            (403, _) => Stop::because("plan", "our voice service can't make this line: set your own key for the voice"),
+            // A 429 is a rate limit: a plain failure, and the job resumes later.
             _ => format!("the voice service answered {status}: {}", answer.trim()).into(),
         })
     }
@@ -1055,11 +1056,11 @@ mod tests {
 
     #[test]
     fn a_refusal_halfway_stops_the_job_and_starting_again_makes_each_line_once() {
-        // The month runs out on the third request, and is back for the next run.
+        // The voice credit runs out on the third request, and an own key is set before the next run.
         let refuse = Arc::new(std::sync::atomic::AtomicBool::new(true));
         let refusing = refuse.clone();
         let (service, requests) = serve(move |n, _| match n {
-            2 if refusing.load(std::sync::atomic::Ordering::SeqCst) => answer("429 Too Many Requests", "application/json", br#"{"reason":"monthly"}"#),
+            2 if refusing.load(std::sync::atomic::Ordering::SeqCst) => answer("403 Forbidden", "application/json", br#"{"reason":"own_key"}"#),
             _ => answer("200 OK", "audio/pcm;rate=16000", &spoken()),
         });
         let (maker, scratch) = maker("making-resume", Some(service), &[], "http://127.0.0.1:9", "http://127.0.0.1:9");
@@ -1067,7 +1068,7 @@ mod tests {
         let mut request = request("ada", lines);
 
         let stopped = run(&maker, &request);
-        assert_eq!((stopped.state, stopped.reason, stopped.done, stopped.total), ("failed", Some("monthly"), 2, 6));
+        assert_eq!((stopped.state, stopped.reason, stopped.done, stopped.total), ("failed", Some("plan"), 2, 6));
         let dir = scratch.join("characters").join(&stopped.id);
         assert!(!dir.join("pack.bin").exists(), "no pack until every line is made");
         let listed = maker.list();
@@ -1111,17 +1112,19 @@ mod tests {
     }
 
     #[test]
-    fn the_plan_and_a_lost_session_stop_the_job_with_their_reason() {
+    fn own_key_and_a_lost_session_stop_the_job_with_their_reason_and_a_rate_limit_is_a_failure() {
         let (service, _) = serve(|n, _| match n {
-            0 => answer("403 Forbidden", "application/json", br#"{"reason":"plan"}"#),
-            1 => answer("429 Too Many Requests", "application/json", br#"{"reason":"global_cap"}"#),
+            0 => answer("403 Forbidden", "application/json", br#"{"reason":"own_key"}"#),
+            1 => answer("429 Too Many Requests", "text/plain", b"rate limited"),
             _ => answer("401 Unauthorized", "application/json", b"{}"),
         });
         let (maker, scratch) = maker("making-refused", Some(service), &[], "http://127.0.0.1:9", "http://127.0.0.1:9");
         let request = request("kai", vec![line("done", "Done.")]);
-        for reason in ["plan", "global_cap", "signed_out"] {
-            assert_eq!(run(&maker, &request).reason, Some(reason));
-        }
+        assert_eq!(run(&maker, &request).reason, Some("plan"), "an own key is needed");
+        let limited = run(&maker, &request);
+        assert_eq!(limited.reason, None);
+        assert!(limited.error.as_deref().is_some_and(|error| error.contains("429")), "{limited:?}");
+        assert_eq!(run(&maker, &request).reason, Some("signed_out"));
         assert!(maker.account.token().is_none(), "a 401 forgets the session");
         let again = run(&maker, &request);
         assert_eq!((again.reason, again.error.as_deref()), (Some("signed_out"), Some("not signed in")));

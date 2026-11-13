@@ -21,11 +21,25 @@ pub struct Status {
     /// The VibeBuddy account this computer is signed in to (ADR-0018); older daemons don't say, which reads as not
     /// available.
     pub account: Account,
-    /// Which of the user's own keys for spoken replies are set (ADR-0020); absent from older daemons.
+    /// Which of the user's own keys for spoken replies are set (ADR-0023); absent from older daemons.
     pub voice_keys: Option<VoiceKeys>,
-    /// The Character being made, or the last one made since the daemon started (ADR-0020); absent when there is none,
+    /// The Character being made, or the last one made since the daemon started (ADR-0023); absent when there is none,
     /// and from older daemons.
     pub making: Option<crate::making::Making>,
+    /// Every VibePlay paired with this computer or found on the network (ADR-0025); absent from older daemons.
+    pub vibeplays: Option<Vec<VibePlay>>,
+}
+
+/// A VibePlay, the game handheld that shows the buddy beside the box (ADR-0025, docs/vibeplay.md).
+#[derive(Clone, Debug, Default, Deserialize, PartialEq)]
+#[serde(default)]
+pub struct VibePlay {
+    pub key: String,
+    pub name: String,
+    /// Paired with this computer.
+    pub paired: bool,
+    pub connected: bool,
+    pub address: Option<String>,
 }
 
 /// The daemon says only whether each key is set, and whether its provider refused it; a key never comes back.
@@ -64,12 +78,52 @@ pub struct Account {
     pub github_id: Option<u64>,
     /// Looked up on GitHub when signing in; the service keeps only the id.
     pub github_login: Option<String>,
-    /// Voice used in the current UTC day, when the daemon knows.
-    pub today: Option<Usage>,
-    /// Why the service refused voice today: `allowance` or `global_cap`.
-    pub refused: Option<String>,
-    /// The account's plan (ADR-0020), when the daemon knows.
+    /// The account's plan (ADR-0023), when the daemon knows.
     pub plan: Option<Plan>,
+    /// The voice credit left, in millionths of a US dollar (ADR-0024); None before the account first uses our voice
+    /// service, when the service couldn't read it, and from older daemons.
+    pub voice_credit_micro_usd: Option<u64>,
+    /// The one switch for the Paid plan: the service's answer, which the daemon reads with the plan. While it is false,
+    /// the app doesn't offer the Paid plan: no Upgrade, no Free plan row, no Relay switch or refusals, and no making a
+    /// Character with VibeBuddy's voices. False when signed out, and from older daemons and services.
+    pub upgrade_offered: bool,
+}
+
+/// The account card's plan button.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PlanButton {
+    Upgrade,
+    ManagePlan,
+}
+
+impl Account {
+    /// Manage plan on Paid, Upgrade on Free while the Paid plan is offered, none otherwise.
+    pub fn plan_button(&self) -> Option<PlanButton> {
+        let plan = self.plan.as_ref().filter(|_| self.signed_in)?;
+        if plan.paid() {
+            Some(PlanButton::ManagePlan)
+        } else {
+            self.upgrade_offered.then_some(PlanButton::Upgrade)
+        }
+    }
+
+    /// True when the plan row has a button: Manage plan on Paid, Upgrade on Free while the Paid plan is offered.
+    pub fn shows_plan_row(&self) -> bool {
+        self.plan_button().is_some()
+    }
+
+    /// The Relay switch on General: while the Paid plan is offered, and always for a Paid account, so stopping sales
+    /// doesn't take it from someone who pays for the Relay.
+    pub fn shows_relay_switch(&self) -> bool {
+        self.upgrade_offered || (self.signed_in && self.plan.as_ref().is_some_and(Plan::paid))
+    }
+
+    /// The voice credit left in dollars, "$0.93", for the account card; None when the daemon doesn't know it. Cut
+    /// down to the cent, so it never shows more than is left.
+    pub fn voice_credit(&self) -> Option<String> {
+        let cents = self.voice_credit_micro_usd? / 10_000;
+        Some(format!("${}.{:02}", cents / 100, cents % 100))
+    }
 }
 
 #[derive(Clone, Debug, Default, Deserialize, PartialEq)]
@@ -77,59 +131,14 @@ pub struct Account {
 pub struct Plan {
     /// `free` or `paid`.
     pub name: String,
-    /// When the billing period ends and the plan renews, RFC 3339; the counts and this come only on the Paid plan.
+    /// When the billing period ends and the plan renews, RFC 3339; only on the Paid plan.
     pub period_end: Option<String>,
-    pub characters: Option<u64>,
-    pub characters_limit: Option<u64>,
 }
 
 impl Plan {
-    /// Whether the app shows the Paid plan. Off until the plan is on sale (2026-10-28): the plan row, the Relay switch
-    /// and its refusals, and making a Character with VibeBuddy's voices are hidden. The daemon doesn't change.
-    pub const SHOWN: bool = false;
-
     pub fn paid(&self) -> bool {
         self.name == "paid"
     }
-
-    /// "This month: 12,300 of 100,000 characters · renews 24 Nov", on the Paid plan only.
-    pub fn month_line(&self) -> Option<String> {
-        let (Some(used), Some(limit), Some(end)) = (self.characters, self.characters_limit, self.period_end.as_deref()) else { return None };
-        let end = chrono::DateTime::parse_from_rfc3339(end).ok()?.with_timezone(&chrono::Local);
-        let renews = if crate::i18n::is_chinese() { end.format("%-m月%-d日") } else { end.format("%-d %b") }.to_string();
-        self.paid().then(|| tr("This month: %@ of %@ characters · renews %@", &[&grouped(used), &grouped(limit), &renews]))
-    }
-}
-
-/// When refused voice comes back: the next 00:00 UTC after `now`, when the service's day starts over, as `HH:MM`
-/// (24 hours) in `zone`, the same time the box shows.
-pub fn voice_comes_back<Zone: chrono::TimeZone>(now: chrono::DateTime<chrono::Utc>, zone: &Zone) -> String
-where
-    Zone::Offset: std::fmt::Display,
-{
-    let midnight = (now.date_naive() + chrono::Days::new(1)).and_time(chrono::NaiveTime::MIN).and_utc();
-    midnight.with_timezone(zone).format("%H:%M").to_string()
-}
-
-/// `12300` as "12,300".
-fn grouped(number: u64) -> String {
-    let digits = number.to_string();
-    let mut out = String::new();
-    for (index, digit) in digits.chars().enumerate() {
-        if index > 0 && (digits.len() - index).is_multiple_of(3) {
-            out.push(',');
-        }
-        out.push(digit);
-    }
-    out
-}
-
-#[derive(Clone, Debug, Default, Deserialize, PartialEq)]
-#[serde(default)]
-pub struct Usage {
-    pub day: String,
-    pub commands: u64,
-    pub commands_limit: u64,
 }
 
 /// One Activity as the daemon summarises it (daemon/src/activity.rs `ActivitySummary`).
@@ -255,7 +264,7 @@ pub struct Device {
     pub volume: Option<u8>,
     /// Which set of screens the box draws, `robot` or `korekore` (ADR-0021); None from firmware that predates the choice.
     pub screens: Option<String>,
-    /// The decoration the box draws over its screens, `off`, `leaves`, `snow` or `lights` (ADR-0022); None from firmware that
+    /// The decoration the box draws over its screens, `off`, `thanksgiving` or `christmas` (ADR-0022); None from firmware that
     /// predates decorations.
     pub decoration: Option<String>,
     /// Linked over the local network or the Relay; `port` is then the box's or the Relay's address.
@@ -289,8 +298,12 @@ pub struct Device {
     pub wifi_error: Option<String>,
     /// What the box heard on its last scan, strongest first.
     pub wifi_seen: Vec<SeenNetwork>,
-    /// Why the Relay won't carry the link (ADR-0020): `signed_out`, `plan` or `unavailable`.
+    /// Why the Relay won't carry the link (ADR-0023): `signed_out`, `plan` or `unavailable`.
     pub relay_refused: Option<String>,
+    /// The Relay this computer uses, and the one the box last said it uses (docs/relay-protocol.md, "Which Relay");
+    /// none from older daemons, and the box's also until the box has said.
+    pub relay_server: Option<String>,
+    pub box_relay: Option<String>,
 }
 
 #[derive(Clone, Debug, Default, Deserialize, PartialEq)]
@@ -340,9 +353,10 @@ impl Device {
         }
     }
 
-    /// What the link section says about the Relay turning this computer away.
-    pub fn relay_refusal(&self) -> Option<String> {
-        if !Plan::SHOWN {
+    /// What the link section says about the Relay turning this computer away; nothing while the Paid plan isn't
+    /// `offered`.
+    pub fn relay_refusal(&self, offered: bool) -> Option<String> {
+        if !offered {
             return None;
         }
         Some(match self.relay_refused.as_deref()? {
@@ -350,6 +364,34 @@ impl Device {
             "plan" => tr("The Relay needs the Paid plan.", &[]),
             _ => tr("The Relay can't check the account right now. VibeBuddy tries again later.", &[]),
         })
+    }
+
+    /// The box uses another Relay than this computer, so the two can't meet through it. Unknown until the box has said.
+    pub fn relay_mismatch(&self) -> bool {
+        match (&self.relay_server, &self.box_relay) {
+            (Some(mine), Some(theirs)) => relay_name(mine) != relay_name(theirs),
+            _ => false,
+        }
+    }
+
+    /// Which Relay this computer uses, and the box's when it differs.
+    pub fn relay_line(&self) -> Option<String> {
+        let mine = relay_name(self.relay_server.as_deref()?);
+        Some(match self.box_relay.as_deref() {
+            Some(theirs) if self.relay_mismatch() => tr("This computer: %@ · Box: %@", &[&mine, &relay_name(theirs)]),
+            _ => mine,
+        })
+    }
+}
+
+/// A Relay by its address: ours in production or staging, or another, such as one under `wrangler dev`, by its host.
+fn relay_name(address: &str) -> String {
+    let host = address.trim().split_once("://").map_or(address.trim(), |(_, rest)| rest);
+    let host = host.split(['/', ':']).next().unwrap_or(host);
+    match host {
+        "relay.korekore.ai" => tr("Production", &[]),
+        "relay-staging.korekore.ai" => tr("Staging", &[]),
+        other => other.to_owned(),
     }
 }
 
@@ -426,7 +468,11 @@ impl MenuState {
                 .unwrap_or("?");
             tr("Box online · firmware %@", &[&build])
         } else {
-            tr("Box not found", &[])
+            match &device.busy {
+                Some(busy) if busy.owner.is_empty() => tr("Box on another computer", &[]),
+                Some(busy) => tr("Box with %@", &[&busy.owner]),
+                None => tr("Box not found", &[]),
+            }
         };
         let mode = match device.mode.as_deref() {
             Some("duty") => tr("On duty", &[]),
@@ -473,9 +519,9 @@ mod tests {
 
     #[test]
     fn the_box_screens_parse() {
-        let device: Device = serde_json::from_str(r#"{"connected": true, "port": null, "bridge": false, "screens": "korekore", "decoration": "snow"}"#).expect("device");
+        let device: Device = serde_json::from_str(r#"{"connected": true, "port": null, "bridge": false, "screens": "korekore", "decoration": "christmas"}"#).expect("device");
         assert_eq!(device.screens.as_deref(), Some("korekore"));
-        assert_eq!(device.decoration.as_deref(), Some("snow"));
+        assert_eq!(device.decoration.as_deref(), Some("christmas"));
     }
 
     #[test]
@@ -532,6 +578,9 @@ mod tests {
         let offline = Status::default();
         assert_eq!(MenuState::derive(Some(&offline)).icon, Icon::Offline);
         assert_eq!(MenuState::derive(Some(&offline)).device_line, "Box not found");
+        let mut away = Status::default();
+        away.device.busy = Some(Busy { owner: "omarchy".to_owned(), reason: "linked".to_owned() });
+        assert_eq!(MenuState::derive(Some(&away)).device_line, "Box with omarchy");
     }
 
     #[test]
@@ -568,8 +617,24 @@ mod tests {
     #[test]
     fn the_relays_refusal_is_explained() {
         let device: Device = serde_json::from_str(r#"{"connected":false,"relay_refused":"plan"}"#).expect("device");
-        assert_eq!(device.relay_refusal().as_deref(), Plan::SHOWN.then_some("The Relay needs the Paid plan."));
-        assert_eq!(Device::default().relay_refusal(), None);
+        assert_eq!(device.relay_refusal(true).as_deref(), Some("The Relay needs the Paid plan."));
+        assert_eq!(device.relay_refusal(false), None, "nothing about the Paid plan while it isn't offered");
+        assert_eq!(Device::default().relay_refusal(true), None);
+    }
+
+    #[test]
+    fn the_two_relays_are_named_and_a_mismatch_is_seen() {
+        let device: Device =
+            serde_json::from_str(r#"{"connected":true,"relay_server":"wss://relay-staging.korekore.ai","box_relay":"wss://relay.korekore.ai"}"#).expect("device");
+        assert!(device.relay_mismatch());
+        assert_eq!(device.relay_line().as_deref(), Some("This computer: Staging · Box: Production"));
+        let same = Device { box_relay: Some("wss://relay-staging.korekore.ai/".to_owned()), ..device.clone() };
+        assert!(!same.relay_mismatch());
+        assert_eq!(same.relay_line().as_deref(), Some("Staging"));
+        let unknown = Device { box_relay: None, ..device.clone() };
+        assert!(!unknown.relay_mismatch(), "the box hasn't said");
+        assert_eq!(Device { relay_server: Some("ws://127.0.0.1:8787".to_owned()), ..unknown }.relay_line().as_deref(), Some("127.0.0.1"));
+        assert_eq!(Device::default().relay_line(), None, "an older daemon");
     }
 
     #[test]
@@ -582,33 +647,41 @@ mod tests {
         )
         .expect("account");
         assert!(account.available && account.signed_in);
-        assert_eq!((account.github_id, account.github_login.as_deref(), account.email), (Some(60097), Some("octocat"), None));
-        let used: Account = serde_json::from_str(r#"{"signed_in":true,"today":{"day":"2026-10-24","commands":7,"commands_limit":100},"refused":"global_cap"}"#).expect("account");
-        assert_eq!(used.today, Some(Usage { day: "2026-10-24".to_owned(), commands: 7, commands_limit: 100 }));
-        assert_eq!(used.refused.as_deref(), Some("global_cap"));
-        assert_eq!(used.plan, None);
+        assert_eq!((account.github_id, account.github_login.as_deref(), account.email.clone()), (Some(60097), Some("octocat"), None));
+        assert_eq!((account.voice_credit(), account.plan), (None, None));
     }
 
     #[test]
-    fn refused_voice_comes_back_at_the_next_midnight_utc_in_local_time() {
-        let at = |text: &str| chrono::DateTime::parse_from_rfc3339(text).unwrap().with_timezone(&chrono::Utc);
-        let zone = |hours: i32| chrono::FixedOffset::east_opt(hours * 3600).unwrap();
-        assert_eq!(voice_comes_back(at("2026-10-27T15:59:00Z"), &zone(8)), "08:00");
-        assert_eq!(voice_comes_back(at("2026-10-27T15:59:00Z"), &zone(-5)), "19:00");
-        assert_eq!(voice_comes_back(at("2026-12-31T23:59:59Z"), &chrono::Utc), "00:00");
-    }
-
-    #[test]
-    fn the_plan_decodes_and_only_the_paid_plan_has_a_month() {
+    fn upgrade_shows_on_free_only_with_the_switch_and_manage_plan_on_paid() {
         let free: Account = serde_json::from_str(r#"{"signed_in":true,"plan":{"name":"free"}}"#).expect("account");
-        let free = free.plan.expect("plan");
-        assert!(!free.paid());
-        assert_eq!(free.month_line(), None);
-        let paid: Plan = serde_json::from_str(r#"{"name":"paid","period_end":"2026-11-24T12:00:00.000Z","characters":12300,"characters_limit":100000}"#).expect("plan");
-        assert!(paid.paid());
-        let line = paid.month_line().expect("a month");
-        assert!(line.starts_with("This month: 12,300 of 100,000 characters · renews ") && line.ends_with(" Nov"), "{line}");
-        assert_eq!((grouped(0), grouped(999), grouped(1000), grouped(1234567)), ("0".to_owned(), "999".to_owned(), "1,000".to_owned(), "1,234,567".to_owned()));
+        assert_eq!((free.upgrade_offered, free.plan_button()), (false, None), "the switch off, or an older daemon");
+        let offered: Account = serde_json::from_str(r#"{"signed_in":true,"plan":{"name":"free"},"upgrade_offered":true}"#).expect("account");
+        assert_eq!(offered.plan_button(), Some(PlanButton::Upgrade));
+        let paid = Account { plan: Some(Plan { name: "paid".to_owned(), period_end: None }), upgrade_offered: false, ..offered.clone() };
+        assert_eq!(paid.plan_button(), Some(PlanButton::ManagePlan), "Manage plan doesn't wait for the switch");
+        assert_eq!(Account { signed_in: false, ..paid.clone() }.plan_button(), None, "signed out");
+        assert_eq!(Account { plan: None, ..offered.clone() }.plan_button(), None, "before the plan is read");
+        // The plan row shows with its button: on Free only while the Paid plan is offered, always on Paid.
+        assert!(!free.shows_plan_row() && offered.shows_plan_row() && paid.shows_plan_row());
+        // The Relay switch: while the Paid plan is offered, and always for a Paid account.
+        assert!(offered.shows_relay_switch() && !free.shows_relay_switch());
+        assert!(paid.shows_relay_switch(), "stopping sales doesn't take the Relay switch from a Paid account");
+        assert!(!Account { signed_in: false, ..paid.clone() }.shows_relay_switch(), "signed out");
+    }
+
+    #[test]
+    fn the_plan_and_the_voice_credit_decode_and_the_credit_shows_in_dollars() {
+        let free: Account = serde_json::from_str(r#"{"signed_in":true,"plan":{"name":"free"}}"#).expect("account");
+        assert!(!free.plan.as_ref().expect("plan").paid());
+        assert_eq!(free.voice_credit(), None, "nothing before the first use");
+        let paid: Plan = serde_json::from_str(r#"{"name":"paid","period_end":"2026-11-24T12:00:00.000Z"}"#).expect("plan");
+        assert!(paid.paid() && paid.period_end.is_some());
+        let credited: Account = serde_json::from_str(r#"{"signed_in":true,"plan":{"name":"free"},"voice_credit_micro_usd":933100}"#).expect("account");
+        assert_eq!(credited.voice_credit_micro_usd, Some(933_100));
+        assert_eq!(credited.voice_credit().as_deref(), Some("$0.93"));
+        let credit = |micro| Account { voice_credit_micro_usd: Some(micro), ..Account::default() }.voice_credit().unwrap();
+        // Cut down to the cent: a credit just under a dollar never shows as a whole one.
+        assert_eq!((credit(999_933), credit(1_000_000), credit(12_345_678), credit(0)), ("$0.99".into(), "$1.00".into(), "$12.34".into(), "$0.00".into()));
     }
 
     #[test]

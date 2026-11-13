@@ -1,11 +1,11 @@
-//! Making a Character (ADR-0020, docs/characters.md), the Mac app's `Making.swift`: the user starts from a preset,
+//! Making a Character (ADR-0023, docs/characters.md), the Mac app's `Making.swift`: the user starts from a preset,
 //! edits its lines and picks a voice; the daemon makes the line audio (`POST /v1/characters`) into
 //! `config_dir()/characters/<id>/`, and the app packs it with a look and writes it to the box like a preset.
 
 use serde::{Deserialize, Serialize};
 
 use crate::i18n::tr;
-use crate::status::{Account, Plan, VoiceKeys};
+use crate::status::{Account, VoiceKeys};
 
 /// A voice a made Character can speak with, from `GET /v1/voices`: a row of characters/voices.tsv, or one in the
 /// user's own account (`own`), which only their own key speaks and which has no language of its own.
@@ -124,18 +124,19 @@ impl Making {
         if self.total == 0 { 0.0 } else { self.done as f32 / self.total as f32 }
     }
 
-    /// Why it stopped, said for the user; `provider` names the voice's provider. None unless it failed.
-    pub fn explanation(&self, provider: &str) -> Option<String> {
+    /// Why it stopped, said for the user; `provider` names the voice's provider, and the Paid plan is named only when
+    /// `plan_offered` ([`Account::upgrade_offered`]). None unless it failed.
+    pub fn explanation(&self, provider: &str, plan_offered: bool) -> Option<String> {
         if self.state != "failed" {
             return None;
         }
         Some(match self.reason.as_deref() {
-            Some("plan") if !Plan::SHOWN => tr("Set your own key for %@ on the Account tab first.", &[&provider]),
+            Some("plan") if !plan_offered => tr("Set your own key for %@ on the General tab first.", &[&provider]),
             Some("plan") => tr("Making a Character with VibeBuddy's voices needs the Paid plan, or your own key for %@.", &[&provider]),
             Some("monthly") => tr("This month's Characters on the Paid plan are used up. The lines made so far are kept: resume next month, or with your own key for %@.", &[&provider]),
             Some("global_cap") => tr("VibeBuddy's voices are paused for today. The lines made so far are kept: resume tomorrow.", &[]),
-            Some("signed_out") => tr("Sign in on the Account tab, or set your own key for %@ there, then resume.", &[&provider]),
-            Some("own_key") => tr("%@ refused your own key. Set another one on the Account tab, then resume.", &[&provider]),
+            Some("signed_out") => tr("Sign in on the General tab, or set your own key for %@ there, then resume.", &[&provider]),
+            Some("own_key") => tr("%@ refused your own key. Set another one on the General tab, then resume.", &[&provider]),
             Some("internal") => tr("Making the Character stopped unexpectedly. Resume to try again.", &[]),
             _ => tr("Making the Character failed: %@", &[&self.error.as_deref().unwrap_or_default()]),
         })
@@ -154,6 +155,8 @@ pub enum Readiness {
     SignIn,
     /// No service to sign in to in this build, and no own key.
     OwnKeyOnly,
+    /// One of Volcano Engine's voices, which are no longer offered, without a key for it: there is no row to set one.
+    Retired,
 }
 
 impl Readiness {
@@ -161,9 +164,11 @@ impl Readiness {
         let key = keys.map(|keys| if voice.provider == "volc" { &keys.volc } else { &keys.elevenlabs });
         if key.is_some_and(|key| key.set && !key.refused) {
             Readiness::OwnKey
-        } else if voice.own || !Plan::SHOWN {
+        } else if voice.provider == "volc" && !voice.own && !keys.is_some_and(VoiceKeys::shows_volc) {
+            Readiness::Retired
+        } else if voice.own || !account.upgrade_offered {
             // A voice in the user's own account: VibeBuddy's voice service can't speak it. Nor, while the Paid plan
-            // is hidden, any voice.
+            // isn't offered, any voice.
             Readiness::OwnKeyOnly
         } else if account.signed_in {
             Readiness::PaidPlan
@@ -182,8 +187,9 @@ impl Readiness {
         match self {
             Readiness::OwnKey => tr("Made with your own key for %@, billed to your account there.", &[&provider]),
             Readiness::PaidPlan => tr("Without your own key for %@, making a Character with VibeBuddy's voices needs the Paid plan.", &[&provider]),
-            Readiness::SignIn => tr("Sign in on the Account tab for the Paid plan, or set your own key for %@ there.", &[&provider]),
-            Readiness::OwnKeyOnly => tr("Set your own key for %@ on the Account tab first.", &[&provider]),
+            Readiness::SignIn => tr("Sign in on the General tab for the Paid plan, or set your own key for %@ there.", &[&provider]),
+            Readiness::OwnKeyOnly => tr("Set your own key for %@ on the General tab first.", &[&provider]),
+            Readiness::Retired => tr("%@ voices are no longer offered. Pick another voice.", &[&provider]),
         }
     }
 }
@@ -320,10 +326,15 @@ mod tests {
         let signed_in = Account { available: true, signed_in: true, ..Account::default() };
         let signed_out = Account { available: true, ..Account::default() };
         assert_eq!(Readiness::of(&voice("elevenlabs"), Some(&keys), &Account::default()), Readiness::OwnKey);
-        let (paid_plan, sign_in) = if Plan::SHOWN { (Readiness::PaidPlan, Readiness::SignIn) } else { (Readiness::OwnKeyOnly, Readiness::OwnKeyOnly) };
-        assert_eq!(Readiness::of(&voice("volc"), Some(&keys), &signed_in), paid_plan, "a refused key doesn't count");
-        assert_eq!(Readiness::of(&voice("volc"), None, &signed_out), sign_in);
-        assert_eq!(Readiness::of(&voice("volc"), None, &Account::default()), Readiness::OwnKeyOnly);
+        let offered = Account { upgrade_offered: true, ..signed_in.clone() };
+        assert_eq!(Readiness::of(&voice("volc"), Some(&keys), &offered), Readiness::PaidPlan, "a refused key doesn't count");
+        assert_eq!(Readiness::of(&voice("volc"), Some(&keys), &signed_in), Readiness::OwnKeyOnly, "only an own key while the Paid plan isn't offered");
+        assert_eq!(Readiness::of(&voice("elevenlabs"), None, &signed_out), Readiness::OwnKeyOnly, "signed out: the daemon says not offered");
+        assert_eq!(Readiness::of(&voice("elevenlabs"), None, &Account::default()), Readiness::OwnKeyOnly);
+        // Volcano Engine's voices without a key for it: no row to set one, so pick another voice, whatever the plan.
+        assert_eq!(Readiness::of(&voice("volc"), None, &signed_in), Readiness::Retired);
+        assert_eq!(Readiness::of(&voice("volc"), None, &offered), Readiness::Retired);
+        assert!(!Readiness::Retired.can_start());
         assert!(!Readiness::SignIn.can_start() && Readiness::PaidPlan.can_start());
         // A voice of the user's own: only their own key speaks it, whatever the plan.
         let own = Voice { own: true, ..voice("volc") };
@@ -354,8 +365,11 @@ mod tests {
         assert_eq!(manifest, request);
         let failed = Making { state: "failed".to_owned(), reason: Some("plan".to_owned()), done: 2, total: 6, ..Making::default() };
         // In whichever language the UI is, it names the provider.
-        assert!(!failed.running() && failed.explanation("ElevenLabs").unwrap().contains("ElevenLabs"));
-        assert_eq!(Making { state: "done".to_owned(), ..Making::default() }.explanation("ElevenLabs"), None);
+        assert!(!failed.running() && failed.explanation("ElevenLabs", true).unwrap().contains("ElevenLabs"));
+        assert_eq!(Making { state: "done".to_owned(), ..Making::default() }.explanation("ElevenLabs", true), None);
+        // The Paid plan is named only while it is offered.
+        let (offered, not_offered) = (failed.explanation("ElevenLabs", true).unwrap(), failed.explanation("ElevenLabs", false).unwrap());
+        assert!(offered.contains("Paid plan") && !not_offered.contains("Paid plan"), "{offered} / {not_offered}");
     }
 
     #[test]

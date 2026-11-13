@@ -66,16 +66,17 @@ const SAMPLE: &str = r#"{"daemon":{"build":"0.5.0 cc16829","revision":"firmware-
  "device":{"connected":true,"port":"/dev/ttyACM0","mode":"duty","firmware_version":"0.5.0","firmware_build":"cc16829",
    "voice":"robot","volume":50,"box_key":"k","computer_key":"me",
    "paired_computers":[{"key":"me","name":"ThinkPad · Omarchy"},{"key":"m","name":"Michael's Mac Studio"}],
-   "wifi_network":"ByteTrade","wifi_address":"192.168.1.160","transfer":true,"screens":"korekore","decoration":"snow"},
+   "wifi_network":"ByteTrade","wifi_address":"192.168.1.160","transfer":true,"screens":"korekore","decoration":"christmas"},
  "today":{"done":7,"asks":3,"busy_seconds":15120},
  "hooks":{"codex":"2026-10-21T16:40:00+08:00","claude":"2026-10-21T17:03:00+08:00"},
  "config":{"notify_link":true,"check_updates":true,"relay":false},
  "updates":{"enabled":true,"last_check":"2026-10-21T13:51:00+08:00"},
  "account":{"available":true,"signed_in":true,"github_id":1,"github_login":"kore-sample",
-   "today":{"day":"2026-10-21","commands":12,"commands_limit":200},
-   "plan":{"name":"paid","period_end":"2026-11-24T00:00:00Z","characters":12300,"characters_limit":100000}},
+   "plan":{"name":"paid","period_end":"2026-11-24T00:00:00Z"},"voice_credit_micro_usd":933100},
  "voice_keys":{"elevenlabs":{"set":true,"refused":false},"volc":{"set":false,"refused":false}},
  "making":{"id":"made-1","name":"Night owl","state":"done","done":12,"total":12},
+ "vibeplays":[{"key":"vg1","name":"Desk VibePlay","paired":true,"connected":true,"address":"192.168.1.42:7342"},
+               {"key":"vg2","name":"Living-room VibePlay","paired":false,"connected":false,"address":"192.168.1.57:7342"}],
  "activities":[{"agent":"claude-code","title":"CC:Add Chinese to the box","state":"working"},
                {"agent":"codex","title":"CX:Fix voice reply","state":"working"},
                {"agent":"github-actions","title":"CI:App tests","state":"working"}]}"#;
@@ -123,11 +124,29 @@ fn draw_the_korekore_pages() {
         lines: 12,
         complete: true,
     }];
+    // The user's own Character, as a card in the grid: Luna's drawings, from the repo, stand in for theirs.
+    let luna = std::fs::read(concat!(env!("CARGO_MANIFEST_DIR"), "/../characters/luna/pack.bin")).unwrap();
+    let frames = crate::character::look_frames(&crate::character::Pack::parse(&luna).unwrap().look.unwrap()).unwrap();
+    let faces: Vec<_> = frames.iter().take(4).map(|frame| crate::handle(frame, 1)).collect();
+    app.custom_look = Some((Vec::new(), faces));
+    app.characters.custom_lender = Some("luna".to_owned());
     for section in Section::ALL {
         app.tab = section.tab();
         let element: Element<'_, Message> = app.view(iced::window::Id::unique());
         save(&format!("page-{}", format!("{section:?}").to_lowercase()), (954.0, 766.0), element);
     }
+    // The whole Device page, down to the VibePlays, with one being paired.
+    app.tab = Section::Device.tab();
+    app.vibeplay_pairing = Some("vg2".to_owned());
+    app.vibeplay_code = "4821".to_owned();
+    let element: Element<'_, Message> = app.view(iced::window::Id::unique());
+    save("page-device-tall", (954.0, 1500.0), element);
+    app.vibeplay_pairing = None;
+    app.vibeplay_code.clear();
+    // The whole Character page, down to the grid's last row.
+    app.tab = Section::Character.tab();
+    let element: Element<'_, Message> = app.view(iced::window::Id::unique());
+    save("page-character-tall", (954.0, 1500.0), element);
     // Making a Character, which takes the Character page's place.
     if let Some(base) = app.voices.first().map(crate::Lender::of) {
         app.tab = Section::Character.tab();

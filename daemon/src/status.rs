@@ -52,7 +52,7 @@ pub struct DeviceState {
     /// Which set of screens the box draws, `robot` or `korekore` (ADR-0021), stored on the device; None from firmware that
     /// predates the choice.
     pub screens: Option<String>,
-    /// The decoration the box draws over its screens, `off`, `leaves`, `snow` or `lights` (ADR-0022), stored on the device; None
+    /// The decoration the box draws over its screens, `off`, `thanksgiving` or `christmas` (ADR-0022), stored on the device; None
     /// from firmware that predates decorations.
     pub decoration: Option<String>,
     /// The connected port's USB serial number, which tells this device from another ESP32-S3.
@@ -77,7 +77,7 @@ pub struct DeviceState {
     pub wifi_error: Option<String>,
     /// The Relay this computer uses, `wss://host`; None without a key. Set by the daemon, not the box.
     pub relay_server: Option<String>,
-    /// Why the Relay won't carry this computer's link (ADR-0020): `signed_out`, `plan`, or `unavailable` (it
+    /// Why the Relay won't carry this computer's link (ADR-0023): `signed_out`, `plan`, or `unavailable` (it
     /// couldn't check the plan; tried again later). Set by the daemon from [`crate::relay::RelayConfig::refused`].
     pub relay_refused: Option<String>,
     /// The Relay the box uses, as it last said (`RELAY URL`); it follows the computer on the cable.
@@ -187,7 +187,12 @@ impl DeviceState {
                 self.bridge_baud = Some(*baud);
                 self.bridge_switches = *switches;
             }
-            DeviceMessage::Busy { owner, reason } => self.busy = Some(Busy { owner: owner.clone(), reason: reason.clone() }),
+            DeviceMessage::Busy { owner, reason } => {
+                // The box is with another computer, so whatever link this one had is gone, even before the transport
+                // stops waiting on the Relay and says so.
+                self.apply(&DeviceMessage::Disconnected);
+                self.busy = Some(Busy { owner: owner.clone(), reason: reason.clone() });
+            }
             DeviceMessage::ForeignFirmware => {
                 // Over the bridge the port survives a reset into other firmware, so what ours reported must go too.
                 self.foreign_firmware = true;
@@ -410,10 +415,12 @@ pub struct Status {
     pub updates: crate::updates::UpdateStatus,
     /// The person's VibeBuddy account (ADR-0018).
     pub account: crate::account::AccountStatus,
-    /// Which of the user's own keys for spoken replies are set, and refused (ADR-0020); never a key.
+    /// Which of the user's own keys for spoken replies are set, and refused (ADR-0023); never a key.
     pub voice_keys: crate::voice_keys::VoiceKeysStatus,
-    /// The Character being made, or the last one made, since the daemon started (ADR-0020).
+    /// The Character being made, or the last one made, since the daemon started (ADR-0023).
     pub making: Option<crate::making::MakingStatus>,
+    /// Every VibePlay paired with this computer or found on the network (ADR-0025).
+    pub vibeplays: Vec<crate::vibeplay::VibePlayStatus>,
 }
 
 /// What the apps explain for `WIFI FAILED <why>`: `wrong_password` (the network turned the box away, which a
@@ -494,7 +501,7 @@ mod tests {
         assert!(!state.apply(&line("VOLUME ERROR")), "an error does not change the volume");
         assert!(state.apply(&line("SCREENS KOREKORE")));
         assert!(!state.apply(&line("SCREENS ERROR")), "an unknown style does not change the screens");
-        assert!(state.apply(&line("DECORATION SNOW")));
+        assert!(state.apply(&line("DECORATION CHRISTMAS")));
         assert!(!state.apply(&line("DECORATION ERROR")), "an unknown decoration does not change it");
         assert_eq!(
             state,
@@ -515,7 +522,7 @@ mod tests {
                 voice: Some("builtin".to_owned()),
                 volume: Some(65),
                 screens: Some("korekore".to_owned()),
-                decoration: Some("snow".to_owned()),
+                decoration: Some("christmas".to_owned()),
                 usb_serial: None,
                 box_key: None,
                 paired: false,
@@ -692,6 +699,17 @@ mod tests {
     }
 
     #[test]
+    fn a_box_that_is_busy_elsewhere_is_not_connected_here() {
+        // Off this computer's cable, the transport waits on the Relay and says Disconnected only when the wait ends
+        // (seen 2026-11-05): the status kept the old port and the apps sent settings into nothing.
+        let mut state = DeviceState::default();
+        state.apply(&DeviceMessage::Connected { port: "/dev/cu.x".to_owned(), bridge: false, usb_serial: None });
+        state.apply(&DeviceMessage::Busy { owner: "omarchy".to_owned(), reason: "linked".to_owned() });
+        assert!(!state.connected && state.port.is_none());
+        assert_eq!(state.busy.as_ref().map(|busy| busy.owner.as_str()), Some("omarchy"));
+    }
+
+    #[test]
     fn a_network_link_is_a_connection_with_an_address() {
         let mut state = DeviceState::default();
         state.apply(&DeviceMessage::ConnectedNetwork { address: "192.168.1.23:7340".to_owned() });
@@ -761,7 +779,7 @@ mod tests {
     fn a_new_connection_forgets_everything_the_previous_device_said() {
         let mut state = DeviceState::default();
         state.apply(&DeviceMessage::Connected { port: "/dev/cu.x".to_owned(), bridge: false, usb_serial: None });
-        for said in ["MODE DUTY", "VOICES ahu", "VOLUME 50", "SCREENS ROBOT", "DECORATION LEAVES"] {
+        for said in ["MODE DUTY", "VOICES ahu", "VOLUME 50", "SCREENS ROBOT", "DECORATION THANKSGIVING"] {
             state.apply(&line(said));
         }
         state.apply(&DeviceMessage::Disconnected);

@@ -2034,7 +2034,7 @@ impl Firmware {
             }
             // Which screens the box draws, robot or korekore (ADR-0021); without a style it is just a query.
             "device.screens" => self.set_screens(board, string(fields, "style"), now),
-            // The decoration over the screens, off, leaves or snow (ADR-0022); without a name it is just a query.
+            // The decoration over the screens, off, thanksgiving or christmas (ADR-0022); without a name it is just a query.
             "device.decoration" => self.set_decoration(board, string(fields, "name"), now),
             // Voice commands (docs/protocol.md): the computer offers them, then answers each turn.
             "voice.available" => {

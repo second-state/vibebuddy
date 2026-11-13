@@ -29,18 +29,30 @@ pub struct AccountStatus {
     pub github_id: Option<u64>,
     /// Looked up on GitHub when signing in, for the App to show; the service keeps only the id.
     pub github_login: Option<String>,
-    /// Voice used in the current UTC day, when known: read from the service at sign-in and when the App asks, and
-    /// counted here as commands are recognized.
-    pub today: Option<Usage>,
-    /// Why the service last refused voice today (`allowance` or `global_cap`), until the UTC day ends.
-    pub refused: Option<String>,
-    /// The account's plan (ADR-0020), read with today's usage; on the Paid plan its characters are counted here
-    /// too as replies are spoken.
+    /// The account's plan (ADR-0023), read from the service at sign-in and when the App asks.
     pub plan: Option<Plan>,
+    /// The voice credit left, in millionths of a US dollar (ADR-0024), read with the plan. None before the account
+    /// first uses our voice service, and when the service couldn't read it.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub voice_credit_micro_usd: Option<u64>,
+    /// The one switch for the Paid plan (ADR-0024): the service's `upgrade_offered`, read with the plan. False before
+    /// the first read, signed out, or when the service has no such field. While it is false, `POST
+    /// /v1/account/upgrade` doesn't ask the service, and the Apps don't offer the Paid plan. Manage plan doesn't
+    /// depend on it.
+    pub upgrade_offered: bool,
+}
+
+/// A Stripe page on the service (docs/api.md), which the App opens in the browser.
+#[derive(Clone, Copy, Debug)]
+pub enum PlanPage {
+    /// Checkout, to start the Paid plan.
+    Checkout,
+    /// The Customer Portal, to change the card or cancel.
+    Portal,
 }
 
 /// As the service's `GET /v1/account` says it (docs/api.md): `{"name":"free"}`, or `paid` with the billing
-/// period's end and its monthly allowance.
+/// period's end.
 #[derive(Clone, Debug, PartialEq, Serialize)]
 pub struct Plan {
     /// `free` or `paid`.
@@ -48,26 +60,14 @@ pub struct Plan {
     /// When the period ends and the plan renews, RFC 3339.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub period_end: Option<String>,
-    /// Characters of our voices spoken this period.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub characters: Option<u64>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub characters_limit: Option<u64>,
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize)]
-pub struct Usage {
-    /// The UTC day, `2026-10-24`.
-    pub day: String,
-    pub commands: u64,
-    pub commands_limit: u64,
-}
-
-/// What the daemon knows of today's voice; cleared at the UTC day's end by [`Account::status`].
+/// What the last read of the account said, besides who it is.
 #[derive(Default)]
-struct Today {
-    usage: Option<Usage>,
-    refused: Option<(String, String)>,
+struct Details {
+    plan: Option<Plan>,
+    voice_credit_micro_usd: Option<u64>,
+    upgrade_offered: bool,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -96,6 +96,10 @@ pub enum AccountError {
     /// The service refused or couldn't be reached; the message is for logs and the App.
     Service(String),
     NotSignedIn,
+    /// The service said 409 with this reason: `already_paid` for Checkout, `no_subscription` for the portal.
+    Conflict(String),
+    /// The service doesn't offer the plan pages (a 404: Stripe isn't set up there), or the account says Upgrade isn't offered.
+    NotOffered,
 }
 
 impl std::fmt::Display for AccountError {
@@ -105,6 +109,8 @@ impl std::fmt::Display for AccountError {
             Self::UnknownSignIn => write!(f, "this sign-in wasn't started here, or has expired"),
             Self::Service(message) => write!(f, "{message}"),
             Self::NotSignedIn => write!(f, "not signed in"),
+            Self::Conflict(reason) => write!(f, "the service refused: {reason}"),
+            Self::NotOffered => write!(f, "the plan isn't offered here"),
         }
     }
 }
@@ -117,11 +123,10 @@ pub struct Account {
     github_api: String,
     saved: Mutex<Option<Saved>>,
     pending: Mutex<Option<Pending>>,
-    today: Mutex<Today>,
-    plan: Mutex<Option<Plan>>,
-    /// Bumped whenever [`AccountStatus::today`], [`AccountStatus::refused`] or [`AccountStatus::plan`] changes, for
-    /// the status stream.
-    usage_changed: watch::Sender<u64>,
+    details: Mutex<Details>,
+    /// Bumped whenever [`AccountStatus::plan`] or [`AccountStatus::voice_credit_micro_usd`] is read, for the status
+    /// stream.
+    details_changed: watch::Sender<u64>,
     /// Whether signed in, for whoever must follow it: the status stream and the box's offer of voice.
     signed_in: watch::Sender<bool>,
     /// Bumped on signing in or out and on each read that finds the Paid plan: what a computer the Relay turned
@@ -135,7 +140,7 @@ impl Account {
         let file = config_dir.map(|dir| dir.join(ACCOUNT_FILE));
         let saved = file.as_deref().and_then(load);
         let (signed_in, _) = watch::channel(saved.is_some());
-        let (usage_changed, _) = watch::channel(0);
+        let (details_changed, _) = watch::channel(0);
         let (relay_chance, _) = watch::channel(0);
         Self {
             base,
@@ -144,9 +149,8 @@ impl Account {
             github_api: "https://api.github.com".to_owned(),
             saved: Mutex::new(saved),
             pending: Mutex::new(None),
-            today: Mutex::default(),
-            plan: Mutex::default(),
-            usage_changed,
+            details: Mutex::default(),
+            details_changed,
             signed_in,
             relay_chance,
         }
@@ -157,9 +161,14 @@ impl Account {
         *self.relay_chance.borrow()
     }
 
-    /// Changes whenever today's usage, a refusal or the plan changes.
-    pub fn watch_usage(&self) -> watch::Receiver<u64> {
-        self.usage_changed.subscribe()
+    /// Changes whenever the plan or the voice credit is read.
+    pub fn watch_details(&self) -> watch::Receiver<u64> {
+        self.details_changed.subscribe()
+    }
+
+    /// The service's base URL, which our voice service is at too; None when it is switched off.
+    pub fn base(&self) -> Option<String> {
+        self.base.clone()
     }
 
     /// Changes each time the account is signed in or out, from here or by the service refusing the session.
@@ -175,8 +184,7 @@ impl Account {
 
     pub fn status(&self) -> AccountStatus {
         let saved = self.saved.lock().unwrap().clone();
-        let day = utc_day();
-        let today = self.today.lock().unwrap();
+        let details = self.details.lock().unwrap();
         let signed_in = saved.is_some();
         AccountStatus {
             available: self.base.is_some() && self.file.is_some(),
@@ -184,58 +192,14 @@ impl Account {
             email: saved.as_ref().and_then(|s| s.email.clone()),
             github_id: saved.as_ref().and_then(|s| s.github_id),
             github_login: saved.and_then(|s| s.github_login),
-            // A new UTC day starts over: nothing used, nothing refused.
-            today: today.usage.clone().filter(|_| signed_in).map(|usage| if usage.day == day { usage } else { Usage { day: day.clone(), commands: 0, ..usage } }),
-            refused: today.refused.as_ref().filter(|(on, _)| signed_in && *on == day).map(|(_, reason)| reason.clone()),
-            plan: self.plan.lock().unwrap().clone().filter(|_| signed_in),
+            plan: details.plan.clone().filter(|_| signed_in),
+            voice_credit_micro_usd: details.voice_credit_micro_usd.filter(|_| signed_in),
+            upgrade_offered: details.upgrade_offered && signed_in,
         }
     }
 
-    /// A command was recognized by the voice service, which counted it.
-    pub fn note_command(&self) {
-        let day = utc_day();
-        let mut today = self.today.lock().unwrap();
-        if let Some(usage) = &mut today.usage {
-            if usage.day != day {
-                *usage = Usage { day, commands: 0, ..usage.clone() };
-            }
-            usage.commands += 1;
-        }
-        drop(today);
-        self.usage_changed.send_modify(|n| *n += 1);
-    }
-
-    /// A spoken reply of `text` went through the service. On the Paid plan the service counted its characters
-    /// (JavaScript's `length`) against the month while it lasts, the one that crosses the limit included; after
-    /// that, against the daily replies, which aren't shown.
-    pub fn note_reply(&self, text: &str) {
-        let mut plan = self.plan.lock().unwrap();
-        if let Some(Plan { characters: Some(used), characters_limit: Some(limit), .. }) = plan.as_mut()
-            && *used < *limit
-        {
-            *used += text.encode_utf16().count() as u64;
-            drop(plan);
-            self.usage_changed.send_modify(|n| *n += 1);
-        }
-    }
-
-    /// The service refused voice for `reason` (`allowance` or `global_cap`).
-    pub fn note_refusal(&self, reason: &str) {
-        self.today.lock().unwrap().refused = Some((utc_day(), reason.to_owned()));
-        self.usage_changed.send_modify(|n| *n += 1);
-    }
-
-    /// Why voice is off today, as [`AccountStatus::refused`] says it: the box isn't offered voice until the UTC day
-    /// ends, or until a read of the account shows voice again.
-    pub fn voice_refusal(&self) -> Option<&'static str> {
-        match self.status().refused.as_deref()? {
-            "global_cap" => Some("global_cap"),
-            _ => Some("allowance"),
-        }
-    }
-
-    /// Reads today's usage from the service. Blocking.
-    pub fn refresh_usage(&self) -> Result<(), AccountError> {
+    /// Reads the plan and the voice credit from the service. Blocking.
+    pub fn refresh(&self) -> Result<(), AccountError> {
         let token = self.token().ok_or(AccountError::NotSignedIn)?;
         let base = self.base.clone().ok_or(AccountError::Unavailable)?;
         let (status, text) = read(crate::speech::agent(TIMEOUT).get(&format!("{base}/v1/account")).header("Authorization", &format!("Bearer {token}")).call())?;
@@ -247,38 +211,51 @@ impl Account {
             return Err(AccountError::Service(format!("the account couldn't be read: HTTP {status}")));
         }
         let account: serde_json::Value = serde_json::from_str(&text).map_err(|error| AccountError::Service(error.to_string()))?;
-        self.take_usage(&account);
+        self.take_details(&account);
         Ok(())
     }
 
-    /// Today's usage and the plan from a `GET /v1/account` answer (docs/api.md).
-    fn take_usage(&self, account: &serde_json::Value) {
-        let usage = match (account["today"]["day"].as_str(), account["today"]["commands"].as_u64(), account["limits"]["commands"].as_u64()) {
-            (Some(day), Some(commands), Some(limit)) => Some(Usage { day: day.to_owned(), commands, commands_limit: limit }),
-            _ => None,
+    /// The URL of a Stripe page for this account, from the service's `POST /v1/plan/checkout` or `/v1/plan/portal`.
+    /// Blocking.
+    pub fn plan_page(&self, page: PlanPage) -> Result<String, AccountError> {
+        let token = self.token().ok_or(AccountError::NotSignedIn)?;
+        let base = self.base.clone().ok_or(AccountError::Unavailable)?;
+        // The App opens the URL in the browser, so only Stripe's own page for what was asked goes through.
+        let (path, host) = match page {
+            PlanPage::Checkout => ("checkout", "checkout.stripe.com"),
+            PlanPage::Portal => ("portal", "billing.stripe.com"),
         };
+        let (status, text) = read(crate::speech::agent(TIMEOUT).post(&format!("{base}/v1/plan/{path}")).header("Authorization", &format!("Bearer {token}")).send_empty())?;
+        let body = serde_json::from_str::<serde_json::Value>(&text).unwrap_or_default();
+        match status {
+            200 => body["url"]
+                .as_str()
+                .filter(|url| url.starts_with(&format!("https://{host}/")))
+                .map(str::to_owned)
+                .ok_or_else(|| AccountError::Service(format!("the service sent no {host} URL"))),
+            401 => {
+                self.forget();
+                Err(AccountError::NotSignedIn)
+            }
+            404 => Err(AccountError::NotOffered),
+            409 => Err(AccountError::Conflict(body["reason"].as_str().unwrap_or_default().to_owned())),
+            _ => Err(AccountError::Service(format!("the service didn't open the page: HTTP {status}"))),
+        }
+    }
+
+    /// The plan, the voice credit and whether Upgrade is offered, from a `GET /v1/account` answer (docs/api.md).
+    fn take_details(&self, account: &serde_json::Value) {
         let plan = &account["plan"];
-        let plan = plan["name"].as_str().map(|name| Plan {
-            name: name.to_owned(),
-            period_end: plan["period_end"].as_str().map(str::to_owned),
-            characters: plan["characters"].as_u64(),
-            characters_limit: plan["characters_limit"].as_u64(),
-        });
+        let plan = plan["name"].as_str().map(|name| Plan { name: name.to_owned(), period_end: plan["period_end"].as_str().map(str::to_owned) });
         if plan.as_ref().is_some_and(|plan| plan.name == "paid") {
             self.relay_chance.send_modify(|n| *n += 1);
         }
-        let mut today = self.today.lock().unwrap();
-        // Commands left today (a higher limit, say on the Paid plan) end a refusal for the allowance; only the day's
-        // end ends the global cap, which the account doesn't show.
-        if usage.as_ref().is_some_and(|usage| usage.commands < usage.commands_limit)
-            && today.refused.as_ref().is_some_and(|(_, reason)| reason == "allowance")
-        {
-            today.refused = None;
-        }
-        today.usage = usage;
-        drop(today);
-        *self.plan.lock().unwrap() = plan;
-        self.usage_changed.send_modify(|n| *n += 1);
+        *self.details.lock().unwrap() = Details {
+            plan,
+            voice_credit_micro_usd: account["voice_credit_micro_usd"].as_u64(),
+            upgrade_offered: account["upgrade_offered"].as_bool().unwrap_or(false),
+        };
+        self.details_changed.send_modify(|n| *n += 1);
     }
 
     /// The session for calls to the service, when signed in.
@@ -336,7 +313,7 @@ impl Account {
             return Err(AccountError::Service(format!("the new session didn't work: HTTP {status}")));
         }
         let account: serde_json::Value = serde_json::from_str(&text).map_err(|error| AccountError::Service(error.to_string()))?;
-        self.take_usage(&account);
+        self.take_details(&account);
         let github_id = account["github_id"].as_u64();
         let saved = Saved {
             token,
@@ -416,12 +393,12 @@ impl Account {
 impl Account {
     /// As if the service had just said the account is on `plan` (`free` or `paid`).
     pub fn read_plan_for_tests(&self, plan: &str) {
-        self.take_usage(&serde_json::json!({"plan": {"name": plan}}));
+        self.take_details(&serde_json::json!({"plan": {"name": plan}}));
     }
 
-    /// As if a read of the account had found `commands` of today's `limit` used.
-    pub fn read_usage_for_tests(&self, commands: u64, limit: u64) {
-        self.take_usage(&serde_json::json!({"today": {"day": utc_day(), "commands": commands}, "limits": {"commands": limit}}));
+    /// As if the service had just said the account is on Free with `upgrade_offered`.
+    pub fn read_upgrade_offered_for_tests(&self, offered: bool) {
+        self.take_details(&serde_json::json!({"plan": {"name": "free"}, "upgrade_offered": offered}));
     }
 }
 
@@ -431,15 +408,6 @@ pub fn signed_in_for_tests(dir: &Path, token: &str) -> Account {
     std::fs::create_dir_all(dir).unwrap();
     crate::resident_claude::write_private(&dir.join(ACCOUNT_FILE), &serde_json::json!({"token": token, "github_id": 1}).to_string()).unwrap();
     Account::new(Some("http://127.0.0.1:9".to_owned()), Some(dir), 7331)
-}
-
-fn utc_day() -> String {
-    chrono::Utc::now().format("%Y-%m-%d").to_string()
-}
-
-/// The next 00:00 UTC after `now`, when the service's day starts over (docs/api.md).
-pub fn next_utc_day(now: chrono::DateTime<chrono::Utc>) -> chrono::DateTime<chrono::Utc> {
-    (now.date_naive() + chrono::Days::new(1)).and_time(chrono::NaiveTime::MIN).and_utc()
 }
 
 fn load(path: &Path) -> Option<Saved> {
@@ -497,14 +465,14 @@ pub fn callback_page(result: &Result<(), AccountError>) -> (u16, String) {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use std::io::{BufRead, BufReader, Read, Write};
     use std::net::TcpListener;
     use std::sync::Arc;
 
     /// A fake service: answers each request in turn with the next `(status, body)`, and records what it was sent.
-    fn serve(answers: Vec<(u16, &'static str)>) -> (String, Arc<Mutex<Vec<String>>>) {
+    pub(crate) fn serve(answers: Vec<(u16, &'static str)>) -> (String, Arc<Mutex<Vec<String>>>) {
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
         let url = format!("http://{}", listener.local_addr().unwrap());
         let seen = Arc::new(Mutex::new(Vec::new()));
@@ -643,85 +611,122 @@ mod tests {
     }
 
     #[test]
-    fn keeps_todays_usage_counts_commands_and_remembers_a_refusal() {
+    fn reads_the_plan_and_the_voice_credit_and_shows_none_before_the_first_use() {
         let dir = scratch();
-        let day = utc_day();
-        let account_answer = format!(r#"{{"id":"a","github_id":1,"today":{{"day":"{day}","commands":7,"replies":9}},"limits":{{"commands":100,"replies":300}}}}"#);
-        let (service, _) = serve(vec![(200, Box::leak(account_answer.into_boxed_str()))]);
-        let account = signed_in(&service, dir.as_path());
-        let changes = account.watch_usage();
-        assert_eq!(account.status().today, None);
-        account.refresh_usage().unwrap();
-        assert_eq!(account.status().today, Some(Usage { day: day.clone(), commands: 7, commands_limit: 100 }));
-        account.note_command();
-        assert_eq!(account.status().today.unwrap().commands, 8);
-        account.note_refusal("allowance");
-        assert_eq!(account.status().refused.as_deref(), Some("allowance"));
-        assert!(changes.has_changed().unwrap());
-        // A refusal from another day is forgotten; signed out, nothing is shown.
-        account.today.lock().unwrap().refused = Some(("2001-01-01".to_owned(), "global_cap".to_owned()));
-        assert_eq!(account.status().refused, None);
-        account.forget();
-        assert_eq!((account.status().today, account.status().refused), (None, None));
-    }
-
-    #[test]
-    fn a_refusal_holds_until_the_utc_day_ends_or_a_read_shows_commands_left() {
-        let dir = scratch();
-        let day = utc_day();
-        let read = |commands: u32, limit: u32| {
-            let answer = format!(r#"{{"today":{{"day":"{day}","commands":{commands},"replies":0}},"limits":{{"commands":{limit},"replies":20}}}}"#);
-            (200, Box::leak(answer.into_boxed_str()) as &'static str)
-        };
-        let (service, _) = serve(vec![read(20, 20), read(20, 100), read(0, 20)]);
-        let account = signed_in(&service, dir.as_path());
-        account.note_refusal("allowance");
-        assert_eq!(account.voice_refusal(), Some("allowance"));
-        account.refresh_usage().unwrap();
-        assert_eq!(account.voice_refusal(), Some("allowance"), "still used up");
-        account.refresh_usage().unwrap();
-        assert_eq!(account.voice_refusal(), None, "a higher limit leaves commands");
-        // The global cap isn't in the account; only the day's end lifts it.
-        account.note_refusal("global_cap");
-        account.refresh_usage().unwrap();
-        assert_eq!(account.voice_refusal(), Some("global_cap"));
-        account.today.lock().unwrap().refused = Some(("2001-01-01".to_owned(), "global_cap".to_owned()));
-        assert_eq!(account.voice_refusal(), None, "a new UTC day");
-    }
-
-    #[test]
-    fn the_next_utc_day_starts_at_midnight_utc() {
-        let at = |text: &str| chrono::DateTime::parse_from_rfc3339(text).unwrap().with_timezone(&chrono::Utc);
-        assert_eq!(next_utc_day(at("2026-10-27T15:30:00Z")), at("2026-10-28T00:00:00Z"));
-        assert_eq!(next_utc_day(at("2026-10-27T00:00:00Z")), at("2026-10-28T00:00:00Z"));
-        assert_eq!(next_utc_day(at("2026-12-31T23:59:59Z")), at("2027-01-01T00:00:00Z"));
-    }
-
-    #[test]
-    fn reads_the_plan_and_counts_spoken_characters_on_the_paid_plan_only() {
-        let dir = scratch();
-        let (service, _) = serve(vec![
-            (200, r#"{"plan":{"name":"free"},"today":{"day":"2026-10-24","commands":0,"replies":0},"limits":{"commands":20,"replies":20}}"#),
-            (200, r#"{"plan":{"name":"paid","period_end":"2026-11-24T00:00:00.000Z","characters":99990,"characters_limit":100000}}"#),
+        let (service, seen) = serve(vec![
+            (200, r#"{"id":"a","github_id":1,"created_at":"2026-11-01T00:00:00Z","plan":{"name":"free"}}"#),
+            (200, r#"{"id":"a","github_id":1,"plan":{"name":"paid","period_end":"2026-12-06T00:00:00.000Z"},"voice_credit_micro_usd":933100}"#),
         ]);
         let account = signed_in(&service, dir.as_path());
-        account.refresh_usage().unwrap();
-        let free = account.status().plan.unwrap();
-        assert_eq!(serde_json::to_value(&free).unwrap(), serde_json::json!({"name": "free"}));
-        account.note_reply("Hello");
-        assert_eq!(account.status().plan, Some(free));
+        let changes = account.watch_details();
+        account.refresh().unwrap();
+        assert!(changes.has_changed().unwrap());
+        let free = account.status();
+        assert_eq!(free.plan, Some(Plan { name: "free".to_owned(), period_end: None }));
+        assert_eq!(free.voice_credit_micro_usd, None, "no voice used yet");
+        assert!(serde_json::to_value(&free).unwrap().get("voice_credit_micro_usd").is_none(), "absent from the status, not null");
+        assert!(seen.lock().unwrap()[0].starts_with("GET /v1/account"));
 
-        account.refresh_usage().unwrap();
-        // Counted as JavaScript does: "é" is one unit, "😀" two.
-        account.note_reply("café 😀");
-        assert_eq!(account.status().plan.unwrap().characters, Some(99997));
-        // The reply that crosses the limit counts; after it, replies count against the day.
-        account.note_reply("four");
-        account.note_reply("more");
-        let paid = account.status().plan.unwrap();
-        assert_eq!((paid.characters, paid.characters_limit, paid.period_end.as_deref()), (Some(100001), Some(100000), Some("2026-11-24T00:00:00.000Z")));
+        account.refresh().unwrap();
+        let paid = account.status();
+        assert_eq!(paid.plan.as_ref().and_then(|plan| plan.period_end.as_deref()), Some("2026-12-06T00:00:00.000Z"));
+        assert_eq!(paid.voice_credit_micro_usd, Some(933_100));
+        assert_eq!(serde_json::to_value(&paid).unwrap()["voice_credit_micro_usd"], 933_100);
         account.forget();
-        assert_eq!(account.status().plan, None);
+        assert_eq!((account.status().plan, account.status().voice_credit_micro_usd), (None, None), "signed out, nothing is shown");
+    }
+
+    #[test]
+    fn upgrade_is_offered_only_when_the_service_says_so() {
+        let dir = scratch();
+        let (service, _) = serve(vec![
+            (200, r#"{"id":"a","github_id":1,"plan":{"name":"free"},"upgrade_offered":true}"#),
+            (200, r#"{"id":"a","github_id":1,"plan":{"name":"free"},"upgrade_offered":false}"#),
+            (200, r#"{"id":"a","github_id":1,"plan":{"name":"free"},"upgrade_offered":true}"#),
+            // An older service has no such field.
+            (200, r#"{"id":"a","github_id":1,"plan":{"name":"free"}}"#),
+        ]);
+        let account = signed_in(&service, dir.as_path());
+        assert!(!account.status().upgrade_offered, "not read yet");
+        account.refresh().unwrap();
+        assert!(account.status().upgrade_offered);
+        assert_eq!(serde_json::to_value(account.status()).unwrap()["upgrade_offered"], true);
+        account.refresh().unwrap();
+        assert!(!account.status().upgrade_offered);
+        account.refresh().unwrap();
+        assert!(account.status().upgrade_offered);
+        account.refresh().unwrap();
+        assert!(!account.status().upgrade_offered, "a missing field means false");
+        account.read_upgrade_offered_for_tests(true);
+        account.forget();
+        assert!(!account.status().upgrade_offered, "signed out");
+    }
+
+    #[test]
+    fn passes_the_plan_pages_through_with_the_session() {
+        let dir = scratch();
+        let (service, seen) = serve(vec![
+            (200, r#"{"url":"https://checkout.stripe.com/c/pay/cs_test_1"}"#),
+            (200, r#"{"url":"https://billing.stripe.com/p/session/test_1"}"#),
+        ]);
+        let account = signed_in(&service, dir.as_path());
+        assert_eq!(account.plan_page(PlanPage::Checkout).as_deref(), Ok("https://checkout.stripe.com/c/pay/cs_test_1"));
+        assert_eq!(account.plan_page(PlanPage::Portal).as_deref(), Ok("https://billing.stripe.com/p/session/test_1"));
+        let seen = seen.lock().unwrap();
+        assert!(seen[0].starts_with("POST /v1/plan/checkout"));
+        assert!(seen[1].starts_with("POST /v1/plan/portal"));
+        assert!(seen.iter().all(|request| request.to_ascii_lowercase().contains("authorization: bearer tok")));
+    }
+
+    #[test]
+    fn passes_only_a_stripe_page_for_the_page_asked_for() {
+        let dir = scratch();
+        let (service, _) = serve(vec![
+            (200, r#"{"url":"https://evil.example/c/1"}"#),
+            (200, r#"{"url":"http://checkout.stripe.com/c/1"}"#),
+            (200, r#"{"url":"https://checkout.stripe.com.evil.example/c/1"}"#),
+            (200, r#"{"url":"https://checkout.stripe.com@evil.example/c/1"}"#),
+            (200, r#"{"url":"https://billing.stripe.com/p/session/1"}"#),
+            (200, r#"{"url":"file:///etc/passwd"}"#),
+        ]);
+        let account = signed_in(&service, dir.as_path());
+        for _ in 0..4 {
+            assert!(matches!(account.plan_page(PlanPage::Checkout), Err(AccountError::Service(_))));
+        }
+        // The portal's host for Checkout is wrong too.
+        assert!(matches!(account.plan_page(PlanPage::Checkout), Err(AccountError::Service(_))));
+        assert!(matches!(account.plan_page(PlanPage::Portal), Err(AccountError::Service(_))));
+        assert!(account.status().signed_in);
+    }
+
+    #[test]
+    fn a_plan_page_the_service_refuses_says_why() {
+        let dir = scratch();
+        let (service, _) = serve(vec![
+            (409, r#"{"reason":"already_paid"}"#),
+            (409, r#"{"reason":"no_subscription"}"#),
+            (404, r#"{"error":"not_found"}"#),
+            (200, r#"{"no":"url"}"#),
+            (401, r#"{"error":"unauthorized"}"#),
+        ]);
+        let account = signed_in(&service, dir.as_path());
+        assert_eq!(account.plan_page(PlanPage::Checkout), Err(AccountError::Conflict("already_paid".to_owned())));
+        assert_eq!(account.plan_page(PlanPage::Portal), Err(AccountError::Conflict("no_subscription".to_owned())));
+        assert_eq!(account.plan_page(PlanPage::Checkout), Err(AccountError::NotOffered));
+        assert!(matches!(account.plan_page(PlanPage::Portal), Err(AccountError::Service(_))));
+        // A revoked session signs out, as anywhere else.
+        assert_eq!(account.plan_page(PlanPage::Portal), Err(AccountError::NotSignedIn));
+        assert!(!account.status().signed_in);
+    }
+
+    #[test]
+    fn a_plan_page_needs_a_session_and_asks_nothing_without_one() {
+        let dir = scratch();
+        let (service, seen) = serve(vec![(200, r#"{"url":"https://checkout.stripe.com/c/pay/cs_test_1"}"#)]);
+        let account = account(&service, dir.as_path());
+        assert_eq!(account.plan_page(PlanPage::Checkout), Err(AccountError::NotSignedIn));
+        assert_eq!(account.plan_page(PlanPage::Portal), Err(AccountError::NotSignedIn));
+        assert!(seen.lock().unwrap().is_empty());
     }
 
     #[test]

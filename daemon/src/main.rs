@@ -27,12 +27,14 @@ mod status;
 mod transfer;
 mod synthesis;
 mod updates;
+mod vibeplay;
 mod voice;
 mod voice_keys;
 mod voice_writer;
 
 use std::convert::Infallible;
 use std::env;
+use std::io::IsTerminal;
 use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -117,10 +119,12 @@ struct AppState {
     written: Arc<Mutex<persona::Written>>,
     /// The person's VibeBuddy account (ADR-0018); unavailable in tests unless one sets it.
     account: Arc<account::Account>,
-    /// The user's own keys for spoken replies (ADR-0020); none can be set in tests unless one sets it.
+    /// The user's own keys for spoken replies (ADR-0023); none can be set in tests unless one sets it.
     voice_keys: Arc<voice_keys::VoiceKeys>,
-    /// Making a Character's line audio (ADR-0020); nothing can be made in tests unless one sets it.
+    /// Making a Character's line audio (ADR-0023); nothing can be made in tests unless one sets it.
     making: Arc<making::Maker>,
+    /// The paired VibePlays, which get a copy of what the box gets (ADR-0025); none in tests unless one sets it.
+    vibeplays: Arc<vibeplay::Hub>,
 }
 
 impl AppState {
@@ -138,6 +142,7 @@ impl AppState {
         let (status_changed, _) = broadcast::channel(64);
         let account = Arc::new(account::Account::new(None, None, 7331));
         let voice_keys = Arc::new(voice_keys::VoiceKeys::new(None));
+        let (vibeplays, _) = vibeplay::Hub::new(None, None, None, status_changed.clone());
         Self {
             transport,
             activities: Arc::new(Mutex::new(activities)),
@@ -163,6 +168,7 @@ impl AppState {
             making: Arc::new(making::Maker::new(None, None, account.clone(), voice_keys.clone(), Arc::new(own_voices::OwnVoices::new(None)))),
             account,
             voice_keys,
+            vibeplays,
         }
     }
 
@@ -198,6 +204,7 @@ impl AppState {
             account: self.account.status(),
             voice_keys: self.voice_keys.status(),
             making: self.making.status(),
+            vibeplays: self.vibeplays.status().await,
         }
     }
 
@@ -234,7 +241,8 @@ async fn main() {
         .filter(|value| !value.trim().is_empty())
         .and_then(|value| EnvFilter::try_new(value).ok())
         .unwrap_or_else(|| EnvFilter::new("vibebuddyd=info"));
-    tracing_subscriber::fmt().with_env_filter(log_filter).init();
+    // Colours only for a terminal: the apps send the log to a file or the journal, where they show as escape codes.
+    tracing_subscriber::fmt().with_env_filter(log_filter).with_ansi(std::io::stdout().is_terminal()).init();
 
     let bind_address = env::var("VIBEBUDDY_BIND")
         .unwrap_or_else(|_| "127.0.0.1:7331".to_owned())
@@ -253,6 +261,16 @@ async fn main() {
         config::config_dir().as_deref(),
         bind_address.port(),
     ));
+    // Read the plan, and whether the Paid plan is offered, once at start: the Apps then don't wait for the account
+    // card to ask before they show the Relay switch or VibeBuddy's voices.
+    if account.token().is_some() {
+        let account = account.clone();
+        tokio::task::spawn_blocking(move || {
+            if let Err(error) = account.refresh() {
+                warn!(%error, "the account couldn't be read at start");
+            }
+        });
+    }
     let mut serial_config = SerialConfig::from_env(known_box_file());
     let mut relay_config = None;
     // Paired, the box can also be reached over the local network when it isn't on the cable (ADR-0012).
@@ -308,9 +326,8 @@ async fn main() {
             None => resident,
         })
     });
-    let session = Some(state.account.clone());
     state.voice_keys = Arc::new(voice_keys::VoiceKeys::new(config::config_dir().as_deref()));
-    let synthesizer = synthesis::from_env(session.clone(), state.voice_keys.clone());
+    let synthesizer = synthesis::new(state.account.clone(), state.voice_keys.clone());
     let made = config::config_dir().map(|dir| dir.join("characters"));
     if let Some(made) = &made {
         let _ = making::DIR.set(made.clone());
@@ -319,17 +336,26 @@ async fn main() {
     let _ = making::OWN.set((own_voices.clone(), state.voice_keys.clone()));
     state.making = Arc::new(making::Maker::new(
         made,
-        synthesis::voice_base(env::var(synthesis::BASE_URL_VARIABLE).ok()),
+        state.account.base(),
         state.account.clone(),
         state.voice_keys.clone(),
         own_voices,
     ));
-    state.voice = Arc::new(voice::Voice::new(speech::from_env(session, Some(state.voice_keys.clone())), state.resident.clone()).with_synthesizer(Some(synthesizer)));
+    let recognizer = speech::new(state.account.clone(), state.voice_keys.clone());
+    state.voice = Arc::new(voice::Voice::new(Some(recognizer), state.resident.clone()).with_synthesizer(Some(synthesizer)));
     if let Some(resident) = state.resident.clone() {
         let wearing = wearing(&state).await;
         tokio::spawn(async move { resident.warm(&wearing).await });
     }
     state.device.lock().await.pin = pin;
+    // VibePlays (ADR-0025): found over mDNS, or at VIBEBUDDY_VIBEPLAY_ADDR, and kept connected once paired.
+    let (vibeplays, vibeplay_inbound) = vibeplay::Hub::new(
+        state.identity.clone(),
+        state.state_dir.clone(),
+        env::var(vibeplay::ADDRESS_VARIABLE).ok().filter(|value| !value.is_empty()),
+        state.status_changed.clone(),
+    );
+    state.vibeplays = vibeplays;
     state.updates = Arc::new(Mutex::new(Updates::new(
         updates::Source::configured(),
         config::state_dir().map(|dir| dir.join("updates")),
@@ -345,6 +371,8 @@ async fn main() {
     tokio::spawn(send_heartbeats(state.clone()));
     tokio::spawn(poll_ci(state.clone()));
     tokio::spawn(handle_device_events(state.clone(), device_events));
+    tokio::spawn(state.vibeplays.clone().run());
+    tokio::spawn(handle_vibeplays(state.clone(), vibeplay_inbound));
     tokio::spawn(check_for_updates(state.clone()));
     if let Some(resident) = state.resident.clone() {
         follow_resident_readiness(&state, resident);
@@ -378,6 +406,9 @@ async fn handle_device_events(
     }
 }
 
+/// The last line our firmware writes as it boots, `READY vibebuddy-fw <version>`.
+const BOOT_DONE_PREFIX: &str = "READY vibebuddy-fw ";
+
 /// Every device message goes through here: update device state, broadcast to operations waiting for acks, and K2 opens the source.
 /// Tests inject device messages here too, so it must not depend on the serial port.
 async fn publish_device_message(state: &AppState, message: DeviceMessage) {
@@ -385,6 +416,8 @@ async fn publish_device_message(state: &AppState, message: DeviceMessage) {
         let mut device = state.device.lock().await;
         let had_build = device.firmware_build.is_some();
         let changed = device.apply(&message);
+        // A box linked and running our firmware speaks; VibePlays then only show (ADR-0025).
+        state.vibeplays.set_box_linked(device.connected && device.firmware_build.is_some());
         (changed, !had_build && device.firmware_build.is_some(), device.usb_serial.clone())
     };
     // Our firmware reported its build: this device is the box, so prefer it when others are plugged in too.
@@ -456,8 +489,13 @@ async fn publish_device_message(state: &AppState, message: DeviceMessage) {
         offer_voice_again(state).await;
     }
     let _ = state.device_bus.send(message.clone());
-    // Ask right after connecting; the device reports its mode, firmware build and voice again.
-    if matches!(message, DeviceMessage::Connected { .. } | DeviceMessage::ConnectedNetwork { .. } | DeviceMessage::ConnectedRelay { .. }) {
+    // Ask right after connecting; the device reports its mode, firmware build and voice again. Ask again when the box
+    // finished booting: after a firmware update over the link it restarts while the bridge's port stays open, and
+    // what it says at boot leaves out its mode, screens and decoration.
+    let booted_again = matches!(&message, DeviceMessage::Line(line) if line.starts_with(BOOT_DONE_PREFIX));
+    if booted_again
+        || matches!(message, DeviceMessage::Connected { .. } | DeviceMessage::ConnectedNetwork { .. } | DeviceMessage::ConnectedRelay { .. })
+    {
         send_event(state, device_command("device.hello"));
         // Then this computer's cards, which replace any the box kept from another computer.
         let screen = {
@@ -477,6 +515,37 @@ async fn publish_device_message(state: &AppState, message: DeviceMessage) {
         open_card_source(state, card).await;
     } else if !event.event.starts_with("voice.") && event.event != "echo" {
         info!(event = %event.event, "ignoring unbound device event");
+    }
+}
+
+/// What the daemon hears from its VibePlays (ADR-0025). None of it goes near the box's link (ADR-0011): a VibePlay
+/// that connects gets the screen as it is now, and its K2 and picked card do what the box's do.
+async fn handle_vibeplays(state: AppState, mut inbound: tokio::sync::mpsc::UnboundedReceiver<vibeplay::Inbound>) {
+    while let Some(message) = inbound.recv().await {
+        handle_vibeplay(&state, message).await;
+    }
+}
+
+async fn handle_vibeplay(state: &AppState, message: vibeplay::Inbound) {
+    match message {
+        vibeplay::Inbound::Connected(key) => {
+            let now = chrono::Local::now();
+            state.vibeplays.send_to(&key, &heartbeat_event(&build_identity(state.app_version.as_deref()), now.hour(), local_day(&now)));
+            let screen = {
+                let mut tracker = state.activities.lock().await;
+                let mut screen = tracker.viewer_screen();
+                tracker.stamp_live_fields(&mut screen);
+                screen
+            };
+            state.vibeplays.send_to(&key, &screen);
+        }
+        vibeplay::Inbound::Event(event) => {
+            if is_k2_press(&event) {
+                open_k2_source(state).await;
+            } else if let Some(card) = tapped_card(&event) {
+                open_card_source(state, card).await;
+            }
+        }
     }
 }
 
@@ -522,8 +591,8 @@ async fn voice_offer(state: &AppState) -> Option<Event> {
 }
 
 /// Why voice commands can't be taken right now, for the Conversation tab: the bridge at 115200 (`bridge_firmware`
-/// when the firmware can't move it, `bridge_slow` when moving it failed), or the recognizer's refusal (`signed_out`, `own_key`,
-/// `allowance`, `global_cap`). The resident session not being ready is the tab's `problem` already.
+/// when the firmware can't move it, `bridge_slow` when moving it failed), or the recognizer's refusal (`signed_out`,
+/// `own_key`). The resident session not being ready is the tab's `problem` already.
 async fn voice_off(state: &AppState) -> Option<String> {
     let device = state.device.lock().await.clone();
     if device.connected && device.bridge && device.bridge_baud.is_some_and(|baud| baud != serial_transport::FAST_BAUD_RATE) {
@@ -547,8 +616,8 @@ async fn wearing(state: &AppState) -> persona::Wearing {
 }
 
 /// Tells a box that has reported its build whether voice is on now, and if not why, after the resident session's
-/// readiness or the account flipped (the user's Codex installed or gone, logged in or out, the service refusing
-/// voice for the day or the day ending), or the UART bridge's rate settled. Told `false`, a long K0 gives up the
+/// readiness or the account flipped (the user's Codex installed or gone, signed in or out), or the UART bridge's rate
+/// settled. Told `false`, a long K0 gives up the
 /// Pomodoro phase as it did before voice.
 async fn offer_voice_again(state: &AppState) {
     let booted = {
@@ -571,26 +640,12 @@ fn follow_account(state: &AppState) {
             offer_voice_again(&follower).await;
         }
     });
-    // Today's usage is only shown. A refusal for the day also withdraws voice until the UTC day ends or a read of
-    // the account shows voice again; the day's end changes both without a word from the service.
-    let mut usage = state.account.watch_usage();
+    // The plan and the voice credit are only shown.
+    let mut details = state.account.watch_details();
     let follower = state.clone();
-    let mut refusal = state.account.voice_refusal();
     tokio::spawn(async move {
-        loop {
-            let now = chrono::Utc::now();
-            let day_ends = account::next_utc_day(now) - now;
-            tokio::select! {
-                changed = usage.changed() => if changed.is_err() { break },
-                // A second late, so the clock is surely in the new day.
-                () = tokio::time::sleep(day_ends.to_std().unwrap_or_default() + Duration::from_secs(1)) => {}
-            }
+        while details.changed().await.is_ok() {
             follower.notify_status();
-            let today = follower.account.voice_refusal();
-            if today != refusal {
-                refusal = today;
-                offer_voice_again(&follower).await;
-            }
         }
     });
     // So is why the Relay turned this computer away.
@@ -814,6 +869,8 @@ fn app(state: AppState) -> Router {
         )
         .route("/v1/device/screenshot", post(post_screenshot))
         .route("/v1/device/firmware", post(post_firmware))
+        .route("/v1/vibeplays/pair", post(post_vibeplay_pair))
+        .route("/v1/vibeplays/forget", post(post_vibeplay_forget))
         .route("/v1/daemon/restart", post(post_restart))
         .route("/v1/updates/check", post(post_check_updates))
         .route("/v1/resident", get(get_resident))
@@ -834,6 +891,8 @@ fn app(state: AppState) -> Router {
         .route("/v1/account/callback", get(get_account_callback))
         .route("/v1/account/sign-out", post(post_sign_out))
         .route("/v1/account/refresh", post(post_account_refresh))
+        .route("/v1/account/upgrade", post(post_upgrade))
+        .route("/v1/account/manage-plan", post(post_manage_plan))
         .with_state(state)
 }
 
@@ -1084,7 +1143,7 @@ async fn post_screens(
 }
 
 /// The decorations the box can draw over its screens (ADR-0022).
-const DECORATIONS: [&str; 4] = ["off", "leaves", "snow", "lights"];
+const DECORATIONS: [&str; 3] = ["off", "thanksgiving", "christmas"];
 
 #[derive(serde::Deserialize)]
 struct DecorationRequest {
@@ -1572,6 +1631,7 @@ async fn send_heartbeats(state: AppState) {
             Ok(frame) => drop(state.transport.send(frame)),
             Err(error) => warn!(%error, "failed to encode heartbeat"),
         }
+        state.vibeplays.send(&heartbeat);
     }
 }
 
@@ -1655,6 +1715,8 @@ async fn sweep_expired_activities(state: AppState) {
 fn send_event(state: &AppState, event: Event) {
     // What the box shows changed, so the apps' picture of it (the Activities in the status) did too.
     state.notify_status();
+    // The same line, occasion included, goes to every VibePlay: one announcement, one occasion (ADR-0025).
+    state.vibeplays.send(&event);
     match event.to_ndjson() {
         Ok(frame) => {
             if let Err(error) = state.transport.send(frame) {
@@ -1681,6 +1743,7 @@ async fn post_event(
             );
         }
     };
+    state.vibeplays.send(&event);
 
     match state.transport.send(frame) {
         Ok(()) => (
@@ -1804,6 +1867,37 @@ async fn forward(state: AppState, event: Option<Event>) -> (StatusCode, Json<Api
 }
 
 #[derive(serde::Deserialize)]
+struct VibePlayPairRequest {
+    key: String,
+    code: String,
+}
+
+/// Pairs with a VibePlay by the code it shows: 200, or 400 with `code`, `full`, `closed` or `unreachable`.
+async fn post_vibeplay_pair(State(state): State<AppState>, Json(request): Json<VibePlayPairRequest>) -> axum::response::Response {
+    use axum::response::IntoResponse;
+    match state.vibeplays.pair(request.key.trim(), request.code.trim()).await {
+        Ok(()) => (StatusCode::OK, Json(serde_json::json!({"paired": true}))).into_response(),
+        Err(error) => {
+            info!(?error, "pairing with a VibePlay failed");
+            (StatusCode::BAD_REQUEST, Json(serde_json::json!({"error": error.code()}))).into_response()
+        }
+    }
+}
+
+#[derive(serde::Deserialize)]
+struct VibePlayForgetRequest {
+    key: String,
+}
+
+async fn post_vibeplay_forget(State(state): State<AppState>, Json(request): Json<VibePlayForgetRequest>) -> (StatusCode, Json<ApiResponse>) {
+    if state.vibeplays.forget(request.key.trim()) {
+        (StatusCode::OK, Json(ApiResponse { accepted: true, message: "forgot the VibePlay".to_owned() }))
+    } else {
+        (StatusCode::NOT_FOUND, Json(ApiResponse { accepted: false, message: "no such paired VibePlay".to_owned() }))
+    }
+}
+
+#[derive(serde::Deserialize)]
 struct SayRequest {
     text: String,
 }
@@ -1829,7 +1923,7 @@ struct ResidentInfo {
     /// Whether an Anthropic API key is stored; the key itself is never sent back.
     anthropic_key_set: bool,
     /// Why the box can't take voice commands right now besides `problem`: `bridge_firmware`, `bridge_slow`,
-    /// `signed_out`, `own_key`, `allowance` or `global_cap` (see [`voice_off`]).
+    /// `signed_out` or `own_key` (see [`voice_off`]).
     voice_off: Option<String>,
 }
 
@@ -1950,7 +2044,7 @@ async fn set_anthropic_key(state: AppState, key: Option<String>) -> axum::respon
     get_resident(State(state)).await.into_response()
 }
 
-/// Sets or clears the user's own keys (ADR-0020): `{"elevenlabs"?, "volc"?, "groq"?}`, each a key, or null
+/// Sets or clears the user's own keys (ADR-0023): `{"elevenlabs"?, "volc"?, "groq"?}`, each a key, or null
 /// or "" to clear it; one left out stays. Answers which are set, as in the status; a key is never sent back or logged.
 async fn put_voice_keys(State(state): State<AppState>, Json(request): Json<serde_json::Map<String, serde_json::Value>>) -> axum::response::Response {
     use axum::response::IntoResponse;
@@ -2125,13 +2219,77 @@ async fn post_sign_out(State(state): State<AppState>) -> (StatusCode, Json<ApiRe
     }
 }
 
-/// Reads today's voice use and the plan from the service, for the App's Account tab; the status stream carries them.
+/// Reads the plan and the voice credit from the service, for the App's account card; the status stream carries them.
 async fn post_account_refresh(State(state): State<AppState>) -> (StatusCode, Json<ApiResponse>) {
     let account = state.account.clone();
-    match tokio::task::spawn_blocking(move || account.refresh_usage()).await.unwrap_or_else(|error| Err(account::AccountError::Service(error.to_string()))) {
+    match tokio::task::spawn_blocking(move || account.refresh()).await.unwrap_or_else(|error| Err(account::AccountError::Service(error.to_string()))) {
         Ok(()) => (StatusCode::OK, Json(ApiResponse { accepted: true, message: "refreshed".to_owned() })),
         Err(error) => account_refusal(&error),
     }
+}
+
+/// Opens the Paid plan's Stripe Checkout: the App opens the URL in the browser. Only when the account says
+/// [`account::AccountStatus::upgrade_offered`].
+async fn post_upgrade(State(state): State<AppState>) -> axum::response::Response {
+    let offered = state.account.status().upgrade_offered;
+    plan_page(&state, account::PlanPage::Checkout, offered).await
+}
+
+/// Opens Stripe's Customer Portal, where a Paid user changes the card or cancels.
+async fn post_manage_plan(State(state): State<AppState>) -> axum::response::Response {
+    plan_page(&state, account::PlanPage::Portal, true).await
+}
+
+#[derive(Serialize)]
+struct PlanPageResponse {
+    url: String,
+}
+
+#[derive(Serialize)]
+struct PlanRefusal {
+    accepted: bool,
+    message: String,
+    /// The service's reason on a 409: `already_paid` or `no_subscription`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    reason: Option<String>,
+}
+
+/// `{"url"}` on 200; otherwise the service's 409 (with its reason), 404 and 401 as they are (docs/api.md). After a
+/// 409, or a 404 from Checkout, the account is read again, so the status shows the plan and the offer as they are.
+async fn plan_page(state: &AppState, page: account::PlanPage, offered: bool) -> axum::response::Response {
+    use axum::response::IntoResponse;
+    let account = state.account.clone();
+    let result = if offered {
+        tokio::task::spawn_blocking(move || account.plan_page(page)).await.unwrap_or_else(|error| Err(account::AccountError::Service(error.to_string())))
+    } else {
+        Err(account::AccountError::NotOffered)
+    };
+    let error = match result {
+        Ok(url) => return Json(PlanPageResponse { url }).into_response(),
+        Err(error) => error,
+    };
+    warn!(%error, ?page, "the plan page didn't open");
+    // A 409 means the plan isn't what the App thought. A 404 from Checkout means the service stopped selling, and the
+    // account read before still says `upgrade_offered`. Either way, read the account again.
+    let read_again = match &error {
+        account::AccountError::Conflict(_) => true,
+        account::AccountError::NotOffered => offered && matches!(page, account::PlanPage::Checkout),
+        _ => false,
+    };
+    if read_again {
+        let account = state.account.clone();
+        if let Ok(Err(error)) = tokio::task::spawn_blocking(move || account.refresh()).await {
+            warn!(%error, "the account couldn't be read again");
+        }
+    }
+    let (status, reason) = match &error {
+        account::AccountError::NotSignedIn => (StatusCode::UNAUTHORIZED, None),
+        account::AccountError::NotOffered => (StatusCode::NOT_FOUND, None),
+        account::AccountError::Conflict(reason) => (StatusCode::CONFLICT, Some(reason.clone())),
+        other => (account_refusal(other).0, None),
+    };
+    state.notify_status();
+    (status, Json(PlanRefusal { accepted: false, message: error.to_string(), reason })).into_response()
 }
 
 async fn delete_account(State(state): State<AppState>) -> (StatusCode, Json<ApiResponse>) {
@@ -2150,6 +2308,8 @@ fn account_refusal(error: &account::AccountError) -> (StatusCode, Json<ApiRespon
         account::AccountError::NotSignedIn => StatusCode::CONFLICT,
         account::AccountError::UnknownSignIn => StatusCode::BAD_REQUEST,
         account::AccountError::Service(_) => StatusCode::BAD_GATEWAY,
+        account::AccountError::Conflict(_) => StatusCode::CONFLICT,
+        account::AccountError::NotOffered => StatusCode::NOT_FOUND,
     };
     (status, Json(ApiResponse { accepted: false, message: error.to_string() }))
 }
@@ -2258,6 +2418,75 @@ mod tests {
         )
     }
 
+    /// A state with a fake VibePlay paired and connected (ADR-0025).
+    async fn with_vibeplay(state: &mut AppState) -> vibeplay::tests::FakeVibePlay {
+        let mut fake = vibeplay::tests::fake_vibeplay(vibeplay::tests::Behaviour::default()).await;
+        let (hub, inbound) = vibeplay::tests::hub_for(&fake, None);
+        hub.pair(&fake.key, "123456").await.unwrap();
+        state.vibeplays = hub.clone();
+        tokio::spawn(hub.clone().run());
+        tokio::spawn(handle_vibeplays(state.clone(), inbound));
+        vibeplay::tests::wait_connected(&hub, &fake.key).await;
+        assert_eq!(vibeplay::tests::next_line(&mut fake).await["event"], "device.heartbeat");
+        assert_eq!(vibeplay::tests::next_line(&mut fake).await["event"], "agent.idle", "the screen as it is now");
+        fake
+    }
+
+    #[tokio::test]
+    async fn a_vibeplay_does_not_touch_the_box_link() {
+        // ADR-0011: the box's link stays as it is. A VibePlay connecting, pressing K2 and picking a card sends the
+        // box nothing and changes nothing the daemon knows about the box.
+        let transport = Arc::new(RecordingTransport::default());
+        let mut state = test_state(transport.clone());
+        let before = serde_json::to_value(state.device.lock().await.clone()).unwrap();
+        let fake = with_vibeplay(&mut state).await;
+        fake.send.send(r#"{"version":1,"event":"button","button":"K2","action":"press"}"#.to_owned()).unwrap();
+        fake.send.send(r#"{"version":1,"event":"focus","task":"nothing"}"#.to_owned()).unwrap();
+        tokio::time::sleep(Duration::from_millis(200)).await;
+        assert!(transport.events().is_empty(), "the box got {:?}", transport.events());
+        assert_eq!(serde_json::to_value(state.device.lock().await.clone()).unwrap(), before);
+        assert!(state.snapshot().await.vibeplays[0].connected);
+    }
+
+    #[tokio::test]
+    async fn a_vibeplay_is_quiet_only_while_a_box_is_linked() {
+        let transport = Arc::new(RecordingTransport::default());
+        let mut state = test_state(transport.clone());
+        let mut fake = with_vibeplay(&mut state).await;
+        let done = |id: &str| {
+            let mut event = Event::named("task.done");
+            event.id = Some(id.to_owned());
+            event
+        };
+        // The line with this id; the box's own screen on linking reaches the VibePlay too, and is skipped.
+        async fn line_for(fake: &mut vibeplay::tests::FakeVibePlay, id: &str) -> serde_json::Value {
+            loop {
+                let line = vibeplay::tests::next_line(fake).await;
+                if line["id"] == id {
+                    return line;
+                }
+                assert_ne!(line["event"], "device.hello", "nothing that looks after the box");
+            }
+        }
+        send_event(&state, done("no box"));
+        assert_eq!(line_for(&mut fake, "no box").await["quiet"], false);
+
+        publish_device_message(&state, DeviceMessage::Connected { port: "/dev/cu.x".to_owned(), bridge: false, usb_serial: None }).await;
+        publish_device_message(&state, DeviceMessage::Line("DISPLAY READY BUILD v9 2026-10-01".to_owned())).await;
+        let mut first_done = done("box");
+        first_done.extra.insert("occasion".to_owned(), serde_json::json!("first_done_today"));
+        send_event(&state, first_done);
+        // The box got the same line, one occasion for both, without `quiet`; the VibePlay got it with `quiet`.
+        let line = line_for(&mut fake, "box").await;
+        assert_eq!((line["quiet"].as_bool(), line["occasion"].as_str()), (Some(true), Some("first_done_today")));
+        assert!(transport.events().iter().any(|event| event.id.as_deref() == Some("box") && !event.extra.contains_key("quiet")));
+        assert!(transport.events().iter().any(|event| event.event == "device.hello"), "the box was looked after");
+
+        publish_device_message(&state, DeviceMessage::Disconnected).await;
+        send_event(&state, done("box gone"));
+        assert_eq!(line_for(&mut fake, "box gone").await["quiet"], false);
+    }
+
     #[tokio::test]
     async fn the_account_routes_answer_without_a_service() {
         let state = test_state(Arc::new(RecordingTransport::default()));
@@ -2266,6 +2495,92 @@ mod tests {
         let (status, _) = post_sign_out(State(state.clone())).await;
         assert_eq!(status, StatusCode::CONFLICT);
         assert!(!state.snapshot().await.account.available);
+    }
+
+    /// The answer's status and JSON body.
+    async fn plan_answer(state: &AppState, page: account::PlanPage, offered: bool) -> (StatusCode, serde_json::Value) {
+        let response = plan_page(state, page, offered).await;
+        let status = response.status();
+        let body = http_body_util::BodyExt::collect(response.into_body()).await.unwrap().to_bytes();
+        (status, serde_json::from_slice(&body).unwrap())
+    }
+
+    fn signed_in_state(service: &str, name: &str) -> AppState {
+        let mut state = test_state(Arc::new(RecordingTransport::default()));
+        let dir = std::env::temp_dir().join(format!("vibebuddy-plan-{name}-{}", std::process::id()));
+        account::signed_in_for_tests(&dir, "tok");
+        state.account = Arc::new(account::Account::new(Some(service.to_owned()), Some(&dir), 7331));
+        state
+    }
+
+    #[tokio::test]
+    async fn upgrade_and_manage_plan_pass_the_service_through() {
+        let (service, seen) = account::tests::serve(vec![
+            (200, r#"{"url":"https://checkout.stripe.com/c/pay/cs_test_1"}"#),
+            (200, r#"{"url":"https://billing.stripe.com/p/session/test_1"}"#),
+            (409, r#"{"reason":"already_paid"}"#),
+            // The daemon reads the account again after `already_paid`, so the status shows the Paid plan.
+            (200, r#"{"id":"a","github_id":1,"plan":{"name":"paid","period_end":"2026-12-06T00:00:00.000Z"},"voice_credit_micro_usd":5000000}"#),
+            (404, r#"{"error":"not_found"}"#),
+            (401, r#"{"error":"unauthorized"}"#),
+        ]);
+        let state = signed_in_state(&service, "through");
+        assert_eq!(plan_answer(&state, account::PlanPage::Checkout, true).await, (StatusCode::OK, serde_json::json!({"url": "https://checkout.stripe.com/c/pay/cs_test_1"})));
+        assert_eq!(plan_answer(&state, account::PlanPage::Portal, true).await, (StatusCode::OK, serde_json::json!({"url": "https://billing.stripe.com/p/session/test_1"})));
+
+        let (status, body) = plan_answer(&state, account::PlanPage::Checkout, true).await;
+        assert_eq!((status, body["reason"].as_str()), (StatusCode::CONFLICT, Some("already_paid")));
+        let paid = state.snapshot().await.account;
+        assert_eq!((paid.plan.map(|plan| plan.name), paid.voice_credit_micro_usd), (Some("paid".to_owned()), Some(5_000_000)));
+
+        let (status, body) = plan_answer(&state, account::PlanPage::Portal, true).await;
+        assert_eq!((status, body["accepted"].as_bool()), (StatusCode::NOT_FOUND, Some(false)));
+        assert_eq!(plan_answer(&state, account::PlanPage::Portal, true).await.0, StatusCode::UNAUTHORIZED);
+        assert!(!state.snapshot().await.account.signed_in, "a revoked session signs out");
+
+        let seen = seen.lock().unwrap();
+        let paths: Vec<&str> = seen.iter().map(|request| request.split(' ').nth(1).unwrap()).collect();
+        assert_eq!(paths, ["/v1/plan/checkout", "/v1/plan/portal", "/v1/plan/checkout", "/v1/account", "/v1/plan/portal", "/v1/plan/portal"]);
+        assert!(seen.iter().all(|request| request.to_ascii_lowercase().contains("authorization: bearer tok")), "the session goes with each call");
+    }
+
+    #[tokio::test]
+    async fn the_plan_routes_ask_nothing_when_signed_out_or_while_upgrade_is_not_offered() {
+        let (service, seen) = account::tests::serve(vec![(200, r#"{"url":"https://checkout.stripe.com/c/pay/cs_test_1"}"#)]);
+        let state = signed_in_state(&service, "off");
+        // Not read yet, or the service said false or had no such field: the route asks the service nothing.
+        assert!(!state.snapshot().await.account.upgrade_offered);
+        assert_eq!(post_upgrade(State(state.clone())).await.status(), StatusCode::NOT_FOUND);
+        state.account.read_upgrade_offered_for_tests(false);
+        assert_eq!(post_upgrade(State(state.clone())).await.status(), StatusCode::NOT_FOUND);
+        assert!(seen.lock().unwrap().is_empty());
+        // The service offers it: the route asks for Checkout.
+        state.account.read_upgrade_offered_for_tests(true);
+        assert!(state.snapshot().await.account.upgrade_offered);
+        assert_eq!(post_upgrade(State(state.clone())).await.status(), StatusCode::OK);
+        assert_eq!(seen.lock().unwrap().len(), 1);
+
+        let mut signed_out = test_state(Arc::new(RecordingTransport::default()));
+        let dir = std::env::temp_dir().join(format!("vibebuddy-plan-out-{}", std::process::id()));
+        signed_out.account = Arc::new(account::Account::new(Some(service), Some(&dir), 7331));
+        assert_eq!(plan_answer(&signed_out, account::PlanPage::Checkout, true).await.0, StatusCode::UNAUTHORIZED);
+        assert_eq!(plan_answer(&signed_out, account::PlanPage::Portal, true).await.0, StatusCode::UNAUTHORIZED);
+        assert_eq!(seen.lock().unwrap().len(), 1, "signed out, nothing more is asked");
+    }
+
+    #[tokio::test]
+    async fn a_checkout_404_reads_the_account_again_so_upgrade_goes_away() {
+        let (service, seen) = account::tests::serve(vec![
+            (404, r#"{"error":"not_found"}"#),
+            // The service stopped selling: the account now says so.
+            (200, r#"{"id":"a","github_id":1,"plan":{"name":"free"},"upgrade_offered":false}"#),
+        ]);
+        let state = signed_in_state(&service, "stopped");
+        state.account.read_upgrade_offered_for_tests(true);
+        assert_eq!(post_upgrade(State(state.clone())).await.status(), StatusCode::NOT_FOUND);
+        assert!(!state.snapshot().await.account.upgrade_offered);
+        let paths: Vec<String> = seen.lock().unwrap().iter().map(|request| request.split(' ').nth(1).unwrap().to_owned()).collect();
+        assert_eq!(paths, ["/v1/plan/checkout", "/v1/account"]);
     }
 
     #[tokio::test]
@@ -2316,6 +2631,29 @@ mod tests {
         publish_device_message(&state, DeviceMessage::Line("DISPLAY READY BUILD v9 2026-10-01".to_owned())).await;
         waiting.await.unwrap();
         assert_eq!(state.operation.lock().await.as_ref().map(|operation| operation.state), Some(OperationState::Done));
+    }
+
+    #[tokio::test]
+    async fn a_box_that_restarts_under_an_open_link_is_asked_again() {
+        // A firmware update over the link restarts the box, but the bridge's port stays open: no `Connected`. What
+        // the box said at boot leaves out its mode, screens and decoration, so it must be asked again (seen with a
+        // box updated from 0.6.0 to 0.6.1, which kept the old firmware's missing decoration).
+        let transport = Arc::new(RecordingTransport::default());
+        let state = test_state(transport.clone());
+        publish_device_message(&state, DeviceMessage::Connected { port: "/dev/cu.x".to_owned(), bridge: true, usb_serial: None }).await;
+        publish_device_message(&state, DeviceMessage::Line("DISPLAY READY BUILD v0.6.0 2026-11-03".to_owned())).await;
+        let hellos = || transport.events().iter().filter(|event| event.event == "device.hello").count();
+        assert_eq!(hellos(), 1);
+
+        for line in ["DISPLAY READY BUILD firmware-v0.6.1 2026-11-10", "FIRMWARE VERSION 0.6.1", "READY vibebuddy-fw 0.6.1"] {
+            publish_device_message(&state, DeviceMessage::Line(line.to_owned())).await;
+        }
+        assert_eq!(hellos(), 2, "asked again once the box finished booting");
+        let last_hello = transport.events().iter().rposition(|event| event.event == "device.hello").unwrap();
+        assert!(transport.events().len() > last_hello + 1, "and given this computer's cards again");
+
+        publish_device_message(&state, DeviceMessage::Line("DECORATION OFF".to_owned())).await;
+        assert_eq!(state.device.lock().await.decoration.as_deref(), Some("off"));
     }
 
     #[tokio::test]
@@ -2777,31 +3115,18 @@ mod tests {
         let _ = std::fs::remove_dir_all(dir);
     }
 
-    /// Asks the account why voice is off, as the voice service does.
-    struct AccountRecognizer(Arc<account::Account>);
-
-    impl speech::Recognizer for AccountRecognizer {
-        fn recognize(&self, _wav: &[u8]) -> Result<speech::Transcript, speech::RecognitionError> {
-            Ok(speech::Transcript::default())
-        }
-
-        fn refusal(&self) -> Option<&'static str> {
-            if self.0.token().is_none() {
-                return Some("signed_out");
-            }
-            self.0.voice_refusal()
-        }
-    }
-
     #[tokio::test]
-    async fn a_refusal_for_the_day_withdraws_voice_with_its_reason_until_a_read_shows_voice_again() {
-        let dir = resident::tests::temp_dir("main-refusal-offer");
+    async fn signing_out_with_no_groq_key_tells_the_box_to_set_one() {
+        let dir = resident::tests::temp_dir("main-own-key-offer");
         let transport = Arc::new(RecordingTransport::default());
         let mut state = test_state(transport.clone());
         let resident = Arc::new(resident::tests::resident(&dir, &resident::tests::logged_in(), Arc::default()));
         resident.note(None);
         state.account = Arc::new(account::signed_in_for_tests(&dir.join("config"), "tok"));
-        state.voice = Arc::new(voice::Voice::new(Some(Arc::new(AccountRecognizer(state.account.clone()))), Some(resident)));
+        state.voice_keys = Arc::new(voice_keys::VoiceKeys::new(Some(&dir.join("config"))));
+        // The daemon's own recognizer: no Groq key, so our service while signed in.
+        let recognizer = speech::new(state.account.clone(), state.voice_keys.clone());
+        state.voice = Arc::new(voice::Voice::new(Some(recognizer), Some(resident)));
         let offers = || {
             transport
                 .events()
@@ -2814,31 +3139,20 @@ mod tests {
         publish_device_message(&state, DeviceMessage::Connected { port: "/dev/cu.x".to_owned(), bridge: false, usb_serial: None }).await;
         publish_device_message(&state, DeviceMessage::Line("DISPLAY READY BUILD v9 2026-10-01".to_owned())).await;
         follow_account(&state);
-        assert_eq!(offers(), [(serde_json::json!(true), None, None)]);
-
-        state.account.note_refusal("allowance");
-        settle().await;
-        let (on, reason, message) = offers()[1].clone();
-        assert_eq!((on, reason), (serde_json::json!(false), Some(serde_json::json!("allowance"))));
-        assert_eq!(message, voice::refusal_message("allowance"));
-        // A rebooted box is told again, reason and all.
-        publish_device_message(&state, DeviceMessage::Line("DISPLAY READY BUILD v9 2026-10-01".to_owned())).await;
-        assert_eq!(offers().len(), 3);
-        assert_eq!(offers()[2].1, Some(serde_json::json!("allowance")));
-
-        // Usage that leaves the refusal as it was tells the box nothing new.
-        state.account.read_usage_for_tests(20, 20);
-        settle().await;
-        assert_eq!(offers().len(), 3);
-        // A read that shows commands left (a higher limit) brings voice back.
-        state.account.read_usage_for_tests(20, 100);
-        settle().await;
-        assert_eq!(offers().len(), 4);
-        assert_eq!(offers()[3], (serde_json::json!(true), None, None));
+        follow_voice_keys(&state);
+        assert_eq!(offers(), [(serde_json::json!(true), None, None)], "signed in, voice goes to our service");
 
         state.account.forget();
         settle().await;
-        assert_eq!(offers().last().unwrap().1, Some(serde_json::json!("signed_out")));
+        let (on, reason, message) = offers().last().unwrap().clone();
+        assert_eq!((on, reason), (serde_json::json!(false), Some(serde_json::json!("own_key"))));
+        assert_eq!(message.as_deref(), Some("Set a Groq key on the computer to talk to me."));
+        assert_eq!(voice_off(&state).await.as_deref(), Some("own_key"));
+
+        // A Groq key brings voice back, signed out or not.
+        state.voice_keys.set(&[(voice_keys::Provider::Groq, Some("gsk_test".to_owned()))]).unwrap();
+        settle().await;
+        assert_eq!(offers().last().unwrap(), &(serde_json::json!(true), None, None));
         let _ = std::fs::remove_dir_all(dir);
     }
 
@@ -3016,13 +3330,13 @@ mod tests {
     #[tokio::test]
     async fn choosing_a_decoration_sends_it_to_the_device_and_an_unknown_one_is_refused() {
         let transport = Arc::new(RecordingTransport::default());
-        let request = DecorationRequest { name: "snow".to_owned() };
+        let request = DecorationRequest { name: "christmas".to_owned() };
         let (status, _) = post_decoration(State(test_state(transport.clone())), Json(request)).await;
         assert_eq!(status, StatusCode::ACCEPTED);
         let event = &transport.events()[0];
         assert_eq!(event.event, "device.decoration");
-        assert_eq!(event.extra["name"], "snow");
-        let request = DecorationRequest { name: "Snow".to_owned() };
+        assert_eq!(event.extra["name"], "christmas");
+        let request = DecorationRequest { name: "Christmas".to_owned() };
         let (status, Json(response)) = post_decoration(State(test_state(transport.clone())), Json(request)).await;
         assert_eq!(status, StatusCode::BAD_REQUEST);
         assert!(!response.accepted);

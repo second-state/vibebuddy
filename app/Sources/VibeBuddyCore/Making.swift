@@ -1,6 +1,6 @@
 import Foundation
 
-/// Making a Character (ADR-0020, docs/characters.md): the user starts from a preset, edits its lines and picks a voice;
+/// Making a Character (ADR-0023, docs/characters.md): the user starts from a preset, edits its lines and picks a voice;
 /// the daemon makes the line audio (`POST /v1/characters`), and the App packs it with a look.
 
 /// A voice a made Character can speak with, from `GET /v1/voices`: a row of characters/voices.tsv, or one in the
@@ -114,16 +114,17 @@ public struct MakingStatus: Codable, Equatable, Sendable {
     public var failed: Bool { state == "failed" }
     public var progress: Double { total > 0 ? Double(done) / Double(total) : 0 }
 
-    /// Why it stopped, said for the user; `provider` names the voice's provider. Nil unless it failed.
-    public func explanation(provider: String) -> String? {
+    /// Why it stopped, said for the user; `provider` names the voice's provider, and the Paid plan is named only when
+    /// `planOffered` (`AccountStatus.upgradeOffered`). Nil unless it failed.
+    public func explanation(provider: String, planOffered: Bool) -> String? {
         guard failed else { return nil }
         switch reason {
-        case "plan" where !AccountPlan.shown: return String(localized: "Set your own key for \(provider) on the Account tab first.")
+        case "plan" where !planOffered: return String(localized: "Set your own key for \(provider) on the General tab first.")
         case "plan": return String(localized: "Making a Character with VibeBuddy's voices needs the Paid plan, or your own key for \(provider).")
         case "monthly": return String(localized: "This month's Characters on the Paid plan are used up. The lines made so far are kept: resume next month, or with your own key for \(provider).")
         case "global_cap": return String(localized: "VibeBuddy's voices are paused for today. The lines made so far are kept: resume tomorrow.")
-        case "signed_out": return String(localized: "Sign in on the Account tab, or set your own key for \(provider) there, then resume.")
-        case "own_key": return String(localized: "\(provider) refused your own key. Set another one on the Account tab, then resume.")
+        case "signed_out": return String(localized: "Sign in on the General tab, or set your own key for \(provider) there, then resume.")
+        case "own_key": return String(localized: "\(provider) refused your own key. Set another one on the General tab, then resume.")
         case "internal": return String(localized: "Making the Character stopped unexpectedly. Resume to try again.")
         default: return String(localized: "Making the Character failed: \(error ?? "")")
         }
@@ -141,15 +142,18 @@ public enum MakingReadiness: Equatable, Sendable {
     case signIn
     /// No service to sign in to in this build, and no own key.
     case ownKeyOnly
+    /// One of Volcano Engine's voices, which are no longer offered, without a key for it: there is no row to set one.
+    case retired
 
     public var canStart: Bool { self == .ownKey || self == .paidPlan }
 
     public static func of(_ voice: CharacterVoice, keys: VoiceKeysStatus?, account: AccountStatus?) -> MakingReadiness {
         let key = voice.provider == "volc" ? keys?.volc : keys?.elevenlabs
         if let key, key.set, !key.refused { return .ownKey }
-        // A voice in the user's own account: VibeBuddy's voice service can't speak it. Nor, while the Paid plan is
-        // hidden, any voice.
-        if voice.own || !AccountPlan.shown { return .ownKeyOnly }
+        if voice.provider == "volc", !voice.own, keys?.showsVolc != true { return .retired }
+        // A voice in the user's own account: VibeBuddy's voice service can't speak it. Nor, while the Paid plan isn't
+        // offered, any voice.
+        if voice.own || account?.upgradeOffered != true { return .ownKeyOnly }
         if account?.signedIn == true { return .paidPlan }
         return account?.available == true ? .signIn : .ownKeyOnly
     }
@@ -158,8 +162,9 @@ public enum MakingReadiness: Equatable, Sendable {
         switch self {
         case .ownKey: return String(localized: "Made with your own key for \(provider), billed to your account there.")
         case .paidPlan: return String(localized: "Without your own key for \(provider), making a Character with VibeBuddy's voices needs the Paid plan.")
-        case .signIn: return String(localized: "Sign in on the Account tab for the Paid plan, or set your own key for \(provider) there.")
-        case .ownKeyOnly: return String(localized: "Set your own key for \(provider) on the Account tab first.")
+        case .signIn: return String(localized: "Sign in on the General tab for the Paid plan, or set your own key for \(provider) there.")
+        case .ownKeyOnly: return String(localized: "Set your own key for \(provider) on the General tab first.")
+        case .retired: return String(localized: "\(provider) voices are no longer offered. Pick another voice.")
         }
     }
 }

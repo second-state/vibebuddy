@@ -2,27 +2,24 @@
 //! messages as the current tabs in main.rs, laid out in the korekore look. Where the Mac shows a sheet, these show an
 //! inline panel, as the alerts board says for Linux.
 
-use iced::widget::{Space, button, column, container, image, row, scrollable, text};
+use iced::widget::{Space, button, column, container, image, row, scrollable, stack, text};
 use iced::{Alignment, Border, Element, Length, Padding};
 
 use super::Section;
 use super::controls::{
     Fill, pixel, badge, bar, bold, card, card_with, divider, field, heading, note, picker, pill, pill_sized, regular, rows, semibold,
-    setting, small, sprite, switch, tag,
+    setting, small, sprite, switch, tag, trash_pill,
 };
 use super::picture::BoxPicture;
 use super::{sprites, theme, view};
 use crate::i18n::{UiLanguage, tr};
 use crate::status::{self, OperationKind, OperationState};
-use crate::{AddressChoice, BUILTIN, BoxDecoration, BoxScreens, CUSTOM, Lender, Message, ROBOT, agents, assets, client, config_dir, short_time, wifi_failure};
+use crate::{AddressChoice, BUILTIN, BoxDecoration, BoxScreens, CUSTOM, Message, ROBOT, agents, assets, client, config_dir, short_time, wifi_failure};
 
 /// Leaves room for the scroll bar and the cards' shadows.
 pub(super) fn page<'a>(content: impl Into<Element<'a, Message>>) -> Element<'a, Message> {
     scrollable(container(content).padding(Padding::ZERO.right(14).bottom(8))).into()
 }
-
-/// The Character page's scroller, so the page can go down to the card Make your own look opens below the grid.
-pub(crate) const CHARACTER_PAGE: &str = "korekore-character";
 
 fn percent(progress: f32) -> String {
     format!("{:.0}%", progress * 100.0)
@@ -127,6 +124,10 @@ impl crate::App {
         for made in &self.made {
             cards.push(self.kk_made_card(made, job));
         }
+        let custom_in_use = current.as_deref() == Some(CUSTOM);
+        if self.custom_look.is_some() || custom_in_use {
+            cards.push(self.custom_look_card(custom_in_use));
+        }
         cards.push(self.kk_make_character());
         let mut grid = column![].spacing(12);
         let mut cards = cards.into_iter().peekable();
@@ -160,15 +161,12 @@ impl crate::App {
             ),
             _ => None,
         });
-        let custom = (self.custom_look.is_some() || self.custom_problem.is_some() || current.as_deref() == Some(CUSTOM))
-            .then(|| self.custom_look_card(current.as_deref() == Some(CUSTOM)));
         let content = column![rows(std::iter::once(volume_row.into()).chain(address.map(Into::into))), self.decoration_card()]
             .push(progress)
             .push(job.and_then(|job| self.kk_making_row(job)))
             .push(grid)
-            .push(custom)
             .spacing(14);
-        scrollable(container(content).padding(Padding::ZERO.right(14).bottom(8))).id(CHARACTER_PAGE).into()
+        scrollable(container(content).padding(Padding::ZERO.right(14).bottom(8))).into()
     }
 
     /// The decoration the box draws over its screens (ADR-0022), as a strip under the volume so it stays near the top
@@ -271,60 +269,53 @@ impl crate::App {
         card_with(content, theme::PAPER, outline, stroke).padding(9).into()
     }
 
+    /// The user's own drawings as a Character card, like a made one: their first figure, ▶ and Use, a trash can in the
+    /// corner, and who lends the voice and lines. Make your own makes it; to change it, delete it and make another.
     fn custom_look_card(&self, in_use: bool) -> Element<'_, Message> {
-        let online = self.online();
-        let busy = self.busy();
-        let lenders: Vec<Lender> = self.voices.iter().map(Lender::of).collect();
-        // The box already wears this look with this lender, so writing it again would only redo it.
-        let on_the_box = in_use && self.custom_look_written && self.characters.custom_lender.as_deref() == self.lender.map(|lender| lender.id);
-        let frames = self.custom_look.as_ref().map(|(_, frames)| {
-            container(row(frames.iter().map(|frame| image(frame.clone()).filter_method(image::FilterMethod::Nearest).into())).spacing(14))
-                .center_x(Length::Fill)
-                .padding(12)
-                .style(|_| container::Style {
-                    background: Some(theme::BOX_CARD.into()),
-                    border: Border { color: theme::INK, width: theme::STROKE_BASE, radius: 12.0.into() },
-                    ..container::Style::default()
-                })
-        });
-        let pick = self.custom_look.as_ref().map(|_| {
-            column![
-                row![note(tr("Voice and lines from", &[])), Space::new().width(Length::Fill), picker(lenders, self.lender, Message::PickLender)]
-                    .align_y(Alignment::Center),
-                row![]
-                    .push((self.characters.custom_lender.is_some() && !self.confirm_delete_custom).then(|| pill(tr("Delete…", &[]), Fill::Paper, Some(Message::AskDeleteCustom(true)))))
-                    .push(Space::new().width(Length::Fill))
-                    .push(pill(tr("Use this look", &[]), Fill::Pink, (online && !busy && self.lender.is_some() && !on_the_box).then_some(Message::UseCustom))),
+        let actions: Element<'_, Message> = if in_use {
+            tag(tr("In use", &[]), theme::KORE_PINK_TEXT)
+        } else {
+            let can_use = self.online() && !self.busy() && self.custom_look.is_some() && self.lender.is_some();
+            // ▶ plays the lender's lines in its voice: what the box says when it wears this Character.
+            let preview = self.characters.custom_lender.as_deref().and_then(assets::voice_id);
+            let playing = preview.is_some_and(|id| self.previewing.as_ref().is_some_and(|(playing, _)| playing == id));
+            row![]
+                .push(preview.map(|id| {
+                    // As narrow as the trash can was here, so "My character" still fits beside it.
+                    pill(if playing { "■".to_owned() } else { "▶".to_owned() }, Fill::Paper, (!self.busy()).then_some(Message::TogglePreview(id))).padding(Padding::from([4, 9]))
+                }))
+                .push(pill(tr("Use", &[]), Fill::Paper, can_use.then_some(Message::UseCustom)))
+                .spacing(5)
+                .into()
+        };
+        let lender = self.characters.custom_lender.as_deref().map(assets::voice_name).unwrap_or_default();
+        let face: Element<'_, Message> = match self.custom_look.as_ref().and_then(|(_, frames)| frames.first()) {
+            Some(face) => figure(face.clone()).into(),
+            None => Space::new().into(),
+        };
+        // The trash can sits in the stage's corner, so the name keeps its room beside ▶ and Use.
+        let trash = (!in_use).then(|| container(trash_pill(Some(Message::AskDeleteCustom(true)))).align_right(Length::Fill).padding(6));
+        let content = column![
+            stack![
+                container(face).center_x(Length::Fill).align_y(Alignment::End).height(104).padding(Padding::ZERO.bottom(4)).style(|_| stage(theme::BOX_CARD))
             ]
-            .spacing(8)
-        });
-        card_with(
-            column![
-                row![heading(tr("Your own character", &[])), Space::new().width(Length::Fill)]
-                    .push(in_use.then(|| tag(tr("In use", &[]), theme::KORE_PINK_TEXT))),
-            ]
-            .push(frames)
-            .push(note(tr("One PNG or JPEG image: the figure four times in a 2 × 2 grid, on a plain white or transparent background. Top left normal, top right eyes closed, bottom left happy, bottom right sad. Any size: VibeBuddy cuts out each figure and makes it 48 × 64 pixels in 15 colors. No drawing yet? Copy a prompt into an image tool, such as ChatGPT or Gemini, with your character in place of the brackets.", &[])))
-            .push(row![pill(tr("Choose images…", &[]), Fill::Paper, Some(Message::ChooseDrawings)), pill(tr("Copy a prompt", &[]), Fill::Paper, Some(Message::CopyPrompt))].spacing(8))
-            .push(pick)
-            .push(self.confirm_delete_custom.then(|| {
-                let lender = self.characters.custom_lender.as_deref().map(assets::voice_name).unwrap_or_default();
-                column![note(tr("Delete your own character? This can't be undone.", &[]))]
-                    .push(in_use.then(|| note(tr("The box goes back to %@.", &[&lender]))))
-                    .push(row![
-                        Space::new().width(Length::Fill),
-                        pill(tr("Cancel", &[]), Fill::Paper, Some(Message::AskDeleteCustom(false))),
-                        pill(tr("Delete", &[]), Fill::Pink, Some(Message::DeleteCustom)),
-                    ].spacing(6))
-                    .spacing(6)
-            }))
-            .push(self.custom_problem.as_ref().map(|problem| tag(problem, theme::KORE_PINK_TEXT)))
-            .spacing(10),
-            theme::PAPER,
-            theme::INK,
-            theme::STROKE_BOLD,
-        )
-        .into()
+            .push(trash),
+            row![text(tr("My character", &[])).font(bold()).size(16).width(Length::Fill), actions].spacing(3).align_y(Alignment::Center),
+            small(tr("Your drawings · voice: %@", &[&lender])),
+        ]
+        // Asking before deleting, for the moment it takes.
+        .push(self.confirm_delete_custom.then(|| {
+            column![note(tr("Delete your own character? This can't be undone.", &[]))]
+                .push(row![
+                    Space::new().width(Length::Fill),
+                    pill(tr("Cancel", &[]), Fill::Paper, Some(Message::AskDeleteCustom(false))),
+                    pill(tr("Delete", &[]), Fill::Pink, Some(Message::DeleteCustom)),
+                ].spacing(6))
+                .spacing(6)
+        }))
+        .spacing(6);
+        let (outline, stroke) = if in_use { (theme::KORE_PINK, theme::STROKE_BOLD) } else { (theme::INK, theme::STROKE_BASE) };
+        card_with(content, theme::PAPER, outline, stroke).padding(9).into()
     }
 
     // MARK: Agents
@@ -575,7 +566,7 @@ impl crate::App {
         let detail = if forced {
             tr("On while the daemon runs with VIBEBUDDY_RESIDENT_SESSION=1.", &[])
         } else {
-            tr("Hold K0 on the box and ask. Codex or Claude Code on this computer answers, with your own account or key, and the buddy speaks the reply. Your voice goes to VibeBuddy's speech service.", &[])
+            tr("Hold K0 on the box and ask. Codex or Claude Code on this computer answers, with your own account or key, and the buddy speaks the reply. Your voice goes to VibeBuddy's voice service, or to Groq with your own key.", &[])
         };
         let toggle = (self.resident_info.is_some() && !forced).then_some(Message::VoiceCommands(!on));
         rows([row![
@@ -695,8 +686,12 @@ impl crate::App {
         .width(358);
         let link = match device {
             None => tr("daemon isn't running", &[]),
-            Some(device) if !device.connected && !device.candidates.is_empty() => tr("Several devices found", &[]),
-            Some(device) if !device.connected => tr("Box not found", &[]),
+            Some(device) if !device.connected => match &device.busy {
+                Some(busy) if busy.owner.is_empty() => tr("On another computer", &[]),
+                Some(busy) => tr("With %@", &[&busy.owner]),
+                None if !device.candidates.is_empty() => tr("Several devices found", &[]),
+                None => tr("Box not found", &[]),
+            },
             Some(device) if device.relay => tr("Relay", &[]),
             Some(device) => {
                 let port = device.port.as_deref().unwrap_or("?").trim_start_matches("/dev/");
@@ -728,6 +723,10 @@ impl crate::App {
                 row![small(tr("Box screens", &[])), Space::new().width(Length::Fill), value].align_y(Alignment::Center).into()
             }
         };
+        let relay_line = device
+            .filter(|_| self.status.as_ref().is_some_and(|status| status.account.shows_relay_switch()))
+            .and_then(status::Device::relay_line);
+        let relay_shown = relay_line.is_some();
         let the_box = card(
             column![
                 heading(tr("The box", &[])),
@@ -735,8 +734,16 @@ impl crate::App {
                 column![small(tr("Firmware", &[])), firmware].spacing(2),
                 screens,
             ]
-            .push(device.filter(|device| !device.connected).and_then(status::Device::relay_refusal).map(|why| text(why).font(regular()).size(12).color(theme::KORE_PINK_TEXT)))
-            .push(Space::new().height(Length::Fill))
+            .push(device.filter(|device| !device.connected).and_then(|device| device.relay_refusal(self.plan_offered())).map(|why| text(why).font(regular()).size(12).color(theme::KORE_PINK_TEXT)))
+            // Which Relay this computer uses; only where the Relay switch shows on General.
+            .push(relay_line.map(|line| column![small(tr("Relay", &[])), text(line).font(pixel(13.0).0).size(pixel(13.0).1).color(theme::INK)].spacing(2)))
+            .push(device.filter(|device| device.relay_mismatch()).map(|_| {
+                text(tr("The box uses another Relay than this computer, so they can't meet through it. Plug in the cable once to move the box to this computer's Relay.", &[]))
+                    .font(regular())
+                    .size(12)
+                    .color(theme::KORE_PINK_TEXT)
+            }))
+            .push(Space::new().height(if relay_shown { Length::Fixed(8.0) } else { Length::Fill }))
             .push((outdated && online && !can_flash).then(|| note(tr("Plug in the cable to update the box's firmware.", &[]))))
             .push((outdated && can_flash).then(|| {
                 pill_sized(tr("Update to %@", &[&offer.map(|offer| offer.version.clone()).unwrap_or_default()]), Fill::Pink, 13.0, (!busy).then_some(Message::AskFirmwareUpdate(true)))
@@ -745,7 +752,8 @@ impl crate::App {
             .push(pill_sized(tr("Make the box blink", &[]), Fill::Sun, 13.0, (online && !busy).then_some(Message::Identify)).width(Length::Fill))
             .push(pill_sized(tr("Flash from file…", &[]), Fill::Paper, 13.0, (can_flash && !busy).then_some(Message::FlashFromFile)).width(Length::Fill))
             .spacing(10)
-            .height(Length::Fixed(290.0)),
+            // The Relay lines make the card taller than the screen beside it; it grows to fit them.
+            .height(if relay_shown { Length::Shrink } else { Length::Fixed(290.0) }),
         );
         let top = row![column![screen, screen_actions].spacing(8), the_box].spacing(14);
         let firmware_state = self.firmware_state(can_flash, downloaded);
@@ -762,6 +770,7 @@ impl crate::App {
                 .push(self.confirm_panel())
                 .push(firmware_state)
                 .push(networked)
+                .push(self.vibeplays_card())
                 .spacing(14),
         )
     }
@@ -816,14 +825,17 @@ impl crate::App {
                     .extend(rows)
                     .spacing(8),
             ));
-        } else if self.status.is_some() && !online && !busy && !replug && device.is_some_and(|device| device.pin.is_none()) {
+        } else if self.status.is_some() && !online && !busy && !replug && device.is_some_and(|device| device.pin.is_none() && device.busy.is_none()) {
             finding = finding.push(card(
                 column![
                     row![badge(&sprites::KORE_SLEEP, true, theme::INK), heading(tr("Box not found", &[]))].spacing(10).align_y(Alignment::Center),
                     note(tr("Not showing up? Use a cable that carries data, not just power.", &[])),
-                    note(tr("If the daemon log on the Advanced tab says “Permission denied”, your account can't open the box's port yet: restart the computer once, then replug the box.", &[])),
-                    note(tr("Still nothing? Hold K0 on the box while you plug in the cable. The box starts in download mode with a dark screen, ready to be flashed with VibeBuddy firmware.", &[])),
                 ]
+                .push(
+                    // The serial group a Linux account joins at install takes effect at the next login; Windows has none.
+                    (!cfg!(windows)).then(|| note(tr("If the daemon log on the Advanced tab says “Permission denied”, your account can't open the box's port yet: restart the computer once, then replug the box.", &[]))),
+                )
+                .push(note(tr("Still nothing? Hold K0 on the box while you plug in the cable. The box starts in download mode with a dark screen, ready to be flashed with VibeBuddy firmware.", &[])))
                 .spacing(8),
             ));
         }
@@ -1022,13 +1034,23 @@ impl crate::App {
             wifi = wifi.push(row![pill(tr("Add network", &[]), Fill::Paper, Some(Message::ChangeWifi))]);
         } else {
             let valid = !self.wifi_ssid.is_empty() && self.wifi_ssid.len() <= 32 && self.wifi_password.len() <= 63;
-            let seen = device.wifi_seen.iter().take(8).map(|network| {
-                let fill = if network.ssid == self.wifi_ssid { Fill::Ink } else { Fill::Paper };
-                pill(format!("{}  {} dBm", network.ssid, network.rssi), fill, Some(Message::WifiSsid(network.ssid.clone()))).into()
-            });
+            // The networks the box heard, in a menu as on the Mac: a scan can hear a dozen or more.
+            let choices: Vec<NetworkChoice> = std::iter::once(NetworkChoice { ssid: String::new(), label: tr("Choose…", &[]) })
+                .chain(device.wifi_seen.iter().map(|network| NetworkChoice {
+                    ssid: network.ssid.clone(),
+                    label: format!("{}  {} dBm", network.ssid, network.rssi),
+                }))
+                .collect();
+            let chosen = choices.iter().find(|choice| choice.ssid == self.wifi_ssid).cloned().or_else(|| choices.first().cloned());
             wifi = wifi
-                .push(row![small(tr("Nearby networks", &[])), Space::new().width(Length::Fill), pill(tr("Scan", &[]), Fill::Paper, (!busy).then_some(Message::ScanWifi))].align_y(Alignment::Center))
-                .push(column(seen).spacing(4))
+                .push(
+                    row![
+                        picker(choices, chosen, |choice: NetworkChoice| Message::WifiSsid(choice.ssid)),
+                        pill(tr("Scan", &[]), Fill::Paper, (!busy).then_some(Message::ScanWifi))
+                    ]
+                    .spacing(8)
+                    .align_y(Alignment::Center),
+                )
                 .push(field(&tr("Network name", &[]), &self.wifi_ssid).on_input(Message::WifiSsid))
                 .push(field(&tr("Password", &[]), &self.wifi_password).secure(true).on_input(Message::WifiPassword))
                 .push(row![pill(tr("Join", &[]), Fill::Sun, (valid && !busy).then_some(Message::JoinWifi))]);
@@ -1047,6 +1069,54 @@ impl crate::App {
             wifi = wifi.push(small(tr("The box remembers up to 5 networks and joins the one it finds.", &[])));
         }
         card(wifi.push(small(tr("On the same network, a paired computer drives the box without the cable.", &[])))).width(Length::FillPortion(1)).into()
+    }
+
+    /// VibePlays (ADR-0025): the ones found on the network, to pair by the code they show, and the paired ones. They
+    /// show the buddy beside the box and never take its link. Older daemons don't report them: no card.
+    fn vibeplays_card(&self) -> Option<Element<'_, Message>> {
+        let vibeplays = self.status.as_ref()?.vibeplays.as_ref()?;
+        let rows = vibeplays.iter().map(|vibeplay| {
+            let mut action = row![].spacing(8).align_y(Alignment::Center);
+            if vibeplay.paired {
+                action = action.push(if vibeplay.connected { tag(tr("Connected", &[]), theme::DONE_TEXT) } else { tag(tr("Not connected", &[]), theme::MUTED_2) });
+                if self.vibeplay_forgetting.as_ref() != Some(&vibeplay.key) {
+                    action = action.push(pill(tr("Forget", &[]), Fill::Paper, Some(Message::AskForgetVibePlay(Some(vibeplay.key.clone())))));
+                }
+            } else if self.vibeplay_pairing.as_ref() != Some(&vibeplay.key) {
+                action = action.push(pill(tr("Pair…", &[]), Fill::Sun, Some(Message::PairVibePlay(Some(vibeplay.key.clone())))));
+            }
+            let mut body = column![row![text(vibeplay.name.clone()).font(semibold()).size(13).color(theme::INK).width(Length::Fill), action].align_y(Alignment::Center)].spacing(8);
+            if !vibeplay.paired && self.vibeplay_pairing.as_ref() == Some(&vibeplay.key) {
+                let ready = self.vibeplay_code.len() == 6 && !self.vibeplay_sending;
+                body = body
+                    .push(field(&tr("Enter the six digits the VibePlay shows", &[]), &self.vibeplay_code).on_input(Message::VibePlayCode).on_submit_maybe(ready.then_some(Message::SendVibePlayCode)))
+                    .push(self.vibeplay_error.as_ref().map(|error| note(error.clone())))
+                    .push(row![pill(tr("Pair", &[]), Fill::Sun, ready.then_some(Message::SendVibePlayCode)), pill(tr("Cancel", &[]), Fill::Paper, Some(Message::PairVibePlay(None)))].spacing(8));
+            }
+            if vibeplay.paired && self.vibeplay_forgetting.as_ref() == Some(&vibeplay.key) {
+                body = body
+                    .push(text(tr("Forget this VibePlay?", &[])).font(bold()).size(13).color(theme::INK))
+                    .push(note(tr("It stops getting this computer's cards. To use it again, pair it again with the code it shows.", &[])))
+                    .push(row![pill(tr("Forget", &[]), Fill::Pink, Some(Message::ForgetVibePlay(vibeplay.key.clone()))), pill(tr("Cancel", &[]), Fill::Paper, Some(Message::AskForgetVibePlay(None)))].spacing(8));
+            }
+            container(body)
+                .padding(Padding::from([6, 10]))
+                .style(|_| container::Style {
+                    border: Border { color: theme::LINE, width: theme::STROKE_BASE, radius: theme::RADIUS_SM.into() },
+                    ..container::Style::default()
+                })
+                .into()
+        });
+        Some(
+            card(
+                column![heading(tr("VibePlays", &[]))]
+                    .extend(rows)
+                    .push(vibeplays.is_empty().then(|| note(tr("No VibePlay found on this network.", &[]))))
+                    .push(small(tr("A VibePlay shows the buddy beside the box, over Wi-Fi. While the box is linked, the VibePlay shows and doesn't speak.", &[])))
+                    .spacing(8),
+            )
+            .into(),
+        )
     }
 
     fn paired_card<'a>(&'a self, device: &'a status::Device) -> Element<'a, Message> {
@@ -1117,7 +1187,7 @@ impl crate::App {
             setting(tr("Launch at login", &[]), switch(self.launch_at_login, Some(Message::LaunchAtLogin(!self.launch_at_login)))),
             setting(tr("Tell me when the box disconnects or the daemon fails", &[]), switch(notify, have_status.then_some(Message::NotifyLink(!notify)))),
         ];
-        if status::Plan::SHOWN {
+        if self.status.as_ref().is_some_and(|status| status.account.shows_relay_switch()) {
             settings.push(setting(tr("Reach the box through the Relay when it's away from this computer", &[]), switch(relay, have_status.then_some(Message::Relay(!relay)))));
         }
         let settings = rows(settings);
@@ -1151,13 +1221,13 @@ impl crate::App {
         page(
             column![]
                 .push(unsupported)
+                .push(container(text(tr("Updates", &[])).font(bold()).size(15).color(theme::INK)).padding(Padding::ZERO.left(4)))
+                .push(updates_card)
+                .push(upgrade)
                 .push(self.kk_account())
                 .push(container(text(tr("This computer", &[])).font(bold()).size(15).color(theme::INK)).padding(Padding::ZERO.left(4)))
                 .push(settings)
                 .push(self.restart_offer.as_ref().map(|offer| self.restart_panel(offer)))
-                .push(container(text(tr("Updates", &[])).font(bold()).size(15).color(theme::INK)).padding(Padding::ZERO.left(4)))
-                .push(updates_card)
-                .push(upgrade)
                 .push(about)
                 .spacing(14),
         )
@@ -1242,17 +1312,21 @@ impl crate::App {
             column![
                 daemon,
                 row![
-                    // The daemon logs to the journal here, not a file; the folder holds the hook's log.
+                    // On Linux the daemon logs to the journal, not a file; the folder holds the hook's log.
                     small_card(
                         tr("Logs", &[]),
-                        tr("The daemon's log in the journal, and the hook's log as a file.", &[]),
+                        if cfg!(windows) {
+                            tr("The daemon's log and the hook's log, both files.", &[])
+                        } else {
+                            tr("The daemon's log in the journal, and the hook's log as a file.", &[])
+                        },
                         row![pill(tr("Show daemon log", &[]), Fill::Paper, Some(Message::ShowDaemonLog)), pill(tr("Open logs folder", &[]), Fill::Paper, Some(Message::OpenLogsFolder))]
                             .spacing(8)
                             .into(),
                     ),
                     small_card(
                         tr("Diagnostics", &[]),
-                        tr("Logs, config and both sides' build IDs in one file, for a bug report.", &[]),
+                        tr("Logs, config and both sides' build IDs in one folder, for a bug report.", &[]),
                         pill(tr("Export diagnostics…", &[]), Fill::Paper, Some(Message::ExportDiagnostics)).into(),
                     ),
                 ]
@@ -1383,4 +1457,17 @@ fn buddy(words: &str) -> Element<'_, Message> {
 /// three screen pixels on a 2× display.
 pub(super) fn figure(face: image::Handle) -> iced::widget::Image {
     image(face).filter_method(image::FilterMethod::Nearest).width(72).height(96)
+}
+
+/// One entry of the Wi-Fi menu: a network the box heard, or none yet.
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct NetworkChoice {
+    ssid: String,
+    label: String,
+}
+
+impl std::fmt::Display for NetworkChoice {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.label)
+    }
 }

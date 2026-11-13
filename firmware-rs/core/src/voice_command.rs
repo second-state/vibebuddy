@@ -76,7 +76,7 @@ pub enum Reason {
     NotReady,
     /// The box is on its UART bridge, which runs too slowly for the audio.
     SlowLink,
-    /// No speech recognizer: the user's own Groq key is needed (ADR-0020).
+    /// No speech recognizer: the user's own Groq key is needed (ADR-0023).
     OwnKey,
     /// A reason this firmware doesn't know.
     Other,

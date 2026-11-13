@@ -1,10 +1,10 @@
-//! The account (ADR-0018), the user's own keys and making a Character (ADR-0020) in the korekore look. The design has
+//! The account (ADR-0018), the user's own keys and making a Character (ADR-0023) in the korekore look. The design has
 //! no boards for them, so they use its cards, rows and pills; the state and messages are the current tabs' in main.rs.
 
 use iced::widget::{Space, button, column, container, image, row, text};
 use iced::{Alignment, Border, Element, Length, Padding};
 
-use super::controls::{Fill, bar, bold, card, card_with, divider, field, heading, note, picker, pill, rows, small, tag};
+use super::controls::{Fill, bar, bold, card, card_with, divider, field, heading, note, picker, pill, rows, small, tag, trash_pill};
 use super::theme;
 use crate::i18n::tr;
 use crate::status;
@@ -13,7 +13,7 @@ use crate::{Lender, MakeForm, Message, ROBOT, assets, client, making};
 impl crate::App {
     // MARK: Account
 
-    /// At the top of the General page: who is signed in, the plan and today's use, then the own keys.
+    /// At the top of the General page: who is signed in, the plan and the voice credit, then the own keys.
     pub(super) fn kk_account(&self) -> Element<'_, Message> {
         let title = |label: String| container(text(label).font(bold()).size(15).color(theme::INK)).padding(Padding::ZERO.left(4));
         let keys = self.status.as_ref().and_then(|status| status.voice_keys.as_ref()).map(|keys| column![title(tr("Your own keys", &[])), self.kk_own_keys(keys)].spacing(14));
@@ -73,31 +73,31 @@ impl crate::App {
                 .into(),
             ));
         }
-        if status::Plan::SHOWN && let Some(plan) = &account.plan {
+        // The plan row shows with its button: Upgrade while the Paid plan is offered, and Manage plan always on Paid.
+        let button = account.plan_button();
+        if let Some(plan) = account.plan.as_ref().filter(|_| account.shows_plan_row()) {
             let (name, color) = if plan.paid() { (tr("Paid plan", &[]), theme::DONE_TEXT) } else { (tr("Free", &[]), theme::INK) };
+            let press = |button| (!self.plan_busy).then_some(Message::OpenPlanPage(button));
+            let button = button.map(|button| match button {
+                status::PlanButton::Upgrade => pill(tr("Upgrade", &[]), Fill::Sun, press(button)),
+                status::PlanButton::ManagePlan => pill(tr("Manage plan", &[]), Fill::Paper, press(button)),
+            });
+            let paying = self.paying.clone().filter(|_| !plan.paid()).map(|note| tag(note, theme::WAIT_TEXT));
             items.push(divider());
-            items.push(line(row![text(tr("Plan", &[])).font(bold()).size(14).color(theme::INK).width(Length::Fill), tag(name, color)].align_y(Alignment::Center).into()));
-            if let Some(month) = plan.month_line() {
-                items.push(divider());
-                items.push(line(tag(month, theme::MUTED_2)));
-            }
+            items.push(line(
+                row![text(tr("Plan", &[])).font(bold()).size(14).color(theme::INK).width(Length::Fill)]
+                    .push(paying)
+                    .push(tag(name, color))
+                    .push(button)
+                    .spacing(8)
+                    .align_y(Alignment::Center)
+                    .into(),
+            ));
         }
-        let today = match (account.refused.as_deref(), &account.today) {
-            (Some(refused), _) => {
-                let back = status::voice_comes_back(chrono::Utc::now(), &chrono::Local);
-                let line = if refused == "global_cap" {
-                    tr("Voice is paused for everyone today. It comes back at %@.", &[&back])
-                } else {
-                    tr("Today's voice is used up. It comes back at %@.", &[&back])
-                };
-                Some(tag(line, theme::KORE_PINK_TEXT))
-            }
-            (None, Some(usage)) => Some(tag(tr("Voice today: %lld of %lld", &[&usage.commands, &usage.commands_limit]), theme::MUTED_2)),
-            (None, None) => None,
-        };
-        if let Some(today) = today {
+        // Nothing before the first use of our voice service.
+        if let Some(credit) = account.voice_credit() {
             items.push(divider());
-            items.push(line(today));
+            items.push(line(tag(tr("Voice credit %@", &[&credit]), theme::MUTED_2)));
         }
         items
     }
@@ -121,7 +121,7 @@ impl crate::App {
         if let Some(groq) = &keys.groq {
             items.push(divider());
             items.push(
-                container(note(tr("Voice commands need your own Groq key for speech recognition, from console.groq.com. Your recordings go straight to Groq, billed to your account there.", &[])))
+                container(note(tr("When you are signed in, voice commands go through VibeBuddy's voice service and use your voice credit. With your own Groq key, from console.groq.com, your recordings go straight to Groq instead, billed to your account there.", &[])))
                     .padding(Padding::from([12, 16]))
                     .into(),
             );
@@ -160,21 +160,22 @@ impl crate::App {
 
     // MARK: Making a Character
 
-    /// A Character the user made, as a Character card with Use or Resume, and Delete.
+    /// A Character the user made, as a Character card with Use or Resume and a trash can beside it.
     pub(super) fn kk_made_card<'a>(&'a self, made: &'a making::MadeCharacter, job: Option<&'a making::Making>) -> Element<'a, Message> {
         let online = self.online();
         let busy = self.busy();
         let in_use = self.status.as_ref().and_then(|status| status.device.voice.as_deref()) == Some(made.id.as_str());
         let making_this = job.is_some_and(|job| job.running() && job.id == made.id);
         let job_running = job.is_some_and(making::Making::running);
+        let trash = trash_pill((!making_this).then(|| Message::AskDeleteMade(Some(made.id.clone()))));
         let action: Element<'_, Message> = if in_use {
             tag(tr("In use", &[]), theme::KORE_PINK_TEXT)
         } else if made.complete {
-            pill(tr("Use", &[]), Fill::Paper, (online && !busy).then_some(Message::UseMade(made.id.clone()))).into()
+            row![trash, pill(tr("Use", &[]), Fill::Paper, (online && !busy).then_some(Message::UseMade(made.id.clone())))].spacing(5).into()
         } else if making_this {
             tag(tr("Making…", &[]), theme::WAIT_TEXT)
         } else {
-            pill(tr("Resume", &[]), Fill::Paper, (!job_running).then_some(Message::ResumeMade(made.id.clone()))).into()
+            row![trash, pill(tr("Resume", &[]), Fill::Paper, (!job_running).then_some(Message::ResumeMade(made.id.clone())))].spacing(5).into()
         };
         let base = assets::voice_name(&made.base);
         let voice = self.character_voices.iter().find(|voice| voice.id == made.voice).map_or_else(|| made.voice.clone(), |voice| voice.name.clone());
@@ -183,7 +184,8 @@ impl crate::App {
             Some((_, face)) => super::pages::figure(face.clone()).into(),
             None => Space::new().into(),
         };
-        let delete: Element<'_, Message> = if self.confirm_delete_made.as_deref() == Some(made.id.as_str()) {
+        // Asking before deleting, for the moment it takes.
+        let delete = (self.confirm_delete_made.as_deref() == Some(made.id.as_str())).then(|| {
             column![
                 note(tr("Delete “%@”? This can't be undone.", &[&made.name])),
                 small(tr("Its lines made in its voice go with it; making it again would make them again.", &[])),
@@ -195,18 +197,13 @@ impl crate::App {
                 .spacing(6),
             ]
             .spacing(6)
-            .into()
-        } else if in_use {
-            small(tr("It's on the box: put another character on the box to delete this one.", &[]))
-        } else {
-            row![Space::new().width(Length::Fill), pill(tr("Delete…", &[]), Fill::Paper, (!making_this).then(|| Message::AskDeleteMade(Some(made.id.clone()))))].into()
-        };
+        });
         let content = column![
             container(face).center_x(Length::Fill).align_y(Alignment::End).height(104).padding(Padding::ZERO.bottom(4)).style(|_| super::pages::stage(theme::BOX_CARD)),
             row![text(made.name.clone()).font(bold()).size(16).width(Length::Fill), action].align_y(Alignment::Center),
             small(detail),
-            delete,
         ]
+        .push(delete)
         .spacing(6);
         let (outline, stroke) = if in_use { (theme::KORE_PINK, theme::STROKE_BOLD) } else { (theme::INK, theme::STROKE_BASE) };
         card_with(content, theme::PAPER, outline, stroke).padding(9).into()
@@ -230,7 +227,7 @@ impl crate::App {
         let provider = made
             .and_then(|made| self.character_voices.iter().find(|voice| voice.id == made.voice))
             .map_or_else(|| tr("the voice's provider", &[]), making::Voice::provider_name);
-        if let Some(why) = job.explanation(&provider) {
+        if let Some(why) = job.explanation(&provider, self.plan_offered()) {
             let resume = made.map(|made| pill(tr("Resume", &[]), Fill::Sun, Some(Message::ResumeMade(made.id.clone()))));
             return Some(
                 card_with(row![container(note(why)).width(Length::Fill)].push(resume).spacing(12).align_y(Alignment::Center), theme::CREAM, theme::KORE_PINK_TEXT, theme::STROKE_BASE)

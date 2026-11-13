@@ -15,15 +15,16 @@ enum KorekoreSnapshots {
      "device":{"connected":true,"port":"/dev/cu.usbmodem8301","bridge":false,"mode":"duty","firmware_version":"0.5.0",
        "firmware_build":"cc16829","voice":"mei","volume":50,"box_key":"k","computer_key":"me","paired":true,
        "paired_computers":[{"key":"me","name":"Michael's Mac Studio"},{"key":"t","name":"ThinkPad · Omarchy"}],
-       "wifi_network":"ByteTrade","wifi_address":"192.168.1.160","transfer":true,"screens":"korekore","decoration":"snow"},
+       "wifi_network":"ByteTrade","wifi_address":"192.168.1.160","transfer":true,"screens":"korekore","decoration":"christmas"},
      "today":{"done":7,"asks":3,"busy_seconds":15120},
      "hooks":{"codex":"2026-10-21T16:40:00+08:00","claude":"2026-10-21T17:03:00+08:00"},
      "config":{"notify_link":true,"check_updates":true,"relay":false},
      "updates":{"enabled":true,"last_check":"2026-10-21T13:51:00+08:00","unsupported_app":false},
      "account":{"available":true,"signed_in":true,"github_id":1,"github_login":"kore-sample",
-       "today":{"day":"2026-10-21","commands":12,"commands_limit":200},
-       "plan":{"name":"paid","period_end":"2026-11-24T00:00:00Z","characters":12300,"characters_limit":100000}},
+       "plan":{"name":"paid","period_end":"2026-11-24T00:00:00Z"},"voice_credit_micro_usd":933100},
      "voice_keys":{"elevenlabs":{"set":true,"refused":false},"volc":{"set":false,"refused":false}},
+     "vibeplays":[{"key":"vg1","name":"Desk VibePlay","paired":true,"connected":true,"address":"192.168.1.42:7342"},
+                  {"key":"vg2","name":"Living-room VibePlay","paired":false,"connected":false,"address":"192.168.1.57:7342"}],
      "activities":[{"agent":"claude-code","title":"CC:Add Chinese to the box","state":"working"},
                    {"agent":"codex","title":"CX:Fix voice reply","state":"working"},
                    {"agent":"github-actions","title":"CI:App tests","state":"working"}]}
@@ -86,6 +87,10 @@ enum KorekoreSnapshots {
         try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
         let status = try! StatusCoding.decoder().decode(Status.self, from: Data(sample.utf8))
         model.showSample(status)
+        // The user's own Character, as a card in the grid: a preset's drawings stand in for theirs.
+        if let sheet = LookImages.load(URL(fileURLWithPath: "characters/luna/look.png")), let look = try? LookBuilder.build([sheet]) {
+            model.sampleCustomCharacter = (look, "wanwanxiaohe")
+        }
         for section in KorekoreSection.allCases {
             let window = KorekoreSettingsWindow(rootView: KorekoreSettingsRoot(model: model, initial: section, sampleConversation: conversation))
             window.setFrameOrigin(NSPoint(x: -20_000, y: 0))
@@ -128,7 +133,11 @@ enum KorekoreSnapshots {
                 message: String(localized: "The box's current firmware and data will be erased and can't be recovered. It restarts on its own when done; over the UART port this takes a few minutes."),
                 buttons: [String(localized: "Flash"), String(localized: "Cancel")], warning: true))),
         ]
-        for (name, view) in alerts {
+        // The VibePlays card sits below the window's fold: drawn on its own, with one being paired.
+        let cards: [(String, AnyView)] = [
+            ("card-vibeplays", AnyView(KorekoreVibePlaysCard(model: model, vibeplays: status.vibeplays ?? [], pairing: "vg2", code: "4821"))),
+        ]
+        for (name, view) in alerts + cards {
             let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 480, height: 300), styleMask: [.borderless], backing: .buffered, defer: false)
             let hosting = NSHostingView(rootView: view.padding(10).background(KorekoreTheme.Colors.backdrop))
             window.setContentSize(hosting.fittingSize)

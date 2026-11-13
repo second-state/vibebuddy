@@ -250,6 +250,24 @@ fn buddy_rect(x_offset: i32) -> Rect {
     Rect { x: 104 + x_offset, y: 28, width: 112, height: 128 }
 }
 
+/// What the screens call the keys in their hints. The box's are K0, K1 and K2; the VibePlay shows the same screens
+/// and names its own keys (docs/vibeplay.md).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct KeyNames {
+    /// Starts, pauses and goes on with the Pomodoro.
+    pub k0: &'static str,
+    /// Held: gives up the Pomodoro phase.
+    pub hold_k0: &'static str,
+    /// Goes back on duty.
+    pub k1: &'static str,
+    /// Opens what the screen is about.
+    pub k2: &'static str,
+}
+
+impl KeyNames {
+    pub const BOX: Self = Self { k0: "K0", hold_k0: "HOLD K0", k1: "K1", k2: "K2" };
+}
+
 /// External state needed to draw a frame: the pomodoro and the leisure director belong to the main program.
 pub struct Scene<'a> {
     pub now_ms: u32,
@@ -303,6 +321,8 @@ pub struct Display {
     /// The time the decoration was last drawn at, which it stays at while it holds still, and when it moves next.
     decoration_t: u32,
     decoration_at: u32,
+    /// What the hints call the keys.
+    keys: KeyNames,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -924,7 +944,13 @@ impl Display {
             decoration: Decoration::Off,
             decoration_t: 0,
             decoration_at: 0,
+            keys: KeyNames::BOX,
         }
+    }
+
+    /// Names the keys in the hints from now on; the box keeps [`KeyNames::BOX`].
+    pub fn set_keys(&mut self, keys: KeyNames) {
+        self.keys = keys;
     }
 
     /// The screen hardware is initialized and the backlight is still off: draw the first frame, then turn on the backlight.
@@ -1113,14 +1139,16 @@ impl Display {
             b"FOCUS"
         };
         canvas.draw_text(PANEL_X, 44, phase_label, 2, color, 9);
+        let keys = self.keys;
         if view.run == Run::Pending {
-            canvas.draw_text(PANEL_X, 66, b"K0 START", 1, COLOR_MUTED, 18);
+            canvas.draw_text(PANEL_X, 66, text!(24, "{} START", keys.k0).as_bytes(), 1, COLOR_MUTED, 18);
             if !view.is_idle() {
-                canvas.draw_text(PANEL_X, 78, b"HOLD K0 SKIP", 1, COLOR_MUTED, 18);
+                canvas.draw_text(PANEL_X, 78, text!(24, "{} SKIP", keys.hold_k0).as_bytes(), 1, COLOR_MUTED, 18);
             }
         } else {
-            canvas.draw_text(PANEL_X, 66, if paused { b"K0 RESUME" } else { b"K0 PAUSE" }, 1, COLOR_MUTED, 18);
-            canvas.draw_text(PANEL_X, 78, b"HOLD K0 STOP", 1, COLOR_MUTED, 18);
+            let action = if paused { "RESUME" } else { "PAUSE" };
+            canvas.draw_text(PANEL_X, 66, text!(24, "{} {}", keys.k0, action).as_bytes(), 1, COLOR_MUTED, 18);
+            canvas.draw_text(PANEL_X, 78, text!(24, "{} STOP", keys.hold_k0).as_bytes(), 1, COLOR_MUTED, 18);
         }
         if paused {
             canvas.draw_text(PANEL_X, 98, b"PAUSED", 2, color, 9);
@@ -1578,11 +1606,19 @@ impl Display {
     }
 
     /// Whether the decoration moves now. It holds still while something needs the user, so the only motion is the
-    /// buddy asking; and while the menu is up or the screen is dimmed for the night.
+    /// buddy asking (and the lights' twinkle); and while the menu is up or the screen is dimmed for the night.
     fn decoration_moves(&self, scene: &Scene) -> bool {
         self.decoration != Decoration::Off
             && self.panel.is_none()
             && !self.needs_input()
+            && !(self.mode == Mode::Leisure && scene.leisure.view(scene.now_ms).dim)
+    }
+
+    /// Whether the decoration's lights twinkle now: they do while the box needs input too, but not while the menu is
+    /// up or the screen is dimmed for the night.
+    fn decoration_twinkles(&self, scene: &Scene) -> bool {
+        decoration::twinkles(self.decoration)
+            && self.panel.is_none()
             && !(self.mode == Mode::Leisure && scene.leisure.view(scene.now_ms).dim)
     }
 
@@ -1600,7 +1636,8 @@ impl Display {
             self.decoration_t = scene.now_ms;
         }
         self.decoration_at = scene.now_ms.wrapping_add(decoration::FRAME_MS);
-        decoration::draw(canvas, self.decoration, self.decoration_t);
+        let twinkle_ms = if self.decoration_twinkles(scene) { scene.now_ms } else { self.decoration_t };
+        decoration::draw(canvas, self.decoration, self.decoration_t, twinkle_ms);
     }
 
     pub fn refresh(&mut self, screen: &mut dyn Screen, scene: &Scene) {
@@ -1655,8 +1692,8 @@ impl Display {
             let _ = self.render(screen, scene);
         }
         if (now.wrapping_sub(self.next_animation_at) as i32) < 0 {
-            // Between the screens' own frames, a moving decoration still needs its own.
-            if self.decoration_moves(scene) && now.wrapping_sub(self.decoration_at) as i32 >= 0 {
+            // Between the screens' own frames, a moving or twinkling decoration still needs its own.
+            if (self.decoration_moves(scene) || self.decoration_twinkles(scene)) && now.wrapping_sub(self.decoration_at) as i32 >= 0 {
                 let _ = self.render(screen, scene);
             }
             return;

@@ -37,13 +37,23 @@ pub struct Handshake(snow::HandshakeState);
 
 /// Starts a handshake with the box whose key is `box_key`; returns the first message as a line.
 pub fn start(identity: &Identity, box_key: &[u8; 32], payload: &[u8]) -> Result<(Handshake, String), String> {
-    let box_public = ed25519_dalek::VerifyingKey::from_bytes(box_key).map_err(|error| error.to_string())?.to_montgomery().to_bytes();
+    start_with(identity, box_key, PROLOGUE, payload)
+}
+
+/// The X25519 key Noise sees for an Ed25519 key (a box's or a VibePlay's); None if it isn't a key.
+pub fn noise_public(key: &[u8; 32]) -> Option<[u8; 32]> {
+    Some(ed25519_dalek::VerifyingKey::from_bytes(key).ok()?.to_montgomery().to_bytes())
+}
+
+/// [`start`] bound to another prologue: a VibePlay's link uses the same pattern (docs/vibeplay.md).
+pub fn start_with(identity: &Identity, remote_key: &[u8; 32], prologue: &[u8], payload: &[u8]) -> Result<(Handshake, String), String> {
+    let remote_public = noise_public(remote_key).ok_or_else(|| "not a key".to_owned())?;
     let secret = identity.noise_secret();
     let params = PATTERN.parse().map_err(|error: snow::Error| error.to_string())?;
     let mut handshake = snow::Builder::new(params)
         .local_private_key(&secret)
-        .and_then(|builder| builder.remote_public_key(&box_public))
-        .and_then(|builder| builder.prologue(PROLOGUE))
+        .and_then(|builder| builder.remote_public_key(&remote_public))
+        .and_then(|builder| builder.prologue(prologue))
         .and_then(snow::Builder::build_initiator)
         .map_err(|error| error.to_string())?;
     let mut message = vec![0u8; MAX_MESSAGE];
@@ -58,6 +68,43 @@ impl Handshake {
         let mut payload = vec![0u8; MAX_MESSAGE];
         self.0.read_message(&reply, &mut payload).map_err(|_| "the box didn't prove its key".to_owned())?;
         Ok(Session(self.0.into_transport_mode().map_err(|error| error.to_string())?))
+    }
+}
+
+/// Pairing with a VibePlay (docs/vibeplay.md): `Noise_XX_25519_ChaChaPoly_SHA256`, this computer as initiator.
+/// XX tells each side the other's key during the handshake, which is what pairing needs.
+pub struct Pairing(snow::HandshakeState);
+
+const PAIRING_PATTERN: &str = "Noise_XX_25519_ChaChaPoly_SHA256";
+
+/// Starts a pairing handshake; returns the first message as a line.
+pub fn start_pairing(identity: &Identity, prologue: &[u8]) -> Result<(Pairing, String), String> {
+    let secret = identity.noise_secret();
+    let params = PAIRING_PATTERN.parse().map_err(|error: snow::Error| error.to_string())?;
+    let mut handshake = snow::Builder::new(params)
+        .local_private_key(&secret)
+        .and_then(|builder| builder.prologue(prologue))
+        .and_then(snow::Builder::build_initiator)
+        .map_err(|error| error.to_string())?;
+    let mut message = vec![0u8; MAX_MESSAGE];
+    let length = handshake.write_message(&[], &mut message).map_err(|error| error.to_string())?;
+    Ok((Pairing(handshake), URL_SAFE_NO_PAD.encode(&message[..length])))
+}
+
+impl Pairing {
+    /// Reads the second message, checks that the other side holds `expected` (an Ed25519 key), and returns the
+    /// session and the third message as a line, which tells the other side this computer's key.
+    pub fn finish(mut self, reply: &str, expected: &[u8; 32]) -> Result<(Session, String), String> {
+        let reply = URL_SAFE_NO_PAD.decode(reply.trim()).map_err(|_| "the reply isn't a handshake message".to_owned())?;
+        let mut payload = vec![0u8; MAX_MESSAGE];
+        self.0.read_message(&reply, &mut payload).map_err(|_| "a reply that doesn't open".to_owned())?;
+        if self.0.get_remote_static() != noise_public(expected).as_ref().map(<[u8; 32]>::as_slice) {
+            return Err("a different key than the one it advertised".to_owned());
+        }
+        let mut message = vec![0u8; MAX_MESSAGE];
+        let length = self.0.write_message(&[], &mut message).map_err(|error| error.to_string())?;
+        let session = Session(self.0.into_transport_mode().map_err(|error| error.to_string())?);
+        Ok((session, URL_SAFE_NO_PAD.encode(&message[..length])))
     }
 }
 

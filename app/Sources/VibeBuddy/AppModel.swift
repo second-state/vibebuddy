@@ -6,6 +6,8 @@ import VibeBuddyCore
 @MainActor
 final class AppModel: ObservableObject {
     @Published private(set) var status: Status?
+    /// The one switch for the Paid plan: the daemon's `account.upgrade_offered`, false without a status.
+    var planOffered: Bool { status?.account?.upgradeOffered == true }
     @Published private(set) var daemonAlive = false
     @Published var lastError: String?
     @Published private(set) var screenshot: NSImage?
@@ -17,7 +19,7 @@ final class AppModel: ObservableObject {
     @Published private(set) var previewingVoice: String?
     /// Serial port open but no build ID ever reported: the box isn't running our firmware (a factory box), so offer to flash it.
     @Published private(set) var foreignFirmware = false
-    /// The Characters made on this computer, and the voices one can be made with (ADR-0020); asked when the daemon
+    /// The Characters made on this computer, and the voices one can be made with (ADR-0023); asked when the daemon
     /// comes up and whenever a job changes state.
     @Published private(set) var madeCharacters: [MadeCharacter] = []
     @Published private(set) var characterVoices: [CharacterVoice] = []
@@ -32,6 +34,8 @@ final class AppModel: ObservableObject {
     private var streamTask: Task<Void, Never>?
     private var linkLostSince: Date?
     private var linkNotified = false
+    /// The box was there at least once since the app started: a box that never showed up isn't lost.
+    private var linkSeen = false
     /// A voice the user asked for while changing the UI language, to write once the restarted app sees the box.
     /// Taken out of the defaults at start, so it is tried in this run only and never surprises the user days later.
     private var pendingVoice: String?
@@ -146,10 +150,12 @@ final class AppModel: ObservableObject {
     private func checkLink() {
         guard let status, daemonAlive, status.config.notifyLink else { linkLostSince = nil; return }
         if status.device.connected {
+            linkSeen = true
             linkLostSince = nil
             linkNotified = false
             return
         }
+        guard linkSeen else { return }
         if linkLostSince == nil { linkLostSince = Date() }
         if !linkNotified, let since = linkLostSince, Date().timeIntervalSince(since) >= 30 {
             linkNotified = true
@@ -179,6 +185,18 @@ final class AppModel: ObservableObject {
     func unpair(key: String) { run { try await self.client.unpair(key: key) } }
 
     func takeOver() { run { try await self.client.takeOver() } }
+
+    /// Pairs with a VibePlay; nil when it paired, else why not, for the card to show beside the code.
+    func pairVibePlay(key: String, code: String) async -> String? {
+        do {
+            try await client.pairVibePlay(key: key, code: code)
+            return nil
+        } catch {
+            return error.localizedDescription
+        }
+    }
+
+    func forgetVibePlay(key: String) { run { try await self.client.forgetVibePlay(key: key) } }
 
     func setWifi(ssid: String, password: String) { run { try await self.client.setWifi(ssid: ssid, password: password) } }
 
@@ -313,7 +331,15 @@ final class AppModel: ObservableObject {
     private static let customLenderKey = "custom.lender"
 
     /// The user's own Character as last written: its look and the Character lending voice and lines.
+    #if DEBUG
+    /// Snapshots only: a Character of the user's own to show in place of the one kept on disk.
+    var sampleCustomCharacter: (look: Data, lender: String)?
+    #endif
+
     var savedCustomCharacter: (look: Data, lender: String)? {
+        #if DEBUG
+        if let sampleCustomCharacter { return sampleCustomCharacter }
+        #endif
         guard let look = try? Data(contentsOf: Self.customLookURL),
               let lender = UserDefaults.standard.string(forKey: Self.customLenderKey) else { return nil }
         return (look, lender)

@@ -1,9 +1,14 @@
 //! Previewing a Character on the computer before writing it to the box, the Mac's `VoicePreview` and
 //! `VoicePack.previewPCM()`: the first line of each ordinary occasion (or an old voice pack's five clips), decoded
-//! the way the box decodes them and played through whatever plays raw PCM here (PipeWire, PulseAudio or ALSA).
+//! the way the box decodes them and played through whatever plays raw PCM here (PipeWire, PulseAudio or ALSA), or
+//! on Windows through the system's own PlaySound.
 
 use std::sync::Arc;
 
+#[cfg(windows)]
+use std::time::Duration;
+
+#[cfg(not(windows))]
 use tokio::io::AsyncWriteExt;
 use tokio::sync::Notify;
 
@@ -112,6 +117,49 @@ fn upsample(input: &[i32]) -> Vec<u8> {
 }
 
 /// Plays `pcm` until it ends or `stop` is notified.
+#[cfg(windows)]
+pub async fn play(pcm: Vec<u8>, stop: Arc<Notify>) -> Result<(), String> {
+    use windows_sys::Win32::Media::Audio::{PlaySoundW, SND_ASYNC, SND_MEMORY, SND_NODEFAULT};
+    let wav = wav_file(&pcm);
+    // SAFETY: with SND_MEMORY the first argument is the WAV in memory, which `wav` keeps alive until the sound is
+    // stopped below; a null sound stops whatever this process plays.
+    let started = unsafe { PlaySoundW(wav.as_ptr().cast(), std::ptr::null_mut(), SND_MEMORY | SND_ASYNC | SND_NODEFAULT) };
+    if started == 0 {
+        return Err("Can't play audio here: Windows refused to play the preview.".to_owned());
+    }
+    let length = Duration::from_secs_f64(pcm.len() as f64 / (RATE * 2 * 2) as f64);
+    tokio::select! {
+        () = tokio::time::sleep(length + Duration::from_millis(200)) => {}
+        () = stop.notified() => {}
+    }
+    unsafe { PlaySoundW(std::ptr::null(), std::ptr::null_mut(), 0) };
+    drop(wav);
+    Ok(())
+}
+
+/// `pcm` (24 kHz, 16-bit stereo) with a WAV header, as PlaySound wants it.
+#[cfg(any(windows, test))]
+fn wav_file(pcm: &[u8]) -> Vec<u8> {
+    let length = pcm.len() as u32;
+    let mut wav = Vec::with_capacity(44 + pcm.len());
+    wav.extend_from_slice(b"RIFF");
+    wav.extend_from_slice(&(36 + length).to_le_bytes());
+    wav.extend_from_slice(b"WAVEfmt ");
+    wav.extend_from_slice(&16u32.to_le_bytes());
+    wav.extend_from_slice(&1u16.to_le_bytes());
+    wav.extend_from_slice(&2u16.to_le_bytes());
+    wav.extend_from_slice(&(RATE as u32).to_le_bytes());
+    wav.extend_from_slice(&(RATE as u32 * 4).to_le_bytes());
+    wav.extend_from_slice(&4u16.to_le_bytes());
+    wav.extend_from_slice(&16u16.to_le_bytes());
+    wav.extend_from_slice(b"data");
+    wav.extend_from_slice(&length.to_le_bytes());
+    wav.extend_from_slice(pcm);
+    wav
+}
+
+/// Plays `pcm` until it ends or `stop` is notified.
+#[cfg(not(windows))]
 pub async fn play(pcm: Vec<u8>, stop: Arc<Notify>) -> Result<(), String> {
     let players: [&[&str]; 3] = [
         &["pw-play", "--rate", "24000", "--channels", "2", "--format", "s16", "-"],
@@ -195,6 +243,14 @@ mod tests {
         wav.extend([1i16, 2, 3, 4].iter().flat_map(|sample| sample.to_le_bytes()));
         assert_eq!(super::wav(&wav).map(|pcm| pcm.len()), Some(6 * 4));
         assert_eq!(super::wav(b"RIFF....WAVE"), None);
+    }
+
+    #[test]
+    fn the_windows_preview_is_a_wav_of_the_pcm() {
+        let wav = wav_file(&[0u8; 8]);
+        assert_eq!(wav.len(), 44 + 8);
+        assert_eq!((&wav[..4], &wav[8..16], &wav[36..40]), (&b"RIFF"[..], &b"WAVEfmt "[..], &b"data"[..]));
+        assert_eq!((u16_at(&wav, 22), u32_at(&wav, 24), u32_at(&wav, 40)), (2, RATE, 8));
     }
 
     #[test]
