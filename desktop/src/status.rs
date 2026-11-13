@@ -304,7 +304,7 @@ pub struct Device {
     /// none from older daemons, and the box's also until the box has said.
     pub relay_server: Option<String>,
     pub box_relay: Option<String>,
-    /// The company edition the box is of (ADR-0025); None for an ordinary box, other firmware, and older daemons.
+    /// The company edition the box is of (ADR-0026); None for an ordinary box, other firmware, and older daemons.
     pub edition: Option<Edition>,
 }
 

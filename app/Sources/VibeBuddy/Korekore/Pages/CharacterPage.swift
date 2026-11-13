@@ -23,7 +23,7 @@ struct KorekoreCharacterPage: View {
                     KorekoreMakingRow(model: model, making: making)
                 }
                 LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 12, alignment: .top), count: 3), spacing: 12) {
-                    // A box of a company edition (ADR-0025) has the company Character first, then the robot, then Kore.
+                    // A box of a company edition (ADR-0026) has the company Character first, then the robot, then Kore.
                     if let edition = model.edition {
                         editionCard(edition)
                         robotCard
@@ -138,7 +138,7 @@ struct KorekoreCharacterPage: View {
         }
     }
 
-    /// The company Character (ADR-0025), from the box's own copy: ▶ has the box say its line, and Use puts it back on.
+    /// The company Character (ADR-0026), from the box's own copy: ▶ has the box say its line, and Use puts it back on.
     private func editionCard(_ edition: EditionCard) -> some View {
         card(name: edition.name, summary: edition.summary, inUse: model.status?.device.voice == edition.id, previewID: nil,
              use: model.restoreEdition, playOnBox: model.previewEdition) {

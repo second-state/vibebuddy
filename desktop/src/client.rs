@@ -99,7 +99,7 @@ pub async fn write_voice_pack(pack: Vec<u8>, lender: Option<&str>, address: Opti
     accepted(request).await
 }
 
-/// The company Character's card (ADR-0025), from `GET /v1/device/edition`.
+/// The company Character's card (ADR-0026), from `GET /v1/device/edition`.
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq)]
 pub struct EditionCard {
     pub id: String,

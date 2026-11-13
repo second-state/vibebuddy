@@ -1,4 +1,4 @@
-//! A company edition's card and its way back (ADR-0025): the box sends the company Character's card on
+//! A company edition's card and its way back (ADR-0026): the box sends the company Character's card on
 //! `device.edition`, and copies its pack back into `voices` on `device.edition.restore`. See docs/protocol.md.
 
 use std::sync::Arc;

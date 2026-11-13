@@ -590,7 +590,7 @@ do {
     check(false, "korekore status fails to decode: \(error)")
 }
 
-// A company edition's card (ADR-0025): asked once per edition box, shown only for that box.
+// A company edition's card (ADR-0026): asked once per edition box, shown only for that box.
 do {
     let ordinary = try StatusCoding.decoder().decode(DeviceState.self, from: Data(#"{"connected":true,"bridge":false,"edition":null}"#.utf8))
     let luna = try StatusCoding.decoder().decode(DeviceState.self, from: Data(#"{"connected":true,"bridge":false,"voice":"robot","edition":{"id":"luna"}}"#.utf8))

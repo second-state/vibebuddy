@@ -43,7 +43,7 @@ pub const MAX_LINE_BYTES: usize = 4608;
 const LINE_BUFFER_BYTES: usize = MAX_LINE_BYTES + 2;
 /// With no message for longer than this, the link to the Mac counts as lost.
 const LINK_TIMEOUT_MS: u32 = 15000;
-/// How long a company edition's boot logo shows after a power-on (ADR-0025).
+/// How long a company edition's boot logo shows after a power-on (ADR-0026).
 const LOGO_MS: u32 = 2000;
 /// After task.done, return to idle on our own after this long.
 const DONE_TO_IDLE_MS: u32 = 5000;
@@ -138,7 +138,7 @@ pub trait Board: Screen {
     fn restart(&mut self) {}
     /// This boot came from power being switched on: not from the serial port, which restarts the box each time a
     /// computer opens it, nor a restart the firmware asked for, a watchdog or a brownout. A company edition's boot
-    /// logo shows only then (ADR-0025).
+    /// logo shows only then (ADR-0026).
     fn powered_on(&self) -> bool {
         false
     }
@@ -225,7 +225,7 @@ pub struct Firmware {
     leisure: Leisure,
     display: Display,
     voices: Voices,
-    /// The company edition the factory wrote to this box (ADR-0025); None for an ordinary box.
+    /// The company edition the factory wrote to this box (ADR-0026); None for an ordinary box.
     edition: Option<Edition>,
     /// The company Character's lines, read from the edition partition, for the card's play button.
     edition_voices: Option<Box<Voices>>,
@@ -2438,7 +2438,7 @@ impl Firmware {
         self.announce(board, Occasion::Done);
     }
 
-    /// `device.edition`: the company Character's card for the App (ADR-0025). Over the cable it goes at once; over the
+    /// `device.edition`: the company Character's card for the App (ADR-0026). Over the cable it goes at once; over the
     /// network or the Relay a line at a time, as a screenshot does.
     fn edition_card<B: Board>(&mut self, board: &mut B) {
         let Some(edition) = self.edition else { return };

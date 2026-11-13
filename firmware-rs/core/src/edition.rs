@@ -1,4 +1,4 @@
-//! Company edition (ADR-0025): the company Character a box of a company edition carries, in its own
+//! Company edition (ADR-0026): the company Character a box of a company edition carries, in its own
 //! `edition` partition that only the factory writes. Nothing in the firmware writes it, so changing
 //! Character, updating the firmware or a failed write never loses it. This byte layout is shared with
 //! `tools/make_edition.py`, and each side tests against the same sample.

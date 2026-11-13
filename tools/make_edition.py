@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Build the edition image of a company edition (ADR-0025), which the factory writes to the box's `edition` partition.
+"""Build the edition image of a company edition (ADR-0026), which the factory writes to the box's `edition` partition.
 
 Usage:
     tools/make_edition.py <character dir> <output.bin>

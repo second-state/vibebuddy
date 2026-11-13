@@ -165,7 +165,7 @@ enum Message {
     PickAddress(assets::Language, Option<&'static str>),
     UseRobot,
     UseCustom,
-    /// The company Character's card for the edition asked (ADR-0025), or why it didn't come.
+    /// The company Character's card for the edition asked (ADR-0026), or why it didn't come.
     EditionCard(String, Result<client::EditionCard, String>),
     /// The box plays the company Character's line.
     PreviewEdition,
@@ -330,7 +330,7 @@ struct App {
     lender: Option<Lender>,
     /// The robot's face for its card.
     robot_face: Option<image::Handle>,
-    /// The company Character's card from the last edition box seen (ADR-0025), with its face, and the edition whose
+    /// The company Character's card from the last edition box seen (ADR-0026), with its face, and the edition whose
     /// card is being asked for.
     edition: Option<(client::EditionCard, Option<image::Handle>)>,
     edition_asking: Option<String>,

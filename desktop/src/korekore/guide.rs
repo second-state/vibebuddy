@@ -260,7 +260,7 @@ impl crate::App {
         let busy = self.busy();
         let current = self.status.as_ref().and_then(|status| status.device.voice.clone());
         let robot_in_use = matches!(current.as_deref(), Some(ROBOT | BUILTIN)) && self.characters.robot_lender.is_none();
-        // A box of a company edition (ADR-0025) has the company Character first, then the robot, then Kore.
+        // A box of a company edition (ADR-0026) has the company Character first, then the robot, then Kore.
         let mut cards: Vec<Element<'_, Message>> = self.edition_card().into_iter().collect();
         let edition = !cards.is_empty();
         if !edition {

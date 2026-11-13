@@ -1,6 +1,6 @@
 import Foundation
 
-/// The company edition a box is of (ADR-0025), as `/v1/status` reports it in `device.edition`.
+/// The company edition a box is of (ADR-0026), as `/v1/status` reports it in `device.edition`.
 public struct DeviceEdition: Codable, Equatable {
     public var id: String
     public init(id: String) { self.id = id }

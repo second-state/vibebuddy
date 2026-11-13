@@ -290,7 +290,7 @@ pub struct Display {
     backlight_on: bool,
     /// Blink to identify: the backlight flashes until this time; None means not flashing.
     identify_until: Option<u32>,
-    /// The frame holds a company edition's boot logo until this time: nothing is drawn over it (ADR-0025).
+    /// The frame holds a company edition's boot logo until this time: nothing is drawn over it (ADR-0026).
     splash_until: Option<u32>,
     identify_next_toggle: u32,
     muted: bool,
