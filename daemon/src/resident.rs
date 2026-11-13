@@ -1218,6 +1218,10 @@ fn user_codex_home() -> PathBuf {
 
 /// Makes the resident session's Codex home (mode 0700) and links the user's login into it.
 fn prepare_codex_home(codex_home: &Path, user_codex_home: &Path) -> std::io::Result<()> {
+    // Readiness checks on other threads can prepare the home at the same moment. On Windows one check's remove or
+    // link then fails while another has the file open (os error 32), so the checks take turns.
+    static PREPARING: std::sync::Mutex<()> = std::sync::Mutex::new(());
+    let _turn = PREPARING.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
     std::fs::create_dir_all(codex_home)?;
     #[cfg(unix)]
     std::fs::set_permissions(codex_home, std::os::unix::fs::PermissionsExt::from_mode(0o700))?;
