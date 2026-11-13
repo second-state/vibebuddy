@@ -710,8 +710,11 @@ fn wifi_networks(firmware: &Firmware, first_now: bool) -> net::Networks {
 /// a panic.
 fn report_reset(board: &mut DeviceBoard) {
     // SAFETY: read and cleared once at boot, before anything can panic again.
-    let panicked = unsafe { core::mem::replace(&mut *core::ptr::addr_of_mut!(PANICKED), 0) } == PANIC_MARK;
+    let marked = unsafe { core::mem::replace(&mut *core::ptr::addr_of_mut!(PANICKED), 0) } == PANIC_MARK;
     let reason = esp_hal::system::reset_reason();
+    // A panic resets through software_reset(). Another firmware in this RTC memory, such as Muse (docs/muse.md),
+    // can leave the mark behind, but then the box restarted some other way.
+    let panicked = marked && reason == Some(esp_hal::rtc_cntl::SocResetReason::CoreSw);
     let line = alloc::format!("RESET {reason:?}{}\n", if panicked { " PANIC" } else { "" });
     board.write(line.as_bytes());
 }
