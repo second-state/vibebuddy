@@ -19,6 +19,8 @@ export IDF_PATH="${IDF_PATH:-${HOME}/esp/esp-idf-v6.0.3}"
 . "${IDF_PATH}/export.sh" >/dev/null
 
 mkdir -p "${out}"
+# ESP-IDF applies the defaults only to a new sdkconfig, so a left-over one would keep old settings.
+rm -f "${out}/sdkconfig"
 # The table's path must be absolute: ESP-IDF reads it relative to the SDK's project directory.
 { cat "${here}/sdkconfig.vibebuddy"; echo "CONFIG_PARTITION_TABLE_CUSTOM_FILENAME=\"${here}/partitions.csv\""; } > "${out}/sdkconfig.vibebuddy"
 defaults="${sdk}/sdkconfig.defaults;${sdk}/devices/sdkconfig.muse;${sdk}/devices/sdkconfig.muse-atk-dnesp32s3-box;${out}/sdkconfig.vibebuddy"
