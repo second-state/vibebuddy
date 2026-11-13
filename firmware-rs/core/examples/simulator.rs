@@ -171,7 +171,7 @@ impl Board for SimulatedBoard {
 
 /// 16 MB flash, with the partition table laid out per firmware/partitions.csv.
 fn flash_with_partitions() -> MemoryFlash {
-    let mut bytes = vec![0xFF; 0xA14000];
+    let mut bytes = vec![0xFF; 0xC14000];
     let entries = [
         ("nvs", 1u8, 2u8, 0x9000u32, 0x6000u32),
         ("phy_init", 1, 1, 0xF000, 0x1000),
@@ -180,6 +180,7 @@ fn flash_with_partitions() -> MemoryFlash {
         ("ota_1", 0, 0x11, 0x610000, 0x400000),
         ("otadata", 1, 0, 0xA10000, 0x2000),
         ("link", 1, 0x41, 0xA12000, 0x2000),
+        ("edition", 1, 0x42, 0xA14000, 0x200000),
     ];
     for (index, (label, kind, subtype, offset, size)) in entries.iter().enumerate() {
         let entry = &mut bytes[0x8000 + index * 32..0x8000 + index * 32 + 32];

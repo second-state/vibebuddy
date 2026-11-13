@@ -15,6 +15,7 @@ use crate::audio::{ES8311_ADDRESS, Occasion, SAMPLE_RATE, Sound, clamp_volume, V
 use crate::mic;
 use crate::buttons::{ButtonEvent, Buttons, Levels};
 use crate::decoration::Decoration;
+use crate::edition::{self, Edition};
 use crate::display::{Display, LinkPath, MAX_STATS, MAX_TASKS, Mode, Panel, PanelKind, SNAPSHOT_LINE_BYTES, Scene, Screen, Screens, Snapshot, State, Target, TaskInput, Tone};
 use crate::leisure::{Leisure, Tier};
 use crate::menu::{self, Action as MenuAction, ComputersRow, Context as MenuContext, Menu, Row, View};
@@ -212,6 +213,8 @@ pub struct Firmware {
     leisure: Leisure,
     display: Display,
     voices: Voices,
+    /// The company edition the factory wrote to this box (ADR-0025); None for an ordinary box.
+    edition: Option<Edition>,
     picker: LinePicker,
     buttons: Option<Buttons>,
     /// The touchscreen's chip, taps so far and when to read it next; None on a box without one.
@@ -394,6 +397,7 @@ impl Firmware {
             leisure: Leisure::new(seed, now_ms),
             display: Display::new(),
             voices: Voices::new(),
+            edition: None,
             picker: LinePicker::new(seed ^ 0x9E37_79B9),
             buttons: None,
             touch: None,
@@ -512,6 +516,8 @@ impl Firmware {
             Ok(()) => Self::write_value_line(board, "VOICES ", self.voices.current_id().as_bytes()),
             Err(_) => Self::write_literal(board, "VOICES NO PARTITION\n"),
         }
+        self.edition = find_partition(board.flash(), "edition").and_then(|region| edition::read(board.flash(), region));
+        self.announce_edition(board);
         self.load_look(board);
 
         match board.init_audio(self.volume) {
@@ -2379,6 +2385,13 @@ impl Firmware {
         self.load_look(board);
     }
 
+    /// `EDITION <id>` on a box of a company edition, nothing on an ordinary box.
+    fn announce_edition<B: Board>(&self, board: &mut B) {
+        if let Some(edition) = &self.edition {
+            Self::write_value_line(board, "EDITION ", edition.id().as_bytes());
+        }
+    }
+
     /// Reports the device's whole static state: firmware build and version, its key, mode, voice and volume.
     fn announce_state<B: Board>(&self, board: &mut B) {
         Self::write_value_line(board, "DISPLAY READY BUILD ", &self.build);
@@ -2387,6 +2400,7 @@ impl Firmware {
         self.announce_key(board);
         Self::write_value_line(board, "MODE ", self.display.mode().name().as_bytes());
         Self::write_value_line(board, "VOICES ", self.voices.current_id().as_bytes());
+        self.announce_edition(board);
         self.announce_volume(board);
         self.announce_screens(board);
         self.announce_decoration(board);

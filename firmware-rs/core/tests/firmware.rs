@@ -42,7 +42,7 @@ impl Flash for MemoryFlash {
 
 /// 16 MB flash, with a partition table matching partitions.csv.
 fn blank_flash() -> MemoryFlash {
-    let mut flash = MemoryFlash { bytes: vec![0xFF; 0xA14000] };
+    let mut flash = MemoryFlash { bytes: vec![0xFF; 0xC14000] };
     let entries = [
         ("nvs", 1u8, 2u8, 0x9000u32, 0x6000u32),
         ("phy_init", 1, 1, 0xF000, 0x1000),
@@ -51,6 +51,7 @@ fn blank_flash() -> MemoryFlash {
         ("ota_1", 0, 0x11, 0x610000, 0x400000),
         ("otadata", 1, 0, 0xA10000, 0x2000),
         ("link", 1, 0x41, 0xA12000, 0x2000),
+        ("edition", 1, 0x42, 0xA14000, 0x200000),
     ];
     for (index, (label, kind, subtype, offset, size)) in entries.iter().enumerate() {
         let at = 0x8000 + index * 32;
@@ -65,6 +66,23 @@ fn blank_flash() -> MemoryFlash {
         entry[12..12 + label.len()].copy_from_slice(label.as_bytes());
     }
     flash
+}
+
+#[test]
+fn the_fake_flash_has_the_real_partition_table() {
+    // A boot step that reads the partition table must be tested on the real layout (LESSONS.md).
+    let root = concat!(env!("CARGO_MANIFEST_DIR"), "/../..");
+    let out = std::env::temp_dir().join(format!("vibebuddy-core-pt-{}.bin", std::process::id()));
+    let made = std::process::Command::new("python3")
+        .args([format!("{root}/tools/make-partition-table.py"), format!("{root}/firmware/partitions.csv"), out.display().to_string()])
+        .output()
+        .expect("run make-partition-table.py");
+    assert!(made.status.success(), "{made:?}");
+    let table = std::fs::read(&out).unwrap();
+    std::fs::remove_file(&out).ok();
+    let entries = table.chunks(32).take_while(|entry| entry[..2] == [0xAA, 0x50]).count();
+    assert_eq!(&blank_flash().bytes[0x8000..0x8000 + entries * 32], &table[..entries * 32]);
+    assert_eq!(blank_flash().bytes[0x8000 + entries * 32], 0xFF, "the fake table has no extra entry");
 }
 
 struct FakeBoard {
@@ -1005,6 +1023,50 @@ fn pairing_rejects_a_bad_key_and_isnt_agent_activity() {
     assert_eq!(lines, ["PAIR INVALID"]);
 }
 
+const EDITION: &[u8] = include_bytes!("../src/fixtures/sample_edition.bin");
+const EDITION_OFFSET: usize = 0xA14000;
+
+/// The flash of a box the factory made for a company edition: the edition, and the same pack in voices.
+fn edition_flash() -> MemoryFlash {
+    let mut flash = blank_flash();
+    flash.bytes[EDITION_OFFSET..EDITION_OFFSET + EDITION.len()].copy_from_slice(EDITION);
+    flash.bytes[0x410000..0x410000 + EDITION.len() - 4096].copy_from_slice(&EDITION[4096..]);
+    flash
+}
+
+#[test]
+fn a_company_edition_box_says_its_edition_after_its_voice() {
+    let (mut firmware, mut board, lines) = booted(edition_flash());
+    let voices = lines.iter().position(|line| line == "VOICES sample").expect("wears the company Character");
+    assert_eq!(lines[voices + 1], "EDITION sample", "{lines:?}");
+    let lines = send(&mut firmware, &mut board, r#"{"version":1,"event":"device.hello"}"#);
+    assert_eq!(lines, ["DISPLAY READY BUILD abc1234 2026-09-26 10:00", "FIRMWARE VERSION 1.2.3", "TRANSFER 1", "LINK NOISE", BOX_KEY, RELAY_URL, "MODE DUTY", "VOICES sample", "EDITION sample", "VOLUME 65", "SCREENS ROBOT", "DECORATION OFF", "TOUCH NONE"]);
+}
+
+#[test]
+fn a_damaged_edition_or_the_old_partition_table_is_an_ordinary_box() {
+    let mut damaged = edition_flash();
+    damaged.bytes[EDITION_OFFSET + 50] ^= 1;
+    let mut old_table = edition_flash();
+    // Drop the edition entry, as on boxes made before company editions.
+    old_table.bytes[0x8000 + 7 * 32..0x8000 + 8 * 32].fill(0xFF);
+    for flash in [damaged, old_table] {
+        let (mut firmware, mut board, lines) = booted(flash);
+        assert!(!lines.iter().any(|line| line.starts_with("EDITION")), "{lines:?}");
+        let lines = send(&mut firmware, &mut board, r#"{"version":1,"event":"device.hello"}"#);
+        assert!(!lines.iter().any(|line| line.starts_with("EDITION")), "{lines:?}");
+    }
+}
+
+#[test]
+fn changing_character_keeps_the_edition() {
+    let (mut firmware, mut board, _) = booted(edition_flash());
+    write_pack(&mut firmware, &mut board, SAMPLE_PACK);
+    assert_eq!(&board.flash.bytes[EDITION_OFFSET..EDITION_OFFSET + EDITION.len()], EDITION);
+    let lines = send(&mut firmware, &mut board, r#"{"version":1,"event":"device.hello"}"#);
+    assert!(lines.contains(&"EDITION sample".to_owned()), "{lines:?}");
+}
+
 #[test]
 fn a_box_without_the_link_partition_has_no_key() {
     let mut flash = blank_flash();
@@ -1665,6 +1727,19 @@ mod transfer {
 
     fn hex_sha(image: &[u8]) -> String {
         Sha256::digest(image).iter().map(|byte| format!("{byte:02x}")).collect()
+    }
+
+    #[test]
+    fn neither_a_pack_nor_a_firmware_image_touches_the_edition() {
+        let (mut firmware, mut board, _) = booted(edition_flash());
+        send_over_xfer(&mut firmware, &mut board, "character", LOOK_PACK, &hex_sha(LOOK_PACK));
+        let mut image = vec![0xA5u8; 10_000];
+        image[0] = 0xE9;
+        image[12..14].copy_from_slice(&[9, 0]);
+        send_over_xfer(&mut firmware, &mut board, "firmware", &image, &hex_sha(&image));
+        assert_eq!(board.restarts, 1, "the firmware image went in");
+        assert_eq!(&board.flash.bytes[EDITION_OFFSET..EDITION_OFFSET + EDITION.len()], EDITION);
+        assert!(board.flash.bytes[EDITION_OFFSET + EDITION.len()..EDITION_OFFSET + 0x200000].iter().all(|&byte| byte == 0xFF));
     }
 
     #[test]
