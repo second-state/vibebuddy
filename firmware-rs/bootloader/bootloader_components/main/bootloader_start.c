@@ -213,9 +213,10 @@ static void write_boot_sel(const esp_partition_pos_t *boot_sel, bool muse)
 static bool boot_muse(const bootloader_state_t *bs)
 {
     esp_partition_pos_t boot_sel;
-    uint8_t first_byte = 0xFF;
+    uint32_t first_word = 0xFFFFFFFF; /* bootloader_flash_read() reads whole words only */
     if (bs->test.offset == 0 || !find_partition("boot_sel", &boot_sel)
-        || bootloader_flash_read(bs->test.offset, &first_byte, 1, false) != ESP_OK || first_byte != ESP_IMAGE_HEADER_MAGIC) {
+        || bootloader_flash_read(bs->test.offset, &first_word, sizeof(first_word), false) != ESP_OK
+        || (first_word & 0xFF) != ESP_IMAGE_HEADER_MAGIC) {
         return false;
     }
     uint32_t word = 0;
