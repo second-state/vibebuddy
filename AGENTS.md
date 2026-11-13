@@ -10,9 +10,9 @@ The project is switching to English as it goes open source:
 - App UI strings use the English text as the key in source; Chinese translations go in `app/Localization/zh-Hans.lproj`. After changing UI strings, run `tools/check-localization.py`. English UI wording follows the "English UI terms" section of `CONTEXT.md`.
 - Docs (`*.md`) are all in English. The one exception is `README.zh-CN.md`, the Chinese version of `README.md`: the two match section for section, so when you change one, update the other.
 
-## Mac and Linux apps stay in step
+## Mac, Linux and Windows apps stay in step
 
-The Mac app (`app/`) and the Linux app (`desktop/`) are one product on two platforms. When a change adds, removes or changes something the user sees or does in one of them (a setting, a tab, a menu item, a Character, a supported agent, an update or K2 behaviour), make the matching change in the other in the same PR. If the other platform can't do it, say so in the PR and in the docs, with what it does instead. UI strings get their zh-Hans translations on both sides.
+The Mac app (`app/`) and the desktop app (`desktop/`) are one product on three platforms: the desktop app is the Linux app and, built for Windows, the Windows app. When a change adds, removes or changes something the user sees or does in one of them (a setting, a tab, a menu item, a Character, a supported agent, an update or K2 behaviour), make the matching change in the other in the same PR. A change in `desktop/` reaches Windows too, so keep it free of Linux-only code, or give Windows its own path (see `docs/architecture.md`, decision 16). If a platform can't do it, say so in the PR and in the docs, with what it does instead. UI strings get their zh-Hans translations on both sides.
 
 ## Agent skills
 

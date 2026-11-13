@@ -2,6 +2,8 @@
 
 The app is VibeBuddy's graphical interface on the Mac: a menu bar item with its panel, plus a settings window, both in the korekore look ([ADR-0021](adr/0021-the-apps-become-korekore-and-the-user-picks-the-box-screens.md), [`design/korekore/`](design/korekore/README.md)). It handles onboarding, settings, the announcement voice and firmware, and it supervises the daemon. It is not a second channel for alerts: agent events are all told by the buddy on the box, and the app speaks up only when the box can't (when the link breaks). This document records the design as settled on 2026-09-16; the three hard-to-reverse trade-offs are covered separately in ADR-0003, 0004 and 0005.
 
+The Linux app (`desktop/`) has the same pages, and so does the Windows app, which is the same app built for Windows. Where this page says Linux, Windows does the same unless [`architecture.md`](architecture.md) (decision 16) says otherwise.
+
 ## Role and lifecycle
 
 - **Lives in the menu bar; a Dock icon only while a window is open.** `LSUIElement` is true. Opening the settings or onboarding window switches the activation policy to `.regular`, so the window gets a Dock icon and a menu bar (with ⌘Q still saying the box goes offline); closing the last one switches back to `.accessory`. A permanent Dock icon was rejected because its Quit would take the box offline from a place that doesn't say so.
