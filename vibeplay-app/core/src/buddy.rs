@@ -41,6 +41,9 @@ pub struct News {
     pub takes_screen: bool,
     /// Today's Pomodoro record changed: keep it.
     pub tally: bool,
+    /// Ask QingOS to call the person while another app is in front (QingOS ADR 0042): the line in English and in
+    /// Chinese. Only for needs input and failed, never when a box speaks for it or on a catch-up state.
+    pub call: Option<(String, String)>,
 }
 
 /// The box's frame buffer, 320 × 240 RGB565 with the high byte first, and its backlight.
@@ -255,7 +258,8 @@ impl Buddy {
             _ => return,
         };
         self.ready_deadline = (event == "task.done").then(|| now.wrapping_add(DONE_TO_IDLE_MS));
-        if fields.get("suppress_audio") == Some(&Value::Bool(true)) {
+        let suppressed = fields.get("suppress_audio") == Some(&Value::Bool(true));
+        if suppressed {
             occasion = None;
         }
         match string(fields, "announcement") {
@@ -263,8 +267,16 @@ impl Buddy {
             Some("failed") => occasion = Some(Occasion::Failed),
             _ => {}
         }
+        let text = title;
         let title = title.map(str::as_bytes);
         news.takes_screen = matches!(state, State::InputRequired | State::Failed) && !self.display.shows(state, title);
+        if news.takes_screen && !self.quiet && !suppressed {
+            let (en, zh) = if state == State::InputRequired { ("An agent needs you", "agent 要你") } else { ("A task failed", "任务出错了") };
+            news.call = Some(match text.filter(|text| !text.is_empty()) {
+                Some(text) => (format!("{en}: {text}"), format!("{zh}：{text}")),
+                None => (en.to_string(), zh.to_string()),
+            });
+        }
         if news.takes_screen {
             self.picked = None;
         }
