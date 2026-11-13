@@ -6,6 +6,7 @@ mod agent_hooks;
 mod claude_hooks;
 mod codex_hooks;
 mod config;
+mod edition;
 mod identity;
 mod lan;
 mod noise_link;
@@ -115,6 +116,8 @@ struct AppState {
     /// What the App said about the Character pack it last wrote (who lends a custom one, the form of address),
     /// kept in [`persona::RECORD_FILE`] in the state directory.
     written: Arc<Mutex<persona::Written>>,
+    /// The connected box's company Character card (ADR-0025), with the box key it came from.
+    edition_card: Arc<Mutex<Option<KeptCard>>>,
     /// The person's VibeBuddy account (ADR-0018); unavailable in tests unless one sets it.
     account: Arc<account::Account>,
     /// The user's own keys for spoken replies (ADR-0023); none can be set in tests unless one sets it.
@@ -160,6 +163,7 @@ impl AppState {
             voice: Arc::new(voice::Voice::new(None, None)),
             noise_seen: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             written: Arc::default(),
+            edition_card: Arc::default(),
             making: Arc::new(making::Maker::new(None, None, account.clone(), voice_keys.clone(), Arc::new(own_voices::OwnVoices::new(None)))),
             account,
             voice_keys,
@@ -799,6 +803,9 @@ fn app(state: AppState) -> Router {
             post(post_voice_pack).layer(DefaultBodyLimit::max(4 * 1024 * 1024)),
         )
         .route("/v1/device/screenshot", post(post_screenshot))
+        .route("/v1/device/edition", get(get_edition))
+        .route("/v1/device/edition/preview", post(post_edition_preview))
+        .route("/v1/device/edition/restore", post(post_edition_restore))
         .route("/v1/device/firmware", post(post_firmware))
         .route("/v1/daemon/restart", post(post_restart))
         .route("/v1/updates/check", post(post_check_updates))
@@ -844,6 +851,93 @@ async fn post_screenshot(State(state): State<AppState>) -> axum::response::Respo
             (StatusCode::BAD_GATEWAY, error).into_response()
         }
     }
+}
+
+/// A box's card and the box key it came from.
+type KeptCard = (Option<String>, edition::Card);
+
+fn no_edition() -> axum::response::Response {
+    use axum::response::IntoResponse;
+    (StatusCode::NOT_FOUND, Json(ApiResponse { accepted: false, message: "the box has no company edition".to_owned() })).into_response()
+}
+
+/// The connected box's company Character card (ADR-0025). The box is asked once; the card is kept while the same box,
+/// with the same edition, stays connected.
+async fn get_edition(State(state): State<AppState>) -> axum::response::Response {
+    use axum::response::IntoResponse;
+    let (edition, box_key) = {
+        let device = state.device.lock().await;
+        (device.edition.clone(), device.box_key.clone())
+    };
+    let Some(edition) = edition else { return no_edition() };
+    if let Some((key, card)) = &*state.edition_card.lock().await
+        && *key == box_key
+        && card.id == edition.id
+    {
+        return Json(card.clone()).into_response();
+    }
+    if matches!(&*state.operation.lock().await, Some(current) if current.state == OperationState::Running) {
+        return (StatusCode::CONFLICT, "another device operation is in progress").into_response();
+    }
+    match edition::fetch_card(state.transport.clone(), state.device_bus.subscribe()).await {
+        Ok(card) => {
+            *state.edition_card.lock().await = Some((box_key, card.clone()));
+            Json(card).into_response()
+        }
+        Err(error) => {
+            warn!(%error, "edition card failed");
+            (StatusCode::BAD_GATEWAY, error).into_response()
+        }
+    }
+}
+
+/// The box plays the company Character's line.
+async fn post_edition_preview(State(state): State<AppState>) -> axum::response::Response {
+    use axum::response::IntoResponse;
+    if state.device.lock().await.edition.is_none() {
+        return no_edition();
+    }
+    match edition::preview(&state.transport) {
+        Ok(()) => (StatusCode::ACCEPTED, Json(ApiResponse { accepted: true, message: "playing".to_owned() })).into_response(),
+        Err(error) => (StatusCode::SERVICE_UNAVAILABLE, Json(ApiResponse { accepted: false, message: error })).into_response(),
+    }
+}
+
+/// The box puts its company Character back on, copied from its own edition partition. It runs in the background,
+/// with progress in the status as a Character pack write.
+async fn post_edition_restore(State(state): State<AppState>) -> axum::response::Response {
+    use axum::response::IntoResponse;
+    let Some(edition) = state.device.lock().await.edition.clone() else { return no_edition() };
+    if let Some(refused) = begin_operation(&state, OperationKind::VoicePack, format!("restoring {}", edition.id)).await {
+        return refused.into_response();
+    }
+    let bus = state.device_bus.subscribe();
+    let task_state = state.clone();
+    tokio::spawn(async move {
+        let progress_state = task_state.clone();
+        let result = edition::restore(task_state.transport.clone(), bus, move |fraction| report_progress(&progress_state, fraction, None)).await;
+        let operation = match result {
+            Ok(voice) => {
+                info!(%voice, "company Character restored");
+                task_state.save_config(|config| config.voice = Some(voice.clone())).await;
+                // A company Character is nobody's custom one and has no form of address (docs/characters.md).
+                let record = persona::Written { id: Some(voice.clone()), lender: None, address: None };
+                if let Some(dir) = &task_state.state_dir
+                    && let Err(error) = record.save(&dir.join(persona::RECORD_FILE))
+                {
+                    warn!(%error, "failed to save what the App said about the Character");
+                }
+                *task_state.written.lock().await = record;
+                Operation { kind: OperationKind::VoicePack, state: OperationState::Done, progress: 1.0, message: format!("wrote {voice}") }
+            }
+            Err(error) => {
+                warn!(%error, "company Character restore failed");
+                Operation { kind: OperationKind::VoicePack, state: OperationState::Failed, progress: 0.0, message: error }
+            }
+        };
+        task_state.set_operation(Some(operation)).await;
+    });
+    (StatusCode::ACCEPTED, Json(ApiResponse { accepted: true, message: format!("started restoring {}", edition.id) })).into_response()
 }
 
 async fn get_status(State(state): State<AppState>) -> Json<Status> {
@@ -3040,6 +3134,107 @@ mod tests {
         let response = handle.await.expect("screenshot task should not panic");
         assert_eq!(response.status(), StatusCode::OK);
         assert_eq!(response.headers()["content-type"], "image/png");
+    }
+
+    async fn body_json(response: axum::response::Response) -> serde_json::Value {
+        let body = http_body_util::BodyExt::collect(response.into_body()).await.unwrap().to_bytes();
+        serde_json::from_slice(&body).unwrap()
+    }
+
+    async fn edition_box(state: &AppState) {
+        for line in ["BOX KEY abc", "EDITION acme"] {
+            publish_device_message(state, DeviceMessage::Line(line.to_owned())).await;
+        }
+    }
+
+    #[tokio::test]
+    async fn an_ordinary_box_has_no_edition_card_nor_its_commands() {
+        let transport = Arc::new(RecordingTransport::default());
+        let state = test_state(transport.clone());
+        assert_eq!(get_edition(State(state.clone())).await.status(), StatusCode::NOT_FOUND);
+        assert_eq!(post_edition_preview(State(state.clone())).await.status(), StatusCode::NOT_FOUND);
+        assert_eq!(post_edition_restore(State(state.clone())).await.status(), StatusCode::NOT_FOUND);
+        assert!(transport.events().is_empty(), "nothing goes to the box");
+    }
+
+    #[tokio::test]
+    async fn the_edition_card_comes_from_the_box_once() {
+        let transport = Arc::new(RecordingTransport::default());
+        let state = test_state(transport.clone());
+        edition_box(&state).await;
+        let handle = tokio::spawn({
+            let state = state.clone();
+            async move { get_edition(State(state)).await }
+        });
+        assert_eq!(nth_event(&transport, 0).await.event, "device.edition");
+        for line in ["CARD BEGIN acme", "CARD NAME Acme Bot", "CARD SUMMARY Says hello.", "CARD LOOK TE9P", "CARD LOOK Sw==", "CARD END"] {
+            publish_device_message(&state, DeviceMessage::Line(line.to_owned())).await;
+        }
+        let response = handle.await.unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let card = serde_json::json!({"id": "acme", "name": "Acme Bot", "summary": "Says hello.", "look": "TE9PSw=="});
+        assert_eq!(body_json(response).await, card);
+        let again = get_edition(State(state.clone())).await;
+        assert_eq!(body_json(again).await, card);
+        assert_eq!(transport.events().len(), 1, "kept for the connected box");
+    }
+
+    #[tokio::test]
+    async fn the_preview_plays_on_the_box() {
+        let transport = Arc::new(RecordingTransport::default());
+        let state = test_state(transport.clone());
+        edition_box(&state).await;
+        assert_eq!(post_edition_preview(State(state)).await.status(), StatusCode::ACCEPTED);
+        assert_eq!(transport.events()[0].event, "device.edition.preview");
+    }
+
+    #[tokio::test]
+    async fn a_restore_reports_progress_and_the_character_it_wears() {
+        let transport = Arc::new(RecordingTransport::default());
+        let state = test_state(transport.clone());
+        edition_box(&state).await;
+        assert_eq!(post_edition_restore(State(state.clone())).await.status(), StatusCode::ACCEPTED);
+        assert_eq!(nth_event(&transport, 0).await.event, "device.edition.restore");
+        assert_eq!(post_edition_restore(State(state.clone())).await.status(), StatusCode::CONFLICT, "one operation at a time");
+        for line in ["EDITION RESTORE 0", "EDITION RESTORE 50"] {
+            publish_device_message(&state, DeviceMessage::Line(line.to_owned())).await;
+        }
+        for _ in 0..200 {
+            if state.operation.lock().await.as_ref().is_some_and(|operation| operation.progress >= 0.5) {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(5)).await;
+        }
+        assert_eq!(state.operation.lock().await.as_ref().unwrap().progress, 0.5);
+        for line in ["EDITION RESTORE 100", "VOICES acme"] {
+            publish_device_message(&state, DeviceMessage::Line(line.to_owned())).await;
+        }
+        for _ in 0..200 {
+            if state.operation.lock().await.as_ref().is_some_and(|operation| operation.state != OperationState::Running) {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(5)).await;
+        }
+        let operation = state.operation.lock().await.clone().unwrap();
+        assert_eq!((operation.kind, operation.state, operation.message.as_str()), (OperationKind::VoicePack, OperationState::Done, "wrote acme"));
+        assert_eq!(state.written.lock().await.id.as_deref(), Some("acme"));
+    }
+
+    #[tokio::test]
+    async fn a_failed_restore_says_why() {
+        let transport = Arc::new(RecordingTransport::default());
+        let state = test_state(transport.clone());
+        edition_box(&state).await;
+        post_edition_restore(State(state.clone())).await;
+        nth_event(&transport, 0).await;
+        publish_device_message(&state, DeviceMessage::Line("EDITION RESTORE FAILED flash".to_owned())).await;
+        for _ in 0..200 {
+            if state.operation.lock().await.as_ref().is_some_and(|operation| operation.state == OperationState::Failed) {
+                return;
+            }
+            tokio::time::sleep(Duration::from_millis(5)).await;
+        }
+        panic!("the restore never failed: {:?}", state.operation.lock().await);
     }
 
     #[tokio::test]
