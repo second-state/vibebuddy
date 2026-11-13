@@ -88,9 +88,8 @@ struct KorekoreAccountCard: View {
             Button(String(localized: "Sign out")) { signOut() }.kButton()
             Button(String(localized: "Delete account…")) { confirmDelete() }.kButton()
         }
-        // The plan row shows with its button even while the plan is hidden: Upgrade has its own switch, and a Paid
-        // user must always be able to manage the plan.
-        if let plan = account.plan, AccountPlan.shown || account.planButton != nil {
+        // The plan row shows with its button: Upgrade while the Paid plan is offered, and Manage plan always on Paid.
+        if account.showsPlanRow, let plan = account.plan {
             KDivider()
             row {
                 Text("Plan").font(.rounded(14))

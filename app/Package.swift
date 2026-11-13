@@ -28,5 +28,7 @@ let package = Package(
         // Draws the korekore views with sample data into PNGs, to set beside the design canvas:
         // `swift run --package-path app KorekorePreview <dir>`.
         .executableTarget(name: "KorekorePreview", dependencies: ["KorekoreUI"], path: "Sources/KorekorePreview"),
+        // Writes the app icon's iconset from KorekoreAppIcon; build-app.sh runs it.
+        .executableTarget(name: "MakeAppIcon", dependencies: ["KorekoreUI"], path: "Sources/MakeAppIcon"),
     ]
 )

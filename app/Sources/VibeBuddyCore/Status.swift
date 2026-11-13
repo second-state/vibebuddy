@@ -20,10 +20,12 @@ public struct Status: Codable, Equatable {
     /// The Character being made, or the last one made since the daemon started (ADR-0023); absent when there is none,
     /// and from older daemons.
     public var making: MakingStatus?
+    /// Every VibePlay paired with this computer or found on the network (ADR-0025); absent from older daemons.
+    public var vibeplays: [VibePlay]?
 
-    enum CodingKeys: String, CodingKey { case daemon, device, today, hooks, operation, config, updates, account, voiceKeys = "voice_keys", making, activities }
+    enum CodingKeys: String, CodingKey { case daemon, device, today, hooks, operation, config, updates, account, voiceKeys = "voice_keys", making, activities, vibeplays }
 
-    public init(daemon: DaemonInfo, device: DeviceState, today: TodaySummary, hooks: HooksSeen, operation: DeviceOperation?, config: DaemonConfig, updates: UpdateStatus? = nil, account: AccountStatus? = nil, voiceKeys: VoiceKeysStatus? = nil, making: MakingStatus? = nil, activities: [ActivitySummary]? = nil) {
+    public init(daemon: DaemonInfo, device: DeviceState, today: TodaySummary, hooks: HooksSeen, operation: DeviceOperation?, config: DaemonConfig, updates: UpdateStatus? = nil, account: AccountStatus? = nil, voiceKeys: VoiceKeysStatus? = nil, making: MakingStatus? = nil, activities: [ActivitySummary]? = nil, vibeplays: [VibePlay]? = nil) {
         self.daemon = daemon
         self.device = device
         self.today = today
@@ -35,6 +37,26 @@ public struct Status: Codable, Equatable {
         self.account = account
         self.voiceKeys = voiceKeys
         self.making = making
+        self.vibeplays = vibeplays
+    }
+}
+
+/// A VibePlay, the game handheld that shows the buddy beside the box (ADR-0025, docs/vibeplay.md).
+public struct VibePlay: Codable, Equatable, Identifiable {
+    public var key: String
+    public var name: String
+    /// Paired with this computer.
+    public var paired: Bool
+    public var connected: Bool
+    public var address: String?
+    public var id: String { key }
+
+    public init(key: String, name: String, paired: Bool, connected: Bool, address: String? = nil) {
+        self.key = key
+        self.name = name
+        self.paired = paired
+        self.connected = connected
+        self.address = address
     }
 }
 
@@ -94,8 +116,9 @@ public struct AccountStatus: Codable, Equatable {
     /// The voice credit left, in millionths of a US dollar (ADR-0024); nil before the account first uses our voice
     /// service, when the service couldn't read it, and from older daemons.
     public var voiceCreditMicroUSD: Int?
-    /// Whether to show Upgrade on Free: the daemon's one switch (`account::UPGRADE_OFFERED`), off until sales open.
-    /// False from older daemons.
+    /// The one switch for the Paid plan: the service's answer, which the daemon reads with the plan. While it is false,
+    /// the App doesn't offer the Paid plan: no Upgrade, no Free plan row, no Relay switch or refusals, and no making a
+    /// Character with VibeBuddy's voices. False when signed out, and from older daemons and services.
     public var upgradeOffered: Bool
     enum CodingKeys: String, CodingKey {
         case available, signedIn = "signed_in", email, githubID = "github_id", githubLogin = "github_login", plan, voiceCreditMicroUSD = "voice_credit_micro_usd"
@@ -117,12 +140,20 @@ public struct AccountStatus: Codable, Equatable {
 
     public enum PlanButton: Equatable { case upgrade, managePlan }
 
-    /// The account card's plan button: Manage plan on Paid, Upgrade on Free while the switch is on, none otherwise.
+    /// The account card's plan button: Manage plan on Paid, Upgrade on Free while the Paid plan is offered, none
+    /// otherwise.
     public var planButton: PlanButton? {
         guard signedIn, let plan else { return nil }
         if plan.paid { return .managePlan }
         return upgradeOffered ? .upgrade : nil
     }
+
+    /// True when the plan row has a button: Manage plan on Paid, Upgrade on Free while the Paid plan is offered.
+    public var showsPlanRow: Bool { planButton != nil }
+
+    /// The Relay switch on General: while the Paid plan is offered, and always for a Paid account, so stopping sales
+    /// doesn't take it from someone who pays for the Relay.
+    public var showsRelaySwitch: Bool { upgradeOffered || (signedIn && plan?.paid == true) }
 
     /// The voice credit left in dollars, "$0.93", for the account card; nil when the daemon doesn't know it. Cut down
     /// to the cent, so it never shows more than is left.
@@ -142,9 +173,6 @@ public struct AccountPlan: Codable, Equatable {
         self.name = name; self.periodEnd = periodEnd
     }
     public var paid: Bool { name == "paid" }
-    /// Whether the App shows the Paid plan. Off until the plan is on sale (2026-10-28): the plan row, the Relay switch
-    /// and its refusals, and making a Character with VibeBuddy's voices are hidden. The daemon doesn't change.
-    public static let shown = false
 }
 
 /// The daemon's answer to `POST /v1/account/upgrade` or `/v1/account/manage-plan` (docs/api.md).
@@ -154,7 +182,7 @@ public enum PlanPageAnswer: Equatable {
     /// The service's 409 reason, `already_paid` or `no_subscription`: the plan isn't what the App showed, and the
     /// daemon has read the account again.
     case conflict(String)
-    /// 404: Stripe isn't set up for this service, the switch is off, or the daemon is too old for the route.
+    /// 404: Stripe isn't set up for this service, the Paid plan isn't offered, or the daemon is too old for the route.
     case notOffered
     /// 401: the status then shows signed out.
     case notSignedIn
@@ -273,10 +301,38 @@ public struct DeviceState: Codable, Equatable {
     public var rolledBack: Bool?
     /// Why the Relay won't carry the link (ADR-0023): `signed_out`, `plan` or `unavailable`. Absent from older daemons.
     public var relayRefused: String?
-    enum CodingKeys: String, CodingKey { case transfer, rolledBack = "rolled_back", relayRefused = "relay_refused", wifiNetwork = "wifi_network", wifiNetworks = "wifi_networks", wifiAddress = "wifi_address", wifiError = "wifi_error", wifiSeen = "wifi_seen", relay, busy, connected, port, bridge, network, mode, firmwareBuild = "firmware_build", firmwareVersion = "firmware_version", voice, volume, screens, decoration, foreignFirmware = "foreign_firmware", pin, candidates, unsupportedBoard = "unsupported_board", boxKey = "box_key", computerKey = "computer_key", pairedComputers = "paired_computers" }
+    /// The Relay this computer uses, and the one the box last said it uses (docs/relay-protocol.md, "Which Relay").
+    /// Absent from older daemons; the box's also until the box has said.
+    public var relayServer: String?
+    public var boxRelay: String?
+    enum CodingKeys: String, CodingKey { case transfer, rolledBack = "rolled_back", relayRefused = "relay_refused", relayServer = "relay_server", boxRelay = "box_relay", wifiNetwork = "wifi_network", wifiNetworks = "wifi_networks", wifiAddress = "wifi_address", wifiError = "wifi_error", wifiSeen = "wifi_seen", relay, busy, connected, port, bridge, network, mode, firmwareBuild = "firmware_build", firmwareVersion = "firmware_version", voice, volume, screens, decoration, foreignFirmware = "foreign_firmware", pin, candidates, unsupportedBoard = "unsupported_board", boxKey = "box_key", computerKey = "computer_key", pairedComputers = "paired_computers" }
     public init(connected: Bool, port: String? = nil, bridge: Bool = false, mode: String? = nil, firmwareBuild: String? = nil, firmwareVersion: String? = nil, voice: String? = nil, volume: Int? = nil, foreignFirmware: Bool? = nil) {
         self.connected = connected; self.port = port; self.bridge = bridge; self.mode = mode; self.firmwareBuild = firmwareBuild; self.firmwareVersion = firmwareVersion; self.voice = voice; self.volume = volume
         self.foreignFirmware = foreignFirmware
+    }
+}
+
+/// Which Relay an address names: ours in production, ours in staging, or another, such as one under `wrangler dev`.
+public enum RelayKind: Equatable {
+    case production
+    case staging
+    case other(String)
+
+    public init(_ address: String) {
+        let host = URL(string: address.trimmingCharacters(in: .whitespaces))?.host ?? address
+        switch host {
+        case "relay.korekore.ai": self = .production
+        case "relay-staging.korekore.ai": self = .staging
+        default: self = .other(host)
+        }
+    }
+}
+
+extension DeviceState {
+    /// The box uses another Relay than this computer, so the two can't meet through it. Unknown until the box has said.
+    public var relayMismatch: Bool {
+        guard let relayServer, let boxRelay else { return false }
+        return RelayKind(relayServer) != RelayKind(boxRelay)
     }
 }
 

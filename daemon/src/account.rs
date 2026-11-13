@@ -19,11 +19,6 @@ pub const ACCOUNT_FILE: &str = "account";
 const PENDING_FOR: Duration = Duration::from_secs(15 * 60);
 const TIMEOUT: Duration = Duration::from_secs(20);
 
-/// The one switch for Upgrade (ADR-0024): off until sales open, which is when Token Station offers synthesis. While it
-/// is off, `POST /v1/account/upgrade` doesn't ask the service, and the status tells the Apps not to show Upgrade.
-/// Manage plan doesn't depend on it.
-pub const UPGRADE_OFFERED: bool = false;
-
 /// What `GET /v1/status` says about the account.
 #[derive(Clone, Debug, Default, PartialEq, Serialize)]
 pub struct AccountStatus {
@@ -40,7 +35,10 @@ pub struct AccountStatus {
     /// first uses our voice service, and when the service couldn't read it.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub voice_credit_micro_usd: Option<u64>,
-    /// Whether the Apps show Upgrade on Free: [`UPGRADE_OFFERED`].
+    /// The one switch for the Paid plan (ADR-0024): the service's `upgrade_offered`, read with the plan. False before
+    /// the first read, signed out, or when the service has no such field. While it is false, `POST
+    /// /v1/account/upgrade` doesn't ask the service, and the Apps don't offer the Paid plan. Manage plan doesn't
+    /// depend on it.
     pub upgrade_offered: bool,
 }
 
@@ -69,6 +67,7 @@ pub struct Plan {
 struct Details {
     plan: Option<Plan>,
     voice_credit_micro_usd: Option<u64>,
+    upgrade_offered: bool,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -99,7 +98,7 @@ pub enum AccountError {
     NotSignedIn,
     /// The service said 409 with this reason: `already_paid` for Checkout, `no_subscription` for the portal.
     Conflict(String),
-    /// The service doesn't offer the plan pages (a 404: Stripe isn't set up there), or [`UPGRADE_OFFERED`] is off.
+    /// The service doesn't offer the plan pages (a 404: Stripe isn't set up there), or the account says Upgrade isn't offered.
     NotOffered,
 }
 
@@ -195,7 +194,7 @@ impl Account {
             github_login: saved.and_then(|s| s.github_login),
             plan: details.plan.clone().filter(|_| signed_in),
             voice_credit_micro_usd: details.voice_credit_micro_usd.filter(|_| signed_in),
-            upgrade_offered: UPGRADE_OFFERED,
+            upgrade_offered: details.upgrade_offered && signed_in,
         }
     }
 
@@ -244,14 +243,18 @@ impl Account {
         }
     }
 
-    /// The plan and the voice credit from a `GET /v1/account` answer (docs/api.md).
+    /// The plan, the voice credit and whether Upgrade is offered, from a `GET /v1/account` answer (docs/api.md).
     fn take_details(&self, account: &serde_json::Value) {
         let plan = &account["plan"];
         let plan = plan["name"].as_str().map(|name| Plan { name: name.to_owned(), period_end: plan["period_end"].as_str().map(str::to_owned) });
         if plan.as_ref().is_some_and(|plan| plan.name == "paid") {
             self.relay_chance.send_modify(|n| *n += 1);
         }
-        *self.details.lock().unwrap() = Details { plan, voice_credit_micro_usd: account["voice_credit_micro_usd"].as_u64() };
+        *self.details.lock().unwrap() = Details {
+            plan,
+            voice_credit_micro_usd: account["voice_credit_micro_usd"].as_u64(),
+            upgrade_offered: account["upgrade_offered"].as_bool().unwrap_or(false),
+        };
         self.details_changed.send_modify(|n| *n += 1);
     }
 
@@ -391,6 +394,11 @@ impl Account {
     /// As if the service had just said the account is on `plan` (`free` or `paid`).
     pub fn read_plan_for_tests(&self, plan: &str) {
         self.take_details(&serde_json::json!({"plan": {"name": plan}}));
+    }
+
+    /// As if the service had just said the account is on Free with `upgrade_offered`.
+    pub fn read_upgrade_offered_for_tests(&self, offered: bool) {
+        self.take_details(&serde_json::json!({"plan": {"name": "free"}, "upgrade_offered": offered}));
     }
 }
 
@@ -626,6 +634,32 @@ pub(crate) mod tests {
         assert_eq!(serde_json::to_value(&paid).unwrap()["voice_credit_micro_usd"], 933_100);
         account.forget();
         assert_eq!((account.status().plan, account.status().voice_credit_micro_usd), (None, None), "signed out, nothing is shown");
+    }
+
+    #[test]
+    fn upgrade_is_offered_only_when_the_service_says_so() {
+        let dir = scratch();
+        let (service, _) = serve(vec![
+            (200, r#"{"id":"a","github_id":1,"plan":{"name":"free"},"upgrade_offered":true}"#),
+            (200, r#"{"id":"a","github_id":1,"plan":{"name":"free"},"upgrade_offered":false}"#),
+            (200, r#"{"id":"a","github_id":1,"plan":{"name":"free"},"upgrade_offered":true}"#),
+            // An older service has no such field.
+            (200, r#"{"id":"a","github_id":1,"plan":{"name":"free"}}"#),
+        ]);
+        let account = signed_in(&service, dir.as_path());
+        assert!(!account.status().upgrade_offered, "not read yet");
+        account.refresh().unwrap();
+        assert!(account.status().upgrade_offered);
+        assert_eq!(serde_json::to_value(account.status()).unwrap()["upgrade_offered"], true);
+        account.refresh().unwrap();
+        assert!(!account.status().upgrade_offered);
+        account.refresh().unwrap();
+        assert!(account.status().upgrade_offered);
+        account.refresh().unwrap();
+        assert!(!account.status().upgrade_offered, "a missing field means false");
+        account.read_upgrade_offered_for_tests(true);
+        account.forget();
+        assert!(!account.status().upgrade_offered, "signed out");
     }
 
     #[test]

@@ -75,6 +75,8 @@ const SAMPLE: &str = r#"{"daemon":{"build":"0.5.0 cc16829","revision":"firmware-
    "plan":{"name":"paid","period_end":"2026-11-24T00:00:00Z"},"voice_credit_micro_usd":933100},
  "voice_keys":{"elevenlabs":{"set":true,"refused":false},"volc":{"set":false,"refused":false}},
  "making":{"id":"made-1","name":"Night owl","state":"done","done":12,"total":12},
+ "vibeplays":[{"key":"vg1","name":"Desk VibePlay","paired":true,"connected":true,"address":"192.168.1.42:7342"},
+               {"key":"vg2","name":"Living-room VibePlay","paired":false,"connected":false,"address":"192.168.1.57:7342"}],
  "activities":[{"agent":"claude-code","title":"CC:Add Chinese to the box","state":"working"},
                {"agent":"codex","title":"CX:Fix voice reply","state":"working"},
                {"agent":"github-actions","title":"CI:App tests","state":"working"}]}"#;
@@ -133,6 +135,14 @@ fn draw_the_korekore_pages() {
         let element: Element<'_, Message> = app.view(iced::window::Id::unique());
         save(&format!("page-{}", format!("{section:?}").to_lowercase()), (954.0, 766.0), element);
     }
+    // The whole Device page, down to the VibePlays, with one being paired.
+    app.tab = Section::Device.tab();
+    app.vibeplay_pairing = Some("vg2".to_owned());
+    app.vibeplay_code = "4821".to_owned();
+    let element: Element<'_, Message> = app.view(iced::window::Id::unique());
+    save("page-device-tall", (954.0, 1500.0), element);
+    app.vibeplay_pairing = None;
+    app.vibeplay_code.clear();
     // The whole Character page, down to the grid's last row.
     app.tab = Section::Character.tab();
     let element: Element<'_, Message> = app.view(iced::window::Id::unique());

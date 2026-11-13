@@ -566,7 +566,7 @@ impl crate::App {
         let detail = if forced {
             tr("On while the daemon runs with VIBEBUDDY_RESIDENT_SESSION=1.", &[])
         } else {
-            tr("Hold K0 on the box and ask. Codex or Claude Code on this computer answers, with your own account or key, and the buddy speaks the reply. Your voice goes to VibeBuddy's speech service.", &[])
+            tr("Hold K0 on the box and ask. Codex or Claude Code on this computer answers, with your own account or key, and the buddy speaks the reply. Your voice goes to VibeBuddy's voice service, or to Groq with your own key.", &[])
         };
         let toggle = (self.resident_info.is_some() && !forced).then_some(Message::VoiceCommands(!on));
         rows([row![
@@ -686,8 +686,12 @@ impl crate::App {
         .width(358);
         let link = match device {
             None => tr("daemon isn't running", &[]),
-            Some(device) if !device.connected && !device.candidates.is_empty() => tr("Several devices found", &[]),
-            Some(device) if !device.connected => tr("Box not found", &[]),
+            Some(device) if !device.connected => match &device.busy {
+                Some(busy) if busy.owner.is_empty() => tr("On another computer", &[]),
+                Some(busy) => tr("With %@", &[&busy.owner]),
+                None if !device.candidates.is_empty() => tr("Several devices found", &[]),
+                None => tr("Box not found", &[]),
+            },
             Some(device) if device.relay => tr("Relay", &[]),
             Some(device) => {
                 let port = device.port.as_deref().unwrap_or("?").trim_start_matches("/dev/");
@@ -719,6 +723,10 @@ impl crate::App {
                 row![small(tr("Box screens", &[])), Space::new().width(Length::Fill), value].align_y(Alignment::Center).into()
             }
         };
+        let relay_line = device
+            .filter(|_| self.status.as_ref().is_some_and(|status| status.account.shows_relay_switch()))
+            .and_then(status::Device::relay_line);
+        let relay_shown = relay_line.is_some();
         let the_box = card(
             column![
                 heading(tr("The box", &[])),
@@ -726,8 +734,16 @@ impl crate::App {
                 column![small(tr("Firmware", &[])), firmware].spacing(2),
                 screens,
             ]
-            .push(device.filter(|device| !device.connected).and_then(status::Device::relay_refusal).map(|why| text(why).font(regular()).size(12).color(theme::KORE_PINK_TEXT)))
-            .push(Space::new().height(Length::Fill))
+            .push(device.filter(|device| !device.connected).and_then(|device| device.relay_refusal(self.plan_offered())).map(|why| text(why).font(regular()).size(12).color(theme::KORE_PINK_TEXT)))
+            // Which Relay this computer uses; only where the Relay switch shows on General.
+            .push(relay_line.map(|line| column![small(tr("Relay", &[])), text(line).font(pixel(13.0).0).size(pixel(13.0).1).color(theme::INK)].spacing(2)))
+            .push(device.filter(|device| device.relay_mismatch()).map(|_| {
+                text(tr("The box uses another Relay than this computer, so they can't meet through it. Plug in the cable once to move the box to this computer's Relay.", &[]))
+                    .font(regular())
+                    .size(12)
+                    .color(theme::KORE_PINK_TEXT)
+            }))
+            .push(Space::new().height(if relay_shown { Length::Fixed(8.0) } else { Length::Fill }))
             .push((outdated && online && !can_flash).then(|| note(tr("Plug in the cable to update the box's firmware.", &[]))))
             .push((outdated && can_flash).then(|| {
                 pill_sized(tr("Update to %@", &[&offer.map(|offer| offer.version.clone()).unwrap_or_default()]), Fill::Pink, 13.0, (!busy).then_some(Message::AskFirmwareUpdate(true)))
@@ -736,7 +752,8 @@ impl crate::App {
             .push(pill_sized(tr("Make the box blink", &[]), Fill::Sun, 13.0, (online && !busy).then_some(Message::Identify)).width(Length::Fill))
             .push(pill_sized(tr("Flash from file…", &[]), Fill::Paper, 13.0, (can_flash && !busy).then_some(Message::FlashFromFile)).width(Length::Fill))
             .spacing(10)
-            .height(Length::Fixed(290.0)),
+            // The Relay lines make the card taller than the screen beside it; it grows to fit them.
+            .height(if relay_shown { Length::Shrink } else { Length::Fixed(290.0) }),
         );
         let top = row![column![screen, screen_actions].spacing(8), the_box].spacing(14);
         let firmware_state = self.firmware_state(can_flash, downloaded);
@@ -753,6 +770,7 @@ impl crate::App {
                 .push(self.confirm_panel())
                 .push(firmware_state)
                 .push(networked)
+                .push(self.vibeplays_card())
                 .spacing(14),
         )
     }
@@ -807,14 +825,17 @@ impl crate::App {
                     .extend(rows)
                     .spacing(8),
             ));
-        } else if self.status.is_some() && !online && !busy && !replug && device.is_some_and(|device| device.pin.is_none()) {
+        } else if self.status.is_some() && !online && !busy && !replug && device.is_some_and(|device| device.pin.is_none() && device.busy.is_none()) {
             finding = finding.push(card(
                 column![
                     row![badge(&sprites::KORE_SLEEP, true, theme::INK), heading(tr("Box not found", &[]))].spacing(10).align_y(Alignment::Center),
                     note(tr("Not showing up? Use a cable that carries data, not just power.", &[])),
-                    note(tr("If the daemon log on the Advanced tab says “Permission denied”, your account can't open the box's port yet: restart the computer once, then replug the box.", &[])),
-                    note(tr("Still nothing? Hold K0 on the box while you plug in the cable. The box starts in download mode with a dark screen, ready to be flashed with VibeBuddy firmware.", &[])),
                 ]
+                .push(
+                    // The serial group a Linux account joins at install takes effect at the next login; Windows has none.
+                    (!cfg!(windows)).then(|| note(tr("If the daemon log on the Advanced tab says “Permission denied”, your account can't open the box's port yet: restart the computer once, then replug the box.", &[]))),
+                )
+                .push(note(tr("Still nothing? Hold K0 on the box while you plug in the cable. The box starts in download mode with a dark screen, ready to be flashed with VibeBuddy firmware.", &[])))
                 .spacing(8),
             ));
         }
@@ -1050,6 +1071,54 @@ impl crate::App {
         card(wifi.push(small(tr("On the same network, a paired computer drives the box without the cable.", &[])))).width(Length::FillPortion(1)).into()
     }
 
+    /// VibePlays (ADR-0025): the ones found on the network, to pair by the code they show, and the paired ones. They
+    /// show the buddy beside the box and never take its link. Older daemons don't report them: no card.
+    fn vibeplays_card(&self) -> Option<Element<'_, Message>> {
+        let vibeplays = self.status.as_ref()?.vibeplays.as_ref()?;
+        let rows = vibeplays.iter().map(|vibeplay| {
+            let mut action = row![].spacing(8).align_y(Alignment::Center);
+            if vibeplay.paired {
+                action = action.push(if vibeplay.connected { tag(tr("Connected", &[]), theme::DONE_TEXT) } else { tag(tr("Not connected", &[]), theme::MUTED_2) });
+                if self.vibeplay_forgetting.as_ref() != Some(&vibeplay.key) {
+                    action = action.push(pill(tr("Forget", &[]), Fill::Paper, Some(Message::AskForgetVibePlay(Some(vibeplay.key.clone())))));
+                }
+            } else if self.vibeplay_pairing.as_ref() != Some(&vibeplay.key) {
+                action = action.push(pill(tr("Pair…", &[]), Fill::Sun, Some(Message::PairVibePlay(Some(vibeplay.key.clone())))));
+            }
+            let mut body = column![row![text(vibeplay.name.clone()).font(semibold()).size(13).color(theme::INK).width(Length::Fill), action].align_y(Alignment::Center)].spacing(8);
+            if !vibeplay.paired && self.vibeplay_pairing.as_ref() == Some(&vibeplay.key) {
+                let ready = self.vibeplay_code.len() == 6 && !self.vibeplay_sending;
+                body = body
+                    .push(field(&tr("Enter the six digits the VibePlay shows", &[]), &self.vibeplay_code).on_input(Message::VibePlayCode).on_submit_maybe(ready.then_some(Message::SendVibePlayCode)))
+                    .push(self.vibeplay_error.as_ref().map(|error| note(error.clone())))
+                    .push(row![pill(tr("Pair", &[]), Fill::Sun, ready.then_some(Message::SendVibePlayCode)), pill(tr("Cancel", &[]), Fill::Paper, Some(Message::PairVibePlay(None)))].spacing(8));
+            }
+            if vibeplay.paired && self.vibeplay_forgetting.as_ref() == Some(&vibeplay.key) {
+                body = body
+                    .push(text(tr("Forget this VibePlay?", &[])).font(bold()).size(13).color(theme::INK))
+                    .push(note(tr("It stops getting this computer's cards. To use it again, pair it again with the code it shows.", &[])))
+                    .push(row![pill(tr("Forget", &[]), Fill::Pink, Some(Message::ForgetVibePlay(vibeplay.key.clone()))), pill(tr("Cancel", &[]), Fill::Paper, Some(Message::AskForgetVibePlay(None)))].spacing(8));
+            }
+            container(body)
+                .padding(Padding::from([6, 10]))
+                .style(|_| container::Style {
+                    border: Border { color: theme::LINE, width: theme::STROKE_BASE, radius: theme::RADIUS_SM.into() },
+                    ..container::Style::default()
+                })
+                .into()
+        });
+        Some(
+            card(
+                column![heading(tr("VibePlays", &[]))]
+                    .extend(rows)
+                    .push(vibeplays.is_empty().then(|| note(tr("No VibePlay found on this network.", &[]))))
+                    .push(small(tr("A VibePlay shows the buddy beside the box, over Wi-Fi. While the box is linked, the VibePlay shows and doesn't speak.", &[])))
+                    .spacing(8),
+            )
+            .into(),
+        )
+    }
+
     fn paired_card<'a>(&'a self, device: &'a status::Device) -> Element<'a, Message> {
         let busy = self.busy();
         let rows = device.paired_computers.iter().map(|computer| {
@@ -1118,7 +1187,7 @@ impl crate::App {
             setting(tr("Launch at login", &[]), switch(self.launch_at_login, Some(Message::LaunchAtLogin(!self.launch_at_login)))),
             setting(tr("Tell me when the box disconnects or the daemon fails", &[]), switch(notify, have_status.then_some(Message::NotifyLink(!notify)))),
         ];
-        if status::Plan::SHOWN {
+        if self.status.as_ref().is_some_and(|status| status.account.shows_relay_switch()) {
             settings.push(setting(tr("Reach the box through the Relay when it's away from this computer", &[]), switch(relay, have_status.then_some(Message::Relay(!relay)))));
         }
         let settings = rows(settings);
@@ -1152,13 +1221,13 @@ impl crate::App {
         page(
             column![]
                 .push(unsupported)
+                .push(container(text(tr("Updates", &[])).font(bold()).size(15).color(theme::INK)).padding(Padding::ZERO.left(4)))
+                .push(updates_card)
+                .push(upgrade)
                 .push(self.kk_account())
                 .push(container(text(tr("This computer", &[])).font(bold()).size(15).color(theme::INK)).padding(Padding::ZERO.left(4)))
                 .push(settings)
                 .push(self.restart_offer.as_ref().map(|offer| self.restart_panel(offer)))
-                .push(container(text(tr("Updates", &[])).font(bold()).size(15).color(theme::INK)).padding(Padding::ZERO.left(4)))
-                .push(updates_card)
-                .push(upgrade)
                 .push(about)
                 .spacing(14),
         )
@@ -1243,17 +1312,21 @@ impl crate::App {
             column![
                 daemon,
                 row![
-                    // The daemon logs to the journal here, not a file; the folder holds the hook's log.
+                    // On Linux the daemon logs to the journal, not a file; the folder holds the hook's log.
                     small_card(
                         tr("Logs", &[]),
-                        tr("The daemon's log in the journal, and the hook's log as a file.", &[]),
+                        if cfg!(windows) {
+                            tr("The daemon's log and the hook's log, both files.", &[])
+                        } else {
+                            tr("The daemon's log in the journal, and the hook's log as a file.", &[])
+                        },
                         row![pill(tr("Show daemon log", &[]), Fill::Paper, Some(Message::ShowDaemonLog)), pill(tr("Open logs folder", &[]), Fill::Paper, Some(Message::OpenLogsFolder))]
                             .spacing(8)
                             .into(),
                     ),
                     small_card(
                         tr("Diagnostics", &[]),
-                        tr("Logs, config and both sides' build IDs in one file, for a bug report.", &[]),
+                        tr("Logs, config and both sides' build IDs in one folder, for a bug report.", &[]),
                         pill(tr("Export diagnostics…", &[]), Fill::Paper, Some(Message::ExportDiagnostics)).into(),
                     ),
                 ]

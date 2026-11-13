@@ -64,6 +64,12 @@ do {
     """.utf8))
     check(paired.boxKey == "BOX" && paired.computerKey == "MINE", "pairing keys decode")
     check(paired.pairedComputers?.map(\.name) == ["dragon's MacBook", "omarchy"], "paired computers decode")
+    check(status.vibeplays == nil, "an older daemon: no VibePlays, so no VibePlays part")
+    let vibeplays = try StatusCoding.decoder().decode([VibePlay].self, from: Data("""
+    [{"key":"K1","name":"Desk VibePlay","paired":true,"connected":true,"address":"192.168.1.42:7342"},
+     {"key":"K2","name":"VibePlay K2","paired":false,"connected":false,"address":null}]
+    """.utf8))
+    check(vibeplays.map(\.paired) == [true, false] && vibeplays[0].connected && vibeplays[1].address == nil, "VibePlays decode")
     let wifi = try StatusCoding.decoder().decode(DeviceState.self, from: Data("""
     {"connected":true,"bridge":false,"network":true,"port":"192.168.1.23:7340","wifi_network":"Home","wifi_address":"192.168.1.23","wifi_error":"password"}
     """.utf8))
@@ -76,6 +82,12 @@ do {
     {"connected":false,"bridge":false,"relay_refused":"plan"}
     """.utf8))
     check(refused.relayRefused == "plan" && busy.relayRefused == nil, "the Relay's refusal decodes")
+    let relays = try StatusCoding.decoder().decode(DeviceState.self, from: Data("""
+    {"connected":true,"bridge":false,"relay_server":"wss://relay-staging.korekore.ai","box_relay":"wss://relay.korekore.ai"}
+    """.utf8))
+    check(RelayKind(relays.relayServer ?? "") == .staging && RelayKind(relays.boxRelay ?? "") == .production, "the two Relays decode and are named")
+    check(relays.relayMismatch && !busy.relayMismatch, "a box on another Relay is a mismatch; an unknown one isn't")
+    check(RelayKind("ws://127.0.0.1:8787") == .other("127.0.0.1"), "another Relay is named by its host")
     let screens = try StatusCoding.decoder().decode(DeviceState.self, from: Data("""
     {"connected":true,"bridge":false,"screens":"korekore","decoration":"christmas"}
     """.utf8))
@@ -104,8 +116,9 @@ do {
     {"id":"night-owl-1a2b3c4d","name":"Night Owl","state":"failed","done":2,"total":6,"reason":"plan","error":"making a Character with our voices needs the Paid plan"}
     """.utf8))
     check(making.failed && !making.running && making.reason == "plan" && making.progress == 2.0 / 6.0, "making decodes")
-    let planText = AccountPlan.shown ? "Paid plan, or your own key for ElevenLabs" : "your own key for ElevenLabs"
-    check(making.explanation(provider: "ElevenLabs")?.contains(planText) == true, "a plan refusal names the provider, and the Paid plan when it is shown")
+    check(making.explanation(provider: "ElevenLabs", planOffered: true)?.contains("Paid plan, or your own key for ElevenLabs") == true, "a plan refusal names the provider and the Paid plan when it is offered")
+    let notOffered = making.explanation(provider: "ElevenLabs", planOffered: false)
+    check(notOffered?.contains("your own key for ElevenLabs") == true && notOffered?.contains("Paid plan") == false, "and only the own key when it isn't")
     let made = try StatusCoding.decoder().decode([MadeCharacter].self, from: Data(#"[{"id":"night-owl-1a2b3c4d","name":"Night Owl","base":"ada","voice":"luna","lines":55,"complete":false}]"#.utf8))
     check(made == [MadeCharacter(id: "night-owl-1a2b3c4d", name: "Night Owl", base: "ada", voice: "luna", lines: 55, complete: false)], "made Characters decode")
     let voices = try StatusCoding.decoder().decode([CharacterVoice].self, from: Data(#"[{"id":"ada","provider":"elevenlabs","voice":"tcSs","language":"en","gender":"female","name":"Ada"},{"id":"wanwanxiaohe","provider":"volc","voice":"zh_f","language":"zh","gender":"female","name":"Xiaohe"}]"#.utf8))
@@ -157,6 +170,15 @@ do {
     signedOut.signedIn = false
     check(signedOut.planButton == nil, "no plan button when signed out")
     check(AccountStatus(available: true, signedIn: true, upgradeOffered: true).planButton == nil, "no plan button before the plan is read")
+    // The plan row: with Upgrade on Free while offered, and always on Paid with Manage plan.
+    check(free.showsPlanRow == false && offered.showsPlanRow, "the Free plan row only while the Paid plan is offered")
+    check(paidAccount.showsPlanRow, "a Paid account always sees its plan row")
+    // The Relay switch: while the Paid plan is offered, and always for a Paid account.
+    check(offered.showsRelaySwitch && !free.showsRelaySwitch, "the Relay switch follows the offer on Free")
+    check(paidAccount.showsRelaySwitch, "stopping sales doesn't take the Relay switch from a Paid account")
+    var paidSignedOut = paidAccount
+    paidSignedOut.signedIn = false
+    check(!paidSignedOut.showsRelaySwitch, "signed out, no Relay switch")
 
     // The daemon's answers to /v1/account/upgrade and /v1/account/manage-plan.
     let answer = { (code: Int, body: String) in PlanPageAnswer(code: code, data: Data(body.utf8)) }
@@ -421,8 +443,12 @@ let volc = CharacterVoice(id: "wanwanxiaohe", provider: "volc", voice: "z", lang
 let ownEleven = VoiceKeysStatus(elevenlabs: .init(set: true), volc: .init(set: true, refused: true))
 let signedIn = AccountStatus(available: true, signedIn: true)
 check(MakingReadiness.of(eleven, keys: ownEleven, account: nil) == .ownKey, "an own key for the voice's provider is enough")
-check(MakingReadiness.of(volc, keys: ownEleven, account: signedIn) == (AccountPlan.shown ? .paidPlan : .ownKeyOnly), "a refused key doesn't count: VibeBuddy's voices, on the Paid plan when it is shown")
-check(MakingReadiness.of(volc, keys: nil, account: AccountStatus(available: true, signedIn: false)) == (AccountPlan.shown ? .signIn : .ownKeyOnly), "signed out and no key")
+let signedInOffered = AccountStatus(available: true, signedIn: true, upgradeOffered: true)
+check(MakingReadiness.of(volc, keys: ownEleven, account: signedInOffered) == .paidPlan, "a refused key doesn't count: VibeBuddy's voices, on the Paid plan when it is offered")
+check(MakingReadiness.of(volc, keys: ownEleven, account: signedIn) == .ownKeyOnly, "and only an own key when it isn't")
+check(MakingReadiness.of(eleven, keys: nil, account: AccountStatus(available: true, signedIn: false)) == .ownKeyOnly, "signed out and no key: the daemon says not offered")
+check(MakingReadiness.of(volc, keys: nil, account: signedIn) == .retired && !MakingReadiness.retired.canStart, "Volcano Engine's voices without a key for it: pick another voice")
+check(MakingReadiness.of(volc, keys: nil, account: signedInOffered) == .retired, "retired comes before the Paid plan")
 check(MakingReadiness.of(eleven, keys: nil, account: nil) == .ownKeyOnly && !MakingReadiness.ownKeyOnly.canStart, "no service and no key")
 let mine = CharacterVoice(id: "own-1a2b3c4d", provider: "volc", voice: "S_me", language: "", gender: "", name: "Me", own: true)
 check(MakingReadiness.of(mine, keys: ownEleven, account: signedIn) == .ownKeyOnly, "a voice of the user's own needs their own key, not the Paid plan")
@@ -552,6 +578,10 @@ do {
     check(picture.mood == .input && picture.link == .lan, "an Activity waiting on you makes the box ask; linked over the network")
     check(picture.tickets.map(\.icon) == ["cx", "cc", "ci"] && picture.tickets.first?.title == "Review changes", "the newest three, by tile, without prefix")
     check(BoxPicture.derive(status: status, daemonAlive: false).mood == .noLink, "no daemon, no link")
+    var away = status
+    away.device.connected = false
+    away.device.busy = BoxBusy(owner: "omarchy", reason: "linked")
+    check(BoxPicture.derive(status: away, daemonAlive: true).awayWith == "omarchy" && picture.awayWith == nil, "a box with another computer is away, not waiting")
     check(BoxPicture.cardTitle("Fix: the build") == "Fix: the build", "only a short capital prefix is dropped")
     check(BoxPicture.busy(15120) == "4h12m" && BoxPicture.busy(2100) == "35m", "busy time reads 4h12m")
     let old = try StatusCoding.decoder().decode(Status.self, from: Data(sample.utf8))

@@ -90,12 +90,18 @@ pub fn screen<'a, M: 'a>(picture: &BoxPicture, scale: f32) -> Element<'a, M> {
     // iced clips square, so the screen's own corners are rounded to sit inside the outline.
     const INNER: f32 = theme::RADIUS_MD - theme::STROKE_BOLD;
     let screen: Element<'a, M> = if picture.mood == Mood::NoLink {
+        // A box that is with another computer isn't waiting for this one, so it reads as away, not as asleep.
+        let (word, line) = match picture.away_with.as_deref() {
+            Some("") => ("AWAY", "with another computer".to_owned()),
+            Some(owner) => ("AWAY", format!("with {owner}")),
+            None => ("NO LINK", "waiting for the computer".to_owned()),
+        };
         container(
             column![
                 text("Z z").font(pixel(14.0 * S).0).size(pixel(14.0 * S).1).color(theme::MIST),
                 sized(&sprites::KORE_SLEEP, 6, true, 6.0 * S),
-                text("NO LINK").font(pixel(typography::BOX_STATE.size * S).0).size(pixel(typography::BOX_STATE.size * S).1).color(theme::MIST),
-                text("waiting for the Mac").font(pixel(11.0 * S).0).size(pixel(11.0 * S).1).color(theme::MIST_TEXT),
+                text(word).font(pixel(typography::BOX_STATE.size * S).0).size(pixel(typography::BOX_STATE.size * S).1).color(theme::MIST),
+                text(line).font(pixel(11.0 * S).0).size(pixel(11.0 * S).1).color(theme::MIST_TEXT),
             ]
             .spacing(6.0 * S)
             .align_x(Alignment::Center),
@@ -189,6 +195,8 @@ fn sidebar<'a, M: Clone + 'a>(
         tr("DAEMON NOT RUNNING", &[])
     } else if let Some(link) = picture.link {
         tr("BOX ONLINE · %@", &[&link.label()])
+    } else if let Some(owner) = picture.away_with.as_deref() {
+        if owner.is_empty() { tr("BOX ON ANOTHER COMPUTER", &[]) } else { tr("BOX WITH %@", &[&owner.to_uppercase()]) }
     } else {
         tr("NO BOX LINKED", &[])
     };
@@ -285,6 +293,15 @@ pub fn settings<'a, M: Clone + 'a>(
         .height(Length::Fill)
         .style(|_| container::Style { background: Some(theme::CREAM.into()), ..container::Style::default() })
         .into()
+}
+
+/// What the last action said, above the page: green when it worked, pink when it failed.
+pub fn notice<'a, M: 'a>(notice: &Result<String, String>) -> Element<'a, M> {
+    let (message, color) = match notice {
+        Ok(message) => (message, theme::DONE_TEXT),
+        Err(error) => (error, theme::KORE_PINK_TEXT),
+    };
+    text(message.clone()).font(rounded(iced::font::Weight::Bold)).size(13).color(color).into()
 }
 
 /// Stands in for a page that comes with a later step of the korekore UI.

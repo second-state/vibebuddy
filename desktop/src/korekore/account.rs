@@ -73,12 +73,9 @@ impl crate::App {
                 .into(),
             ));
         }
-        // The plan row shows with its button even while the plan is hidden: Upgrade has its own switch, and a Paid
-        // user must always be able to manage the plan.
+        // The plan row shows with its button: Upgrade while the Paid plan is offered, and Manage plan always on Paid.
         let button = account.plan_button();
-        if let Some(plan) = &account.plan
-            && (status::Plan::SHOWN || button.is_some())
-        {
+        if let Some(plan) = account.plan.as_ref().filter(|_| account.shows_plan_row()) {
             let (name, color) = if plan.paid() { (tr("Paid plan", &[]), theme::DONE_TEXT) } else { (tr("Free", &[]), theme::INK) };
             let press = |button| (!self.plan_busy).then_some(Message::OpenPlanPage(button));
             let button = button.map(|button| match button {
@@ -230,7 +227,7 @@ impl crate::App {
         let provider = made
             .and_then(|made| self.character_voices.iter().find(|voice| voice.id == made.voice))
             .map_or_else(|| tr("the voice's provider", &[]), making::Voice::provider_name);
-        if let Some(why) = job.explanation(&provider) {
+        if let Some(why) = job.explanation(&provider, self.plan_offered()) {
             let resume = made.map(|made| pill(tr("Resume", &[]), Fill::Sun, Some(Message::ResumeMade(made.id.clone()))));
             return Some(
                 card_with(row![container(note(why)).width(Length::Fill)].push(resume).spacing(12).align_y(Alignment::Center), theme::CREAM, theme::KORE_PINK_TEXT, theme::STROKE_BASE)
