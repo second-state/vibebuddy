@@ -128,6 +128,9 @@ struct FakeBoard {
     /// The box has a touchscreen, and where a finger is on it.
     touchscreen: bool,
     finger: Option<(i32, i32)>,
+    /// This boot came from power being switched on; and the first frame the box presented.
+    powered_on: bool,
+    first_frame: Option<Vec<u8>>,
 }
 
 impl FakeBoard {
@@ -165,6 +168,8 @@ impl FakeBoard {
             speaking: false,
             touchscreen: false,
             finger: None,
+            powered_on: false,
+            first_frame: None,
         }
     }
 
@@ -184,6 +189,9 @@ impl Screen for FakeBoard {
     }
     fn present(&mut self) -> Result<(), ()> {
         self.presents += 1;
+        if self.first_frame.is_none() {
+            self.first_frame = Some(self.frame.clone());
+        }
         Ok(())
     }
     fn set_backlight(&mut self, on: bool) -> Result<(), ()> {
@@ -193,6 +201,9 @@ impl Screen for FakeBoard {
 }
 
 impl Board for FakeBoard {
+    fn powered_on(&self) -> bool {
+        self.powered_on
+    }
     fn lan_send(&mut self, conn: u32, bytes: &[u8]) {
         self.lan_sent.push((conn, String::from_utf8(bytes.to_vec()).unwrap()));
     }
@@ -1041,6 +1052,86 @@ fn a_company_edition_box_says_its_edition_after_its_voice() {
     assert_eq!(lines[voices + 1], "EDITION sample", "{lines:?}");
     let lines = send(&mut firmware, &mut board, r#"{"version":1,"event":"device.hello"}"#);
     assert_eq!(lines, ["DISPLAY READY BUILD abc1234 2026-09-26 10:00", "FIRMWARE VERSION 1.2.3", "TRANSFER 1", "LINK NOISE", BOX_KEY, RELAY_URL, "MODE DUTY", "VOICES sample", "EDITION sample", "VOLUME 65", "SCREENS ROBOT", "DECORATION OFF", "TOUCH NONE"]);
+}
+
+/// A 320 × 240 boot logo, run-length encoded as tools/make_edition.py writes it: red on the top half, blue below.
+fn logo() -> Vec<u8> {
+    let mut bytes = b"LOGO".to_vec();
+    bytes.extend(320u16.to_le_bytes());
+    bytes.extend(240u16.to_le_bytes());
+    for color in [0xF800u16, 0x001F] {
+        bytes.extend(38400u16.to_le_bytes());
+        bytes.extend(color.to_le_bytes());
+    }
+    bytes
+}
+
+/// The frame the logo draws: big-endian RGB565, as the canvas writes it.
+fn logo_frame() -> Vec<u8> {
+    let half = FRAME_BYTES / 2;
+    let mut frame = Vec::with_capacity(FRAME_BYTES);
+    frame.extend([0xF8, 0x00].repeat(half / 2));
+    frame.extend([0x00, 0x1F].repeat(half / 2));
+    frame
+}
+
+/// The sample edition with this boot logo after its pack.
+fn edition_flash_with_logo(logo: &[u8]) -> MemoryFlash {
+    const LOGO_AT: usize = 8192;
+    let mut flash = edition_flash();
+    let header = EDITION_OFFSET;
+    flash.bytes[header + LOGO_AT..header + LOGO_AT + logo.len()].copy_from_slice(logo);
+    flash.bytes[header + 360..header + 364].copy_from_slice(&(LOGO_AT as u32).to_le_bytes());
+    flash.bytes[header + 364..header + 368].copy_from_slice(&(logo.len() as u32).to_le_bytes());
+    let crc = voice_pack::crc32(0, &flash.bytes[header..header + 508]);
+    flash.bytes[header + 508..header + 512].copy_from_slice(&crc.to_le_bytes());
+    flash
+}
+
+fn powered_on(flash: MemoryFlash, on: bool) -> (Firmware, FakeBoard, Vec<String>) {
+    let mut board = FakeBoard::new(flash);
+    board.powered_on = on;
+    let mut firmware = Firmware::new(7, board.now_ms(), b"abc1234 2026-09-26 10:00", "1.2.3");
+    firmware.boot(&mut board);
+    let lines = board.take_lines();
+    (firmware, board, lines)
+}
+
+#[test]
+fn after_a_power_on_the_boot_logo_shows_for_two_seconds() {
+    let (mut firmware, mut board, lines) = powered_on(edition_flash_with_logo(&logo()), true);
+    assert!(lines.contains(&"EDITION sample".to_owned()), "{lines:?}");
+    assert!(board.first_frame.as_ref() == Some(&logo_frame()), "the first frame is the logo");
+    assert!(board.backlight);
+    board.advance(1900);
+    firmware.poll(&mut board);
+    assert!(board.frame == logo_frame(), "still the logo");
+    board.advance(100);
+    firmware.poll(&mut board);
+    assert!(board.frame != logo_frame(), "then the usual screen");
+}
+
+#[test]
+fn without_a_logo_or_a_power_on_the_first_frame_is_as_before() {
+    let first = |flash, on| powered_on(flash, on).1.first_frame.expect("a frame");
+    let usual = first(edition_flash(), false);
+    assert!(usual != logo_frame());
+    assert!(first(edition_flash(), true) == usual, "no logo");
+    assert!(first(edition_flash_with_logo(&logo()), false) == usual, "a restart, not a power-on");
+    let mut short = logo();
+    short.truncate(short.len() - 4);
+    assert!(first(edition_flash_with_logo(&short), true) == usual, "a logo that doesn't fill the screen");
+    assert!(first(blank_flash(), true) == first(blank_flash(), false), "an ordinary box");
+}
+
+#[test]
+fn the_box_answers_while_the_logo_shows_and_needs_input_ends_it() {
+    let (mut firmware, mut board, _) = powered_on(edition_flash_with_logo(&logo()), true);
+    let lines = send(&mut firmware, &mut board, r#"{"version":1,"event":"device.hello"}"#);
+    assert!(lines.contains(&"EDITION sample".to_owned()), "{lines:?}");
+    assert!(board.frame == logo_frame(), "hello doesn't end the logo");
+    send(&mut firmware, &mut board, INPUT);
+    assert!(board.frame != logo_frame(), "needs input ends the logo at once");
 }
 
 #[test]
