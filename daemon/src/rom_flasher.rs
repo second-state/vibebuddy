@@ -383,6 +383,22 @@ pub fn blank_otadata(table: &[u8]) -> Option<Segment> {
     })
 }
 
+/// The boot_sel partition in a partition table image, as a blank segment: writing it makes the bootloader boot
+/// Vibe Buddy rather than Muse, which a user may have flashed next to it (docs/muse.md). None for a table without one.
+pub fn blank_boot_sel(table: &[u8]) -> Option<Segment> {
+    const ENTRY: usize = 32;
+    const MAGIC: [u8; 2] = [0xAA, 0x50];
+    const LABEL: &[u8] = b"boot_sel";
+    table.as_chunks::<ENTRY>().0.iter().take_while(|entry| entry[..2] == MAGIC).find_map(|entry| {
+        let label = &entry[12..28];
+        (label.starts_with(LABEL) && label[LABEL.len()] == 0).then(|| {
+            let address = u32::from_le_bytes(entry[4..8].try_into().unwrap());
+            let size = u32::from_le_bytes(entry[8..12].try_into().unwrap());
+            Segment { address, data: vec![0xFF; size as usize] }
+        })
+    })
+}
+
 /// The whole flow: enter download mode, identify the chip, attach flash, write and verify each segment, hard reset.
 pub fn flash(port_name: &str, paced: bool, segments: &[Segment], on_progress: &mut dyn FnMut(f32, &str)) -> Result<(), String> {
     let mut flasher = RomFlasher::open(port_name, paced)?;
@@ -476,5 +492,13 @@ mod tests {
         let table = std::fs::read(&out).unwrap();
         std::fs::remove_file(&out).ok();
         assert_eq!(blank_otadata(&table).map(|segment| (segment.address, segment.data.len())), Some((0xA1_0000, 0x2000)));
+        assert_eq!(blank_boot_sel(&table).map(|segment| (segment.address, segment.data.len())), Some((0xA2_1000, 0x1000)));
+    }
+
+    #[test]
+    fn a_table_without_muse_has_no_boot_sel() {
+        let mut table = [entry(0x01, 0x02, 0x9000, 0x6000), entry(0x00, 0x10, 0x10000, 0x40_0000), entry(0x01, 0x00, 0xA1_0000, 0x2000)].concat();
+        table.resize(0xC00, 0xFF);
+        assert!(blank_boot_sel(&table).is_none());
     }
 }
