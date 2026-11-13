@@ -272,6 +272,8 @@ pub struct Display {
     backlight_on: bool,
     /// Blink to identify: the backlight flashes until this time; None means not flashing.
     identify_until: Option<u32>,
+    /// The frame holds a company edition's boot logo until this time: nothing is drawn over it (ADR-0025).
+    splash_until: Option<u32>,
     identify_next_toggle: u32,
     muted: bool,
     /// How the box is linked, as an icon in the top left at all times, and `STG` after it while that link goes
@@ -907,6 +909,7 @@ impl Display {
             next_animation_at: 0,
             backlight_on: false,
             identify_until: None,
+            splash_until: None,
             identify_next_toggle: 0,
             muted: false,
             link: (None, false),
@@ -928,9 +931,10 @@ impl Display {
     }
 
     /// The screen hardware is initialized and the backlight is still off: draw the first frame, then turn on the backlight.
+    /// After [`Display::hold_splash`] the first frame is the boot logo already in the frame.
     pub fn start(&mut self, screen: &mut dyn Screen, scene: &Scene) -> Result<(), ()> {
         self.ready = true;
-        self.show_tasks(screen, scene, State::Idle, None, &[], 0)?;
+        self.update_tasks(screen, scene, State::Idle, None, &[], 0)?;
         screen.set_backlight(true)?;
         self.backlight_on = true;
         Ok(())
@@ -1273,7 +1277,16 @@ impl Display {
         }
     }
 
+    /// The frame holds a boot logo that has been presented: draw nothing over it until `until`, or until news
+    /// (a task's state, a mode, a panel) ends it. The box still takes every message meanwhile.
+    pub fn hold_splash(&mut self, until: u32) {
+        self.splash_until = Some(until);
+    }
+
     fn render(&mut self, screen: &mut dyn Screen, scene: &Scene) -> Result<(), ()> {
+        if self.splash_until.is_some() {
+            return Ok(());
+        }
         if self.screens == Screens::Korekore {
             return self.render_korekore(screen, scene);
         }
@@ -1346,6 +1359,19 @@ impl Display {
     }
 
     pub fn show_tasks(
+        &mut self,
+        screen: &mut dyn Screen,
+        scene: &Scene,
+        state: State,
+        title: Option<&[u8]>,
+        tasks: &[TaskInput],
+        total: usize,
+    ) -> Result<(), ()> {
+        self.splash_until = None;
+        self.update_tasks(screen, scene, state, title, tasks, total)
+    }
+
+    fn update_tasks(
         &mut self,
         screen: &mut dyn Screen,
         scene: &Scene,
@@ -1495,6 +1521,7 @@ impl Display {
         if self.mode == mode {
             return;
         }
+        self.splash_until = None;
         self.mode = mode;
         self.animation_frame = 0;
         // Switching away from the pomodoro screen means it was seen: the alarm can stop.
@@ -1532,6 +1559,7 @@ impl Display {
         if self.panel.as_ref().map(|panel| &panel.title) != panel.as_ref().map(|panel| &panel.title) {
             self.highlight = None;
         }
+        self.splash_until = None;
         self.panel = panel;
         if self.ready {
             let _ = self.render(screen, scene);
@@ -1623,6 +1651,12 @@ impl Display {
             return;
         }
         let now = scene.now_ms;
+        if let Some(until) = self.splash_until
+            && now.wrapping_sub(until) as i32 >= 0
+        {
+            self.splash_until = None;
+            let _ = self.render(screen, scene);
+        }
         if let Some(until) = self.identify_until {
             if now.wrapping_sub(until) as i32 >= 0 {
                 self.identify_until = None;

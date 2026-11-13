@@ -16,10 +16,18 @@
 //! ```
 //! A Character pack (`VBCP`, see `character_pack.rs`) whose id is the edition id starts at 4096.
 //!
+//! The boot logo, if any, fills the screen. It is run-length encoded, little endian:
+//! ```text
+//!   0  magic "LOGO"
+//!   4  u16 width (320), u16 height (240)
+//!   8  runs: u16 pixel count (1 or more), u16 RGB565 color; together they cover width × height pixels exactly
+//! ```
+//!
 //! An edition is valid only when the header and the whole pack pass their checks. An empty or
 //! invalid partition, or no `edition` partition at all, counts as no edition: the box is an
 //! ordinary one.
 
+use crate::canvas;
 use crate::character_pack;
 use crate::storage::{Flash, Region};
 use crate::voice_pack::{ID_BYTES, crc32};
@@ -41,6 +49,7 @@ const CRC_AT: usize = HEADER_BYTES - 4;
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Edition {
     id: [u8; ID_BYTES],
+    logo: Option<Region>,
 }
 
 impl Edition {
@@ -48,6 +57,55 @@ impl Edition {
         let end = self.id.iter().position(|&byte| byte == 0).unwrap_or(ID_BYTES);
         core::str::from_utf8(&self.id[..end]).unwrap_or("?")
     }
+
+    /// Where the boot logo is in flash; None for no logo.
+    pub fn logo(&self) -> Option<Region> {
+        self.logo
+    }
+}
+
+const LOGO_HEADER_BYTES: u32 = 8;
+const RUN_BYTES: u32 = 4;
+
+/// Draws a boot logo into a frame, a block of runs at a time, so it never needs the whole logo in memory.
+pub struct LogoDecoder {
+    pixel: usize,
+}
+
+impl LogoDecoder {
+    /// Checks the logo's header; None if it is not a logo for this screen.
+    pub fn new(header: &[u8; LOGO_HEADER_BYTES as usize]) -> Option<Self> {
+        let width = u16::from_le_bytes([header[4], header[5]]) as i32;
+        let height = u16::from_le_bytes([header[6], header[7]]) as i32;
+        (&header[..4] == b"LOGO" && width == canvas::WIDTH && height == canvas::HEIGHT).then_some(LogoDecoder { pixel: 0 })
+    }
+
+    /// Draws whole runs into `frame` (big-endian RGB565, as the canvas writes it). False if they go past the screen.
+    pub fn feed(&mut self, runs: &[u8], frame: &mut [u8]) -> bool {
+        for run in runs.as_chunks::<{ RUN_BYTES as usize }>().0 {
+            let count = u16::from_le_bytes([run[0], run[1]]) as usize;
+            let color = u16::from_le_bytes([run[2], run[3]]).to_be_bytes();
+            if count == 0 || (self.pixel + count) * 2 > frame.len() {
+                return false;
+            }
+            for pixel in frame[self.pixel * 2..(self.pixel + count) * 2].as_chunks_mut::<2>().0 {
+                pixel.copy_from_slice(&color);
+            }
+            self.pixel += count;
+        }
+        true
+    }
+
+    /// Every pixel of the screen has been drawn.
+    pub fn done(&self, frame: &[u8]) -> bool {
+        self.pixel * 2 == frame.len()
+    }
+}
+
+/// Where the runs of a logo stored at `logo` are, and their length; None if its length doesn't hold whole runs.
+pub fn logo_runs(logo: Region) -> Option<Region> {
+    let size = logo.size.checked_sub(LOGO_HEADER_BYTES)?;
+    (size % RUN_BYTES == 0).then_some(Region { offset: logo.offset + LOGO_HEADER_BYTES, size })
 }
 
 fn read_u32(at: &[u8]) -> u32 {
@@ -71,7 +129,8 @@ pub fn read(flash: &mut dyn Flash, region: Region) -> Option<Edition> {
     text(&header[NAME_AT..SUMMARY_AT]).filter(|name| !name.is_empty())?;
     text(&header[SUMMARY_AT..LOGO_AT])?;
     let (logo_offset, logo_length) = (read_u32(&header[LOGO_AT..]), read_u32(&header[LOGO_AT + 4..]));
-    if logo_length > 0 && (logo_offset < HEADER_BYTES as u32 || logo_offset as u64 + logo_length as u64 > region.size as u64) {
+    // Flash reads are 4-byte aligned, so the logo starts on a multiple of 4.
+    if logo_length > 0 && (logo_offset < HEADER_BYTES as u32 || logo_offset % 4 != 0 || logo_offset as u64 + logo_length as u64 > region.size as u64) {
         return None;
     }
 
@@ -85,7 +144,8 @@ pub fn read(flash: &mut dyn Flash, region: Region) -> Option<Edition> {
         return None;
     }
 
-    let mut edition = Edition { id: [0; ID_BYTES] };
+    let logo = (logo_length > 0).then_some(Region { offset: region.offset + logo_offset, size: logo_length });
+    let mut edition = Edition { id: [0; ID_BYTES], logo };
     edition.id[..id.len()].copy_from_slice(id.as_bytes());
     Some(edition)
 }
@@ -219,7 +279,13 @@ mod tests {
         put_u32(&mut bytes[LOGO_AT..], 0x8000);
         put_u32(&mut bytes[LOGO_AT + 4..], 0x100);
         reseal(&mut bytes);
-        assert!(read(&mut flash_with(&bytes), REGION).is_some(), "a logo the firmware doesn't draw yet is allowed");
+        let edition = read(&mut flash_with(&bytes), REGION).expect("a logo inside the partition");
+        assert_eq!(edition.logo(), Some(Region { offset: REGION.offset + 0x8000, size: 0x100 }));
+
+        put_u32(&mut bytes[LOGO_AT..], 0x8002);
+        reseal(&mut bytes);
+        assert_eq!(read(&mut flash_with(&bytes), REGION), None, "a logo not on a multiple of 4");
+        put_u32(&mut bytes[LOGO_AT..], 0x8000);
 
         put_u32(&mut bytes[LOGO_AT + 4..], 0x10000);
         reseal(&mut bytes);

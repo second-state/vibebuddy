@@ -21,7 +21,7 @@ use crate::leisure::{Leisure, Tier};
 use crate::menu::{self, Action as MenuAction, ComputersRow, Context as MenuContext, Menu, Row, View};
 use crate::pomodoro::{Phase, Pomodoro, Run, Transition};
 use crate::relay_box;
-use crate::storage::{Flash, Settings, SettingsStore, find_partition};
+use crate::storage::{Flash, Region, Settings, SettingsStore, find_partition};
 use crate::text;
 use crate::spoken_reply::ReplyAudio;
 use crate::agent_icon::AgentIcon;
@@ -42,6 +42,8 @@ pub const MAX_LINE_BYTES: usize = 4608;
 const LINE_BUFFER_BYTES: usize = MAX_LINE_BYTES + 2;
 /// With no message for longer than this, the link to the Mac counts as lost.
 const LINK_TIMEOUT_MS: u32 = 15000;
+/// How long a company edition's boot logo shows after a power-on (ADR-0025).
+const LOGO_MS: u32 = 2000;
 /// After task.done, return to idle on our own after this long.
 const DONE_TO_IDLE_MS: u32 = 5000;
 /// voice.begin waits at most this long for the line being played to finish; the longest line is under 7 seconds.
@@ -130,6 +132,12 @@ pub trait Board: Screen {
     }
     /// Starts the box again from the top, as after power-on.
     fn restart(&mut self) {}
+    /// This boot came from power being switched on: not from the serial port, which restarts the box each time a
+    /// computer opens it, nor a restart the firmware asked for, a watchdog or a brownout. A company edition's boot
+    /// logo shows only then (ADR-0025).
+    fn powered_on(&self) -> bool {
+        false
+    }
 
     /// One register read on the codec's I2C bus; None when nothing acknowledges. For the microphone
     /// diagnostic ([`crate::mic`]).
@@ -497,7 +505,14 @@ impl Firmware {
         }
         self.load_link(board);
 
-        let display_ok = board.init_display() && self.display.start(board, &scene!(self, now)).is_ok();
+        // Read before the screen starts, so that a boot logo can be its first frame.
+        self.edition = find_partition(board.flash(), "edition").and_then(|region| edition::read(board.flash(), region));
+        let display_ok = board.init_display() && {
+            if board.powered_on() && self.edition.and_then(|edition| edition.logo()).is_some_and(|logo| Self::draw_logo(board, logo)) {
+                self.display.hold_splash(now.wrapping_add(LOGO_MS));
+            }
+            self.display.start(board, &scene!(self, now)).is_ok()
+        };
         if display_ok {
             self.display.set_screens(board, &scene!(self, now), screens);
             self.display.set_decoration(board, &scene!(self, now), decoration);
@@ -516,7 +531,6 @@ impl Firmware {
             Ok(()) => Self::write_value_line(board, "VOICES ", self.voices.current_id().as_bytes()),
             Err(_) => Self::write_literal(board, "VOICES NO PARTITION\n"),
         }
-        self.edition = find_partition(board.flash(), "edition").and_then(|region| edition::read(board.flash(), region));
         self.announce_edition(board);
         self.load_look(board);
 
@@ -2386,6 +2400,30 @@ impl Firmware {
     }
 
     /// `EDITION <id>` on a box of a company edition, nothing on an ordinary box.
+    /// Draws the boot logo into the frame and presents it; false, with nothing presented, if it isn't a whole logo.
+    fn draw_logo<B: Board>(board: &mut B, logo: Region) -> bool {
+        let mut header = [0u8; 8];
+        let Some((mut decoder, runs)) = board
+            .flash()
+            .read(logo.offset, &mut header)
+            .ok()
+            .and_then(|()| edition::LogoDecoder::new(&header))
+            .zip(edition::logo_runs(logo))
+        else {
+            return false;
+        };
+        let mut block = [0u8; 1024];
+        let mut offset = 0;
+        while offset < runs.size {
+            let length = (runs.size - offset).min(block.len() as u32) as usize;
+            if board.flash().read(runs.offset + offset, &mut block[..length]).is_err() || !decoder.feed(&block[..length], board.frame()) {
+                return false;
+            }
+            offset += length as u32;
+        }
+        decoder.done(board.frame()) && board.present().is_ok()
+    }
+
     fn announce_edition<B: Board>(&self, board: &mut B) {
         if let Some(edition) = &self.edition {
             Self::write_value_line(board, "EDITION ", edition.id().as_bytes());

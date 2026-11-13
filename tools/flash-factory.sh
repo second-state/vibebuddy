@@ -42,7 +42,7 @@ sys.path.insert(0, sys.argv[1])
 import make_edition
 image = Path(sys.argv[2]).read_bytes()
 edition_id = make_edition.check(image)
-Path(sys.argv[3]).write_bytes(image[make_edition.PACK_OFFSET:])
+Path(sys.argv[3]).write_bytes(make_edition.pack_of(image))
 print(edition_id)
 EOF
 )"
