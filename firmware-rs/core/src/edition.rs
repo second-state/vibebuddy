@@ -49,13 +49,35 @@ const CRC_AT: usize = HEADER_BYTES - 4;
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Edition {
     id: [u8; ID_BYTES],
+    name: [u8; NAME_BYTES],
+    summary: [u8; SUMMARY_BYTES],
+    pack: Region,
     logo: Option<Region>,
+}
+
+/// The text of a field checked by [`read`].
+fn checked_text(field: &[u8]) -> &str {
+    text(field).unwrap_or("")
 }
 
 impl Edition {
     pub fn id(&self) -> &str {
         let end = self.id.iter().position(|&byte| byte == 0).unwrap_or(ID_BYTES);
         core::str::from_utf8(&self.id[..end]).unwrap_or("?")
+    }
+
+    /// The company Character's name and one-sentence summary, for its card in the App.
+    pub fn name(&self) -> &str {
+        checked_text(&self.name)
+    }
+
+    pub fn summary(&self) -> &str {
+        checked_text(&self.summary)
+    }
+
+    /// Where the company Character's pack is in flash: its header and payload.
+    pub fn pack(&self) -> Region {
+        self.pack
     }
 
     /// Where the boot logo is in flash; None for no logo.
@@ -126,8 +148,10 @@ pub fn read(flash: &mut dyn Flash, region: Region) -> Option<Edition> {
         return None;
     }
     let id = text(&header[ID_AT..NAME_AT]).filter(|id| !id.is_empty() && id.bytes().all(|byte| byte.is_ascii_graphic()))?;
-    text(&header[NAME_AT..SUMMARY_AT]).filter(|name| !name.is_empty())?;
-    text(&header[SUMMARY_AT..LOGO_AT])?;
+    // Each goes to the computer as one line, so no control character.
+    let one_line = |text: &str| !text.chars().any(char::is_control);
+    text(&header[NAME_AT..SUMMARY_AT]).filter(|name| !name.is_empty() && one_line(name))?;
+    text(&header[SUMMARY_AT..LOGO_AT]).filter(|summary| one_line(summary))?;
     let (logo_offset, logo_length) = (read_u32(&header[LOGO_AT..]), read_u32(&header[LOGO_AT + 4..]));
     // Flash reads are 4-byte aligned, so the logo starts on a multiple of 4.
     if logo_length > 0 && (logo_offset < HEADER_BYTES as u32 || logo_offset % 4 != 0 || logo_offset as u64 + logo_length as u64 > region.size as u64) {
@@ -145,7 +169,10 @@ pub fn read(flash: &mut dyn Flash, region: Region) -> Option<Edition> {
     }
 
     let logo = (logo_length > 0).then_some(Region { offset: region.offset + logo_offset, size: logo_length });
-    let mut edition = Edition { id: [0; ID_BYTES], logo };
+    let pack = Region { offset: region.offset + PACK_OFFSET, size: character_pack::HEADER_BYTES as u32 + pack.payload_length };
+    let mut edition = Edition { id: [0; ID_BYTES], name: [0; NAME_BYTES], summary: [0; SUMMARY_BYTES], pack, logo };
+    edition.name.copy_from_slice(&header[NAME_AT..SUMMARY_AT]);
+    edition.summary.copy_from_slice(&header[SUMMARY_AT..LOGO_AT]);
     edition.id[..id.len()].copy_from_slice(id.as_bytes());
     Some(edition)
 }
