@@ -305,7 +305,7 @@ public struct DeviceState: Codable, Equatable {
     /// Absent from older daemons; the box's also until the box has said.
     public var relayServer: String?
     public var boxRelay: String?
-    /// The company edition the box is of (ADR-0025); nil for an ordinary box, other firmware, no box, and older daemons.
+    /// The company edition the box is of (ADR-0026); nil for an ordinary box, other firmware, no box, and older daemons.
     public var edition: DeviceEdition?
     enum CodingKeys: String, CodingKey { case edition, transfer, rolledBack = "rolled_back", relayRefused = "relay_refused", relayServer = "relay_server", boxRelay = "box_relay", wifiNetwork = "wifi_network", wifiNetworks = "wifi_networks", wifiAddress = "wifi_address", wifiError = "wifi_error", wifiSeen = "wifi_seen", relay, busy, connected, port, bridge, network, mode, firmwareBuild = "firmware_build", firmwareVersion = "firmware_version", voice, volume, screens, decoration, foreignFirmware = "foreign_firmware", pin, candidates, unsupportedBoard = "unsupported_board", boxKey = "box_key", computerKey = "computer_key", pairedComputers = "paired_computers" }
     public init(connected: Bool, port: String? = nil, bridge: Bool = false, mode: String? = nil, firmwareBuild: String? = nil, firmwareVersion: String? = nil, voice: String? = nil, volume: Int? = nil, foreignFirmware: Bool? = nil) {

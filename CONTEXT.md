@@ -121,7 +121,7 @@ One Character bundled into a single pack: its look (unless it uses the built-in 
 _Avoid_: voice pack (the older pack that held only five lines), 语音包, 音色包, asset pack, skin pack
 
 **Company edition (企业定制版)**:
-A batch of boxes that a company buys as a gift, each one with a company Character written at the factory. It is data on the box, in its own `edition` partition, never a separate firmware or App build: one firmware and one App serve every edition and every ordinary box (ADR-0025).
+A batch of boxes that a company buys as a gift, each one with a company Character written at the factory. It is data on the box, in its own `edition` partition, never a separate firmware or App build: one firmware and one App serve every edition and every ordinary box (ADR-0026).
 _Avoid_: custom build, OEM version, white label
 
 **Company Character (品牌角色)**:

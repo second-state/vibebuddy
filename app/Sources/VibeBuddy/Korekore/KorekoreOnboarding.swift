@@ -370,7 +370,7 @@ struct KorekoreOnboarding: View {
             title(String(localized: "Who lives in your box?"))
             ScrollView(.horizontal) {
                 HStack(alignment: .top, spacing: 12) {
-                    // A box of a company edition (ADR-0025) has the company Character first, then the robot, then Kore; picking it puts it back on.
+                    // A box of a company edition (ADR-0026) has the company Character first, then the robot, then Kore; picking it puts it back on.
                     if let edition = model.edition {
                         pickCard(name: edition.name, blurb: edition.summary, stage: Theme.Colors.boxCard,
                                  inUse: model.status?.device.voice == edition.id, comingSoon: false,

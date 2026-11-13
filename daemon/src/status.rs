@@ -55,7 +55,7 @@ pub struct DeviceState {
     /// The decoration the box draws over its screens, `off`, `thanksgiving` or `christmas` (ADR-0022), stored on the device; None
     /// from firmware that predates decorations.
     pub decoration: Option<String>,
-    /// The company edition the box is (`EDITION <id>`, ADR-0025); None for an ordinary box, other firmware, or while no
+    /// The company edition the box is (`EDITION <id>`, ADR-0026); None for an ordinary box, other firmware, or while no
     /// box is connected.
     pub edition: Option<Edition>,
     /// The connected port's USB serial number, which tells this device from another ESP32-S3.

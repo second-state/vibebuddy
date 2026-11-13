@@ -150,7 +150,7 @@ struct DaemonClient {
         guard code == 202 else { throw DaemonError(message: DaemonClient.message(in: data) ?? String(localized: "Voice pack write was rejected (\(code))")) }
     }
 
-    /// The company Character's card (ADR-0025). The daemon asks the box once and keeps it while the box stays connected.
+    /// The company Character's card (ADR-0026). The daemon asks the box once and keeps it while the box stays connected.
     func editionCard() async throws -> EditionCard {
         let (data, response) = try await URLSession.shared.data(for: request("/v1/device/edition"))
         // 404 (no edition), 409 (another box operation) or 502 (the box didn't answer): the next status asks again.

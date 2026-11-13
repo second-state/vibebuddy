@@ -23,7 +23,7 @@ final class AppModel: ObservableObject {
     /// comes up and whenever a job changes state.
     @Published private(set) var madeCharacters: [MadeCharacter] = []
     @Published private(set) var characterVoices: [CharacterVoice] = []
-    /// The company Character's card from the last edition box seen (ADR-0025), and its first frame to draw.
+    /// The company Character's card from the last edition box seen (ADR-0026), and its first frame to draw.
     @Published private(set) var editionCard: EditionCard?
     @Published private(set) var editionFrame: RGBAImage?
     /// The edition whose card is being asked for, so one status after another doesn't ask again.

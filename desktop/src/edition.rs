@@ -1,4 +1,4 @@
-//! A company edition's card in the Character list (ADR-0025): asked once per edition box, shown only for that box.
+//! A company edition's card in the Character list (ADR-0026): asked once per edition box, shown only for that box.
 
 use base64::Engine;
 

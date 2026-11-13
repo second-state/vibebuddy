@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Flash a box of a company edition at the factory (ADR-0025), in one pass over the native USB port:
+# Flash a box of a company edition at the factory (ADR-0026), in one pass over the native USB port:
 # the bootloader, the partition table, the firmware, a blank otadata, the company Character's pack in voices
 # (so the box starts up wearing it) and the edition image in the edition partition. Then check that the box
 # reports the edition.

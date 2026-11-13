@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Check that a box reports the company edition it was flashed with (ADR-0025).
+"""Check that a box reports the company edition it was flashed with (ADR-0026).
 
 Usage: tools/check-edition.py <port> <edition id>
 

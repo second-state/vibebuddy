@@ -118,7 +118,7 @@ struct AppState {
     /// What the App said about the Character pack it last wrote (who lends a custom one, the form of address),
     /// kept in [`persona::RECORD_FILE`] in the state directory.
     written: Arc<Mutex<persona::Written>>,
-    /// The connected box's company Character card (ADR-0025), with the box key it came from.
+    /// The connected box's company Character card (ADR-0026), with the box key it came from.
     edition_card: Arc<Mutex<Option<KeptCard>>>,
     /// The person's VibeBuddy account (ADR-0018); unavailable in tests unless one sets it.
     account: Arc<account::Account>,
@@ -932,7 +932,7 @@ fn no_edition() -> axum::response::Response {
     (StatusCode::NOT_FOUND, Json(ApiResponse { accepted: false, message: "the box has no company edition".to_owned() })).into_response()
 }
 
-/// The connected box's company Character card (ADR-0025). The box is asked once; the card is kept while the same box,
+/// The connected box's company Character card (ADR-0026). The box is asked once; the card is kept while the same box,
 /// with the same edition, stays connected.
 async fn get_edition(State(state): State<AppState>) -> axum::response::Response {
     use axum::response::IntoResponse;
