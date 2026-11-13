@@ -23,6 +23,10 @@ struct KorekoreCharacterPage: View {
                     KorekoreMakingRow(model: model, making: making)
                 }
                 LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 12, alignment: .top), count: 3), spacing: 12) {
+                    // A box of a company edition (ADR-0025) has the company Character first.
+                    if let edition = model.edition {
+                        editionCard(edition)
+                    }
                     koreCard
                     robotCard
                     ForEach(Resources.bundledVoices) { entry in
@@ -73,6 +77,7 @@ struct KorekoreCharacterPage: View {
     /// A Character card: the look on a dark stage 104 px high, the name, ▷ and Use, one line about who it is. The
     /// one the box wears has a 3 px `kore-pink` outline and IN USE.
     private func card<Stage: View>(name: String, summary: String, inUse: Bool, previewID: String?, use: (() -> Void)?,
+                                   playOnBox: (() -> Void)? = nil,
                                    stageFill: Color = Theme.Colors.boxCard, @ViewBuilder stage: () -> Stage) -> some View {
         KCard(padding: EdgeInsets(top: 9, leading: 9, bottom: 9, trailing: 9),
               outline: inUse ? Theme.Colors.korePink : Theme.Colors.ink,
@@ -94,6 +99,10 @@ struct KorekoreCharacterPage: View {
                     } else {
                         if let previewID {
                             KorekorePreviewButton(model: model, voice: previewID, name: name)
+                        }
+                        if let playOnBox {
+                            KorekorePlayButton(playing: false, label: String(localized: "Play \(name) on the box"), action: playOnBox)
+                                .disabled(model.operationRunning || !connected)
                         }
                         if let use {
                             Button(String(localized: "Use"), action: use).kButton()
@@ -122,6 +131,18 @@ struct KorekoreCharacterPage: View {
                 }
                 Text("The box itself. “Kore kore!”").font(.rounded(12, weight: 400)).foregroundStyle(Theme.Colors.muted)
                     .lineLimit(2, reservesSpace: true)
+            }
+        }
+    }
+
+    /// The company Character (ADR-0025), from the box's own copy: ▶ has the box say its line, and Use puts it back on.
+    private func editionCard(_ edition: EditionCard) -> some View {
+        card(name: edition.name, summary: edition.summary, inUse: model.status?.device.voice == edition.id, previewID: nil,
+             use: model.restoreEdition, playOnBox: model.previewEdition) {
+            if let frame = model.editionFrame {
+                Image(nsImage: LookImages.figure(frame)).interpolation(.none).padding(.bottom, 2)
+            } else if let face = Resources.robotFace {
+                Image(nsImage: LookImages.figure(face)).interpolation(.none).padding(.bottom, 8)
             }
         }
     }
@@ -309,8 +330,20 @@ struct KorekorePreviewButton: View {
     let name: String
 
     var body: some View {
-        Button { model.togglePreview(voice) } label: {
-            Image(systemName: model.previewingVoice == voice ? "stop.fill" : "play.fill")
+        KorekorePlayButton(playing: model.previewingVoice == voice, label: String(localized: "Preview \(name)")) { model.togglePreview(voice) }
+            .disabled(model.operationRunning)
+    }
+}
+
+/// The ▶ (■ while playing) pill of a Character card.
+struct KorekorePlayButton: View {
+    let playing: Bool
+    let label: String
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            Image(systemName: playing ? "stop.fill" : "play.fill")
                 .font(.system(size: 9, weight: .heavy))
                 .frame(width: 24, height: 22)
                 .foregroundStyle(Theme.Colors.ink)
@@ -318,8 +351,7 @@ struct KorekorePreviewButton: View {
                 .overlay(Capsule().strokeBorder(Theme.Colors.ink, lineWidth: Theme.Stroke.base))
         }
         .buttonStyle(.plain)
-        .disabled(model.operationRunning)
-        .accessibilityLabel(String(localized: "Preview \(name)"))
+        .accessibilityLabel(label)
     }
 }
 

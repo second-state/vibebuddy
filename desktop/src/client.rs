@@ -99,6 +99,32 @@ pub async fn write_voice_pack(pack: Vec<u8>, lender: Option<&str>, address: Opti
     accepted(request).await
 }
 
+/// The company Character's card (ADR-0025), from `GET /v1/device/edition`.
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq)]
+pub struct EditionCard {
+    pub id: String,
+    pub name: String,
+    pub summary: String,
+    /// The look (docs/characters.md) as base64; None for a Character without one.
+    pub look: Option<String>,
+}
+
+/// The daemon asks the box once and keeps the card while the box stays connected.
+pub async fn edition_card() -> Result<EditionCard, String> {
+    get_json("/v1/device/edition").await
+}
+
+/// The box plays the company Character's line.
+pub async fn preview_edition() -> Result<(), String> {
+    post("/v1/device/edition/preview", None).await
+}
+
+/// The box puts the company Character back on from its own copy; progress arrives in the status as a Character pack
+/// write.
+pub async fn restore_edition() -> Result<(), String> {
+    post("/v1/device/edition/restore", None).await
+}
+
 /// Like the voice pack, flashing runs in the background; the daemon reads the three images from these paths.
 /// Flashes the three images in `directory`: the firmware the daemon downloaded from the update manifest.
 pub async fn flash_firmware(directory: std::path::PathBuf) -> Result<(), String> {

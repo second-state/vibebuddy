@@ -278,6 +278,15 @@ pub struct Device {
     pub wifi_seen: Vec<SeenNetwork>,
     /// Why the Relay won't carry the link (ADR-0023): `signed_out`, `plan` or `unavailable`.
     pub relay_refused: Option<String>,
+    /// The company edition the box is of (ADR-0025); None for an ordinary box, other firmware, and older daemons.
+    pub edition: Option<Edition>,
+}
+
+#[derive(Clone, Debug, Default, Deserialize, PartialEq)]
+#[serde(default)]
+pub struct Edition {
+    /// The company Character's id.
+    pub id: String,
 }
 
 #[derive(Clone, Debug, Default, Deserialize, PartialEq)]
@@ -457,6 +466,14 @@ mod tests {
         "operation": null,
         "config": {"voice": null, "notify_link": true}
     }"#;
+
+    #[test]
+    fn a_company_edition_parses_and_an_ordinary_box_has_none() {
+        let device: Device = serde_json::from_str(r#"{"connected": true, "edition": {"id": "luna"}}"#).expect("device");
+        assert_eq!(device.edition, Some(Edition { id: "luna".to_owned() }));
+        let device: Device = serde_json::from_str(r#"{"connected": true, "edition": null}"#).expect("device");
+        assert_eq!(device.edition, None);
+    }
 
     #[test]
     fn the_box_screens_parse() {

@@ -12,6 +12,7 @@ mod assets;
 mod character;
 mod client;
 mod custom;
+mod edition;
 mod firmware_file;
 mod i18n;
 mod making;
@@ -155,6 +156,12 @@ enum Message {
     PickAddress(assets::Language, Option<&'static str>),
     UseRobot,
     UseCustom,
+    /// The company Character's card for the edition asked (ADR-0025), or why it didn't come.
+    EditionCard(String, Result<client::EditionCard, String>),
+    /// The box plays the company Character's line.
+    PreviewEdition,
+    /// The box puts the company Character back on.
+    RestoreEdition,
     CopyPrompt,
     /// Making a Character (ADR-0023): open the form in place of the Character tab, or (false) leave it.
     MakeCharacter(bool),
@@ -314,6 +321,10 @@ struct App {
     lender: Option<Lender>,
     /// The robot's face for its card.
     robot_face: Option<image::Handle>,
+    /// The company Character's card from the last edition box seen (ADR-0025), with its face, and the edition whose
+    /// card is being asked for.
+    edition: Option<(client::EditionCard, Option<image::Handle>)>,
+    edition_asking: Option<String>,
     /// Each decoration's preview over each set of box screens, keyed `<screens>-<decoration>`, and the frame up now.
     decoration_frames: Vec<(&'static str, Vec<image::Handle>)>,
     decoration_frame: usize,
@@ -478,6 +489,8 @@ impl App {
             custom_look: None,
             lender: None,
             robot_face: None,
+            edition: None,
+            edition_asking: None,
             decoration_frames: decoration_frames(),
             decoration_frame: 0,
             decoration_pointed: None,
@@ -647,9 +660,18 @@ impl App {
                 } else {
                     Task::none()
                 };
+                // A box of a company edition: ask for its card, once. A failed ask is tried again at the next status.
+                let card = match edition::to_ask(&status.device, self.edition.as_ref().map(|(card, _)| card), self.edition_asking.as_deref()) {
+                    Some(id) => {
+                        self.edition_asking = Some(id.clone());
+                        Task::perform(client::edition_card(), move |card| Message::EditionCard(id.clone(), card))
+                    }
+                    None => Task::none(),
+                };
                 self.status = Some(*status);
                 return Task::batch([
                     self.refresh_tray(),
+                    card,
                     voice.map_or_else(Task::none, |id| Task::done(Message::UseVoice(id))),
                     made,
                 ]);
@@ -966,6 +988,22 @@ impl App {
                 let write = async move { client::write_voice_pack(assets::read_pack(ROBOT).await?, None, None).await };
                 return Task::perform(write, Message::Done);
             }
+            Message::EditionCard(id, card) => {
+                if self.edition_asking.as_deref() == Some(id.as_str()) {
+                    self.edition_asking = None;
+                }
+                match card {
+                    Ok(card) => {
+                        let face = edition::look(&card)
+                            .and_then(|look| character::look_frames(&look))
+                            .and_then(|frames| frames.first().map(|frame| handle(frame, 1)));
+                        self.edition = Some((card, face));
+                    }
+                    Err(error) => eprintln!("vibebuddy-desktop: the company Character's card didn't come ({error})"),
+                }
+            }
+            Message::PreviewEdition => return Task::perform(client::preview_edition(), Message::Done),
+            Message::RestoreEdition => return Task::perform(client::restore_edition(), Message::Done),
             Message::UseCustom => {
                 let (Some((look, _)), Some(lender)) = (self.custom_look.clone(), self.lender) else { return Task::none() };
                 if let Some(path) = custom::custom_look_file() {
