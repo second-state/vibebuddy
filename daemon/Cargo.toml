@@ -49,8 +49,10 @@ sha1 = "0.11"
 
 # Watching the supervising app's process (main.rs) and the device name (identity.rs) on Windows.
 [target.'cfg(windows)'.dependencies]
-windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_System_Console", "Win32_System_SystemInformation", "Win32_System_Threading", "Win32_UI_Input_KeyboardAndMouse", "Win32_UI_WindowsAndMessaging"] }
+windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Globalization", "Win32_Storage_FileSystem", "Win32_System_Console", "Win32_System_SystemInformation", "Win32_System_Threading", "Win32_UI_Input_KeyboardAndMouse", "Win32_UI_WindowsAndMessaging"] }
 
 [dev-dependencies]
 http-body-util = "0.1"
+# The VibePlay app's pairing and link, so the tests check the daemon against the VibePlay's own side.
+vibeplay-core = { path = "../vibeplay-app/core" }
 tokio = { workspace = true, features = ["test-util"] }

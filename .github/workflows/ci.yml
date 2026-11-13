@@ -38,6 +38,30 @@ jobs:
       - name: Tool tests
         run: python3 -m unittest discover -s tools -p "test_*.py"
 
+  vibeplay-app:
+    # The VibePlay app (vibeplay-app/, its own workspace): its tests on the host, the wasm32 build QingOS takes, and
+    # its screens against the box's.
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: vibeplay-app
+    steps:
+      - uses: actions/checkout@v4
+      - name: Toolchain
+        run: rustup update stable --no-self-update && rustup default stable && rustup target add wasm32-unknown-unknown && rustup component add clippy
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: vibeplay-app
+      - name: Test
+        run: cargo test --workspace --locked
+      - name: Clippy
+        run: cargo clippy --workspace --all-targets --locked
+      - name: Build for QingOS
+        run: cargo build --release --target wasm32-unknown-unknown --locked
+      - name: Same screens as the box
+        # The app draws with the firmware's code; this compares its screens with the firmware's previews.
+        run: tools/compare-box-screens.sh
+
   windows:
     # The same crates on Windows, where nothing ships yet: it keeps them building and their tests passing there.
     runs-on: windows-latest

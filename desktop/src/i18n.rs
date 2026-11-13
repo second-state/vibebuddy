@@ -95,11 +95,21 @@ impl Display for UiLanguage {
 }
 
 /// The first of the POSIX locale variables that is set decides, as it does for every other program.
+#[cfg(not(windows))]
 fn locale_wants_chinese() -> bool {
     ["LC_ALL", "LC_MESSAGES", "LANG"]
         .iter()
         .find_map(|name| std::env::var(name).ok().filter(|value| !value.is_empty()))
         .is_some_and(|locale| locale.starts_with("zh"))
+}
+
+/// Windows sets no locale variables: the user's display language decides.
+#[cfg(windows)]
+fn locale_wants_chinese() -> bool {
+    // SAFETY: no arguments; it returns a language id.
+    let language = unsafe { windows_sys::Win32::Globalization::GetUserDefaultUILanguage() };
+    // The primary language in the low 10 bits; LANG_CHINESE is 4.
+    language & 0x3ff == 0x04
 }
 
 /// `"key" = "value";` lines; comments and anything else are skipped.

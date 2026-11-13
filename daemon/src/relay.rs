@@ -217,9 +217,17 @@ pub struct Wait<'a> {
     pub memory: Option<Memory>,
 }
 
+/// A link through the Relay: the stream carries the VibeBuddy Protocol as bytes, as the cable does.
+pub struct Linked {
+    pub stream: DuplexStream,
+    /// Whether the box is on the Relay. The Relay links a computer even while the box is away, such as when the
+    /// box uses another Relay; the link is then down until the Relay says `linked` again.
+    pub box_here: bool,
+}
+
 /// Connects, proves this computer's key, and asks for the box, waiting on the socket while someone else has
-/// it. On success the returned stream carries the VibeBuddy Protocol as bytes, as the cable does.
-pub async fn link(config: &RelayConfig, box_key: &[u8; 32], wait: Wait<'_>) -> Result<DuplexStream, RelayError> {
+/// it.
+pub async fn link(config: &RelayConfig, box_key: &[u8; 32], wait: Wait<'_>) -> Result<Linked, RelayError> {
     let url = box_url(&config.url(), box_key);
     let connected = tokio_tungstenite::connect_async_tls_with_config(&url, None, false, Some(connector()?));
     let (mut socket, _) = match tokio::time::timeout(HANDSHAKE_TIMEOUT, connected).await {
@@ -239,13 +247,16 @@ pub async fn link(config: &RelayConfig, box_key: &[u8; 32], wait: Wait<'_>) -> R
         Ok(Ok(())) => wait_for_box(&mut socket, wait).await,
     };
     match &result {
-        Ok(()) => config.note_refusal(None),
+        Ok(_) => config.note_refusal(None),
         Err(RelayError::Account(code)) => config.note_refusal(Some(code)),
         Err(RelayError::Refused(code)) if code == "unavailable" => config.note_refusal(Some(code)),
         Err(_) => {}
     }
     match result {
-        Ok(()) => Ok(bridge(socket, presence, Noise { identity: config.identity.clone(), box_key: *box_key, memory }, config.clone())),
+        Ok(box_here) => {
+            let stream = bridge(socket, box_here, presence, Noise { identity: config.identity.clone(), box_key: *box_key, memory }, config.clone());
+            Ok(Linked { stream, box_here })
+        }
         Err(error) => {
             close_normally(&mut socket).await;
             Err(error)
@@ -253,8 +264,9 @@ pub async fn link(config: &RelayConfig, box_key: &[u8; 32], wait: Wait<'_>) -> R
     }
 }
 
-/// Asks for the box and waits on the socket until it is ours.
-async fn wait_for_box<S>(socket: &mut S, wait: Wait<'_>) -> Result<(), RelayError>
+/// Asks for the box and waits on the socket until it is ours. Says whether the box is on the Relay, as its last
+/// `status` said.
+async fn wait_for_box<S>(socket: &mut S, wait: Wait<'_>) -> Result<bool, RelayError>
 where
     S: futures_util::Stream<Item = Result<Message, tokio_tungstenite::tungstenite::Error>>
         + futures_util::Sink<Message, Error = tokio_tungstenite::tungstenite::Error>
@@ -264,13 +276,19 @@ where
     send(socket, json!({"t": first})).await?;
     let mut tick = tokio::time::interval(Duration::from_secs(1));
     let mut pinged = tokio::time::Instant::now();
+    let mut box_here = true;
     loop {
         tokio::select! {
             message = socket.next() => match message {
                 Some(Ok(Message::Text(text))) => {
                     let Ok(value) = serde_json::from_str::<Value>(&text) else { continue };
+                    if value["t"] == "status"
+                        && let Some(here) = value["box"].as_bool()
+                    {
+                        box_here = here;
+                    }
                     match value["t"].as_str() {
-                        Some("linked") => return Ok(()),
+                        Some("linked") => return Ok(box_here),
                         Some("busy") => {
                             let text = |name: &str| value[name].as_str().unwrap_or_default().to_owned();
                             (wait.busy)(text("owner"), text("reason"));
@@ -422,13 +440,13 @@ const HANDSHAKE_AGAIN_AFTER: Duration = Duration::from_secs(10);
 /// Runs the linked socket behind a byte stream: lines written to the stream go out as `data`, `data`
 /// from the box comes back as lines, sealed once the box opens a session. The stream ends when the box
 /// is taken away, the Relay closes, a sealed line doesn't open, or the Relay goes quiet for [`DEAD_AFTER`].
-fn bridge(socket: Socket, presence: Arc<dyn Fn(bool) + Send + Sync>, noise: Noise, config: RelayConfig) -> DuplexStream {
+fn bridge(socket: Socket, box_here: bool, presence: Arc<dyn Fn(bool) + Send + Sync>, noise: Noise, config: RelayConfig) -> DuplexStream {
     let (ours, theirs) = tokio::io::duplex(64 * 1024);
-    tokio::spawn(run_bridge(socket, theirs, presence, noise, config));
+    tokio::spawn(run_bridge(socket, theirs, box_here, presence, noise, config));
     ours
 }
 
-async fn run_bridge<S>(socket: S, stream: DuplexStream, presence: Arc<dyn Fn(bool) + Send + Sync>, noise: Noise, config: RelayConfig)
+async fn run_bridge<S>(socket: S, stream: DuplexStream, mut box_here: bool, presence: Arc<dyn Fn(bool) + Send + Sync>, noise: Noise, config: RelayConfig)
 where
     S: futures_util::Stream<Item = Result<Message, tokio_tungstenite::tungstenite::Error>>
         + futures_util::Sink<Message, Error = tokio_tungstenite::tungstenite::Error>
@@ -440,8 +458,6 @@ where
     let mut ping = tokio::time::interval(PING_EVERY);
     ping.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
     let mut heard = tokio::time::Instant::now();
-    // The Relay links a computer even while the box is away; its first status says whether it is there.
-    let mut box_here = true;
     let knows_noise = || noise.memory.as_ref().is_some_and(|memory| memory.knows(&noise.box_key));
     let mut mode = if knows_noise() { Mode::Waiting } else { Mode::Clear };
     let mut held: std::collections::VecDeque<String> = std::collections::VecDeque::new();
@@ -687,9 +703,16 @@ mod tests {
                 return;
             }
             socket.send(say(json!({"t": "welcome"}))).await.unwrap();
-            socket.send(say(json!({"t": "status", "box": true, "owner": null}))).await.unwrap();
+            socket.send(say(json!({"t": "status", "box": answer != "absent", "owner": null}))).await.unwrap();
             let Some(Ok(Message::Text(_link))) = socket.next().await else { return };
             match answer {
+                // Linked while the box is on another Relay; then it joins this one.
+                "absent" => {
+                    socket.send(say(json!({"t": "linked"}))).await.unwrap();
+                    socket.send(say(json!({"t": "linked"}))).await.unwrap();
+                    socket.send(say(json!({"t": "unlinked", "reason": "takeover"}))).await.unwrap();
+                    while socket.next().await.is_some() {}
+                }
                 // Linked; then the box loses power and comes back.
                 "away" => {
                     socket.send(say(json!({"t": "linked"}))).await.unwrap();
@@ -745,7 +768,7 @@ mod tests {
     async fn link_now(config: &RelayConfig) -> Result<DuplexStream, RelayError> {
         let takeover = AtomicBool::new(false);
         let mut busy = |_: String, _: String| {};
-        link(config, &[5; 32], Wait { takeover: &takeover, busy: &mut busy, give_up: &|| false, presence: Arc::new(|_| {}), memory: None }).await
+        link(config, &[5; 32], Wait { takeover: &takeover, busy: &mut busy, give_up: &|| false, presence: Arc::new(|_| {}), memory: None }).await.map(|linked| linked.stream)
     }
 
     #[tokio::test]
@@ -787,10 +810,26 @@ mod tests {
         let seen = Arc::new(std::sync::Mutex::new(Vec::new()));
         let record = seen.clone();
         let presence: Arc<dyn Fn(bool) + Send + Sync> = Arc::new(move |here| record.lock().unwrap().push(here));
-        let mut stream = link(&config, &[5; 32], Wait { takeover: &takeover, busy: &mut busy, give_up: &|| false, presence, memory: None }).await.unwrap();
+        let mut stream = link(&config, &[5; 32], Wait { takeover: &takeover, busy: &mut busy, give_up: &|| false, presence, memory: None }).await.unwrap().stream;
         let mut rest = String::new();
         stream.read_to_string(&mut rest).await.unwrap();
         assert_eq!(seen.lock().unwrap().as_slice(), [false, true]);
+    }
+
+    #[tokio::test]
+    async fn a_link_while_the_box_is_away_is_not_the_box_until_it_arrives() {
+        let config = RelayConfig::new(Arc::new(identity()), Some(fake_relay("absent").await), false);
+        let takeover = AtomicBool::new(false);
+        let mut busy = |_: String, _: String| {};
+        let seen = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let record = seen.clone();
+        let presence: Arc<dyn Fn(bool) + Send + Sync> = Arc::new(move |here| record.lock().unwrap().push(here));
+        let linked = link(&config, &[5; 32], Wait { takeover: &takeover, busy: &mut busy, give_up: &|| false, presence, memory: None }).await.unwrap();
+        assert!(!linked.box_here, "the status before linked said the box is away");
+        let mut stream = linked.stream;
+        let mut rest = String::new();
+        stream.read_to_string(&mut rest).await.unwrap();
+        assert_eq!(seen.lock().unwrap().as_slice(), [true], "linked again means the box arrived");
     }
 
     #[tokio::test]
@@ -1065,7 +1104,7 @@ mod tests {
         let takeover = AtomicBool::new(false);
         let mut busy = |_: String, _: String| {};
         let wait = Wait { takeover: &takeover, busy: &mut busy, give_up: &|| false, presence: Arc::new(|_| {}), memory: Some(memory.clone()) };
-        let mut stream = link(&config, &box_key, wait).await.unwrap();
+        let mut stream = link(&config, &box_key, wait).await.unwrap().stream;
         // Written before the session is up: held, then sealed after the hello the bridge sends first.
         stream.write_all(b"{\"version\":1,\"event\":\"bye\"}\n").await.unwrap();
         let mut received = String::new();
@@ -1086,7 +1125,7 @@ mod tests {
         let takeover = AtomicBool::new(false);
         let mut busy = |_: String, _: String| {};
         let wait = Wait { takeover: &takeover, busy: &mut busy, give_up: &|| false, presence: Arc::new(|_| {}), memory: Some(memory) };
-        let stream = link(&config, &box_key, wait).await.unwrap();
+        let stream = link(&config, &box_key, wait).await.unwrap().stream;
         let mut lines = tokio::io::BufReader::new(stream).lines();
         let started = tokio::time::Instant::now();
         let first = tokio::time::timeout(Duration::from_secs(10), lines.next_line()).await.expect("a session within seconds");
@@ -1105,7 +1144,7 @@ mod tests {
         let takeover = AtomicBool::new(false);
         let mut busy = |_: String, _: String| {};
         let wait = Wait { takeover: &takeover, busy: &mut busy, give_up: &|| false, presence: Arc::new(|_| {}), memory: Some(memory.clone()) };
-        let stream = link(&config, &box_key, wait).await.unwrap();
+        let stream = link(&config, &box_key, wait).await.unwrap().stream;
         let mut lines = tokio::io::BufReader::new(stream).lines();
         assert_eq!(lines.next_line().await.unwrap().unwrap(), "{\"VERSION\":1,\"EVENT\":\"DEVICE.HELLO\"}");
         assert!(memory.knows(&box_key), "never in the clear again");
@@ -1122,7 +1161,7 @@ mod tests {
         let takeover = AtomicBool::new(false);
         let mut busy = |_: String, _: String| {};
         let wait = Wait { takeover: &takeover, busy: &mut busy, give_up: &|| false, presence: Arc::new(|_| {}), memory: Some(memory) };
-        let mut stream = link(&config, &[5; 32], wait).await.unwrap();
+        let mut stream = link(&config, &[5; 32], wait).await.unwrap().stream;
         stream.write_all(b"{\"version\":1,\"event\":\"device.hello\"}\n").await.unwrap();
         let mut received = String::new();
         let read = tokio::time::timeout(Duration::from_millis(500), stream.read_to_string(&mut received)).await;

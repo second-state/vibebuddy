@@ -27,12 +27,14 @@ mod status;
 mod transfer;
 mod synthesis;
 mod updates;
+mod vibeplay;
 mod voice;
 mod voice_keys;
 mod voice_writer;
 
 use std::convert::Infallible;
 use std::env;
+use std::io::IsTerminal;
 use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -121,6 +123,8 @@ struct AppState {
     voice_keys: Arc<voice_keys::VoiceKeys>,
     /// Making a Character's line audio (ADR-0023); nothing can be made in tests unless one sets it.
     making: Arc<making::Maker>,
+    /// The paired VibePlays, which get a copy of what the box gets (ADR-0025); none in tests unless one sets it.
+    vibeplays: Arc<vibeplay::Hub>,
 }
 
 impl AppState {
@@ -138,6 +142,7 @@ impl AppState {
         let (status_changed, _) = broadcast::channel(64);
         let account = Arc::new(account::Account::new(None, None, 7331));
         let voice_keys = Arc::new(voice_keys::VoiceKeys::new(None));
+        let (vibeplays, _) = vibeplay::Hub::new(None, None, None, status_changed.clone());
         Self {
             transport,
             activities: Arc::new(Mutex::new(activities)),
@@ -163,6 +168,7 @@ impl AppState {
             making: Arc::new(making::Maker::new(None, None, account.clone(), voice_keys.clone(), Arc::new(own_voices::OwnVoices::new(None)))),
             account,
             voice_keys,
+            vibeplays,
         }
     }
 
@@ -198,6 +204,7 @@ impl AppState {
             account: self.account.status(),
             voice_keys: self.voice_keys.status(),
             making: self.making.status(),
+            vibeplays: self.vibeplays.status().await,
         }
     }
 
@@ -234,7 +241,8 @@ async fn main() {
         .filter(|value| !value.trim().is_empty())
         .and_then(|value| EnvFilter::try_new(value).ok())
         .unwrap_or_else(|| EnvFilter::new("vibebuddyd=info"));
-    tracing_subscriber::fmt().with_env_filter(log_filter).init();
+    // Colours only for a terminal: the apps send the log to a file or the journal, where they show as escape codes.
+    tracing_subscriber::fmt().with_env_filter(log_filter).with_ansi(std::io::stdout().is_terminal()).init();
 
     let bind_address = env::var("VIBEBUDDY_BIND")
         .unwrap_or_else(|_| "127.0.0.1:7331".to_owned())
@@ -253,6 +261,16 @@ async fn main() {
         config::config_dir().as_deref(),
         bind_address.port(),
     ));
+    // Read the plan, and whether the Paid plan is offered, once at start: the Apps then don't wait for the account
+    // card to ask before they show the Relay switch or VibeBuddy's voices.
+    if account.token().is_some() {
+        let account = account.clone();
+        tokio::task::spawn_blocking(move || {
+            if let Err(error) = account.refresh() {
+                warn!(%error, "the account couldn't be read at start");
+            }
+        });
+    }
     let mut serial_config = SerialConfig::from_env(known_box_file());
     let mut relay_config = None;
     // Paired, the box can also be reached over the local network when it isn't on the cable (ADR-0012).
@@ -330,6 +348,14 @@ async fn main() {
         tokio::spawn(async move { resident.warm(&wearing).await });
     }
     state.device.lock().await.pin = pin;
+    // VibePlays (ADR-0025): found over mDNS, or at VIBEBUDDY_VIBEPLAY_ADDR, and kept connected once paired.
+    let (vibeplays, vibeplay_inbound) = vibeplay::Hub::new(
+        state.identity.clone(),
+        state.state_dir.clone(),
+        env::var(vibeplay::ADDRESS_VARIABLE).ok().filter(|value| !value.is_empty()),
+        state.status_changed.clone(),
+    );
+    state.vibeplays = vibeplays;
     state.updates = Arc::new(Mutex::new(Updates::new(
         updates::Source::configured(),
         config::state_dir().map(|dir| dir.join("updates")),
@@ -345,6 +371,8 @@ async fn main() {
     tokio::spawn(send_heartbeats(state.clone()));
     tokio::spawn(poll_ci(state.clone()));
     tokio::spawn(handle_device_events(state.clone(), device_events));
+    tokio::spawn(state.vibeplays.clone().run());
+    tokio::spawn(handle_vibeplays(state.clone(), vibeplay_inbound));
     tokio::spawn(check_for_updates(state.clone()));
     if let Some(resident) = state.resident.clone() {
         follow_resident_readiness(&state, resident);
@@ -378,6 +406,9 @@ async fn handle_device_events(
     }
 }
 
+/// The last line our firmware writes as it boots, `READY vibebuddy-fw <version>`.
+const BOOT_DONE_PREFIX: &str = "READY vibebuddy-fw ";
+
 /// Every device message goes through here: update device state, broadcast to operations waiting for acks, and K2 opens the source.
 /// Tests inject device messages here too, so it must not depend on the serial port.
 async fn publish_device_message(state: &AppState, message: DeviceMessage) {
@@ -385,6 +416,8 @@ async fn publish_device_message(state: &AppState, message: DeviceMessage) {
         let mut device = state.device.lock().await;
         let had_build = device.firmware_build.is_some();
         let changed = device.apply(&message);
+        // A box linked and running our firmware speaks; VibePlays then only show (ADR-0025).
+        state.vibeplays.set_box_linked(device.connected && device.firmware_build.is_some());
         (changed, !had_build && device.firmware_build.is_some(), device.usb_serial.clone())
     };
     // Our firmware reported its build: this device is the box, so prefer it when others are plugged in too.
@@ -456,8 +489,13 @@ async fn publish_device_message(state: &AppState, message: DeviceMessage) {
         offer_voice_again(state).await;
     }
     let _ = state.device_bus.send(message.clone());
-    // Ask right after connecting; the device reports its mode, firmware build and voice again.
-    if matches!(message, DeviceMessage::Connected { .. } | DeviceMessage::ConnectedNetwork { .. } | DeviceMessage::ConnectedRelay { .. }) {
+    // Ask right after connecting; the device reports its mode, firmware build and voice again. Ask again when the box
+    // finished booting: after a firmware update over the link it restarts while the bridge's port stays open, and
+    // what it says at boot leaves out its mode, screens and decoration.
+    let booted_again = matches!(&message, DeviceMessage::Line(line) if line.starts_with(BOOT_DONE_PREFIX));
+    if booted_again
+        || matches!(message, DeviceMessage::Connected { .. } | DeviceMessage::ConnectedNetwork { .. } | DeviceMessage::ConnectedRelay { .. })
+    {
         send_event(state, device_command("device.hello"));
         // Then this computer's cards, which replace any the box kept from another computer.
         let screen = {
@@ -477,6 +515,37 @@ async fn publish_device_message(state: &AppState, message: DeviceMessage) {
         open_card_source(state, card).await;
     } else if !event.event.starts_with("voice.") && event.event != "echo" {
         info!(event = %event.event, "ignoring unbound device event");
+    }
+}
+
+/// What the daemon hears from its VibePlays (ADR-0025). None of it goes near the box's link (ADR-0011): a VibePlay
+/// that connects gets the screen as it is now, and its K2 and picked card do what the box's do.
+async fn handle_vibeplays(state: AppState, mut inbound: tokio::sync::mpsc::UnboundedReceiver<vibeplay::Inbound>) {
+    while let Some(message) = inbound.recv().await {
+        handle_vibeplay(&state, message).await;
+    }
+}
+
+async fn handle_vibeplay(state: &AppState, message: vibeplay::Inbound) {
+    match message {
+        vibeplay::Inbound::Connected(key) => {
+            let now = chrono::Local::now();
+            state.vibeplays.send_to(&key, &heartbeat_event(&build_identity(state.app_version.as_deref()), now.hour(), local_day(&now)));
+            let screen = {
+                let mut tracker = state.activities.lock().await;
+                let mut screen = tracker.viewer_screen();
+                tracker.stamp_live_fields(&mut screen);
+                screen
+            };
+            state.vibeplays.send_to(&key, &screen);
+        }
+        vibeplay::Inbound::Event(event) => {
+            if is_k2_press(&event) {
+                open_k2_source(state).await;
+            } else if let Some(card) = tapped_card(&event) {
+                open_card_source(state, card).await;
+            }
+        }
     }
 }
 
@@ -800,6 +869,8 @@ fn app(state: AppState) -> Router {
         )
         .route("/v1/device/screenshot", post(post_screenshot))
         .route("/v1/device/firmware", post(post_firmware))
+        .route("/v1/vibeplays/pair", post(post_vibeplay_pair))
+        .route("/v1/vibeplays/forget", post(post_vibeplay_forget))
         .route("/v1/daemon/restart", post(post_restart))
         .route("/v1/updates/check", post(post_check_updates))
         .route("/v1/resident", get(get_resident))
@@ -1559,6 +1630,7 @@ async fn send_heartbeats(state: AppState) {
             Ok(frame) => drop(state.transport.send(frame)),
             Err(error) => warn!(%error, "failed to encode heartbeat"),
         }
+        state.vibeplays.send(&heartbeat);
     }
 }
 
@@ -1642,6 +1714,8 @@ async fn sweep_expired_activities(state: AppState) {
 fn send_event(state: &AppState, event: Event) {
     // What the box shows changed, so the apps' picture of it (the Activities in the status) did too.
     state.notify_status();
+    // The same line, occasion included, goes to every VibePlay: one announcement, one occasion (ADR-0025).
+    state.vibeplays.send(&event);
     match event.to_ndjson() {
         Ok(frame) => {
             if let Err(error) = state.transport.send(frame) {
@@ -1668,6 +1742,7 @@ async fn post_event(
             );
         }
     };
+    state.vibeplays.send(&event);
 
     match state.transport.send(frame) {
         Ok(()) => (
@@ -1788,6 +1863,37 @@ async fn forward(state: AppState, event: Option<Event>) -> (StatusCode, Json<Api
         );
     };
     post_event(State(state), Json(event)).await
+}
+
+#[derive(serde::Deserialize)]
+struct VibePlayPairRequest {
+    key: String,
+    code: String,
+}
+
+/// Pairs with a VibePlay by the code it shows: 200, or 400 with `code`, `full`, `closed` or `unreachable`.
+async fn post_vibeplay_pair(State(state): State<AppState>, Json(request): Json<VibePlayPairRequest>) -> axum::response::Response {
+    use axum::response::IntoResponse;
+    match state.vibeplays.pair(request.key.trim(), request.code.trim()).await {
+        Ok(()) => (StatusCode::OK, Json(serde_json::json!({"paired": true}))).into_response(),
+        Err(error) => {
+            info!(?error, "pairing with a VibePlay failed");
+            (StatusCode::BAD_REQUEST, Json(serde_json::json!({"error": error.code()}))).into_response()
+        }
+    }
+}
+
+#[derive(serde::Deserialize)]
+struct VibePlayForgetRequest {
+    key: String,
+}
+
+async fn post_vibeplay_forget(State(state): State<AppState>, Json(request): Json<VibePlayForgetRequest>) -> (StatusCode, Json<ApiResponse>) {
+    if state.vibeplays.forget(request.key.trim()) {
+        (StatusCode::OK, Json(ApiResponse { accepted: true, message: "forgot the VibePlay".to_owned() }))
+    } else {
+        (StatusCode::NOT_FOUND, Json(ApiResponse { accepted: false, message: "no such paired VibePlay".to_owned() }))
+    }
 }
 
 #[derive(serde::Deserialize)]
@@ -2121,9 +2227,11 @@ async fn post_account_refresh(State(state): State<AppState>) -> (StatusCode, Jso
     }
 }
 
-/// Opens the Paid plan's Stripe Checkout: the App opens the URL in the browser. Behind [`account::UPGRADE_OFFERED`].
+/// Opens the Paid plan's Stripe Checkout: the App opens the URL in the browser. Only when the account says
+/// [`account::AccountStatus::upgrade_offered`].
 async fn post_upgrade(State(state): State<AppState>) -> axum::response::Response {
-    plan_page(&state, account::PlanPage::Checkout, account::UPGRADE_OFFERED).await
+    let offered = state.account.status().upgrade_offered;
+    plan_page(&state, account::PlanPage::Checkout, offered).await
 }
 
 /// Opens Stripe's Customer Portal, where a Paid user changes the card or cancels.
@@ -2145,8 +2253,8 @@ struct PlanRefusal {
     reason: Option<String>,
 }
 
-/// `{"url"}` on 200; otherwise the service's 409 (with its reason), 404 and 401 as they are (docs/api.md). A 409
-/// means the plan isn't what the App thought, so the account is read again and the status shows the plan it has.
+/// `{"url"}` on 200; otherwise the service's 409 (with its reason), 404 and 401 as they are (docs/api.md). After a
+/// 409, or a 404 from Checkout, the account is read again, so the status shows the plan and the offer as they are.
 async fn plan_page(state: &AppState, page: account::PlanPage, offered: bool) -> axum::response::Response {
     use axum::response::IntoResponse;
     let account = state.account.clone();
@@ -2160,16 +2268,23 @@ async fn plan_page(state: &AppState, page: account::PlanPage, offered: bool) -> 
         Err(error) => error,
     };
     warn!(%error, ?page, "the plan page didn't open");
+    // A 409 means the plan isn't what the App thought. A 404 from Checkout means the service stopped selling, and the
+    // account read before still says `upgrade_offered`. Either way, read the account again.
+    let read_again = match &error {
+        account::AccountError::Conflict(_) => true,
+        account::AccountError::NotOffered => offered && matches!(page, account::PlanPage::Checkout),
+        _ => false,
+    };
+    if read_again {
+        let account = state.account.clone();
+        if let Ok(Err(error)) = tokio::task::spawn_blocking(move || account.refresh()).await {
+            warn!(%error, "the account couldn't be read again");
+        }
+    }
     let (status, reason) = match &error {
         account::AccountError::NotSignedIn => (StatusCode::UNAUTHORIZED, None),
         account::AccountError::NotOffered => (StatusCode::NOT_FOUND, None),
-        account::AccountError::Conflict(reason) => {
-            let account = state.account.clone();
-            if let Ok(Err(error)) = tokio::task::spawn_blocking(move || account.refresh()).await {
-                warn!(%error, "the account couldn't be read again");
-            }
-            (StatusCode::CONFLICT, Some(reason.clone()))
-        }
+        account::AccountError::Conflict(reason) => (StatusCode::CONFLICT, Some(reason.clone())),
         other => (account_refusal(other).0, None),
     };
     state.notify_status();
@@ -2302,6 +2417,75 @@ mod tests {
         )
     }
 
+    /// A state with a fake VibePlay paired and connected (ADR-0025).
+    async fn with_vibeplay(state: &mut AppState) -> vibeplay::tests::FakeVibePlay {
+        let mut fake = vibeplay::tests::fake_vibeplay(vibeplay::tests::Behaviour::default()).await;
+        let (hub, inbound) = vibeplay::tests::hub_for(&fake, None);
+        hub.pair(&fake.key, "123456").await.unwrap();
+        state.vibeplays = hub.clone();
+        tokio::spawn(hub.clone().run());
+        tokio::spawn(handle_vibeplays(state.clone(), inbound));
+        vibeplay::tests::wait_connected(&hub, &fake.key).await;
+        assert_eq!(vibeplay::tests::next_line(&mut fake).await["event"], "device.heartbeat");
+        assert_eq!(vibeplay::tests::next_line(&mut fake).await["event"], "agent.idle", "the screen as it is now");
+        fake
+    }
+
+    #[tokio::test]
+    async fn a_vibeplay_does_not_touch_the_box_link() {
+        // ADR-0011: the box's link stays as it is. A VibePlay connecting, pressing K2 and picking a card sends the
+        // box nothing and changes nothing the daemon knows about the box.
+        let transport = Arc::new(RecordingTransport::default());
+        let mut state = test_state(transport.clone());
+        let before = serde_json::to_value(state.device.lock().await.clone()).unwrap();
+        let fake = with_vibeplay(&mut state).await;
+        fake.send.send(r#"{"version":1,"event":"button","button":"K2","action":"press"}"#.to_owned()).unwrap();
+        fake.send.send(r#"{"version":1,"event":"focus","task":"nothing"}"#.to_owned()).unwrap();
+        tokio::time::sleep(Duration::from_millis(200)).await;
+        assert!(transport.events().is_empty(), "the box got {:?}", transport.events());
+        assert_eq!(serde_json::to_value(state.device.lock().await.clone()).unwrap(), before);
+        assert!(state.snapshot().await.vibeplays[0].connected);
+    }
+
+    #[tokio::test]
+    async fn a_vibeplay_is_quiet_only_while_a_box_is_linked() {
+        let transport = Arc::new(RecordingTransport::default());
+        let mut state = test_state(transport.clone());
+        let mut fake = with_vibeplay(&mut state).await;
+        let done = |id: &str| {
+            let mut event = Event::named("task.done");
+            event.id = Some(id.to_owned());
+            event
+        };
+        // The line with this id; the box's own screen on linking reaches the VibePlay too, and is skipped.
+        async fn line_for(fake: &mut vibeplay::tests::FakeVibePlay, id: &str) -> serde_json::Value {
+            loop {
+                let line = vibeplay::tests::next_line(fake).await;
+                if line["id"] == id {
+                    return line;
+                }
+                assert_ne!(line["event"], "device.hello", "nothing that looks after the box");
+            }
+        }
+        send_event(&state, done("no box"));
+        assert_eq!(line_for(&mut fake, "no box").await["quiet"], false);
+
+        publish_device_message(&state, DeviceMessage::Connected { port: "/dev/cu.x".to_owned(), bridge: false, usb_serial: None }).await;
+        publish_device_message(&state, DeviceMessage::Line("DISPLAY READY BUILD v9 2026-10-01".to_owned())).await;
+        let mut first_done = done("box");
+        first_done.extra.insert("occasion".to_owned(), serde_json::json!("first_done_today"));
+        send_event(&state, first_done);
+        // The box got the same line, one occasion for both, without `quiet`; the VibePlay got it with `quiet`.
+        let line = line_for(&mut fake, "box").await;
+        assert_eq!((line["quiet"].as_bool(), line["occasion"].as_str()), (Some(true), Some("first_done_today")));
+        assert!(transport.events().iter().any(|event| event.id.as_deref() == Some("box") && !event.extra.contains_key("quiet")));
+        assert!(transport.events().iter().any(|event| event.event == "device.hello"), "the box was looked after");
+
+        publish_device_message(&state, DeviceMessage::Disconnected).await;
+        send_event(&state, done("box gone"));
+        assert_eq!(line_for(&mut fake, "box gone").await["quiet"], false);
+    }
+
     #[tokio::test]
     async fn the_account_routes_answer_without_a_service() {
         let state = test_state(Arc::new(RecordingTransport::default()));
@@ -2360,25 +2544,42 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn the_plan_routes_ask_nothing_when_signed_out_or_while_upgrade_is_off() {
+    async fn the_plan_routes_ask_nothing_when_signed_out_or_while_upgrade_is_not_offered() {
         let (service, seen) = account::tests::serve(vec![(200, r#"{"url":"https://checkout.stripe.com/c/pay/cs_test_1"}"#)]);
         let state = signed_in_state(&service, "off");
-        let (status, body) = plan_answer(&state, account::PlanPage::Checkout, false).await;
-        assert_eq!((status, body["accepted"].as_bool()), (StatusCode::NOT_FOUND, Some(false)));
-        assert_eq!(state.snapshot().await.account.upgrade_offered, account::UPGRADE_OFFERED);
-        // The route itself follows the switch: off, it asks the service nothing.
-        let expected = if account::UPGRADE_OFFERED { StatusCode::OK } else { StatusCode::NOT_FOUND };
-        assert_eq!(post_upgrade(State(state.clone())).await.status(), expected);
-        if !account::UPGRADE_OFFERED {
-            assert!(seen.lock().unwrap().is_empty());
-        }
+        // Not read yet, or the service said false or had no such field: the route asks the service nothing.
+        assert!(!state.snapshot().await.account.upgrade_offered);
+        assert_eq!(post_upgrade(State(state.clone())).await.status(), StatusCode::NOT_FOUND);
+        state.account.read_upgrade_offered_for_tests(false);
+        assert_eq!(post_upgrade(State(state.clone())).await.status(), StatusCode::NOT_FOUND);
+        assert!(seen.lock().unwrap().is_empty());
+        // The service offers it: the route asks for Checkout.
+        state.account.read_upgrade_offered_for_tests(true);
+        assert!(state.snapshot().await.account.upgrade_offered);
+        assert_eq!(post_upgrade(State(state.clone())).await.status(), StatusCode::OK);
+        assert_eq!(seen.lock().unwrap().len(), 1);
 
         let mut signed_out = test_state(Arc::new(RecordingTransport::default()));
         let dir = std::env::temp_dir().join(format!("vibebuddy-plan-out-{}", std::process::id()));
         signed_out.account = Arc::new(account::Account::new(Some(service), Some(&dir), 7331));
         assert_eq!(plan_answer(&signed_out, account::PlanPage::Checkout, true).await.0, StatusCode::UNAUTHORIZED);
         assert_eq!(plan_answer(&signed_out, account::PlanPage::Portal, true).await.0, StatusCode::UNAUTHORIZED);
-        assert_eq!(seen.lock().unwrap().len(), usize::from(account::UPGRADE_OFFERED), "only an Upgrade with the switch on asks");
+        assert_eq!(seen.lock().unwrap().len(), 1, "signed out, nothing more is asked");
+    }
+
+    #[tokio::test]
+    async fn a_checkout_404_reads_the_account_again_so_upgrade_goes_away() {
+        let (service, seen) = account::tests::serve(vec![
+            (404, r#"{"error":"not_found"}"#),
+            // The service stopped selling: the account now says so.
+            (200, r#"{"id":"a","github_id":1,"plan":{"name":"free"},"upgrade_offered":false}"#),
+        ]);
+        let state = signed_in_state(&service, "stopped");
+        state.account.read_upgrade_offered_for_tests(true);
+        assert_eq!(post_upgrade(State(state.clone())).await.status(), StatusCode::NOT_FOUND);
+        assert!(!state.snapshot().await.account.upgrade_offered);
+        let paths: Vec<String> = seen.lock().unwrap().iter().map(|request| request.split(' ').nth(1).unwrap().to_owned()).collect();
+        assert_eq!(paths, ["/v1/plan/checkout", "/v1/account"]);
     }
 
     #[tokio::test]
@@ -2429,6 +2630,29 @@ mod tests {
         publish_device_message(&state, DeviceMessage::Line("DISPLAY READY BUILD v9 2026-10-01".to_owned())).await;
         waiting.await.unwrap();
         assert_eq!(state.operation.lock().await.as_ref().map(|operation| operation.state), Some(OperationState::Done));
+    }
+
+    #[tokio::test]
+    async fn a_box_that_restarts_under_an_open_link_is_asked_again() {
+        // A firmware update over the link restarts the box, but the bridge's port stays open: no `Connected`. What
+        // the box said at boot leaves out its mode, screens and decoration, so it must be asked again (seen with a
+        // box updated from 0.6.0 to 0.6.1, which kept the old firmware's missing decoration).
+        let transport = Arc::new(RecordingTransport::default());
+        let state = test_state(transport.clone());
+        publish_device_message(&state, DeviceMessage::Connected { port: "/dev/cu.x".to_owned(), bridge: true, usb_serial: None }).await;
+        publish_device_message(&state, DeviceMessage::Line("DISPLAY READY BUILD v0.6.0 2026-11-03".to_owned())).await;
+        let hellos = || transport.events().iter().filter(|event| event.event == "device.hello").count();
+        assert_eq!(hellos(), 1);
+
+        for line in ["DISPLAY READY BUILD firmware-v0.6.1 2026-11-10", "FIRMWARE VERSION 0.6.1", "READY vibebuddy-fw 0.6.1"] {
+            publish_device_message(&state, DeviceMessage::Line(line.to_owned())).await;
+        }
+        assert_eq!(hellos(), 2, "asked again once the box finished booting");
+        let last_hello = transport.events().iter().rposition(|event| event.event == "device.hello").unwrap();
+        assert!(transport.events().len() > last_hello + 1, "and given this computer's cards again");
+
+        publish_device_message(&state, DeviceMessage::Line("DECORATION OFF".to_owned())).await;
+        assert_eq!(state.device.lock().await.decoration.as_deref(), Some("off"));
     }
 
     #[tokio::test]

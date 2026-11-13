@@ -252,7 +252,7 @@ fn gh_program() -> String {
 }
 
 async fn recent_runs(program: &str, repo: &str) -> Result<Vec<Run>, String> {
-    let command = tokio::process::Command::new(program)
+    let command = crate::resident::without_window(&mut tokio::process::Command::new(program))
         .args([
             "run",
             "list",

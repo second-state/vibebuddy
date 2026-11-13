@@ -550,11 +550,12 @@ impl Display {
         self.kk_key_hint_right(canvas, 308, 218, b"take me there", BOX_GROUND, SUN, BOX_GROUND);
     }
 
-    /// K2 and what it does, against the right edge.
+    /// K2 (or the key named for it) and what it does, against the right edge.
     #[allow(clippy::too_many_arguments, reason = "where and in which colours")]
     fn kk_key_hint_right(&self, canvas: &mut Canvas, right: i32, y: i32, action: &[u8], chip_fill: u16, chip_ink: u16, color: u16) {
-        let width = kt::width(&TYPE_10, b"K2") + 8 + 5 + kt::width(&TYPE_10, action);
-        hint(canvas, &TYPE_10, right - width + 1, y, b"K2", action, chip_ink, chip_fill, color);
+        let key = self.keys.k2.as_bytes();
+        let width = kt::width(&TYPE_10, key) + 8 + 5 + kt::width(&TYPE_10, action);
+        hint(canvas, &TYPE_10, right - width + 1, y, key, action, chip_ink, chip_fill, color);
     }
 
     /// Done: 3 s in `mint` with sparkles, then back on duty (the firmware settles after the line).
@@ -655,11 +656,12 @@ impl Display {
         };
         // Paused shows under the digits and in the keys; the narrow column has no room for a chip beside the label.
         kt::draw(canvas, &TYPE_22, COLUMN_X, tight(&TYPE_22, 11), label, color, COLUMN_WIDTH);
+        let (k0, hold_k0) = (self.keys.k0.as_bytes(), self.keys.hold_k0.as_bytes());
         let hints: [(&[u8], &[u8]); 2] = match (view.run, view.is_idle()) {
-            (Run::Pending, true) => [(b"K0", b"start focus"), (b"", b"")],
-            (Run::Pending, false) => [(b"K0", b"start break"), (b"HOLD K0", b"skip")],
-            (Run::Paused, _) => [(b"K0", b"resume"), (b"HOLD K0", b"stop")],
-            (Run::Running, _) => [(b"K0", b"pause"), (b"HOLD K0", b"stop")],
+            (Run::Pending, true) => [(k0, b"start focus"), (b"", b"")],
+            (Run::Pending, false) => [(k0, b"start break"), (hold_k0, b"skip")],
+            (Run::Paused, _) => [(k0, b"resume"), (hold_k0, b"stop")],
+            (Run::Running, _) => [(k0, b"pause"), (hold_k0, b"stop")],
         };
         for (row, (key, action)) in hints.iter().enumerate() {
             if !key.is_empty() {
@@ -728,7 +730,8 @@ impl Display {
         kt::draw(canvas, &TYPE_12, bubble.x + 8, bubble.y + 6 + TYPE_12.line(), rest, BOX_GROUND, bubble.width - 16);
         let big: &[u8] = if focus_ended { b"BREAK 05:00" } else { b"FOCUS 25:00" };
         kt::draw(canvas, &TYPE_30, 14, tight(&TYPE_30, 133), big, BOX_GROUND, i32::MAX);
-        let hints: [(&[u8], &[u8]); 2] = if focus_ended { [(b"K0", b"start break"), (b"HOLD K0", b"skip")] } else { [(b"K0", b"start focus"), (b"K1", b"on duty")] };
+        let (k0, hold_k0, k1) = (self.keys.k0.as_bytes(), self.keys.hold_k0.as_bytes(), self.keys.k1.as_bytes());
+        let hints: [(&[u8], &[u8]); 2] = if focus_ended { [(k0, b"start break"), (hold_k0, b"skip")] } else { [(k0, b"start focus"), (k1, b"on duty")] };
         let mut x = 14;
         for (key, action) in hints {
             x += hint(canvas, &TYPE_10, x, 216, key, action, CREAM, BOX_GROUND, BOX_GROUND) + 10;

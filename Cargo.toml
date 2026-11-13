@@ -1,13 +1,14 @@
 [workspace]
 members = ["daemon", "desktop", "firmware-rs/core", "hook", "manifest", "protocol"]
-# The device firmware builds separately with the Xtensa toolchain; see firmware-rs/device.
-exclude = ["firmware-rs/device", "firmware-rs/vendor/nanomp3-core"]
+# The device firmware builds separately with the Xtensa toolchain; see firmware-rs/device. The VibePlay app is its
+# own workspace, for wasm32; the daemon's tests use its core.
+exclude = ["firmware-rs/device", "firmware-rs/vendor/nanomp3-core", "vibeplay-app"]
 resolver = "3"
 
 [workspace.package]
 edition = "2024"
 license = "GPL-3.0-or-later"
-version = "0.6.1"
+version = "0.6.2"
 
 # Apps older than this get a banner they can't dismiss, through the update manifest (ADR-0010).
 [workspace.metadata.vibebuddy]
