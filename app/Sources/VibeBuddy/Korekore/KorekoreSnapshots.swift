@@ -110,6 +110,19 @@ enum KorekoreSnapshots {
             capture(KorekoreSettingsWindow.onboarding(rootView: KorekoreOnboarding(model: model, finish: {}, step: step, passive: true)),
                     as: "onboarding-\(step)", in: folder)
         }
+        // A box of a company edition: the company Character first, on the Character page and in onboarding. Luna's
+        // look stands in for the company's.
+        var edition = status
+        edition.device.edition = DeviceEdition(id: "acme")
+        model.showSample(edition)
+        let lunaLook = (try? Data(contentsOf: URL(fileURLWithPath: "characters/luna/pack.bin"))).flatMap(VoicePack.init(data:))?.look
+        model.showSampleEdition(EditionCard(id: "acme", name: "Acme", summary: "Acme's own buddy, from the box", look: lunaLook?.base64EncodedString()))
+        capture(KorekoreSettingsWindow(rootView: KorekoreSettingsRoot(model: model, initial: .character, sampleConversation: conversation)),
+                as: "page-character-edition", in: folder)
+        capture(KorekoreSettingsWindow.onboarding(rootView: KorekoreOnboarding(model: model, finish: {}, step: 3, passive: true)),
+                as: "onboarding-3-edition", in: folder)
+        model.showSampleEdition(nil)
+        model.showSample(status)
         let update = String(localized: "The box restarts once; its voice pack and today's stats are kept. Over the UART bridge this takes a few minutes.")
         let alerts: [(String, AnyView)] = [
             ("alert-take-over", AnyView(KorekoreAlert.preview(

@@ -150,6 +150,26 @@ struct DaemonClient {
         guard code == 202 else { throw DaemonError(message: DaemonClient.message(in: data) ?? String(localized: "Voice pack write was rejected (\(code))")) }
     }
 
+    /// The company Character's card (ADR-0025). The daemon asks the box once and keeps it while the box stays connected.
+    func editionCard() async throws -> EditionCard {
+        let (data, response) = try await URLSession.shared.data(for: request("/v1/device/edition"))
+        // 404 (no edition), 409 (another box operation) or 502 (the box didn't answer): the next status asks again.
+        guard (response as? HTTPURLResponse)?.statusCode == 200 else { throw URLError(.badServerResponse) }
+        return try JSONDecoder().decode(EditionCard.self, from: data)
+    }
+
+    /// The box plays the company Character's line.
+    func previewEdition() async throws {
+        let (code, data) = try await post("/v1/device/edition/preview")
+        guard code == 202 else { throw DaemonError(message: DaemonClient.message(in: data) ?? String(localized: "The box didn't play the line (\(code))")) }
+    }
+
+    /// The box puts the company Character back on from its own copy; progress arrives in the status as a Character write.
+    func restoreEdition() async throws {
+        let (code, data) = try await post("/v1/device/edition/restore")
+        guard code == 202 else { throw DaemonError(message: DaemonClient.message(in: data) ?? String(localized: "Voice pack write was rejected (\(code))")) }
+    }
+
     func flashFirmware(bootloader: URL, partitionTable: URL, app: URL) async throws {
         let body = try JSONSerialization.data(withJSONObject: [
             "bootloader": bootloader.path, "partition_table": partitionTable.path, "app": app.path,

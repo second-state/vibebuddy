@@ -590,6 +590,31 @@ do {
     check(false, "korekore status fails to decode: \(error)")
 }
 
+// A company edition's card (ADR-0025): asked once per edition box, shown only for that box.
+do {
+    let ordinary = try StatusCoding.decoder().decode(DeviceState.self, from: Data(#"{"connected":true,"bridge":false,"edition":null}"#.utf8))
+    let luna = try StatusCoding.decoder().decode(DeviceState.self, from: Data(#"{"connected":true,"bridge":false,"voice":"robot","edition":{"id":"luna"}}"#.utf8))
+    check(ordinary.edition == nil && luna.edition == DeviceEdition(id: "luna"), "device.edition decodes, null for an ordinary box")
+    let card = try JSONDecoder().decode(EditionCard.self, from: Data(#"{"id":"luna","name":"Test Co","summary":"Our buddy","look":"AQID"}"#.utf8))
+    check(card.name == "Test Co" && card.lookData == Data([1, 2, 3]), "the card decodes with its look")
+    let bare = try JSONDecoder().decode(EditionCard.self, from: Data(#"{"id":"luna","name":"Test Co","summary":"Our buddy","look":null}"#.utf8))
+    check(bare.lookData == nil, "a card without a look decodes")
+    check(EditionCard.toAsk(device: ordinary, kept: nil, asking: nil) == nil, "an ordinary box: no card asked")
+    check(EditionCard.toAsk(device: luna, kept: nil, asking: nil) == "luna", "an edition box: its card is asked")
+    check(EditionCard.toAsk(device: luna, kept: nil, asking: "luna") == nil, "not asked twice while asking")
+    check(EditionCard.toAsk(device: luna, kept: card, asking: nil) == nil, "a kept card isn't asked again")
+    var gone = luna
+    gone.connected = false
+    check(EditionCard.toAsk(device: gone, kept: nil, asking: nil) == nil, "no box: nothing asked")
+    check(EditionCard.shown(card, device: luna) == card, "the edition box shows its card")
+    check(EditionCard.shown(card, device: ordinary) == nil && EditionCard.shown(card, device: gone) == nil, "an ordinary box or no box shows none")
+    let look = (try? Data(contentsOf: URL(fileURLWithPath: "characters/luna/pack.bin"))).flatMap(VoicePack.init(data:))?.look
+    let shipped = EditionCard(id: "luna", name: "Test Co", summary: "", look: look?.base64EncodedString())
+    check(shipped.lookData.flatMap(LookBuilder.frames(of:))?.isEmpty == false, "a card's look draws as a Character's")
+} catch {
+    check(false, "edition card fails to decode: \(error)")
+}
+
 if failures > 0 {
     print("\(failures) failure(s)")
     exit(1)

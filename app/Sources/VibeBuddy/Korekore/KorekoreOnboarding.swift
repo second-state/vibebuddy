@@ -370,14 +370,26 @@ struct KorekoreOnboarding: View {
             title(String(localized: "Who lives in your box?"))
             ScrollView(.horizontal) {
                 HStack(alignment: .top, spacing: 12) {
-                    pickCard(name: "Kore", blurb: String(localized: "The box itself"), stage: Theme.Colors.ink, inUse: false, comingSoon: true, action: nil) {
-                        Sprite(name: "kore-happy", scale: 4)
+                    // A box of a company edition (ADR-0025) has the company Character first, then the robot, then Kore; picking it puts it back on.
+                    if let edition = model.edition {
+                        pickCard(name: edition.name, blurb: edition.summary, stage: Theme.Colors.boxCard,
+                                 inUse: model.status?.device.voice == edition.id, comingSoon: false,
+                                 action: { writing = edition.name; model.restoreEdition() }) {
+                            if let frame = model.editionFrame {
+                                Image(nsImage: LookImages.figure(frame)).interpolation(.none)
+                            } else if let face = Resources.robotFace {
+                                Image(nsImage: LookImages.figure(face)).interpolation(.none)
+                            }
+                        }
                     }
+                    if model.edition == nil { korePick }
                     pickCard(name: "VibeBuddy", blurb: String(localized: "The original robot"), stage: Theme.Colors.boxCard,
                              inUse: model.wearsRobot && !model.robotBorrowsVoice, comingSoon: false,
                              action: { writing = "VibeBuddy"; model.writeRobot() }) {
                         if let face = Resources.robotFace { Image(nsImage: LookImages.figure(face)).interpolation(.none) }
                     }
+                    // On a company edition's box, Kore comes after the robot.
+                    if model.edition != nil { korePick }
                     ForEach(Resources.bundledVoices) { entry in
                         pickCard(name: entry.name, blurb: entry.tag, stage: Theme.Colors.boxCard, inUse: model.status?.device.voice == entry.id,
                                  comingSoon: false, action: { writing = entry.name; model.writeVoice(entry.id) }) {
@@ -423,6 +435,12 @@ struct KorekoreOnboarding: View {
     }
 
     /// A 150 px card; picking one writes it to the box.
+    private var korePick: some View {
+        pickCard(name: "Kore", blurb: String(localized: "The box itself"), stage: Theme.Colors.ink, inUse: false, comingSoon: true, action: nil) {
+            Sprite(name: "kore-happy", scale: 4)
+        }
+    }
+
     private func pickCard<Stage: View>(name: String, blurb: String, stage: Color, inUse: Bool, comingSoon: Bool,
                                        action: (() -> Void)?, @ViewBuilder look: () -> Stage) -> some View {
         Button { action?() } label: {

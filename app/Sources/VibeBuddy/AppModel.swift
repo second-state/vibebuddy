@@ -23,6 +23,11 @@ final class AppModel: ObservableObject {
     /// comes up and whenever a job changes state.
     @Published private(set) var madeCharacters: [MadeCharacter] = []
     @Published private(set) var characterVoices: [CharacterVoice] = []
+    /// The company Character's card from the last edition box seen (ADR-0025), and its first frame to draw.
+    @Published private(set) var editionCard: EditionCard?
+    @Published private(set) var editionFrame: RGBAImage?
+    /// The edition whose card is being asked for, so one status after another doesn't ask again.
+    private var editionAsking: String?
 
     let client = DaemonClient()
     let supervisor = DaemonSupervisor()
@@ -108,6 +113,7 @@ final class AppModel: ObservableObject {
         self.status = status
         daemonAlive = true
         refreshForeignFirmware()
+        refreshEdition(status.device)
         notifyNewFirmware(status)
         updater.follow(checks: status.updates?.enabled ?? false)
         // Wait for the build ID: the box has answered, not just had its port opened (which resets it).
@@ -123,7 +129,36 @@ final class AppModel: ObservableObject {
         self.status = status
         daemonAlive = true
     }
+
+    /// Snapshots only: a company Character's card to show for a sample edition box.
+    func showSampleEdition(_ card: EditionCard?) {
+        editionCard = card
+        editionFrame = card?.lookData.flatMap(LookBuilder.frames(of:))?.first
+    }
     #endif
+
+    /// Asks for the company Character's card when a box of an edition connects and its card isn't kept yet. A
+    /// failed ask (the box busy, say) is tried again at the next status.
+    private func refreshEdition(_ device: DeviceState) {
+        guard let id = EditionCard.toAsk(device: device, kept: editionCard, asking: editionAsking) else { return }
+        editionAsking = id
+        Task {
+            let card = try? await client.editionCard()
+            editionAsking = nil
+            guard let card else { return }
+            editionCard = card
+            editionFrame = card.lookData.flatMap(LookBuilder.frames(of:))?.first
+        }
+    }
+
+    /// The company Character's card for the connected box; nil for an ordinary box.
+    var edition: EditionCard? { EditionCard.shown(editionCard, device: status?.device) }
+
+    /// The box plays the company Character's line.
+    func previewEdition() { run { try await self.client.previewEdition() } }
+
+    /// The box puts the company Character back on, from its own copy; progress shows as a Character write.
+    func restoreEdition() { run { try await self.client.restoreEdition() } }
 
     func refreshMadeCharacters() {
         Task {

@@ -14,7 +14,7 @@ use super::picture::BoxPicture;
 use super::{sprites, theme, view};
 use crate::i18n::{UiLanguage, tr};
 use crate::status::{self, OperationKind, OperationState};
-use crate::{AddressChoice, BUILTIN, BoxDecoration, BoxScreens, CUSTOM, Message, ROBOT, agents, assets, client, config_dir, short_time, wifi_failure};
+use crate::{AddressChoice, BUILTIN, BoxDecoration, BoxScreens, CUSTOM, Message, ROBOT, agents, assets, client, config_dir, edition, short_time, wifi_failure};
 
 /// Leaves room for the scroll bar and the cards' shadows.
 pub(super) fn page<'a>(content: impl Into<Element<'a, Message>>) -> Element<'a, Message> {
@@ -101,7 +101,12 @@ impl crate::App {
         let current = self.status.as_ref().and_then(|status| status.device.voice.clone());
         let wears_robot = matches!(current.as_deref(), Some(ROBOT | BUILTIN));
         let robot_in_use = wears_robot && self.characters.robot_lender.is_none();
-        let mut cards: Vec<Element<'_, Message>> = vec![self.kore_card()];
+        // A box of a company edition (ADR-0025) has the company Character first, then the robot, then Kore.
+        let mut cards: Vec<Element<'_, Message>> = self.edition_card().into_iter().collect();
+        let edition = !cards.is_empty();
+        if !edition {
+            cards.push(self.kore_card());
+        }
         cards.push(self.character_card(
             "VibeBuddy".to_owned(),
             tr("The original robot", &[]),
@@ -110,6 +115,9 @@ impl crate::App {
             Some(ROBOT),
             Message::UseRobot,
         ));
+        if edition {
+            cards.push(self.kore_card());
+        }
         for (voice, face) in self.voices.iter().zip(&self.faces) {
             cards.push(self.character_card(
                 voice.name.clone(),
@@ -241,23 +249,54 @@ impl crate::App {
         preview: Option<&'static str>,
         use_it: Message,
     ) -> Element<'_, Message> {
-        let online = self.online();
         let busy = self.busy();
-        let actions: Element<'_, Message> = if in_use {
-            tag(tr("In use", &[]), theme::KORE_PINK_TEXT)
-        } else {
-            let playing = preview.is_some_and(|id| self.previewing.as_ref().is_some_and(|(playing, _)| playing == id));
-            row![]
-                .push(preview.map(|id| pill(if playing { "■".to_owned() } else { "▶".to_owned() }, Fill::Paper, (!busy).then_some(Message::TogglePreview(id)))))
-                .push(pill(tr("Use", &[]), Fill::Paper, (online && !busy).then_some(use_it)))
-                .spacing(5)
-                .into()
-        };
+        let playing = preview.is_some_and(|id| self.previewing.as_ref().is_some_and(|(playing, _)| playing == id));
+        let play = preview.map(|id| (playing, (!busy).then_some(Message::TogglePreview(id))));
         let stage_content: Element<'_, Message> = match face {
             // The robot's face (55 × 54) at the same 1.5 × as a look.
             Some(face) if preview == Some(ROBOT) => image(face).filter_method(image::FilterMethod::Nearest).width(82.5).height(81).into(),
             Some(face) => figure(face).into(),
             None => Space::new().into(),
+        };
+        self.card_of(name, summary, stage_content, in_use, play, use_it)
+    }
+
+    /// The company Character's card (ADR-0025) for a box of an edition, from the box's own copy: ▶ has the box say its
+    /// line, and Use puts it back on. None for an ordinary box.
+    pub(super) fn edition_card(&self) -> Option<Element<'_, Message>> {
+        let device = self.status.as_ref().map(|status| &status.device);
+        let (card, face) = self.edition.as_ref().filter(|(card, _)| edition::shown(device, card))?;
+        let in_use = device.and_then(|device| device.voice.as_deref()) == Some(card.id.as_str());
+        let can = self.online() && !self.busy();
+        // No look: the robot's face, as the box draws a Character without one.
+        let stage_content: Element<'_, Message> = match (face, &self.robot_face) {
+            (Some(face), _) => figure(face.clone()).into(),
+            (None, Some(robot)) => image(robot.clone()).filter_method(image::FilterMethod::Nearest).width(82.5).height(81).into(),
+            (None, None) => Space::new().into(),
+        };
+        Some(self.card_of(card.name.clone(), card.summary.clone(), stage_content, in_use, Some((false, can.then_some(Message::PreviewEdition))), Message::RestoreEdition))
+    }
+
+    /// A Character card: the look on a stage, the name with ▶ (■ while playing) and Use, or In use, and a line under it.
+    fn card_of<'a>(
+        &'a self,
+        name: String,
+        summary: String,
+        stage_content: Element<'a, Message>,
+        in_use: bool,
+        play: Option<(bool, Option<Message>)>,
+        use_it: Message,
+    ) -> Element<'a, Message> {
+        let online = self.online();
+        let busy = self.busy();
+        let actions: Element<'_, Message> = if in_use {
+            tag(tr("In use", &[]), theme::KORE_PINK_TEXT)
+        } else {
+            row![]
+                .push(play.map(|(playing, press)| pill(if playing { "■".to_owned() } else { "▶".to_owned() }, Fill::Paper, press)))
+                .push(pill(tr("Use", &[]), Fill::Paper, (online && !busy).then_some(use_it)))
+                .spacing(5)
+                .into()
         };
         let content = column![
             container(stage_content).center_x(Length::Fill).align_y(Alignment::End).height(104).padding(Padding::ZERO.bottom(4)).style(|_| stage(theme::BOX_CARD)),

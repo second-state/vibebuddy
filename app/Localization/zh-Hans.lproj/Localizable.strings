@@ -50,6 +50,7 @@
 "Couldn't write the hook config: %@" = "写 Hook 配置失败：%@";
 "Volume change was rejected (%lld)" = "音量未被接受（%lld）";
 "Voice pack write was rejected (%lld)" = "写入未被接受（%lld）";
+"The box didn't play the line (%lld)" = "盒子没有播放这句话（%lld）";
 "Firmware flash was rejected (%lld)" = "烧录未被接受（%lld）";
 "Screenshot failed (%lld)" = "截图失败（%lld）";
 "The firmware package has no %@" = "固件包里没有 %@";
@@ -336,6 +337,7 @@
 "Open Settings" = "打开设置";
 "Play on box" = "在盒子上播放";
 "Preview %@" = "试听 %@";
+"Play %@ on the box" = "在盒子上播放 %@";
 "Restart korekore to change the language?" = "重启 korekore 来切换语言？";
 "Restart" = "重启";
 "Running" = "运行中";

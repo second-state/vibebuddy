@@ -147,6 +147,22 @@ fn draw_the_korekore_pages() {
     app.tab = Section::Character.tab();
     let element: Element<'_, Message> = app.view(iced::window::Id::unique());
     save("page-character-tall", (954.0, 1500.0), element);
+    // A box of a company edition: the company Character first, on the Character page and in the guide. Luna's look
+    // stands in for the company's.
+    let device = &mut app.status.as_mut().unwrap().device;
+    device.edition = Some(crate::status::Edition { id: "acme".to_owned() });
+    app.edition = Some((
+        client::EditionCard { id: "acme".to_owned(), name: "Acme".to_owned(), summary: "Acme's own buddy, from the box".to_owned(), look: None },
+        frames.first().map(|frame| crate::handle(frame, 1)),
+    ));
+    let element: Element<'_, Message> = app.view(iced::window::Id::unique());
+    save("page-character-edition", (954.0, 766.0), element);
+    app.guide = Some(2);
+    let element: Element<'_, Message> = app.view(iced::window::Id::unique());
+    save("guide-2-edition", (954.0, 766.0), element);
+    app.guide = None;
+    app.status.as_mut().unwrap().device.edition = None;
+    app.edition = None;
     // Making a Character, which takes the Character page's place.
     if let Some(base) = app.voices.first().map(crate::Lender::of) {
         app.tab = Section::Character.tab();
