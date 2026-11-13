@@ -23,12 +23,15 @@ struct KorekoreCharacterPage: View {
                     KorekoreMakingRow(model: model, making: making)
                 }
                 LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 12, alignment: .top), count: 3), spacing: 12) {
-                    // A box of a company edition (ADR-0025) has the company Character first.
+                    // A box of a company edition (ADR-0025) has the company Character first, then the robot, then Kore.
                     if let edition = model.edition {
                         editionCard(edition)
+                        robotCard
+                        koreCard
+                    } else {
+                        koreCard
+                        robotCard
                     }
-                    koreCard
-                    robotCard
                     ForEach(Resources.bundledVoices) { entry in
                         voiceCard(entry)
                     }

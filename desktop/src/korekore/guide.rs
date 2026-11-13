@@ -256,10 +256,16 @@ impl crate::App {
         let busy = self.busy();
         let current = self.status.as_ref().and_then(|status| status.device.voice.clone());
         let robot_in_use = matches!(current.as_deref(), Some(ROBOT | BUILTIN)) && self.characters.robot_lender.is_none();
-        // A box of a company edition (ADR-0025) has the company Character first.
+        // A box of a company edition (ADR-0025) has the company Character first, then the robot, then Kore.
         let mut cards: Vec<Element<'_, Message>> = self.edition_card().into_iter().collect();
-        cards.push(self.kore_card());
+        let edition = !cards.is_empty();
+        if !edition {
+            cards.push(self.kore_card());
+        }
         cards.push(self.character_card("VibeBuddy".to_owned(), tr("The original robot", &[]), self.robot_face.clone(), robot_in_use, Some(ROBOT), Message::UseRobot));
+        if edition {
+            cards.push(self.kore_card());
+        }
         for (voice, face) in self.voices.iter().zip(&self.faces) {
             cards.push(self.character_card(voice.name.clone(), voice.tag.clone(), face.clone(), current.as_deref() == Some(voice.id), Some(voice.id), Message::UseVoice(voice.id)));
         }
