@@ -32,6 +32,9 @@ struct KorekoreDevicePage: View {
                         pairedComputers(device)
                     }
                 }
+                if let vibeplays = model.status?.vibeplays {
+                    KorekoreVibePlaysCard(model: model, vibeplays: vibeplays)
+                }
             }
             .padding(.bottom, Theme.Sticker.sm + 4)
         }
@@ -84,7 +87,7 @@ struct KorekoreDevicePage: View {
                         }
                     }
                 }
-            } else if device?.pin == nil {
+            } else if device?.pin == nil, device?.busy == nil {
                 KCard {
                     VStack(alignment: .leading, spacing: 8) {
                         HStack(spacing: 10) {
@@ -165,6 +168,13 @@ struct KorekoreDevicePage: View {
                 if !connected, let relayRefusal {
                     KNote(relayRefusal, color: Theme.Colors.korePinkText)
                 }
+                if let relayLine {
+                    field(String(localized: "Relay")) { Text(verbatim: relayLine) }
+                    if device?.relayMismatch == true {
+                        KNote(String(localized: "The box uses another Relay than this Mac, so they can't meet through it. Plug in the cable once to move the box to this Mac's Relay."),
+                              color: Theme.Colors.korePinkText)
+                    }
+                }
                 field(String(localized: "Firmware")) { firmwareLine }
                 field(String(localized: "Box screens")) { screensChoice }
                 if connected, device?.screens == nil {
@@ -221,7 +231,7 @@ struct KorekoreDevicePage: View {
 
     /// Why the Relay won't carry the link, shown while the box is away (ADR-0023).
     private var relayRefusal: String? {
-        guard AccountPlan.shown else { return nil }
+        guard model.planOffered else { return nil }
         return switch device?.relayRefused {
         case nil: nil
         case "signed_out": String(localized: "Sign in to use the Relay.")
@@ -230,9 +240,27 @@ struct KorekoreDevicePage: View {
         }
     }
 
+    /// Which Relay this Mac uses, and the box's when it differs; only where the Relay switch shows on General.
+    private var relayLine: String? {
+        guard model.status?.account?.showsRelaySwitch == true, let mine = device?.relayServer else { return nil }
+        guard let device, device.relayMismatch, let theirs = device.boxRelay else { return Self.relayName(mine) }
+        return String(localized: "This Mac: \(Self.relayName(mine)) · Box: \(Self.relayName(theirs))")
+    }
+
+    private static func relayName(_ address: String) -> String {
+        switch RelayKind(address) {
+        case .production: String(localized: "Production")
+        case .staging: String(localized: "Staging")
+        case .other(let host): host
+        }
+    }
+
     private var linkText: String {
         guard let device else { return String(localized: "daemon isn't running") }
         guard device.connected else {
+            if let busy = device.busy {
+                return busy.owner.isEmpty ? String(localized: "On another computer") : String(localized: "With \(busy.owner)")
+            }
             return device.candidates?.isEmpty == false ? String(localized: "Several devices found") : String(localized: "Box not found")
         }
         if device.relay == true { return String(localized: "Relay") }
@@ -349,6 +377,95 @@ struct KorekoreDevicePage: View {
             buttons: [String(localized: "Flash"), String(localized: "Cancel")],
             facts: [(String(localized: "Firmware package"), offered), (String(localized: "Box now"), current)]) { [model] answer in
             if answer.button == 0 { model.flashFirmware(package) }
+        }
+    }
+}
+
+/// VibePlays (ADR-0025): the ones found on the network, to pair by the code they show, and the paired ones. They show
+/// the buddy beside the box and never take its link.
+struct KorekoreVibePlaysCard: View {
+    @ObservedObject var model: AppModel
+    let vibeplays: [VibePlay]
+    /// The VibePlay whose code is being typed.
+    @State private var pairing: String?
+    @State private var code: String
+    @State private var working = false
+    @State private var error: String?
+
+    /// `pairing` and `code` are set only for the snapshots.
+    init(model: AppModel, vibeplays: [VibePlay], pairing: String? = nil, code: String = "") {
+        self.model = model
+        self.vibeplays = vibeplays
+        _pairing = State(initialValue: pairing)
+        _code = State(initialValue: code)
+    }
+
+    var body: some View {
+        KCard {
+            VStack(alignment: .leading, spacing: 8) {
+                KHeading(String(localized: "VibePlays"))
+                ForEach(vibeplays) { vibeplay in
+                    VStack(alignment: .leading, spacing: 8) {
+                        HStack {
+                            Text(verbatim: vibeplay.name).font(.rounded(13, weight: 700))
+                            Spacer()
+                            if vibeplay.paired {
+                                if vibeplay.connected {
+                                    KTag(String(localized: "Connected"), color: Theme.Colors.doneText)
+                                } else {
+                                    KTag(String(localized: "Not connected"))
+                                }
+                                Button(String(localized: "Forget")) { forget(vibeplay) }.kButton()
+                            } else if pairing != vibeplay.key {
+                                Button(String(localized: "Pair…")) {
+                                    pairing = vibeplay.key
+                                    code = ""
+                                    error = nil
+                                }
+                                .kButton(.sun)
+                            }
+                        }
+                        if pairing == vibeplay.key && !vibeplay.paired {
+                            KField(String(localized: "Enter the six digits the VibePlay shows"), text: $code)
+                                .onChange(of: code) { code = String(code.filter(\.isNumber).prefix(6)) }
+                            if let error { KNote(error, color: Theme.Colors.korePinkText) }
+                            HStack(spacing: 8) {
+                                Button(String(localized: "Pair")) { pair(vibeplay) }.kButton(.sun).disabled(code.count != 6 || working)
+                                Button(String(localized: "Cancel")) { pairing = nil }.kButton()
+                            }
+                        }
+                    }
+                    .padding(.vertical, 6)
+                    .padding(.horizontal, 10)
+                    .overlay(RoundedRectangle(cornerRadius: Theme.Radius.sm).strokeBorder(Theme.Colors.line, lineWidth: Theme.Stroke.base))
+                }
+                if vibeplays.isEmpty {
+                    KNote(String(localized: "No VibePlay found on this network."))
+                }
+                KNote(String(localized: "A VibePlay shows the buddy beside the box, over Wi-Fi. While the box is linked, the VibePlay shows and doesn't speak."))
+            }
+        }
+    }
+
+    private func pair(_ vibeplay: VibePlay) {
+        working = true
+        Task {
+            let failure = await model.pairVibePlay(key: vibeplay.key, code: code)
+            working = false
+            if let failure {
+                error = failure
+            } else {
+                pairing = nil
+            }
+        }
+    }
+
+    private func forget(_ vibeplay: VibePlay) {
+        KorekoreAlert.ask(
+            title: String(localized: "Forget this VibePlay?"),
+            message: String(localized: "It stops getting this computer's cards. To use it again, pair it again with the code it shows."),
+            buttons: [String(localized: "Forget"), String(localized: "Cancel")]) { [model] answer in
+            if answer.button == 0 { model.forgetVibePlay(key: vibeplay.key) }
         }
     }
 }

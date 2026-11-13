@@ -92,6 +92,12 @@ public struct KorekoreMenuPanel: View {
             } else {
                 Text("box online · \(link.rawValue)")
             }
+        } else if let owner = picture.awayWith {
+            if owner.isEmpty {
+                Text("box on another computer")
+            } else {
+                Text("box with \(owner)")
+            }
         } else {
             Text("no box linked")
         }
@@ -166,7 +172,7 @@ public struct KorekoreMenuPanel: View {
 /// The menu bar item: Kore at 1×, in colour online, with a `sun` dot when an agent needs you, gray and asleep
 /// without a link (canvas: "Mac · Menu bar", bottom row).
 /// The Dock icon while the korekore UI is on: the General page's badge shape (Kore with an ink outline), on `sun`,
-/// at the size of a macOS icon. The bundle's own icon stays the robot until the current UI goes (ADR-0021).
+/// at the size of a macOS icon. MakeAppIcon writes the same image into the bundle's AppIcon.icns.
 public enum KorekoreAppIcon {
     public static func image() -> NSImage {
         let kore = KorekoreSprites.all["kore-normal"]!

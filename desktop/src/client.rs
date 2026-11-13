@@ -150,6 +150,38 @@ pub async fn unpair(key: String) -> Result<(), String> {
     post("/v1/device/unpair", Some(serde_json::json!({ "key": key }))).await
 }
 
+/// Pairs with a VibePlay by the six digits it shows (docs/vibeplay.md); the error is for the user.
+pub async fn pair_vibeplay(key: String, code: String) -> Result<(), String> {
+    let response = reqwest::Client::new()
+        .post(format!("{BASE}/v1/vibeplays/pair"))
+        .json(&serde_json::json!({ "key": key, "code": code }))
+        .send()
+        .await
+        .map_err(|error| error.to_string())?;
+    if response.status().is_success() {
+        return Ok(());
+    }
+    #[derive(Deserialize)]
+    struct Refusal {
+        error: String,
+    }
+    let reason = response.json::<Refusal>().await.map(|refusal| refusal.error).unwrap_or_default();
+    Err(vibeplay_pair_error(&reason))
+}
+
+pub fn vibeplay_pair_error(reason: &str) -> String {
+    match reason {
+        "code" => tr("That isn't the code on the VibePlay. Check it and try again.", &[]),
+        "full" => tr("This VibePlay has four computers already. Forget them on the VibePlay first.", &[]),
+        "closed" => tr("The VibePlay isn't showing a code. Choose PAIR in its menu.", &[]),
+        _ => tr("Couldn't reach the VibePlay. Check that it's on and on the same Wi-Fi.", &[]),
+    }
+}
+
+pub async fn forget_vibeplay(key: String) -> Result<(), String> {
+    post("/v1/vibeplays/forget", Some(serde_json::json!({ "key": key }))).await
+}
+
 /// Takes the box from the computer that has it; the daemon's next try over the network or the Relay asks outright.
 pub async fn take_over() -> Result<(), String> {
     post("/v1/device/takeover", None).await
@@ -505,7 +537,7 @@ pub enum PlanAnswer {
     /// The service's 409 reason, `already_paid` or `no_subscription`: the plan isn't what the app showed, and the
     /// daemon has read the account again.
     Conflict(String),
-    /// 404: Stripe isn't set up for this service, the switch is off, or the daemon is too old for the route.
+    /// 404: Stripe isn't set up for this service, the Paid plan isn't offered, or the daemon is too old for the route.
     NotOffered,
     /// 401: the status then shows signed out.
     NotSignedIn,

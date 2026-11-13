@@ -26,6 +26,20 @@ pub struct Status {
     /// The Character being made, or the last one made since the daemon started (ADR-0023); absent when there is none,
     /// and from older daemons.
     pub making: Option<crate::making::Making>,
+    /// Every VibePlay paired with this computer or found on the network (ADR-0025); absent from older daemons.
+    pub vibeplays: Option<Vec<VibePlay>>,
+}
+
+/// A VibePlay, the game handheld that shows the buddy beside the box (ADR-0025, docs/vibeplay.md).
+#[derive(Clone, Debug, Default, Deserialize, PartialEq)]
+#[serde(default)]
+pub struct VibePlay {
+    pub key: String,
+    pub name: String,
+    /// Paired with this computer.
+    pub paired: bool,
+    pub connected: bool,
+    pub address: Option<String>,
 }
 
 /// The daemon says only whether each key is set, and whether its provider refused it; a key never comes back.
@@ -69,8 +83,9 @@ pub struct Account {
     /// The voice credit left, in millionths of a US dollar (ADR-0024); None before the account first uses our voice
     /// service, when the service couldn't read it, and from older daemons.
     pub voice_credit_micro_usd: Option<u64>,
-    /// Whether to show Upgrade on Free: the daemon's one switch (`account::UPGRADE_OFFERED`), off until sales open.
-    /// False from older daemons.
+    /// The one switch for the Paid plan: the service's answer, which the daemon reads with the plan. While it is false,
+    /// the app doesn't offer the Paid plan: no Upgrade, no Free plan row, no Relay switch or refusals, and no making a
+    /// Character with VibeBuddy's voices. False when signed out, and from older daemons and services.
     pub upgrade_offered: bool,
 }
 
@@ -82,7 +97,7 @@ pub enum PlanButton {
 }
 
 impl Account {
-    /// Manage plan on Paid, Upgrade on Free while the switch is on, none otherwise.
+    /// Manage plan on Paid, Upgrade on Free while the Paid plan is offered, none otherwise.
     pub fn plan_button(&self) -> Option<PlanButton> {
         let plan = self.plan.as_ref().filter(|_| self.signed_in)?;
         if plan.paid() {
@@ -90,6 +105,17 @@ impl Account {
         } else {
             self.upgrade_offered.then_some(PlanButton::Upgrade)
         }
+    }
+
+    /// True when the plan row has a button: Manage plan on Paid, Upgrade on Free while the Paid plan is offered.
+    pub fn shows_plan_row(&self) -> bool {
+        self.plan_button().is_some()
+    }
+
+    /// The Relay switch on General: while the Paid plan is offered, and always for a Paid account, so stopping sales
+    /// doesn't take it from someone who pays for the Relay.
+    pub fn shows_relay_switch(&self) -> bool {
+        self.upgrade_offered || (self.signed_in && self.plan.as_ref().is_some_and(Plan::paid))
     }
 
     /// The voice credit left in dollars, "$0.93", for the account card; None when the daemon doesn't know it. Cut
@@ -110,10 +136,6 @@ pub struct Plan {
 }
 
 impl Plan {
-    /// Whether the app shows the Paid plan. Off until the plan is on sale (2026-10-28): the plan row, the Relay switch
-    /// and its refusals, and making a Character with VibeBuddy's voices are hidden. The daemon doesn't change.
-    pub const SHOWN: bool = false;
-
     pub fn paid(&self) -> bool {
         self.name == "paid"
     }
@@ -278,6 +300,10 @@ pub struct Device {
     pub wifi_seen: Vec<SeenNetwork>,
     /// Why the Relay won't carry the link (ADR-0023): `signed_out`, `plan` or `unavailable`.
     pub relay_refused: Option<String>,
+    /// The Relay this computer uses, and the one the box last said it uses (docs/relay-protocol.md, "Which Relay");
+    /// none from older daemons, and the box's also until the box has said.
+    pub relay_server: Option<String>,
+    pub box_relay: Option<String>,
     /// The company edition the box is of (ADR-0025); None for an ordinary box, other firmware, and older daemons.
     pub edition: Option<Edition>,
 }
@@ -336,9 +362,10 @@ impl Device {
         }
     }
 
-    /// What the link section says about the Relay turning this computer away.
-    pub fn relay_refusal(&self) -> Option<String> {
-        if !Plan::SHOWN {
+    /// What the link section says about the Relay turning this computer away; nothing while the Paid plan isn't
+    /// `offered`.
+    pub fn relay_refusal(&self, offered: bool) -> Option<String> {
+        if !offered {
             return None;
         }
         Some(match self.relay_refused.as_deref()? {
@@ -346,6 +373,34 @@ impl Device {
             "plan" => tr("The Relay needs the Paid plan.", &[]),
             _ => tr("The Relay can't check the account right now. VibeBuddy tries again later.", &[]),
         })
+    }
+
+    /// The box uses another Relay than this computer, so the two can't meet through it. Unknown until the box has said.
+    pub fn relay_mismatch(&self) -> bool {
+        match (&self.relay_server, &self.box_relay) {
+            (Some(mine), Some(theirs)) => relay_name(mine) != relay_name(theirs),
+            _ => false,
+        }
+    }
+
+    /// Which Relay this computer uses, and the box's when it differs.
+    pub fn relay_line(&self) -> Option<String> {
+        let mine = relay_name(self.relay_server.as_deref()?);
+        Some(match self.box_relay.as_deref() {
+            Some(theirs) if self.relay_mismatch() => tr("This computer: %@ · Box: %@", &[&mine, &relay_name(theirs)]),
+            _ => mine,
+        })
+    }
+}
+
+/// A Relay by its address: ours in production or staging, or another, such as one under `wrangler dev`, by its host.
+fn relay_name(address: &str) -> String {
+    let host = address.trim().split_once("://").map_or(address.trim(), |(_, rest)| rest);
+    let host = host.split(['/', ':']).next().unwrap_or(host);
+    match host {
+        "relay.korekore.ai" => tr("Production", &[]),
+        "relay-staging.korekore.ai" => tr("Staging", &[]),
+        other => other.to_owned(),
     }
 }
 
@@ -422,7 +477,11 @@ impl MenuState {
                 .unwrap_or("?");
             tr("Box online · firmware %@", &[&build])
         } else {
-            tr("Box not found", &[])
+            match &device.busy {
+                Some(busy) if busy.owner.is_empty() => tr("Box on another computer", &[]),
+                Some(busy) => tr("Box with %@", &[&busy.owner]),
+                None => tr("Box not found", &[]),
+            }
         };
         let mode = match device.mode.as_deref() {
             Some("duty") => tr("On duty", &[]),
@@ -536,6 +595,9 @@ mod tests {
         let offline = Status::default();
         assert_eq!(MenuState::derive(Some(&offline)).icon, Icon::Offline);
         assert_eq!(MenuState::derive(Some(&offline)).device_line, "Box not found");
+        let mut away = Status::default();
+        away.device.busy = Some(Busy { owner: "omarchy".to_owned(), reason: "linked".to_owned() });
+        assert_eq!(MenuState::derive(Some(&away)).device_line, "Box with omarchy");
     }
 
     #[test]
@@ -572,8 +634,24 @@ mod tests {
     #[test]
     fn the_relays_refusal_is_explained() {
         let device: Device = serde_json::from_str(r#"{"connected":false,"relay_refused":"plan"}"#).expect("device");
-        assert_eq!(device.relay_refusal().as_deref(), Plan::SHOWN.then_some("The Relay needs the Paid plan."));
-        assert_eq!(Device::default().relay_refusal(), None);
+        assert_eq!(device.relay_refusal(true).as_deref(), Some("The Relay needs the Paid plan."));
+        assert_eq!(device.relay_refusal(false), None, "nothing about the Paid plan while it isn't offered");
+        assert_eq!(Device::default().relay_refusal(true), None);
+    }
+
+    #[test]
+    fn the_two_relays_are_named_and_a_mismatch_is_seen() {
+        let device: Device =
+            serde_json::from_str(r#"{"connected":true,"relay_server":"wss://relay-staging.korekore.ai","box_relay":"wss://relay.korekore.ai"}"#).expect("device");
+        assert!(device.relay_mismatch());
+        assert_eq!(device.relay_line().as_deref(), Some("This computer: Staging · Box: Production"));
+        let same = Device { box_relay: Some("wss://relay-staging.korekore.ai/".to_owned()), ..device.clone() };
+        assert!(!same.relay_mismatch());
+        assert_eq!(same.relay_line().as_deref(), Some("Staging"));
+        let unknown = Device { box_relay: None, ..device.clone() };
+        assert!(!unknown.relay_mismatch(), "the box hasn't said");
+        assert_eq!(Device { relay_server: Some("ws://127.0.0.1:8787".to_owned()), ..unknown }.relay_line().as_deref(), Some("127.0.0.1"));
+        assert_eq!(Device::default().relay_line(), None, "an older daemon");
     }
 
     #[test]
@@ -598,8 +676,14 @@ mod tests {
         assert_eq!(offered.plan_button(), Some(PlanButton::Upgrade));
         let paid = Account { plan: Some(Plan { name: "paid".to_owned(), period_end: None }), upgrade_offered: false, ..offered.clone() };
         assert_eq!(paid.plan_button(), Some(PlanButton::ManagePlan), "Manage plan doesn't wait for the switch");
-        assert_eq!(Account { signed_in: false, ..paid }.plan_button(), None, "signed out");
-        assert_eq!(Account { plan: None, ..offered }.plan_button(), None, "before the plan is read");
+        assert_eq!(Account { signed_in: false, ..paid.clone() }.plan_button(), None, "signed out");
+        assert_eq!(Account { plan: None, ..offered.clone() }.plan_button(), None, "before the plan is read");
+        // The plan row shows with its button: on Free only while the Paid plan is offered, always on Paid.
+        assert!(!free.shows_plan_row() && offered.shows_plan_row() && paid.shows_plan_row());
+        // The Relay switch: while the Paid plan is offered, and always for a Paid account.
+        assert!(offered.shows_relay_switch() && !free.shows_relay_switch());
+        assert!(paid.shows_relay_switch(), "stopping sales doesn't take the Relay switch from a Paid account");
+        assert!(!Account { signed_in: false, ..paid.clone() }.shows_relay_switch(), "signed out");
     }
 
     #[test]

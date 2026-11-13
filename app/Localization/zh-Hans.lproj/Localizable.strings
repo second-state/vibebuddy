@@ -5,6 +5,8 @@
 "daemon not responding · click to restart" = "daemon 异常 · 点击重启";
 "Box online · firmware %@" = "盒子在线 · 固件 %@";
 "Box not found" = "未找到盒子";
+"Box on another computer" = "盒子在别的电脑上";
+"Box with %@" = "盒子在 %@ 上";
 "Several devices found" = "找到多台设备";
 "This is the box" = "就是这台";
 "Choosing the box was rejected (%lld)" = "选择盒子未被接受（%lld）";
@@ -213,6 +215,8 @@
 "another computer" = "另一台电脑";
 "The box is plugged into %@." = "盒子正插在 %@ 上。";
 "The box is with %@." = "盒子正连着 %@。";
+"On another computer" = "在别的电脑上";
+"With %@" = "在 %@ 上";
 "Take over" = "接管";
 "Relay" = "中转";
 "Taking the box over was rejected (%lld)" = "接管盒子被拒绝（%lld）";
@@ -256,21 +260,25 @@
 "How to install Claude Code" = "如何安装 Claude Code";
 
 /* korekore UI (ADR-0021) */
-"%lld done · %lld asks today" = "今天完成 %lld 个 · 提问 %lld 次";
+"%lld done · %lld asks today" = "今天完成 %lld 个 · 确认 %lld 次";
 "DAEMON NOT RUNNING" = "daemon 没在运行";
 "BOX ONLINE · %@" = "盒子在线 · %@";
 "NO BOX LINKED" = "没有连上盒子";
+"BOX ON ANOTHER COMPUTER" = "盒子在别的电脑上";
+"BOX WITH %@" = "盒子在 %@ 上";
 "app %@ · box fw %@" = "App %@ · 盒子固件 %@";
 "app %@" = "App %@";
 "This page comes with the next step of korekore." = "这一页会在 korekore 的下一步做好。";
 "%@ done" = "完成 %@";
-"%@ asks" = "提问 %@";
+"%@ asks" = "确认 %@";
 "%@ busy" = "忙碌 %@";
 "1 AGENT" = "1 个 Agent";
 "%lld AGENTS" = "%lld 个 Agent";
 "box online · %@ · fw %@" = "盒子在线 · %@ · 固件 %@";
 "box online · %@" = "盒子在线 · %@";
 "no box linked" = "没有连上盒子";
+"box on another computer" = "盒子在别的电脑上";
+"box with %@" = "盒子在 %@ 上";
 "Who lives in the box" = "谁住在盒子里";
 "Who the box watches" = "盒子替你看着谁";
 "Hold K0 on the box and ask" = "按住盒子上的 K0 提问";
@@ -286,7 +294,7 @@
 "A computer pairs when it's plugged in. To forget them all, use COMPUTERS in the box's menu." = "电脑插上盒子时会自动配对。要全部忘掉，用盒子菜单里的 COMPUTERS。";
 "Couldn't join" = "没能加入";
 "If flashing can't start: hold K0 while plugging in, to enter download mode." = "如果刷写开始不了：插线时按住 K0，进入下载模式。";
-"Logs, config and both sides' build IDs in one file, for a bug report." = "日志、配置和两边的构建号打包成一个文件，用来报告问题。";
+"Logs, config and both sides' build IDs in one folder, for a bug report." = "日志、配置和两边的构建号放进一个文件夹，用来报告问题。";
 "Only korekore's own entries; your other hooks stay." = "只改 korekore 自己的条目，你的其他钩子保持不变。";
 "Plug in the cable to change the box's network, update its firmware or see its paired computers." = "插上数据线才能更换盒子的网络、更新固件或查看已配对的电脑。";
 "Reach the box through the Relay when it's away from this computer" = "盒子不在这台电脑旁边时，通过 Relay 连接它";
@@ -296,6 +304,7 @@
 "The character didn't finish writing, so the box keeps its built-in voice for now. Write it again when you're ready." = "角色没写完，盒子暂时保留内置声音。准备好了再写一次。";
 "The daemon isn't running. Restart it on the Advanced page." = "daemon 没在运行。到“高级”页重启它。";
 "The daemon's log in the journal, and the hook's log as a file." = "daemon 的日志在 journal 里，钩子的日志是文件。";
+"The daemon's log and the hook's log, both files." = "daemon 和钩子的日志都是文件。";
 "The daemon's and the app's logs, as files." = "daemon 和 App 的日志文件。";
 "The firmware is on the box, but it didn't start. Unplug the box and plug it back in." = "固件已经写进盒子，但没有启动。把盒子拔下再插上。";
 "The hook config changed after Codex's last event, so Codex turned the hooks off. Type /hooks in Codex and trust korekore's hooks again." = "Codex 上次发来事件之后钩子配置改过，所以 Codex 把钩子关了。在 Codex 里输入 /hooks，重新信任 korekore 的钩子。";
@@ -374,11 +383,13 @@
 "So the box is never left waiting after a restart. macOS may say a background item was added; that's expected." = "这样电脑重启后盒子不会干等着。macOS 可能会提示添加了后台项目，这是正常的。";
 "The firmware is on the box, but it didn't start. Unplug the box and plug it back in. Don't hold K0 this time." = "固件已经写进盒子，但没有启动。把盒子拔下再插上，这次不要按住 K0。";
 "The install script has connected your agents and set korekore to start when you log in. Let's wake up the box first." = "安装脚本已经接好了你的 Agent，并设置了登录时启动 korekore。先把盒子叫醒吧。";
+"The installer has connected your agents and set korekore to start when you log in. Let's wake up the box first." = "安装程序已经接好了你的 Agent，并设置了登录时启动 korekore。先把盒子叫醒吧。";
 "Trust korekore's hooks again with /hooks in Codex." = "在 Codex 里用 /hooks 重新信任 korekore 的钩子。";
 "Yes, that's it" = "对，就是它";
 "a file of korekore's own" = "korekore 自己的一个文件";
 "korekore can remove it and take over, so the two don't fight over the box." = "korekore 可以移除它并接管，免得两个抢同一个盒子。";
 "korekore lives in the tray now, or in Omarchy's bar. Kore kore when someone needs you." = "korekore 现在在托盘里，或者在 Omarchy 的状态栏里。有人需要你时，Kore kore！";
+"korekore lives in the tray now. Kore kore when someone needs you." = "korekore 现在在托盘里。有人需要你时，Kore kore！";
 " for this box (%@)." = "，适用于这个盒子（%@）。";
 "%@ · %lld events" = "%@ · %lld 个事件";
 "All set. Yatta!" = "都好了。Yatta！";
@@ -495,13 +506,14 @@
 "the voice's provider" = "这个声音的服务商";
 "Made with your own key for %@, billed to your account there." = "用你自己的 %@ 密钥创建，费用记在你在那里的账户上。";
 "Without your own key for %@, making a Character with VibeBuddy's voices needs the Paid plan." = "没有自己的 %@ 密钥时，用 VibeBuddy 的声音创建角色需要付费版。";
-"Sign in on the Account tab for the Paid plan, or set your own key for %@ there." = "请在「账户」页登录以使用付费版，或在那里填上自己的 %@ 密钥。";
-"Set your own key for %@ on the Account tab first." = "请先在「账户」页填上自己的 %@ 密钥。";
+"Sign in on the General tab for the Paid plan, or set your own key for %@ there." = "请在「通用」页登录以使用付费版，或在那里填上自己的 %@ 密钥。";
+"Set your own key for %@ on the General tab first." = "请先在「通用」页填上自己的 %@ 密钥。";
+"%@ voices are no longer offered. Pick another voice." = "已不再提供%@的声音，请换一个声音。";
 "Making a Character with VibeBuddy's voices needs the Paid plan, or your own key for %@." = "用 VibeBuddy 的声音创建角色需要付费版，或者自己的 %@ 密钥。";
 "This month's Characters on the Paid plan are used up. The lines made so far are kept: resume next month, or with your own key for %@." = "付费版本月的创建角色额度已用完。已做好的台词会保留：下个月再继续创建，或填上自己的 %@ 密钥后继续。";
 "VibeBuddy's voices are paused for today. The lines made so far are kept: resume tomorrow." = "VibeBuddy 的声音今天暂停使用。已做好的台词会保留：明天再继续创建。";
-"Sign in on the Account tab, or set your own key for %@ there, then resume." = "请在「账户」页登录，或在那里填上自己的 %@ 密钥，然后继续创建。";
-"%@ refused your own key. Set another one on the Account tab, then resume." = "%@ 拒绝了你自己的密钥。在「账户」页换一个，然后继续创建。";
+"Sign in on the General tab, or set your own key for %@ there, then resume." = "请在「通用」页登录，或在那里填上自己的 %@ 密钥，然后继续创建。";
+"%@ refused your own key. Set another one on the General tab, then resume." = "%@ 拒绝了你自己的密钥。在「通用」页换一个，然后继续创建。";
 "Making the Character stopped unexpectedly. Resume to try again." = "创建角色意外中断了。点「继续创建」再试一次。";
 "Making the Character failed: %@" = "创建角色失败：%@";
 "Give the Character a name of up to 64 characters." = "给角色起个名字，最多 64 个字。";
@@ -573,5 +585,28 @@
 "Voice commands" = "语音指令";
 "Beta" = "体验版";
 "On while the daemon runs with VIBEBUDDY_RESIDENT_SESSION=1." = "daemon 带着 VIBEBUDDY_RESIDENT_SESSION=1 运行时一直开启。";
-"Hold K0 on the box and ask. Codex or Claude Code on this computer answers, with your own account or key, and the buddy speaks the reply. Your voice goes to VibeBuddy's speech service." = "按住盒子上的 K0 提问。由这台电脑上的 Codex 或 Claude Code 用你自己的账号或密钥回答，再由伙伴念出来。你的语音会发到 VibeBuddy 的语音识别服务。";
+"Hold K0 on the box and ask. Codex or Claude Code on this computer answers, with your own account or key, and the buddy speaks the reply. Your voice goes to VibeBuddy's voice service, or to Groq with your own key." = "按住盒子上的 K0 提问。由这台电脑上的 Codex 或 Claude Code 用你自己的账号或密钥回答，再由伙伴念出来。你的语音会发到 VibeBuddy 的语音服务，填了自己的 Groq 密钥时发到 Groq。";
 "Your drawings · voice: %@" = "你的画 · 声音：%@";
+"Production" = "正式";
+"Staging" = "测试";
+"This Mac: %@ · Box: %@" = "这台 Mac：%@ · 盒子：%@";
+"This computer: %@ · Box: %@" = "本机：%@ · 盒子：%@";
+"The box uses another Relay than this Mac, so they can't meet through it. Plug in the cable once to move the box to this Mac's Relay." = "盒子用的中转和这台 Mac 不同，两边无法通过中转连上。插上数据线连一次，盒子就会改用这台 Mac 的中转。";
+"The box uses another Relay than this computer, so they can't meet through it. Plug in the cable once to move the box to this computer's Relay." = "盒子用的中转和本机不同，两边无法通过中转连上。插上数据线连一次，盒子就会改用本机的中转。";
+
+/* VibePlays (ADR-0025) */
+"VibePlays" = "掌机";
+"Connected" = "已连接";
+"Not connected" = "未连接";
+"Pair…" = "配对…";
+"Pair" = "配对";
+"Enter the six digits the VibePlay shows" = "输入掌机上显示的六位数";
+"No VibePlay found on this network." = "这个网络上没找到掌机。";
+"A VibePlay shows the buddy beside the box, over Wi-Fi. While the box is linked, the VibePlay shows and doesn't speak." = "掌机通过 Wi-Fi 和盒子一起显示氛围小助手。盒子连着时，掌机只显示，不出声。";
+"Forget this VibePlay?" = "忘掉这台掌机？";
+"It stops getting this computer's cards. To use it again, pair it again with the code it shows." = "它不再收到这台电脑的任务卡。要再用，用它显示的配对码重新配对。";
+"That isn't the code on the VibePlay. Check it and try again." = "这不是掌机上显示的配对码。核对后再试。";
+"This VibePlay has four computers already. Forget them on the VibePlay first." = "这台掌机已经配对了四台电脑。先在掌机上忘掉电脑。";
+"The VibePlay isn't showing a code. Choose PAIR in its menu." = "掌机没有显示配对码。在掌机的菜单里选 PAIR。";
+"Couldn't reach the VibePlay. Check that it's on and on the same Wi-Fi." = "连不上掌机。检查它开着，并且和这台电脑在同一个 Wi-Fi 上。";
+"Forgetting the VibePlay was rejected (%lld)" = "忘掉掌机被拒绝（%lld）";

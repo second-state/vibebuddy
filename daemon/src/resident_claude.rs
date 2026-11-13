@@ -487,6 +487,7 @@ async fn spawn_claude(launch: &Launch, cwd: &Path) -> Result<(Pipes, Option<Stri
             }
         }
         command.envs(launch.env.iter().map(|(name, value)| (name, value))).args(args).current_dir(cwd);
+        crate::resident::without_window(&mut command);
         command
     };
     let version = command(&["--version".to_owned()])
@@ -533,15 +534,18 @@ pub fn find_claude() -> Option<PathBuf> {
     if let Some(path) = std::env::var_os(CLAUDE_VARIABLE) {
         return Some(PathBuf::from(path));
     }
-    let home = std::env::var_os("HOME").map(PathBuf::from);
-    std::env::var_os("PATH")
-        .map(|path| std::env::split_paths(&path).map(|dir| dir.join("claude")).collect::<Vec<_>>())
-        .unwrap_or_default()
-        .into_iter()
-        .chain(home.iter().flat_map(|home| [home.join(".local/bin/claude"), home.join(".claude/local/claude")]))
-        .chain(["/opt/homebrew/bin/claude", "/usr/local/bin/claude"].map(PathBuf::from))
+    let home = std::env::home_dir();
+    crate::resident::on_path(&std::env::var_os("PATH").unwrap_or_default(), CLAUDE_NAMES)
+        .chain(home.iter().flat_map(|home| CLAUDE_NAMES.iter().flat_map(move |name| [home.join(".local/bin").join(name), home.join(".claude/local").join(name)])))
+        .chain(["/opt/homebrew/bin/claude", "/usr/local/bin/claude"].map(PathBuf::from).into_iter().filter(|_| cfg!(unix)))
         .find(|path| path.is_file())
 }
+
+/// The names Claude Code goes by. On Windows only the native install's `claude.exe` (in `~\.local\bin`): npm's
+/// `claude.cmd` would run through cmd.exe, which can't take the session's system prompt: Rust refuses a line break in
+/// a batch file's argument, and cmd.exe's command line ends at 8191 characters. Its extensionless `claude` is a script
+/// for a Unix shell.
+const CLAUDE_NAMES: &[&str] = if cfg!(windows) { &["claude.exe"] } else { &["claude"] };
 
 fn prepare_config_dir(config_dir: &Path) -> std::io::Result<()> {
     std::fs::create_dir_all(config_dir)?;

@@ -45,7 +45,8 @@ const CONVERSATION_LIMIT: usize = 20;
 const RESTARTED: &str = "--restarted";
 /// Followed by a voice id: written once the restarted copy sees the box answer, then forgotten.
 const WRITE_VOICE: &str = "--write-voice";
-/// Passed by the Omarchy bar plugin: open Settings, even from a launch that would otherwise stay in the background.
+/// Passed by the Start menu, the app launcher and the Omarchy bar plugin: open Settings, even from a launch that would
+/// otherwise stay in the background. The start at login leaves it out and stays in the tray.
 const SETTINGS: &str = "--settings";
 
 /// The running copy's socket, handed to the subscription that listens on it.
@@ -142,6 +143,14 @@ enum Message {
     ChooseBox(String),
     /// Forget another computer on the box, by its key.
     Unpair(String),
+    /// VibePlays (ADR-0025): open the code field for one, by key, or close it (None).
+    PairVibePlay(Option<String>),
+    VibePlayCode(String),
+    SendVibePlayCode,
+    VibePlayPaired(Result<(), String>),
+    /// Ask before forgetting a VibePlay, by key, or stop asking (None).
+    AskForgetVibePlay(Option<String>),
+    ForgetVibePlay(String),
     TakeOver,
     WifiSsid(String),
     WifiPassword(String),
@@ -348,6 +357,13 @@ struct App {
     wifi_password: String,
     /// The fields are open again for another network; once one is set they fold away.
     wifi_editing: bool,
+    /// The VibePlay whose pairing code is being typed, what is typed, whether it is being sent, and why it didn't pair.
+    vibeplay_pairing: Option<String>,
+    vibeplay_code: String,
+    vibeplay_sending: bool,
+    vibeplay_error: Option<String>,
+    /// The VibePlay waiting for a second click to be forgotten.
+    vibeplay_forgetting: Option<String>,
     /// Read from the autostart entry at start, then kept as the toggle writes it.
     launch_at_login: bool,
     /// The Character being previewed, and how to stop it.
@@ -505,6 +521,11 @@ impl App {
             wifi_ssid: String::new(),
             wifi_password: String::new(),
             wifi_editing: false,
+            vibeplay_pairing: None,
+            vibeplay_code: String::new(),
+            vibeplay_sending: false,
+            vibeplay_error: None,
+            vibeplay_forgetting: None,
             launch_at_login: launch_at_login(),
             previewing: None,
             agents: Vec::new(),
@@ -583,6 +604,11 @@ impl App {
     /// snapshots are drawn with.
     fn theme(&self, _window: window::Id) -> Theme {
         Theme::Light
+    }
+
+    /// The one switch for the Paid plan: the daemon's `account.upgrade_offered`, false without a status.
+    fn plan_offered(&self) -> bool {
+        self.status.as_ref().is_some_and(|status| status.account.upgrade_offered)
     }
 
     fn plan_paid(&self) -> bool {
@@ -722,9 +748,25 @@ impl App {
                     return window::gain_focus(id);
                 }
                 // The design's 960 × 772, down to 900 × 760.
+                #[allow(unused_mut)]
+                let (mut size, mut min_size, mut position): (iced::Size, iced::Size, _) = (iced::Size::new(960.0, 772.0), iced::Size::new(900.0, 760.0), window::Position::default());
+                // A 1080p screen at 150 % has less room than that above the taskbar, and Windows puts each new window
+                // further down: no taller than the room there, and in the middle of it. The pages scroll.
+                #[cfg(windows)]
+                if let Some(area) = windows::work_area() {
+                    // The title bar and the frame.
+                    let room = area.height - 40.0;
+                    size.height = size.height.min(room);
+                    min_size.height = min_size.height.min(room);
+                    position = window::Position::Specific(iced::Point::new(
+                        area.x + (area.width - size.width).max(0.0) / 2.0,
+                        area.y + (room - size.height).max(0.0) / 2.0,
+                    ));
+                }
                 let (id, open) = window::open(window::Settings {
-                    size: iced::Size::new(960.0, 772.0),
-                    min_size: Some(iced::Size::new(900.0, 760.0)),
+                    size,
+                    min_size: Some(min_size),
+                    position,
                     // Kore's badge, as the Mac app shows in the Dock; Wayland takes the icon from the desktop entry instead.
                     icon: window::icon::from_rgba(korekore::app_icon(256), 256, 256).ok(),
                     #[cfg(target_os = "linux")]
@@ -758,6 +800,7 @@ impl App {
             Message::NotThisOne => self.not_this_one = true,
             Message::Tab(tab) => {
                 self.tab = tab;
+                self.notice = None;
                 // Agents can be installed or set up behind the app's back; look again whenever the tab opens.
                 if tab == Tab::Agents {
                     return Task::done(Message::RefreshAgents);
@@ -944,6 +987,30 @@ impl App {
             Message::SetDecoration(decoration) => return Task::perform(client::set_decoration(decoration.0), Message::Done),
             Message::ChooseBox(usb_serial) => return Task::perform(client::choose_box(usb_serial), Message::Done),
             Message::Unpair(key) => return Task::perform(client::unpair(key), Message::Done),
+            Message::PairVibePlay(key) => {
+                self.vibeplay_pairing = key;
+                self.vibeplay_code.clear();
+                self.vibeplay_error = None;
+            }
+            Message::VibePlayCode(code) => self.vibeplay_code = code.chars().filter(char::is_ascii_digit).take(6).collect(),
+            Message::SendVibePlayCode => {
+                if let Some(key) = self.vibeplay_pairing.clone() {
+                    self.vibeplay_sending = true;
+                    return Task::perform(client::pair_vibeplay(key, self.vibeplay_code.clone()), Message::VibePlayPaired);
+                }
+            }
+            Message::VibePlayPaired(result) => {
+                self.vibeplay_sending = false;
+                match result {
+                    Ok(()) => self.vibeplay_pairing = None,
+                    Err(error) => self.vibeplay_error = Some(error),
+                }
+            }
+            Message::AskForgetVibePlay(key) => self.vibeplay_forgetting = key,
+            Message::ForgetVibePlay(key) => {
+                self.vibeplay_forgetting = None;
+                return Task::perform(client::forget_vibeplay(key), Message::Done);
+            }
             Message::TakeOver => return Task::perform(client::take_over(), Message::Done),
             Message::WifiSsid(ssid) => self.wifi_ssid = ssid,
             Message::WifiPassword(password) => self.wifi_password = password,
@@ -1585,7 +1652,9 @@ impl App {
     fn korekore(&self, section: korekore::Section) -> Element<'_, Message> {
         let sections: Vec<korekore::Section> = korekore::Section::ALL.into_iter().collect();
         let picture = korekore::picture::BoxPicture::derive(self.status.as_ref());
-        korekore::view::settings(&picture, &sections, section, env!("CARGO_PKG_VERSION"), Message::Korekore, self.korekore_page(section))
+        // Pages have no place of their own for what an action said, so it goes above whichever page shows.
+        let page = iced::widget::column![].push(self.notice.as_ref().map(korekore::view::notice)).push(self.korekore_page(section)).spacing(10);
+        korekore::view::settings(&picture, &sections, section, env!("CARGO_PKG_VERSION"), Message::Korekore, page.into())
     }
 
     fn updates(&self) -> Option<&status::Updates> {
@@ -1645,7 +1714,8 @@ fn launch(program: &str, args: &[&std::ffi::OsStr]) -> Result<(), String> {
 }
 
 /// Logs, config and both sides' build IDs in one folder under Downloads, with no hook payloads; the folder opens when
-/// it's ready. The daemon's log comes from the journal, two days of it.
+/// it's ready. The daemon's log comes from the journal, two days of it; on Windows from the file the app writes it to,
+/// with the run before.
 async fn export_diagnostics(summary: String, config: Option<Config>) -> Result<String, String> {
     let seconds = SystemTime::now()
         .duration_since(SystemTime::UNIX_EPOCH)
@@ -1657,6 +1727,10 @@ async fn export_diagnostics(summary: String, config: Option<Config>) -> Result<S
     #[cfg(windows)]
     if let Some(log) = windows::daemon_log().filter(|path| path.is_file()) {
         tokio::fs::copy(log, target.join("vibebuddyd.log")).await.map_err(fail)?;
+    }
+    #[cfg(windows)]
+    if let Some(log) = windows::previous_daemon_log().filter(|path| path.is_file()) {
+        tokio::fs::copy(log, target.join("vibebuddyd.previous.log")).await.map_err(fail)?;
     }
     #[cfg(not(windows))]
     {

@@ -700,7 +700,7 @@ impl Maker {
                 Stop::because("signed_out", "signed out")
             }
             // `own_key`: the service doesn't make lines yet, or the voice credit is used up (ADR-0024). Older services
-            // said `plan`. Both mean an own key for the voice is needed; the App says so while the Paid plan is hidden.
+            // said `plan`. Both mean an own key for the voice is needed; the App says so while the Paid plan isn't offered.
             (403, _) => Stop::because("plan", "our voice service can't make this line: set your own key for the voice"),
             // A 429 is a rate limit: a plain failure, and the job resumes later.
             _ => format!("the voice service answered {status}: {}", answer.trim()).into(),

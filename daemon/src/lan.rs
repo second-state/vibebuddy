@@ -108,6 +108,8 @@ pub const SERVICE_TYPE: &str = "_vibebuddy._tcp.local.";
 pub struct Advertised {
     pub addresses: Vec<SocketAddr>,
     pub key: Option<String>,
+    /// The TXT `name`: what a VibePlay calls itself (docs/vibeplay.md); boxes send none.
+    pub name: Option<String>,
 }
 
 /// The addresses of the instances whose TXT key is this box's, IPv4 first. Only finds the box: the handshake
@@ -123,11 +125,17 @@ pub fn pick(found: &[Advertised], box_key: &[u8; 32]) -> Vec<String> {
     addresses.iter().map(SocketAddr::to_string).collect()
 }
 
-/// A browse for [`SERVICE_TYPE`] that runs for the rest of the daemon's life once started, keeping what it
-/// resolved so a lookup is immediate. It listens for the box's announcements rather than asking every time.
-#[derive(Default)]
+/// A browse for one service type ([`SERVICE_TYPE`] for the box) that runs for the rest of the daemon's life once
+/// started, keeping what it resolved so a lookup is immediate. It listens for announcements rather than asking every time.
 pub struct Discovery {
+    service_type: &'static str,
     browser: OnceLock<Option<Browser>>,
+}
+
+impl Default for Discovery {
+    fn default() -> Self {
+        Self::new(SERVICE_TYPE)
+    }
 }
 
 struct Browser {
@@ -137,12 +145,16 @@ struct Browser {
 }
 
 impl Discovery {
+    pub fn new(service_type: &'static str) -> Self {
+        Self { service_type, browser: OnceLock::new() }
+    }
+
     /// What has been resolved so far, starting the browse on first use; None if mDNS couldn't start.
-    fn found(&self) -> Option<Vec<Advertised>> {
-        let browser = self.browser.get_or_init(|| match Browser::start() {
+    pub fn found(&self) -> Option<Vec<Advertised>> {
+        let browser = self.browser.get_or_init(|| match Browser::start(self.service_type) {
             Ok(browser) => Some(browser),
             Err(error) => {
-                tracing::warn!(%error, "couldn't browse for the box over mDNS");
+                tracing::warn!(%error, service = self.service_type, "couldn't browse over mDNS");
                 None
             }
         });
@@ -152,9 +164,9 @@ impl Discovery {
 }
 
 impl Browser {
-    fn start() -> Result<Self, mdns_sd::Error> {
+    fn start(service_type: &str) -> Result<Self, mdns_sd::Error> {
         let daemon = mdns_sd::ServiceDaemon::new()?;
-        let events = daemon.browse(SERVICE_TYPE)?;
+        let events = daemon.browse(service_type)?;
         let found = Arc::new(Mutex::new(HashMap::new()));
         let shared = Arc::clone(&found);
         std::thread::Builder::new()
@@ -166,8 +178,9 @@ impl Browser {
                         mdns_sd::ServiceEvent::ServiceResolved(service) => {
                             let addresses = service.addresses.iter().map(|ip| SocketAddr::new(ip.to_ip_addr(), service.port)).collect();
                             let key = service.txt_properties.get_property_val_str("key").map(str::to_owned);
-                            tracing::debug!(name = %service.fullname, ?addresses, "a box advertised itself over mDNS");
-                            found.insert(service.fullname.clone(), Advertised { addresses, key });
+                            let name = service.txt_properties.get_property_val_str("name").map(str::to_owned);
+                            tracing::debug!(name = %service.fullname, ?addresses, "a service advertised itself over mDNS");
+                            found.insert(service.fullname.clone(), Advertised { addresses, key, name });
                         }
                         mdns_sd::ServiceEvent::ServiceRemoved(_, name) => {
                             found.remove(&name);
@@ -221,12 +234,12 @@ pub enum LinkError {
 /// whose other end vanished without a word (this computer moved to another network, the box lost power) would
 /// otherwise look alive for minutes while the kernel retransmits. The daemon's heartbeat every 5 s always leaves
 /// something to acknowledge.
-const GIVE_UP_AFTER: Duration = Duration::from_secs(20);
+pub(crate) const GIVE_UP_AFTER: Duration = Duration::from_secs(20);
 
 /// Has the kernel drop the connection once sent data stays unacknowledged for `after`; the read then fails and the
 /// daemon tries the next way to the box.
 #[cfg(any(target_os = "macos", target_os = "linux"))]
-fn drop_when_unacknowledged(stream: &TcpStream, after: Duration) {
+pub(crate) fn drop_when_unacknowledged(stream: &TcpStream, after: Duration) {
     use std::os::fd::AsRawFd;
     #[cfg(target_os = "macos")]
     let (option, value) = {
@@ -252,7 +265,7 @@ fn drop_when_unacknowledged(stream: &TcpStream, after: Duration) {
 }
 
 #[cfg(not(any(target_os = "macos", target_os = "linux")))]
-fn drop_when_unacknowledged(_stream: &TcpStream, _after: Duration) {}
+pub(crate) fn drop_when_unacknowledged(_stream: &TcpStream, _after: Duration) {}
 
 /// Connects and runs the handshake; on success the stream carries the VibeBuddy Protocol.
 pub async fn connect(target: &Target, identity: &Identity, takeover: bool, memory: &Memory) -> Result<LinkStream, LinkError> {
@@ -406,7 +419,7 @@ async fn noise_handshake<S: AsyncRead + AsyncWrite + Unpin>(
 }
 
 /// `link.busy` or `link.error` as the error they mean.
-fn refusal(event: Option<&str>, answer: &Value) -> LinkError {
+pub(crate) fn refusal(event: Option<&str>, answer: &Value) -> LinkError {
     let text = |name: &str| answer.get(name).and_then(Value::as_str).map(str::to_owned);
     match event {
         Some("link.busy") => LinkError::Busy { reason: text("reason").unwrap_or_default(), owner: text("owner").unwrap_or_default() },
@@ -414,12 +427,12 @@ fn refusal(event: Option<&str>, answer: &Value) -> LinkError {
     }
 }
 
-fn parse(line: &str) -> Result<Value, LinkError> {
+pub(crate) fn parse(line: &str) -> Result<Value, LinkError> {
     serde_json::from_str(line).map_err(|_| LinkError::Refused("bad handshake line".to_owned()))
 }
 
 /// Reads one line, byte by byte so nothing after it is taken from the stream.
-async fn read_line<S: AsyncRead + Unpin>(stream: &mut S) -> Result<String, LinkError> {
+pub(crate) async fn read_line<S: AsyncRead + Unpin>(stream: &mut S) -> Result<String, LinkError> {
     let mut line = Vec::new();
     loop {
         let mut byte = [0u8; 1];
@@ -629,7 +642,7 @@ mod tests {
     }
 
     fn advertised(addresses: &[&str], key: Option<[u8; 32]>) -> Advertised {
-        Advertised { addresses: addresses.iter().map(|address| address.parse().unwrap()).collect(), key: key.map(|key| URL_SAFE_NO_PAD.encode(key)) }
+        Advertised { addresses: addresses.iter().map(|address| address.parse().unwrap()).collect(), key: key.map(|key| URL_SAFE_NO_PAD.encode(key)), name: None }
     }
 
     #[test]
@@ -649,7 +662,7 @@ mod tests {
         let found = [
             advertised(&["192.168.1.40:7340"], Some([1; 32])),
             advertised(&["192.168.1.42:7340"], None),
-            Advertised { addresses: vec!["192.168.1.44:7340".parse().unwrap()], key: Some("not a key".to_owned()) },
+            Advertised { addresses: vec!["192.168.1.44:7340".parse().unwrap()], key: Some("not a key".to_owned()), name: None },
         ];
         assert!(pick(&found, &[9; 32]).is_empty());
         assert!(pick(&[], &[9; 32]).is_empty());
