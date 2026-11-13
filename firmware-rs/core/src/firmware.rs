@@ -13,6 +13,7 @@ use vibebuddy_protocol::{Event, ProtocolError, VERSION};
 
 use crate::audio::{ES8311_ADDRESS, Occasion, SAMPLE_RATE, Sound, clamp_volume, VOLUME_DEFAULT};
 use crate::mic;
+use alloc::boxed::Box;
 use crate::buttons::{ButtonEvent, Buttons, Levels};
 use crate::decoration::Decoration;
 use crate::edition::{self, Edition};
@@ -57,6 +58,9 @@ const MERGE_WINDOW_MS: u32 = 15000;
 /// One screenshot line to a computer linked over the network this often: about 33 a second, under the
 /// Relay's 50 messages a second (docs/relay-protocol.md) with room for the box's other output.
 const SNAPSHOT_LINE_MS: u32 = 30;
+/// Look bytes in one `CARD LOOK` line: as base64, 1536 characters, so a line stays under 2 KB.
+const CARD_LOOK_BYTES: usize = 1152;
+const CARD_LINE_BYTES: usize = 10 + CARD_LOOK_BYTES / 3 * 4 + 1;
 
 /// Result of audio init: the codec model (ES8311 or NS4168) on success, or the step it got
 /// stuck at on failure. Either is reported to the Mac as is.
@@ -223,6 +227,13 @@ pub struct Firmware {
     voices: Voices,
     /// The company edition the factory wrote to this box (ADR-0025); None for an ordinary box.
     edition: Option<Edition>,
+    /// The company Character's lines, read from the edition partition, for the card's play button.
+    edition_voices: Option<Box<Voices>>,
+    /// The card going a line at a time to a computer linked over the network, and when the next line is due.
+    card: Option<(alloc::vec::IntoIter<alloc::string::String>, u32)>,
+    /// Copying the company Character's pack back to voices: the next offset to copy (None while erasing), and the
+    /// last percent reported.
+    restore: Option<(Option<u32>, u8)>,
     picker: LinePicker,
     buttons: Option<Buttons>,
     /// The touchscreen's chip, taps so far and when to read it next; None on a box without one.
@@ -406,6 +417,9 @@ impl Firmware {
             display: Display::new(),
             voices: Voices::new(),
             edition: None,
+            edition_voices: None,
+            card: None,
+            restore: None,
             picker: LinePicker::new(seed ^ 0x9E37_79B9),
             buttons: None,
             touch: None,
@@ -507,6 +521,11 @@ impl Firmware {
 
         // Read before the screen starts, so that a boot logo can be its first frame.
         self.edition = find_partition(board.flash(), "edition").and_then(|region| edition::read(board.flash(), region));
+        self.edition_voices = self.edition.map(|edition| {
+            let mut voices = Box::new(Voices::new());
+            let _ = voices.init(board.flash(), Some(edition.pack()));
+            voices
+        });
         let display_ok = board.init_display() && {
             if board.powered_on() && self.edition.and_then(|edition| edition.logo()).is_some_and(|logo| Self::draw_logo(board, logo)) {
                 self.display.hold_splash(now.wrapping_add(LOGO_MS));
@@ -778,13 +797,16 @@ impl Firmware {
             && self.pack_set_aside.is_some_and(|since| board.audio_busy() && (board.now_ms().wrapping_sub(since) as i32) < AUDIO_DRAIN_MS as i32);
         if !draining && self.transfer.erasing().is_some() {
             match self.transfer.erase_step(board.flash()) {
+                Ok(Some(offset)) if self.restore.is_some() => self.restore = self.restore.map(|(_, percent)| (Some(offset), percent)),
                 Ok(Some(offset)) => Self::transfer_reply(board, "xfer.ready", Some(offset)),
                 Ok(None) => {}
+                Err(failure) if self.restore.is_some() => self.restore_failed(board, failure),
                 Err(failure) => Self::transfer_error(board, failure),
             }
             self.after_transfer(board);
             self.show_overlay(board);
         }
+        self.restore_step(board);
         if self.transfer.active() && board.now_ms().wrapping_sub(self.transfer_heard) >= TRANSFER_ABANDONED_MS {
             self.transfer.cancel();
             Self::write_literal(board, "XFER ABANDONED\n");
@@ -810,6 +832,7 @@ impl Firmware {
         }
         self.continue_voice_begin(board);
         self.send_snapshot(board, now);
+        self.send_card(board, now);
         self.tend_mic(board, now);
         self.tend_voice(board, now);
         if self.menu.expire(now) {
@@ -965,6 +988,16 @@ impl Firmware {
         }
         // While a write is about to start, the partition is no longer trusted.
         let pick = if self.pending_voice_begin.is_some() { None } else { self.voices.pick(occasion, &mut self.picker) };
+        self.play_announcement(board, occasion, pick);
+    }
+
+    /// Plays the line picked for an occasion, or the built-in one for None.
+    fn play_announcement<B: Board>(&mut self, board: &mut B, occasion: Occasion, pick: Option<Pick>) {
+        let label = occasion_label(occasion);
+        if self.muted {
+            Self::write_value_line(board, "AUDIO MUTED ", label.as_bytes());
+            return;
+        }
         let (first, then) = match pick {
             Some(Pick { line, chime: Some(chime) }) => (Sound::Chime(chime), Some(Sound::Line(line))),
             Some(Pick { line, chime: None }) => (Sound::Line(line), None),
@@ -2090,6 +2123,15 @@ impl Firmware {
             "device.baud.check" => {}
             // Microphone bring-up (docs/firmware-bringup.md): a diagnostic like the screenshot, so not agent
             // activity. Over the cable only: a recording is hundreds of lines.
+            "device.edition" | "device.edition.preview" | "device.edition.restore" if self.edition.is_none() => {
+                Self::write_literal(board, "ERROR no_edition\n");
+            }
+            "device.edition" => self.edition_card(board),
+            "device.edition.preview" => {
+                let pick = self.edition_voices.as_ref().and_then(|voices| voices.pick(Occasion::Done, &mut self.picker));
+                self.play_announcement(board, Occasion::Done, pick);
+            }
+            "device.edition.restore" => self.start_restore(board),
             "device.mic.record" if self.remote => Self::write_literal(board, "ERROR cable_only\n"),
             "device.mic.record" => self.start_mic(board, fields),
             // Link self-test: send the received string's length and CRC back to the Mac to check for corrupted serial bytes.
@@ -2315,6 +2357,9 @@ impl Firmware {
 
     /// `xfer.*`: a firmware image or a Character pack over any link, in chunks, resumable (ADR-0016, [`crate::transfer`]).
     fn handle_transfer<B: Board>(&mut self, board: &mut B, fields: &BTreeMap<alloc::string::String, Value>, event: &str) {
+        if self.restore.is_some() {
+            return Self::transfer_error(board, transfer::Error::Sequence);
+        }
         self.transfer_heard = board.now_ms();
         match event {
             "xfer.begin" => {
@@ -2372,9 +2417,7 @@ impl Firmware {
                     let id = alloc::string::String::from(self.voices.current_id());
                     let quoted = serde_json::to_string(&id).unwrap_or_default();
                     Self::write_value_line(board, "", alloc::format!(r#"{{"version":1,"event":"xfer.done","voice":{quoted}}}"#).as_bytes());
-                    Self::write_value_line(board, "VOICES ", id.as_bytes());
-                    // As after voice.end: the new voice says it is in.
-                    self.announce(board, Occasion::Done);
+                    self.pack_in(board);
                 }
                 Err(failure) => Self::transfer_error(board, failure),
             },
@@ -2386,6 +2429,141 @@ impl Firmware {
         }
         self.after_transfer(board);
         self.show_overlay(board);
+    }
+
+    /// A new pack is in voices: say which, and let it say it is in, as after voice.end.
+    fn pack_in<B: Board>(&mut self, board: &mut B) {
+        let id = alloc::string::String::from(self.voices.current_id());
+        Self::write_value_line(board, "VOICES ", id.as_bytes());
+        self.announce(board, Occasion::Done);
+    }
+
+    /// `device.edition`: the company Character's card for the App (ADR-0025). Over the cable it goes at once; over the
+    /// network or the Relay a line at a time, as a screenshot does.
+    fn edition_card<B: Board>(&mut self, board: &mut B) {
+        let Some(edition) = self.edition else { return };
+        let mut lines = alloc::vec![
+            alloc::format!("CARD BEGIN {}", edition.id()),
+            alloc::format!("CARD NAME {}", edition.name()),
+            alloc::format!("CARD SUMMARY {}", edition.summary()),
+        ];
+        if let Some((offset, length)) = self.edition_voices.as_ref().and_then(|voices| voices.look()) {
+            let mut look = alloc::vec![0u8; (length as usize).div_ceil(4) * 4];
+            if board.flash().read(offset, &mut look).is_ok() {
+                look.truncate(length as usize);
+                lines.extend(look.chunks(CARD_LOOK_BYTES).map(|piece| alloc::format!("CARD LOOK {}", mic::encode_base64(piece))));
+            }
+        }
+        lines.push(alloc::string::String::from("CARD END"));
+        if self.remote {
+            self.card = Some((lines.into_iter(), board.now_ms()));
+        } else {
+            for mut line in lines {
+                line.push('\n');
+                board.write(line.as_bytes());
+            }
+        }
+    }
+
+    fn send_card<B: Board>(&mut self, board: &mut B, now: u32) {
+        let Some((lines, due)) = &mut self.card else { return };
+        if (now.wrapping_sub(*due) as i32) < 0 || !board.peer_can_take(CARD_LINE_BYTES) {
+            return;
+        }
+        match lines.next() {
+            Some(mut line) => {
+                line.push('\n');
+                board.write(line.as_bytes());
+                *due = now.wrapping_add(SNAPSHOT_LINE_MS);
+            }
+            None => self.card = None,
+        }
+    }
+
+    /// `device.edition.restore`: the company Character's pack goes back into voices, copied by the box itself from the
+    /// edition partition, with the same steps and checks as a Character pack that comes over the link
+    /// ([`crate::transfer`]): a restore cut short leaves the built-in voice, and the next one starts again.
+    fn start_restore<B: Board>(&mut self, board: &mut B) {
+        let Some(pack) = self.edition.map(|edition| edition.pack()) else { return };
+        if self.transfer.active() || self.pending_voice_begin.is_some() || self.voices.writing() {
+            return Self::write_literal(board, "ERROR busy\n");
+        }
+        let Some(sha256) = Self::sha256_of(board.flash(), pack) else {
+            return self.restore_failed(board, transfer::Error::Flash);
+        };
+        match self.transfer.begin(board.flash(), transfer::Kind::Character, pack.size, sha256) {
+            Ok(next) => {
+                Self::write_literal(board, "EDITION RESTORE 0\n");
+                self.restore = Some((next, 0));
+                self.transfer_heard = board.now_ms();
+                if self.pack_set_aside.is_none() {
+                    board.stop_audio();
+                    self.voices.set_aside();
+                    self.pack_set_aside = Some(board.now_ms());
+                    self.load_look(board);
+                }
+            }
+            Err(failure) => self.restore_failed(board, failure),
+        }
+    }
+
+    fn sha256_of(flash: &mut dyn Flash, region: Region) -> Option<[u8; 32]> {
+        use sha2::Digest;
+        let mut hasher = sha2::Sha256::new();
+        let mut block = [0u8; 1024];
+        let mut offset = 0;
+        while offset < region.size {
+            let length = (region.size - offset).min(block.len() as u32);
+            flash.read(region.offset + offset, &mut block[..(length as usize).div_ceil(4) * 4]).ok()?;
+            hasher.update(&block[..length as usize]);
+            offset += length;
+        }
+        Some(hasher.finalize().into())
+    }
+
+    /// One chunk of a restore per main-loop pass, so the box keeps answering; then the same end as a pack transfer.
+    fn restore_step<B: Board>(&mut self, board: &mut B) {
+        let (Some((Some(offset), reported)), Some(pack)) = (self.restore, self.edition.map(|edition| edition.pack())) else {
+            return;
+        };
+        self.transfer_heard = board.now_ms();
+        if offset < pack.size {
+            let mut chunk = alloc::vec![0u8; transfer::CHUNK_BYTES];
+            let length = (pack.size - offset).min(transfer::CHUNK_BYTES as u32) as usize;
+            let next = board
+                .flash()
+                .read(pack.offset + offset, &mut chunk[..length.div_ceil(4) * 4])
+                .map_err(|_| transfer::Error::Flash)
+                .and_then(|()| self.transfer.chunk(board.flash(), offset, &chunk[..length], crc32(0, &chunk[..length])));
+            match next {
+                Ok(next) => {
+                    let percent = (u64::from(next) * 100 / u64::from(pack.size)) as u8 / 10 * 10;
+                    if percent > reported && percent < 100 {
+                        Self::write_value_line(board, "EDITION RESTORE ", text!(4, "{}", percent).as_bytes());
+                    }
+                    self.restore = Some((Some(next), percent.max(reported)));
+                }
+                Err(failure) => self.restore_failed(board, failure),
+            }
+            return;
+        }
+        match self.transfer.end(board.flash()) {
+            Ok(_) => {
+                self.restore = None;
+                self.after_transfer(board);
+                Self::write_literal(board, "EDITION RESTORE 100\n");
+                self.pack_in(board);
+            }
+            Err(failure) => self.restore_failed(board, failure),
+        }
+        self.show_overlay(board);
+    }
+
+    fn restore_failed<B: Board>(&mut self, board: &mut B, failure: transfer::Error) {
+        self.restore = None;
+        self.transfer.cancel();
+        Self::write_value_line(board, "EDITION RESTORE FAILED ", failure.code().as_bytes());
+        self.after_transfer(board);
     }
 
     /// A pack transfer that set the current pack aside has ended, however: load what the partition holds now (the new

@@ -1158,6 +1158,158 @@ fn changing_character_keeps_the_edition() {
     assert!(lines.contains(&"EDITION sample".to_owned()), "{lines:?}");
 }
 
+/// An edition image of this pack, as tools/make_edition.py builds it.
+fn edition_of(pack: &[u8], id: &str, name: &str, summary: &str) -> Vec<u8> {
+    let mut image = vec![0u8; 4096];
+    image[..4].copy_from_slice(b"VBED");
+    image[4..8].copy_from_slice(&1u32.to_le_bytes());
+    image[8..8 + id.len()].copy_from_slice(id.as_bytes());
+    image[40..40 + name.len()].copy_from_slice(name.as_bytes());
+    image[104..104 + summary.len()].copy_from_slice(summary.as_bytes());
+    let crc = voice_pack::crc32(0, &image[..508]);
+    image[508..512].copy_from_slice(&crc.to_le_bytes());
+    image.extend_from_slice(pack);
+    image
+}
+
+/// A box whose edition is the look pack ("looked"), wearing the robot.
+fn look_edition_flash() -> MemoryFlash {
+    let image = edition_of(LOOK_PACK, "looked", "Looked Co", "A Character with a look.");
+    let mut flash = blank_flash();
+    flash.bytes[EDITION_OFFSET..EDITION_OFFSET + image.len()].copy_from_slice(&image);
+    flash
+}
+
+fn decode_base64(text: &str) -> Vec<u8> {
+    let mut out = vec![0u8; text.len()];
+    let length = voice_pack::decode_base64(text.as_bytes(), &mut out).expect("base64");
+    out.truncate(length);
+    out
+}
+
+#[test]
+fn the_edition_card_has_the_name_summary_and_look() {
+    let (mut firmware, mut board, _) = booted(look_edition_flash());
+    let lines = send(&mut firmware, &mut board, r#"{"version":1,"event":"device.edition"}"#);
+    assert_eq!(&lines[..3], ["CARD BEGIN looked", "CARD NAME Looked Co", "CARD SUMMARY A Character with a look."]);
+    assert_eq!(lines.last().unwrap(), "CARD END");
+    let looks: Vec<&str> = lines.iter().filter_map(|line| line.strip_prefix("CARD LOOK ")).collect();
+    assert!(looks.iter().all(|look| look.len() < 2000), "lines under 2 KB");
+    let look = decode_base64(&looks.concat());
+    let at = u32::from_le_bytes(LOOK_PACK[1008..1012].try_into().unwrap()) as usize;
+    let length = u32::from_le_bytes(LOOK_PACK[1012..1016].try_into().unwrap()) as usize;
+    assert_eq!(look, &LOOK_PACK[at..at + length]);
+}
+
+#[test]
+fn the_card_over_the_relay_goes_a_line_at_a_time() {
+    let cable = {
+        let (mut firmware, mut board, _) = booted(look_edition_flash());
+        send(&mut firmware, &mut board, r#"{"version":1,"event":"device.edition"}"#)
+    };
+    // A box the cable isn't talking to: it takes lines from the Relay only then.
+    let (mut firmware, mut board, _) = booted(look_edition_flash());
+    firmware.relay_line(&mut board, br#"{"version":1,"event":"device.edition"}"#);
+    assert!(!board.take_lines().iter().any(|line| line.starts_with("CARD")), "nothing at once");
+    board.peer_full = true;
+    for _ in 0..10 {
+        firmware.poll(&mut board);
+        board.advance(30);
+    }
+    assert!(board.take_lines().is_empty(), "it waits while the network can't take a whole line");
+    board.peer_full = false;
+    let mut lines = Vec::new();
+    for _ in 0..cable.len() + 2 {
+        firmware.poll(&mut board);
+        let new = board.take_lines();
+        assert!(new.len() <= 1, "one line a pass: {new:?}");
+        lines.extend(new);
+        board.advance(30);
+    }
+    assert_eq!(lines, cable);
+}
+
+#[test]
+fn an_edition_without_a_look_sends_no_look_lines() {
+    let (mut firmware, mut board, _) = booted(edition_flash());
+    let lines = send(&mut firmware, &mut board, r#"{"version":1,"event":"device.edition"}"#);
+    assert_eq!(lines, ["CARD BEGIN sample", "CARD NAME Sample Co", "CARD SUMMARY Made for tests.", "CARD END"]);
+}
+
+#[test]
+fn an_ordinary_box_refuses_the_edition_commands() {
+    let (mut firmware, mut board, _) = booted(blank_flash());
+    for event in ["device.edition", "device.edition.preview", "device.edition.restore"] {
+        let lines = send(&mut firmware, &mut board, &format!(r#"{{"version":1,"event":"{event}"}}"#));
+        assert_eq!(lines, ["ERROR no_edition"], "{event}");
+    }
+}
+
+#[test]
+fn the_preview_plays_the_company_characters_done_line_from_the_edition() {
+    let (mut firmware, mut board, _) = booted(look_edition_flash());
+    let lines = send(&mut firmware, &mut board, r#"{"version":1,"event":"device.edition.preview"}"#);
+    assert_eq!(lines, ["AUDIO QUEUED DONE"]);
+    let Some(Sound::Line(line)) = board.played.last() else { panic!("a line: {:?}", board.played) };
+    assert!((EDITION_OFFSET as u32..EDITION_OFFSET as u32 + 0x200000).contains(&line.offset), "from the edition partition");
+    let hello = send(&mut firmware, &mut board, r#"{"version":1,"event":"device.hello"}"#);
+    assert!(hello.contains(&"VOICES builtin".to_owned()), "the box keeps its own Character: {hello:?}");
+}
+
+/// Sends device.edition.restore and runs the main loop until the box has said VOICES; returns all it said.
+fn restore(firmware: &mut Firmware, board: &mut FakeBoard) -> Vec<String> {
+    let mut lines = send(firmware, board, r#"{"version":1,"event":"device.edition.restore"}"#);
+    for _ in 0..2000 {
+        if lines.iter().any(|line| line.starts_with("VOICES ") || line.starts_with("EDITION RESTORE FAILED")) {
+            return lines;
+        }
+        firmware.poll(board);
+        lines.extend(board.take_lines());
+    }
+    panic!("no end to the restore: {lines:?}");
+}
+
+#[test]
+fn restore_brings_the_company_character_back_after_another_was_picked() {
+    let (mut firmware, mut board, _) = booted(look_edition_flash());
+    write_pack(&mut firmware, &mut board, SAMPLE_PACK);
+    let edition = board.flash.bytes[EDITION_OFFSET..EDITION_OFFSET + 0x200000].to_vec();
+    let lines = restore(&mut firmware, &mut board);
+    assert_eq!(lines.first().unwrap(), "EDITION RESTORE 0", "{lines:?}");
+    assert!(lines.contains(&"EDITION RESTORE 100".to_owned()), "{lines:?}");
+    assert!(lines.ends_with(&["VOICES looked".to_owned(), "AUDIO QUEUED DONE".to_owned()]), "{lines:?}");
+    assert!(lines.contains(&"LOOK looked".to_owned()), "it wears the company look: {lines:?}");
+    assert_eq!(&board.flash.bytes[0x410000..0x410000 + LOOK_PACK.len()], LOOK_PACK);
+    assert!(board.flash.bytes[EDITION_OFFSET..EDITION_OFFSET + 0x200000] == edition[..], "the edition is unchanged");
+}
+
+#[test]
+fn an_interrupted_restore_leaves_the_built_in_voice_and_a_second_one_works() {
+    let (mut firmware, mut board, _) = booted(look_edition_flash());
+    write_pack(&mut firmware, &mut board, SAMPLE_PACK);
+    send(&mut firmware, &mut board, r#"{"version":1,"event":"device.edition.restore"}"#);
+    // The block is erased and the first chunk copied; the pack has three.
+    for _ in 0..2 {
+        firmware.poll(&mut board);
+    }
+    let lines = board.take_lines();
+    assert!(!lines.iter().any(|line| line.starts_with("VOICES")), "not done yet: {lines:?}");
+    // The power goes.
+    let (mut firmware, mut board, lines) = booted(board.flash);
+    assert!(lines.contains(&"VOICES builtin".to_owned()), "{lines:?}");
+    let lines = restore(&mut firmware, &mut board);
+    assert!(lines.contains(&"VOICES looked".to_owned()), "{lines:?}");
+}
+
+#[test]
+fn a_restore_waits_for_no_other_transfer() {
+    let (mut firmware, mut board, _) = booted(look_edition_flash());
+    let begin = format!(r#"{{"version":1,"event":"xfer.begin","kind":"character","size":{},"sha256":"{}"}}"#, SAMPLE_PACK.len(), "00".repeat(32));
+    send(&mut firmware, &mut board, &begin);
+    let lines = send(&mut firmware, &mut board, r#"{"version":1,"event":"device.edition.restore"}"#);
+    assert_eq!(lines, ["ERROR busy"]);
+}
+
 #[test]
 fn a_box_without_the_link_partition_has_no_key() {
     let mut flash = blank_flash();
