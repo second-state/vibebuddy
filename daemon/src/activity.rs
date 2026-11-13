@@ -393,6 +393,14 @@ impl ActivityTracker {
         current
     }
 
+    /// The whole screen as it is now, for a VibePlay that just connected (ADR-0025). Like [`Self::current_screen`]
+    /// it never speaks, but it leaves the box's dedup alone: the box didn't get it.
+    pub fn viewer_screen(&self) -> Event {
+        let mut current = self.activity_snapshot().unwrap_or_else(|| event("agent.idle", "", ""));
+        current.extra.insert("suppress_audio".to_owned(), json!(true));
+        current
+    }
+
     /// Remember the activity whose end was just announced, so K2 can still return to it shortly afterwards.
     fn remember_announced(&mut self, activity: Activity) {
         if let Some(source) = activity.source {

@@ -23,6 +23,8 @@ public struct BoxPicture: Equatable {
     public var daemonAlive: Bool
     /// How the box is linked; nil without a link.
     public var link: Link?
+    /// Without a link, the computer that has the box instead: its name, or empty when the box didn't say.
+    public var awayWith: String?
     /// `duty`, `pomodoro` or `leisure`, as the box last said.
     public var mode: String?
     /// The newest three, as the box's first page shows them.
@@ -40,6 +42,7 @@ public struct BoxPicture: Equatable {
         let device = status?.device
         let linked = daemonAlive && device?.connected == true
         let link: Link? = !linked ? nil : device?.relay == true ? .relay : device?.network == true ? .lan : .usb
+        let awayWith = daemonAlive && !linked ? device?.busy?.owner : nil
         let mood: Mood
         if !linked {
             mood = .noLink
@@ -57,7 +60,7 @@ public struct BoxPicture: Equatable {
         let tickets = activities.prefix(ticketsShown).map {
             Ticket(icon: icon(forAgent: $0.agent), title: cardTitle($0.title), needsInput: $0.state == "needs_input")
         }
-        return BoxPicture(mood: mood, daemonAlive: daemonAlive, link: link, mode: device?.mode, tickets: Array(tickets),
+        return BoxPicture(mood: mood, daemonAlive: daemonAlive, link: link, awayWith: awayWith, mode: device?.mode, tickets: Array(tickets),
                           activityCount: activities.count, today: status?.today ?? TodaySummary(done: 0, asks: 0, busySeconds: 0),
                           firmwareVersion: device?.firmwareVersion)
     }

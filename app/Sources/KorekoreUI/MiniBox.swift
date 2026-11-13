@@ -38,13 +38,19 @@ public struct MiniBox: View {
         }
     }
 
-    /// No link: the whole screen gray, Kore asleep and grayed at scale 6 (README, "No link").
+    /// No link: the whole screen gray, Kore asleep and grayed at scale 6 (README, "No link"). A box that is with
+    /// another computer isn't waiting for this one, so it reads as away, not as asleep.
     private var asleep: some View {
         VStack(spacing: 6) {
             Text(verbatim: "Z z").font(.pixel(14)).foregroundStyle(Theme.Colors.mist)
             Sprite(name: "kore-sleep", scale: 6, gray: true)
-            Text(verbatim: "NO LINK").font(.pixel(Theme.Typography.boxState.size)).foregroundStyle(Theme.Colors.mist)
-            Text(verbatim: "waiting for the Mac").font(.pixel(11)).foregroundStyle(Theme.Colors.mistText)
+            if let owner = picture.awayWith {
+                Text(verbatim: "AWAY").font(.pixel(Theme.Typography.boxState.size)).foregroundStyle(Theme.Colors.mist)
+                Text(verbatim: owner.isEmpty ? "with another computer" : "with \(owner)").font(.pixel(11)).foregroundStyle(Theme.Colors.mistText)
+            } else {
+                Text(verbatim: "NO LINK").font(.pixel(Theme.Typography.boxState.size)).foregroundStyle(Theme.Colors.mist)
+                Text(verbatim: "waiting for the Mac").font(.pixel(11)).foregroundStyle(Theme.Colors.mistText)
+            }
         }
         .frame(width: 320, height: 240)
         .background(Theme.Colors.boxGrayGround)

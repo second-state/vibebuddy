@@ -18,35 +18,6 @@ struct KorekoreGeneralPage: View {
                               color: Theme.Colors.ink)
                     }
                 }
-                KorekoreAccountCard(model: model)
-                Text("This Mac").font(.rounded(15)).padding(.leading, 4)
-                KRows {
-                    KRow(String(localized: "Language")) {
-                        // The dialog runs after this update rather than as a nested modal loop inside the menu's action.
-                        KMenu(selection: language, options: [(.system, String(localized: "System")), (.en, "English"), (.zhHans, "简体中文")]) { choice in
-                            DispatchQueue.main.async { change(to: choice) }
-                        }
-                    }
-                    KDivider()
-                    KRow(String(localized: "Launch at login")) {
-                        KToggle(String(localized: "Launch at login"), isOn: Binding(get: { model.launchAtLogin }, set: { model.setLaunchAtLogin($0) }))
-                    }
-                    KDivider()
-                    KRow(String(localized: "Tell me when the box disconnects or the daemon fails")) {
-                        KToggle(String(localized: "Tell me when the box disconnects or the daemon fails"),
-                                isOn: Binding(get: { model.status?.config.notifyLink ?? true }, set: { model.setNotifyLink($0) }))
-                            .disabled(model.status == nil)
-                    }
-                    // ADR-0012: the Relay carries the box's messages through VibeBuddy's server, so it can be turned off.
-                    if AccountPlan.shown {
-                        KDivider()
-                        KRow(String(localized: "Reach the box through the Relay when it's away from this Mac")) {
-                            KToggle(String(localized: "Reach the box through the Relay when it's away from this Mac"),
-                                    isOn: Binding(get: { model.status?.config.relay ?? true }, set: { model.setRelay($0) }))
-                                .disabled(model.status == nil)
-                        }
-                    }
-                }
                 Text("Updates").font(.rounded(15)).padding(.leading, 4)
                 KRows {
                     KRow(String(localized: "Check for updates")) {
@@ -69,6 +40,35 @@ struct KorekoreGeneralPage: View {
                     }
                     .padding(.vertical, 12)
                     .padding(.horizontal, 16)
+                }
+                KorekoreAccountCard(model: model)
+                Text("This Mac").font(.rounded(15)).padding(.leading, 4)
+                KRows {
+                    KRow(String(localized: "Language")) {
+                        // The dialog runs after this update rather than as a nested modal loop inside the menu's action.
+                        KMenu(selection: language, options: [(.system, String(localized: "System")), (.en, "English"), (.zhHans, "简体中文")]) { choice in
+                            DispatchQueue.main.async { change(to: choice) }
+                        }
+                    }
+                    KDivider()
+                    KRow(String(localized: "Launch at login")) {
+                        KToggle(String(localized: "Launch at login"), isOn: Binding(get: { model.launchAtLogin }, set: { model.setLaunchAtLogin($0) }))
+                    }
+                    KDivider()
+                    KRow(String(localized: "Tell me when the box disconnects or the daemon fails")) {
+                        KToggle(String(localized: "Tell me when the box disconnects or the daemon fails"),
+                                isOn: Binding(get: { model.status?.config.notifyLink ?? true }, set: { model.setNotifyLink($0) }))
+                            .disabled(model.status == nil)
+                    }
+                    // ADR-0012: the Relay carries the box's messages through VibeBuddy's server, so it can be turned off.
+                    if model.status?.account?.showsRelaySwitch == true {
+                        KDivider()
+                        KRow(String(localized: "Reach the box through the Relay when it's away from this Mac")) {
+                            KToggle(String(localized: "Reach the box through the Relay when it's away from this Mac"),
+                                    isOn: Binding(get: { model.status?.config.relay ?? true }, set: { model.setRelay($0) }))
+                                .disabled(model.status == nil)
+                        }
+                    }
                 }
                 KCard(padding: EdgeInsets(top: 14, leading: 16, bottom: 14, trailing: 16)) {
                     HStack(spacing: 14) {

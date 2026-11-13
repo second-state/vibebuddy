@@ -82,11 +82,10 @@ done
 cp -R "${app_dir}/Localization/zh-Hans.lproj" "${contents}/Resources/zh-Hant.lproj"
 
 echo "== App icon"
-# The menu bar pixel face is rendered into the app icon from the same source; the face is defined once, in PixelFace.swift.
-icon_tool="${app_dir}/.build/make-app-icon"
-swiftc -O "${app_dir}/Sources/VibeBuddy/PixelFace.swift" "${app_dir}/scripts/make-app-icon.swift" -o "${icon_tool}" 2>&1 | grep -v "warning:" || true
-[[ -x "${icon_tool}" ]] || { echo "failed to compile the icon generator" >&2; exit 1; }
-"${icon_tool}" "${app_dir}/build/AppIcon.iconset"
+# The bundle's icon is the Dock icon the app draws (KorekoreAppIcon), so Finder and the DMG show the same one.
+swift build --package-path "${app_dir}" -c release --product MakeAppIcon
+rm -rf "${app_dir}/build/AppIcon.iconset"
+"${app_dir}/.build/release/MakeAppIcon" "${app_dir}/build/AppIcon.iconset"
 iconutil -c icns "${app_dir}/build/AppIcon.iconset" -o "${contents}/Resources/AppIcon.icns"
 cp "${repo_root}/target/release/vibebuddyd" "${contents}/MacOS/vibebuddyd"
 cp "${repo_root}/target/release/vibebuddy-hook" "${contents}/MacOS/vibebuddy-hook"

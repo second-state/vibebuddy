@@ -78,7 +78,7 @@ public struct KorekoreConversationPage: View {
             KRow(String(localized: "Voice commands"),
                  detail: latest?.forced == true
                      ? String(localized: "On while the daemon runs with VIBEBUDDY_RESIDENT_SESSION=1.")
-                     : String(localized: "Hold K0 on the box and ask. Codex or Claude Code on this computer answers, with your own account or key, and the buddy speaks the reply. Your voice goes to VibeBuddy's speech service.")) {
+                     : String(localized: "Hold K0 on the box and ask. Codex or Claude Code on this computer answers, with your own account or key, and the buddy speaks the reply. Your voice goes to VibeBuddy's voice service, or to Groq with your own key.")) {
                 HStack(spacing: 10) {
                     KTag(String(localized: "Beta"), color: Theme.Colors.korePinkText)
                     KToggle(String(localized: "Voice commands"), isOn: Binding(
