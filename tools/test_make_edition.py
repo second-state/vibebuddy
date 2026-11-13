@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import importlib.util
 import struct
 import tempfile
 import unittest
@@ -68,6 +69,7 @@ class EditionImage(unittest.TestCase):
         counts = [struct.unpack_from("<H", runs, at)[0] for at in range(0, len(runs), 4)]
         self.assertEqual(counts, [65535, 320 * 240 - 65535])
 
+    @unittest.skipUnless(importlib.util.find_spec("PIL"), "needs Pillow, as a logo does")
     def test_an_image_is_fitted_to_the_screen(self) -> None:
         from PIL import Image
 
