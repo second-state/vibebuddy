@@ -2399,7 +2399,6 @@ impl Firmware {
         self.load_look(board);
     }
 
-    /// `EDITION <id>` on a box of a company edition, nothing on an ordinary box.
     /// Draws the boot logo into the frame and presents it; false, with nothing presented, if it isn't a whole logo.
     fn draw_logo<B: Board>(board: &mut B, logo: Region) -> bool {
         let mut header = [0u8; 8];
@@ -2424,6 +2423,7 @@ impl Firmware {
         decoder.done(board.frame()) && board.present().is_ok()
     }
 
+    /// `EDITION <id>` on a box of a company edition, nothing on an ordinary box.
     fn announce_edition<B: Board>(&self, board: &mut B) {
         if let Some(edition) = &self.edition {
             Self::write_value_line(board, "EDITION ", edition.id().as_bytes());
