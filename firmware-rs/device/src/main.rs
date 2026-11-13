@@ -294,6 +294,12 @@ impl Board for DeviceBoard {
         self.restart = true;
     }
 
+    /// On a real box a cable plugged in is `ChipPowerOn`, and each time a computer opens the USB port it is
+    /// `CoreUsbUart` (#251).
+    fn powered_on(&self) -> bool {
+        esp_hal::system::reset_reason() == Some(esp_hal::rtc_cntl::SocResetReason::ChipPowerOn)
+    }
+
     /// Says `BAUD SWITCH <rate>` at the current rate, then moves once it is out; a whole line at the new rate keeps
     /// it (see the main loop).
     fn set_uart_rate(&mut self, rate: u32) {

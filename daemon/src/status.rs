@@ -55,6 +55,9 @@ pub struct DeviceState {
     /// The decoration the box draws over its screens, `off`, `thanksgiving` or `christmas` (ADR-0022), stored on the device; None
     /// from firmware that predates decorations.
     pub decoration: Option<String>,
+    /// The company edition the box is (`EDITION <id>`, ADR-0025); None for an ordinary box, other firmware, or while no
+    /// box is connected.
+    pub edition: Option<Edition>,
     /// The connected port's USB serial number, which tells this device from another ESP32-S3.
     pub usb_serial: Option<String>,
     /// The box's public key, its id on the Relay (ADR-0012); None for firmware that can't pair.
@@ -113,6 +116,12 @@ pub struct SeenNetwork {
     pub rssi: i32,
 }
 
+/// A company edition, as the box reports it.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+pub struct Edition {
+    pub id: String,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct PairedComputer {
     pub key: String,
@@ -160,6 +169,7 @@ impl DeviceState {
                 self.volume = None;
                 self.screens = None;
                 self.decoration = None;
+                self.edition = None;
                 self.box_key = None;
                 self.paired = false;
                 self.paired_computers.clear();
@@ -206,6 +216,7 @@ impl DeviceState {
                 self.volume = None;
                 self.screens = None;
                 self.decoration = None;
+                self.edition = None;
                 self.box_key = None;
                 self.paired = false;
                 self.paired_computers.clear();
@@ -223,6 +234,8 @@ impl DeviceState {
                 self.network = false;
                 self.relay = false;
                 self.foreign_firmware = false;
+                // Unlike the rest, cleared at once: the App offers the company Character only on the box in front of it.
+                self.edition = None;
             }
             DeviceMessage::Line(line) => {
                 if let Some(mode) = line.strip_prefix("MODE ") {
@@ -239,6 +252,7 @@ impl DeviceState {
                     // The box reports these after the build, each time it reports its state.
                     self.transfer = false;
                     self.rolled_back = false;
+                    self.edition = None;
                 } else if line.trim() == "TRANSFER 1" {
                     self.transfer = true;
                 } else if line.trim() == "FIRMWARE ROLLED BACK" {
@@ -341,6 +355,12 @@ impl DeviceState {
                     let screens = screens.trim().to_ascii_lowercase();
                     if screens == "robot" || screens == "korekore" {
                         self.screens = Some(screens);
+                    }
+                } else if let Some(id) = line.strip_prefix("EDITION ") {
+                    // Only the bare id; other EDITION lines carry more than one word.
+                    let id = id.trim();
+                    if !id.is_empty() && !id.contains(' ') {
+                        self.edition = Some(Edition { id: id.to_owned() });
                     }
                 } else if let Some(decoration) = line.strip_prefix("DECORATION ") {
                     let decoration = decoration.trim().to_ascii_lowercase();
@@ -523,6 +543,7 @@ mod tests {
                 volume: Some(65),
                 screens: Some("korekore".to_owned()),
                 decoration: Some("christmas".to_owned()),
+                edition: None,
                 usb_serial: None,
                 box_key: None,
                 paired: false,
@@ -542,6 +563,28 @@ mod tests {
                 candidates: Vec::new(),
             }
         );
+    }
+
+    #[test]
+    fn a_company_edition_box_says_which_edition_it_is() {
+        let mut state = DeviceState::default();
+        state.apply(&DeviceMessage::Connected { port: "/dev/cu.x".to_owned(), bridge: false, usb_serial: None });
+        state.apply(&line("DISPLAY READY BUILD 21a8360 2026-11-07 10:00"));
+        state.apply(&line("VOICES acme"));
+        assert_eq!(state.edition, None, "no EDITION line: an ordinary box");
+        assert!(state.apply(&line("EDITION acme")));
+        assert_eq!(state.edition, Some(Edition { id: "acme".to_owned() }));
+        assert_eq!(serde_json::to_value(&state).unwrap()["edition"], serde_json::json!({"id": "acme"}));
+        assert!(!state.apply(&line("EDITION BEGIN acme")), "a line that isn't the edition id changes nothing");
+        // Each full report starts with the build again; the edition follows it, or doesn't.
+        state.apply(&line("DISPLAY READY BUILD 21a8360 2026-11-07 10:00"));
+        assert_eq!(state.edition, None);
+        state.apply(&line("EDITION acme"));
+        state.apply(&DeviceMessage::Disconnected);
+        assert_eq!(state.edition, None, "a disconnect clears it");
+        state.apply(&line("EDITION acme"));
+        state.apply(&DeviceMessage::ForeignFirmware);
+        assert_eq!(state.edition, None, "other firmware has no edition");
     }
 
     #[test]
