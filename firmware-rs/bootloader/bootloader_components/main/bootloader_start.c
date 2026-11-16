@@ -1,6 +1,6 @@
 /*
  * Vibe Buddy's second-stage bootloader: ESP-IDF's bootloader_start.c (v6.0.1), with one change to how it picks the
- * app. A box can carry Muse next to Vibe Buddy (docs/muse.md). The boot_sel partition says which of the two boots,
+ * app. A box can carry Muse next to Vibe Buddy. The boot_sel partition says which of the two boots,
  * and holding K2 at reset toggles it. Neither app knows about the other: only this file does. The before- and
  * after-init hooks are left out: their header lives in the main component this one replaces, and nothing uses them.
  *
