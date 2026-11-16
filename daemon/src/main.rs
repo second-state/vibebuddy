@@ -41,7 +41,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 
-use activity::{ActivitySource, ActivityTracker};
+use activity::ActivityTracker;
 use axum::body::Bytes;
 use axum::extract::{DefaultBodyLimit, State};
 use axum::http::StatusCode;
@@ -713,8 +713,10 @@ async fn open_k2_source(state: &AppState) {
             return;
         }
         for source in sources {
-            // Check a Codex thread still exists first: opening a missing thread gives a blank session.
-            if let ActivitySource::Codex { thread_id, .. } = &source
+            // Check a Codex thread still exists first: opening a missing thread by its link gives a blank session.
+            // A source focused by its window doesn't need the thread, and on Windows the database may not know it:
+            // a WSL session's database is on the Linux side.
+            if let Some(thread_id) = source_opener::codex_thread_link(&source)
                 && state.titles.lock().await.codex_thread_known(thread_id) == Some(false)
             {
                 warn!(%thread_id, "K2 skipped a Codex thread that no longer exists");

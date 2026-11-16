@@ -17,11 +17,23 @@ const ALLOWED_FIELDS: [&str; 4] = ["session_id", "turn_id", "hook_event_name", "
 
 /// session_meta from the transcript's first line; treated as absent if it can't be read.
 fn transcript_meta(path: &str) -> Option<Map<String, Value>> {
-    let file = std::fs::File::open(path).ok()?;
+    let windows = cfg!(windows).then(|| windows_path(path)).flatten();
+    let file = std::fs::File::open(windows.as_deref().unwrap_or(path)).ok()?;
     let mut first_line = String::new();
     std::io::BufRead::read_line(&mut std::io::BufReader::new(file), &mut first_line).ok()?;
     let value: Value = serde_json::from_str(&first_line).ok()?;
     value.get("payload")?.as_object().cloned()
+}
+
+/// Codex in a WSL workspace names the transcript as Linux sees it (`/mnt/c/Users/…`), but this hook runs on the
+/// Windows side: the same file is `C:\Users\…` here. None for any other path.
+fn windows_path(path: &str) -> Option<String> {
+    let rest = path.strip_prefix("/mnt/")?;
+    let (drive, rest) = rest.split_once('/')?;
+    let [drive] = drive.as_bytes() else { return None };
+    drive
+        .is_ascii_alphabetic()
+        .then(|| format!("{}:\\{}", drive.to_ascii_uppercase() as char, rest.replace('/', "\\")))
 }
 
 /// Maps a subagent's lifecycle session to the parent session the desktop app can open.
@@ -64,6 +76,9 @@ pub fn sanitized_payload(source: &Value) -> Option<Map<String, Value>> {
     if let Some(thread_id) = navigable_thread_id(source) {
         payload.insert("thread_id".to_owned(), Value::String(thread_id));
     }
+    // Only whether there is one, never the path: Codex's background sessions after a turn have none.
+    let has_transcript = source.get("transcript_path").and_then(Value::as_str).is_some();
+    payload.insert("has_transcript".to_owned(), Value::Bool(has_transcript));
     if payload.get("hook_event_name").and_then(Value::as_str) == Some("Stop")
         && requires_user_input(source.get("last_assistant_message").and_then(Value::as_str))
     {
@@ -170,6 +185,30 @@ mod tests {
         let payload = sanitized_payload(&source).expect("should have a payload");
         assert_eq!(payload["thread_id"], "user-session");
         assert!(!payload.contains_key("transcript_path"));
+        assert_eq!(payload["has_transcript"], true);
+    }
+
+    #[test]
+    fn a_background_session_says_it_has_no_transcript() {
+        let source = serde_json::json!({
+            "session_id": "background",
+            "hook_event_name": "UserPromptSubmit",
+            "cwd": "/work/vibe-buddy",
+        });
+        let payload = sanitized_payload(&source).expect("should have a payload");
+        assert_eq!(payload["has_transcript"], false);
+    }
+
+    #[test]
+    fn a_wsl_transcript_path_is_read_from_its_windows_drive() {
+        assert_eq!(
+            windows_path("/mnt/c/Users/Some One/.codex/sessions/rollout-1.jsonl").as_deref(),
+            Some(r"C:\Users\Some One\.codex\sessions\rollout-1.jsonl")
+        );
+        assert_eq!(windows_path("/mnt/d/x.jsonl").as_deref(), Some(r"D:\x.jsonl"));
+        assert_eq!(windows_path("/home/me/.codex/rollout.jsonl"), None);
+        assert_eq!(windows_path("/mnt/wsl/x.jsonl"), None);
+        assert_eq!(windows_path(r"C:\Users\me\rollout.jsonl"), None);
     }
 
     #[test]
