@@ -384,7 +384,7 @@ pub fn blank_otadata(table: &[u8]) -> Option<Segment> {
 }
 
 /// The boot_sel partition in a partition table image, as a blank segment: writing it makes the bootloader boot
-/// Vibe Buddy rather than Muse, which a user may have flashed next to it. None for a table without one.
+/// VibeBuddy rather than Muse, which a user may have flashed next to it. None for a table without one.
 pub fn blank_boot_sel(table: &[u8]) -> Option<Segment> {
     const ENTRY: usize = 32;
     const MAGIC: [u8; 2] = [0xAA, 0x50];
