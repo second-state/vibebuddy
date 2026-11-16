@@ -12,7 +12,7 @@ use vibebuddy_protocol::{Event, VERSION};
 
 use crate::occasions;
 use serde::{Deserialize, Serialize};
-use serde_json::json;
+use serde_json::{Value, json};
 
 /// Two pages of three on the box; six cards keep the line well under the box's 1024 bytes (#155).
 const MAX_VISIBLE_TASKS: usize = 6;
@@ -290,6 +290,13 @@ struct StoredStats {
     last_activity: Option<NaiveDateTime>,
 }
 
+/// An ended activity's card: its key, the activity as it ended, and how it ended (`done` or `failed`).
+struct AnnouncedCard {
+    key: String,
+    activity: Activity,
+    status: &'static str,
+}
+
 #[derive(Default)]
 pub struct ActivityTracker {
     activities: HashMap<String, Activity>,
@@ -304,6 +311,9 @@ pub struct ActivityTracker {
     /// replaces it — expiring it by wall clock is wrong: this device is useful precisely when the user is away from
     /// the computer, and after fetching a glass of water the destination shouldn't have drifted away.
     recently_announced: Option<ActivitySource>,
+    /// The card of the activity whose end was announced most recently. The end announcement shows it (the box's
+    /// done or failed screen draws it as the ticket), and a tap on it must still open that activity.
+    announced_card: Option<AnnouncedCard>,
     /// Project roots agents worked in recently, with the last time each was seen.
     workspaces: HashMap<PathBuf, Instant>,
     /// Project name for each activity. The title's first line goes to the session name; the project name moves to the second line.
@@ -402,10 +412,11 @@ impl ActivityTracker {
     }
 
     /// Remember the activity whose end was just announced, so K2 can still return to it shortly afterwards.
-    fn remember_announced(&mut self, activity: Activity) {
-        if let Some(source) = activity.source {
-            self.recently_announced = Some(source);
+    fn remember_announced(&mut self, key: &str, activity: Activity, status: &'static str) {
+        if let Some(source) = &activity.source {
+            self.recently_announced = Some(source.clone());
         }
+        self.announced_card = Some(AnnouncedCard { key: key.to_owned(), activity, status });
     }
 
     /// K2's destination. Same source as the screen's main state, plus one rule: the activity most recently announced
@@ -493,7 +504,7 @@ impl ActivityTracker {
             return self.visible_activity();
         }
         self.remember_ended(&id.key, &finished, Ending::Done, Instant::now());
-        self.remember_announced(finished);
+        self.remember_announced(&id.key, finished, "done");
         self.sync_busy();
         self.record(|stats| stats.done += 1);
         let mut announced = self.announce_end("task.done", id, title, "done")?;
@@ -570,7 +581,7 @@ impl ActivityTracker {
             return self.visible_activity();
         };
         self.remember_ended(&id.key, &failed, Ending::Failed, Instant::now());
-        self.remember_announced(failed);
+        self.remember_announced(&id.key, failed, "failed");
         self.sync_busy();
         self.announce_end("task.error", id, title, "failed")
     }
@@ -727,33 +738,43 @@ impl ActivityTracker {
 
     /// Attach the current card stack to the event. End announcements carry it too: while hearing "done",
     /// the user should see what's still running.
+    ///
+    /// The announcement of an end that the screen shows (`task.done`, `task.error`) puts the ended activity's card
+    /// first, as `done` or `failed`: the box draws it on that screen, and a tap on it opens that activity. The box
+    /// drops the card itself when it settles.
     fn attach_tasks(&self, visible: &mut Event) {
-        let activities = self.card_order();
-        visible.extra.insert("tasks_total".to_owned(), json!(activities.len()));
-        visible.extra.insert(
-            "tasks".to_owned(),
-            json!(
-                activities
-                    .into_iter()
-                    .take(MAX_VISIBLE_TASKS)
-                    .map(|(key, activity)| {
-                        let mut task = json!({
-                            "id": card_id(key),
-                            "agent": agent_of(activity.source.as_ref()),
-                            "title": activity.title,
-                            "status": match activity.status {
-                                ActivityStatus::Working => "working",
-                                ActivityStatus::InputRequired => "input_required",
-                            },
-                        });
-                        if let Some(project) = self.projects.get(key) {
-                            task["project"] = json!(project);
-                        }
-                        task
-                    })
-                    .collect::<Vec<_>>()
-            ),
-        );
+        let ended = self.announced_card.as_ref().filter(|ended| {
+            matches!(visible.event.as_str(), "task.done" | "task.error")
+                && visible.extra.get("announcement_id").and_then(Value::as_str) == Some(ended.key.as_str())
+        });
+        let ended = ended.map(|ended| self.card(&ended.key, &ended.activity, ended.status));
+        let running: Vec<Value> = self
+            .card_order()
+            .into_iter()
+            .map(|(key, activity)| {
+                let status = match activity.status {
+                    ActivityStatus::Working => "working",
+                    ActivityStatus::InputRequired => "input_required",
+                };
+                self.card(key, activity, status)
+            })
+            .collect();
+        let cards: Vec<Value> = ended.into_iter().chain(running).collect();
+        visible.extra.insert("tasks_total".to_owned(), json!(cards.len()));
+        visible.extra.insert("tasks".to_owned(), json!(cards.into_iter().take(MAX_VISIBLE_TASKS).collect::<Vec<_>>()));
+    }
+
+    fn card(&self, key: &str, activity: &Activity, status: &str) -> Value {
+        let mut task = json!({
+            "id": card_id(key),
+            "agent": agent_of(activity.source.as_ref()),
+            "title": activity.title,
+            "status": status,
+        });
+        if let Some(project) = self.projects.get(key) {
+            task["project"] = json!(project);
+        }
+        task
     }
 
     /// The cards' order: those waiting for an answer first, since they need the user, then the most recently active.
@@ -786,13 +807,13 @@ impl ActivityTracker {
             ),
             None => event(event_name, &id.session_id, title),
         };
-        self.attach_tasks(&mut announced);
         announced
             .extra
             .insert("announcement".to_owned(), json!(announcement));
         announced
             .extra
             .insert("announcement_id".to_owned(), json!(id.key));
+        self.attach_tasks(&mut announced);
         // The screen is now showing this announcement. The next event must be able to refresh it back to the current task, so
         // this frame can't be the dedup baseline — otherwise the next unchanged frame would be swallowed and the screen stuck here.
         self.last_visible = None;
@@ -817,10 +838,16 @@ impl ActivityTracker {
         })
     }
 
-    /// Where a tapped card leads (ADR-0019): the source of the activity whose `card_id` the box named. None when
-    /// that activity has ended since, or has no source to open.
+    /// Where a tapped card leads (ADR-0019): the source of the activity whose `card_id` the box named, or of the one
+    /// whose end was announced last, whose card the done or failed screen shows. None when that activity has ended
+    /// otherwise, or has no source to open.
     pub fn card_source(&self, card: &str) -> Option<ActivitySource> {
-        self.activities.iter().find(|(key, _)| card_id(key) == card).and_then(|(_, activity)| activity.source.clone())
+        let ended = self.announced_card.as_ref().map(|ended| (&ended.key, &ended.activity));
+        self.activities
+            .iter()
+            .chain(ended)
+            .find(|(key, _)| card_id(key) == card)
+            .and_then(|(_, activity)| activity.source.clone())
     }
 
     /// Stamp the fields that only mean something at send time: card timers and today's stats.
@@ -835,7 +862,6 @@ impl ActivityTracker {
             .insert("stats".to_owned(), json!(self.stats_lines()));
 
         let now = Instant::now();
-        let activities = self.card_order().into_iter().map(|(_, activity)| activity);
         let Some(tasks) = event
             .extra
             .get_mut("tasks")
@@ -843,8 +869,17 @@ impl ActivityTracker {
         else {
             return;
         };
-        for (task, activity) in tasks.iter_mut().zip(activities) {
+        // By id: an end announcement's first card is the ended activity, which has no timer left.
+        for task in tasks.iter_mut() {
             let Some(task) = task.as_object_mut() else {
+                continue;
+            };
+            let Some(activity) = task
+                .get("id")
+                .and_then(Value::as_str)
+                .and_then(|id| self.activities.iter().find(|(key, _)| card_id(key) == id))
+                .map(|(_, activity)| activity)
+            else {
                 continue;
             };
             task.insert(
@@ -1327,6 +1362,52 @@ mod tests {
         assert_eq!(tracker.card_source(older_card), Some(codex));
         assert_eq!(tracker.card_source(tasks[0]["id"].as_str().unwrap()), None, "no source to open");
         assert_eq!(tracker.card_source("00000000"), None, "gone, or never there");
+    }
+
+    #[test]
+    fn the_done_screen_shows_the_ended_card_and_a_tap_on_it_opens_that_activity() {
+        let mut tracker = ActivityTracker::default();
+        let codex = |thread: &str| ActivitySource::Codex { thread_id: thread.to_owned(), surface: Surface::default() };
+        let ended = id("ended", "ended:1");
+        tracker.observe(&ended, "CX:ENDED", ActivityStatus::Working);
+        tracker.associate_source(&ended, codex("ended"));
+        let running = id("running", "running:1");
+        tracker.observe(&running, "CX:RUNNING", ActivityStatus::Working);
+        tracker.associate_source(&running, codex("running"));
+
+        let mut done = tracker.finish(&ended, "CX:ENDED").expect("the end is announced");
+        tracker.refresh_cards(&mut done);
+        tracker.stamp_live_fields(&mut done);
+        let tasks = done.extra["tasks"].as_array().expect("cards");
+        let cards: Vec<(&str, &str)> =
+            tasks.iter().map(|task| (task["title"].as_str().unwrap(), task["status"].as_str().unwrap())).collect();
+        assert_eq!(cards, [("CX:ENDED", "done"), ("CX:RUNNING", "working")]);
+        assert_eq!(done.extra["tasks_total"], 2);
+        assert!(tasks[0].get("elapsed_s").is_none(), "the ended card has no timer left");
+        assert!(tasks[1].get("elapsed_s").is_some(), "the running card keeps its own timer");
+        assert_eq!(tracker.card_source(&card_id("ended:1")), Some(codex("ended")), "the tapped ticket, not the running card");
+        assert_eq!(tracker.card_source(&card_id("running:1")), Some(codex("running")));
+
+        // The next screen without an announcement has no ended card; the next end replaces the one to open.
+        let screen = tracker.activity_snapshot().expect("one still runs");
+        assert_eq!(screen.extra["tasks"].as_array().map(Vec::len), Some(1));
+        tracker.fail(&running, "CX:RUNNING").expect("the failure is announced");
+        assert_eq!(tracker.card_source(&card_id("ended:1")), None);
+        assert_eq!(tracker.card_source(&card_id("running:1")), Some(codex("running")));
+    }
+
+    #[test]
+    fn an_end_announced_under_a_question_adds_no_ended_card() {
+        let mut tracker = ActivityTracker::default();
+        let ended = id("ended", "ended:1");
+        tracker.observe(&ended, "CX:ENDED", ActivityStatus::Working);
+        tracker.require_input(&id("asking", "asking:1"), "CX:ASKING");
+        let announced = tracker.finish(&ended, "CX:ENDED").expect("the end is announced");
+        // The screen stays on the question, so the box draws no done ticket and keeps no ended card.
+        assert_eq!(announced.event, "agent.input_required");
+        let titles: Vec<&str> =
+            announced.extra["tasks"].as_array().unwrap().iter().map(|task| task["title"].as_str().unwrap()).collect();
+        assert_eq!(titles, ["CX:ASKING"]);
     }
 
     #[test]
