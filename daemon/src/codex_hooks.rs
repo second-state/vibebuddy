@@ -432,8 +432,10 @@ mod tests {
         let refreshed = apply(&mut tracker, &mut SessionTitles::disabled(), hook("old", "Stop", "/work/old"))
             .expect("background task ending should also refresh the card stack");
         let tasks = refreshed.extra["tasks"].as_array().expect("tasks should be an array");
-        assert_eq!(tasks.len(), 1);
-        assert_eq!(tasks[0]["title"], "CX:NEW");
+        let cards: Vec<(&str, &str)> =
+            tasks.iter().map(|task| (task["title"].as_str().unwrap(), task["status"].as_str().unwrap())).collect();
+        // The ended task's card comes first, for the done screen; the box drops it when it settles.
+        assert_eq!(cards, [("CX:OLD", "done"), ("CX:NEW", "working")]);
     }
 
     #[test]
