@@ -21,9 +21,13 @@ The bootloader (`firmware-rs/bootloader/bootloader_components/main/bootloader_st
 
 When the Vibe Buddy app installs Vibe Buddy over USB, it blanks `boot_sel` with otadata, so the box starts Vibe Buddy. Updates over the link do not touch the bootloader or the partition table, so they keep Muse.
 
+On a box that runs Vibe Buddy, the app installs over the link, so a box flashed before Muse support keeps its old bootloader and partition table. `tools/muse/flash.sh` writes the new ones with Muse. The app writes them only when it installs over USB, which it does when the box runs other firmware.
+
+Muse can't update itself on the box. The `muse` partition ends at the end of the 16 MB flash, so there is no room for a second app slot, and Muse's table has no otadata. The build turns Muse's updates off (`CONFIG_HOMEHUB_OTA_ENABLED=n` in `tools/muse/sdkconfig.vibebuddy`), so Muse skips an update request. To update Muse, build it again and flash it again. Muse logs `esp_ota_mark_app_valid_cancel_rollback failed` each time it connects. This is because it has no otadata, and it does no harm.
+
 ## Build
 
-You need ESP-IDF v6.0.3 and a checkout of the official SDK. The Muse source is not changed: `tools/muse/sdkconfig.vibebuddy` only moves Muse in flash.
+You need ESP-IDF v6.0.3 and a checkout of the official SDK. The Muse source is not changed: `tools/muse/sdkconfig.vibebuddy` only moves Muse in flash and turns off its updates.
 
 ```sh
 git clone https://github.com/facebookincubator/muse-gadget-sdk
