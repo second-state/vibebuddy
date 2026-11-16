@@ -1,6 +1,6 @@
 /*
- * Vibe Buddy's second-stage bootloader: ESP-IDF's bootloader_start.c (v6.0.1), with one change to how it picks the
- * app. A box can carry Muse next to Vibe Buddy. The boot_sel partition says which of the two boots,
+ * VibeBuddy's second-stage bootloader: ESP-IDF's bootloader_start.c (v6.0.1), with one change to how it picks the
+ * app. A box can carry Muse next to VibeBuddy. The boot_sel partition says which of the two boots,
  * and holding K2 at reset toggles it. Neither app knows about the other: only this file does. The before- and
  * after-init hooks are left out: their header lives in the main component this one replaces, and nothing uses them.
  *
@@ -174,7 +174,7 @@ static bool k2_held(void)
 
 /* ---- boot_sel: which app boots ---- */
 
-/* The first word of boot_sel. Anything else, a blank sector included, means Vibe Buddy. */
+/* The first word of boot_sel. Anything else, a blank sector included, means VibeBuddy. */
 #define BOOT_MUSE 0x4553554D /* "MUSE" */
 
 static bool find_partition(const char *label, esp_partition_pos_t *pos)
@@ -242,7 +242,7 @@ static bool boot_muse(const bootloader_state_t *bs)
 
 static int selected_boot_partition(const bootloader_state_t *bs)
 {
-    /* Before otadata is read: reading it can move a new Vibe Buddy image on to its trial boot, which booting Muse
+    /* Before otadata is read: reading it can move a new VibeBuddy image on to its trial boot, which booting Muse
      * instead would waste. */
     if (boot_muse(bs)) {
         ESP_LOGI(TAG, "booting Muse");
