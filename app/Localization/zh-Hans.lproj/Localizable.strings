@@ -97,7 +97,7 @@
 "Connect" = "接入";
 "Not set up" = "未接入";
 "Will change %@" = "将改动 %@";
-"After writing, open /hooks in Codex to review and trust this config — the app can't do that for you." = "写入后还要在 Codex 里打开 /hooks 核对并信任这份配置，App 替不了你。";
+"After writing, trust this config in Codex: /hooks in the terminal, or Settings › Hooks in the app. The app can't do that for you." = "写入后还要在 Codex 里核对并信任这份配置：终端里用 /hooks，App 里在“设置 › Hooks”。App 替不了你。";
 "Cancel" = "取消";
 "Write" = "写入";
 
@@ -307,7 +307,7 @@
 "The daemon's log and the hook's log, both files." = "daemon 和钩子的日志都是文件。";
 "The daemon's and the app's logs, as files." = "daemon 和 App 的日志文件。";
 "The firmware is on the box, but it didn't start. Unplug the box and plug it back in." = "固件已经写进盒子，但没有启动。把盒子拔下再插上。";
-"The hook config changed after Codex's last event, so Codex turned the hooks off. Type /hooks in Codex and trust korekore's hooks again." = "Codex 上次发来事件之后钩子配置改过，所以 Codex 把钩子关了。在 Codex 里输入 /hooks，重新信任 korekore 的钩子。";
+"The hook config changed after Codex's last event, so Codex turned the hooks off. Trust korekore's hooks again in Codex: /hooks in the terminal, or Settings › Hooks in the app." = "Codex 上次发来事件之后钩子配置改过，所以 Codex 把钩子关了。在 Codex 里重新信任 korekore 的钩子：终端里用 /hooks，App 里在“设置 › Hooks”。";
 "The update didn't finish" = "更新没有完成";
 "The update didn't take" = "更新没有生效";
 "Update checks are off, so korekore doesn't download firmware. Turn them on in General, or get it from Releases." = "检查更新已关闭，所以 korekore 不会下载固件。在“通用”里打开，或者从发布页下载。";
@@ -362,7 +362,7 @@
 "Which one is your box?" = "哪个是你的盒子？";
 "Writing the character to the box…" = "正在把角色写入盒子…";
 "captured %@" = "截于 %@";
-"for the first event… Codex runs the hooks once you trust them in /hooks." = "等待第一个事件… 在 Codex 的 /hooks 里信任后，钩子才会运行。";
+"for the first event… Trust the hooks in Codex: /hooks in the terminal, or Settings › Hooks in the app. Still waiting after you use Codex? Click Repair, then trust them again." = "等待第一个事件… 先在 Codex 里信任这些钩子：终端里用 /hooks，App 里在“设置 › Hooks”。用过 Codex 还在等？点“修复”，再重新信任一次。";
 "for the first event…" = "等待第一个事件…";
 "found on this Mac" = "已在这台 Mac 上找到";
 "found on this computer" = "已在这台电脑上找到";
@@ -384,7 +384,7 @@
 "The firmware is on the box, but it didn't start. Unplug the box and plug it back in. Don't hold K0 this time." = "固件已经写进盒子，但没有启动。把盒子拔下再插上，这次不要按住 K0。";
 "The install script has connected your agents and set korekore to start when you log in. Let's wake up the box first." = "安装脚本已经接好了你的 Agent，并设置了登录时启动 korekore。先把盒子叫醒吧。";
 "The installer has connected your agents and set korekore to start when you log in. Let's wake up the box first." = "安装程序已经接好了你的 Agent，并设置了登录时启动 korekore。先把盒子叫醒吧。";
-"Trust korekore's hooks again with /hooks in Codex." = "在 Codex 里用 /hooks 重新信任 korekore 的钩子。";
+"Trust korekore's hooks again in Codex: /hooks in the terminal, or Settings › Hooks in the app." = "在 Codex 里重新信任 korekore 的钩子：终端里用 /hooks，App 里在“设置 › Hooks”。";
 "Yes, that's it" = "对，就是它";
 "a file of korekore's own" = "korekore 自己的一个文件";
 "korekore can remove it and take over, so the two don't fight over the box." = "korekore 可以移除它并接管，免得两个抢同一个盒子。";
@@ -396,7 +396,7 @@
 "Already have a VibeBuddy? Same box, new name. Everything you set up carries over." = "已经有 VibeBuddy 了？同一个盒子，换了新名字。你设置过的一切都保留。";
 "Blink again" = "再闪一次";
 "Box now" = "盒子现在";
-"Codex asks you to trust its hooks once, in /hooks." = "Codex 会让你在 /hooks 里信任一次它的钩子。";
+"Codex asks you to trust its hooks once: /hooks in the terminal, or Settings › Hooks in the app." = "Codex 会让你信任一次它的钩子：终端里用 /hooks，App 里在“设置 › Hooks”。";
 "Connect %lld" = "接入 %lld 个";
 "Connect the box to this Mac with a USB cable. This page notices it on its own." = "用 USB 线把盒子接到这台 Mac。这一页会自己发现它。";
 "Connect the box to this computer with a USB cable. This page notices it on its own." = "用 USB 线把盒子接到这台电脑。这一页会自己发现它。";

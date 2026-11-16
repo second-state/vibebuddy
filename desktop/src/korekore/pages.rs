@@ -400,12 +400,12 @@ impl crate::App {
             (
                 tr("Trust again", &[]),
                 theme::KORE_PINK_TEXT,
-                tr("The hook config changed after Codex's last event, so Codex turned the hooks off. Type /hooks in Codex and trust korekore's hooks again.", &[]),
+                tr("The hook config changed after Codex's last event, so Codex turned the hooks off. Trust korekore's hooks again in Codex: /hooks in the terminal, or Settings › Hooks in the app.", &[]),
             )
         } else if let Some(time) = last {
             (tr("Watching", &[]), theme::DONE_TEXT, tr("last event %@", &[&short_time(time)]))
         } else if setup.agent == "codex" {
-            (tr("Waiting", &[]), theme::WAIT_TEXT, tr("for the first event… Codex runs the hooks once you trust them in /hooks.", &[]))
+            (tr("Waiting", &[]), theme::WAIT_TEXT, tr("for the first event… Trust the hooks in Codex: /hooks in the terminal, or Settings › Hooks in the app. Still waiting after you use Codex? Click Repair, then trust them again.", &[]))
         } else {
             (tr("Waiting", &[]), theme::WAIT_TEXT, tr("for the first event…", &[]))
         };
@@ -483,7 +483,7 @@ impl crate::App {
                     note(tr("Only korekore's own entries; your other hooks stay.", &[])),
                     lines,
                 ]
-                .push((plan.agent == "codex").then(|| note(tr("After writing, open /hooks in Codex to review and trust this config — the app can't do that for you.", &[]))))
+                .push((plan.agent == "codex").then(|| note(tr("After writing, trust this config in Codex: /hooks in the terminal, or Settings › Hooks in the app. The app can't do that for you.", &[]))))
                 .push(row![
                     Space::new().width(Length::Fill),
                     pill(tr("Cancel", &[]), Fill::Paper, Some(Message::ApplyHooks(false))),
