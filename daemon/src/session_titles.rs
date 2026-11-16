@@ -4,7 +4,10 @@
 //! Claude App's session index has an auto-generated `title`, and Codex's `state_5.sqlite`
 //! has the user-given `name` and the thread's recorded `git_branch`. None of these is a prompt: the former is
 //! the summary the app's sidebar already shows, the latter are names the user typed. Codex's `title`
-//! column is the raw first message (mixed with injected context), so it's not used.
+//! column is the raw first message (mixed with injected context), so it's not used. Codex also appends each name it
+//! gives a thread to `session_index.jsonl` beside the database; that is read when the database doesn't know the thread.
+//! On Windows it is the only way to a WSL session's name: Codex's Linux build keeps the database on the Linux side,
+//! but its `CODEX_HOME`, and so this index, in the Windows `~\.codex`.
 //!
 //! Lookups are cached: hooks arrive every few seconds, so we can't scan directories and open databases each time. A title may
 //! only be generated a while after the session starts, so misses are retried every 30 seconds and hits refreshed every 5 minutes.
@@ -20,6 +23,8 @@ use crate::source_opener;
 const RETRY_UNRESOLVED: Duration = Duration::from_secs(30);
 const REFRESH_RESOLVED: Duration = Duration::from_secs(300);
 const CODEX_STATE_DB: &str = ".codex/state_5.sqlite";
+/// Beside the database: one `{"id", "thread_name", "updated_at"}` line per name Codex gave a thread, newest last.
+const CODEX_SESSION_INDEX: &str = "session_index.jsonl";
 
 pub struct SessionTitles {
     enabled: bool,
@@ -108,7 +113,10 @@ impl SessionTitles {
         }
         let db = self.codex_db.clone()?;
         let key = format!("codex:{thread_id}");
-        self.lookup(&key, || codex_thread_title(&db, thread_id))
+        self.lookup(&key, || {
+            codex_thread_title(&db, thread_id)
+                .or_else(|| codex_indexed_name(&db.with_file_name(CODEX_SESSION_INDEX), thread_id))
+        })
     }
 
     fn lookup(&mut self, key: &str, fetch: impl FnOnce() -> Option<String>) -> Option<String> {
@@ -155,6 +163,19 @@ pub fn codex_thread_title(db: &Path, thread_id: &str) -> Option<String> {
         .map(|value| branch_tail(&value))
 }
 
+/// The newest name `session_index.jsonl` records for the thread. A name set to empty means none.
+pub fn codex_indexed_name(index: &Path, thread_id: &str) -> Option<String> {
+    let text = std::fs::read_to_string(index).ok()?;
+    let name = text
+        .lines()
+        .rev()
+        .filter(|line| line.contains(thread_id))
+        .filter_map(|line| serde_json::from_str::<serde_json::Value>(line).ok())
+        .filter(|entry| entry.get("id").and_then(serde_json::Value::as_str) == Some(thread_id))
+        .find_map(|entry| entry.get("thread_name").and_then(serde_json::Value::as_str).map(str::to_owned))?;
+    (!name.trim().is_empty()).then(|| branch_tail(&name))
+}
+
 /// Whether the thread table has this id. Returns None when the database can't be opened.
 pub fn codex_thread_exists(db: &Path, thread_id: &str) -> Option<bool> {
     let connection = rusqlite::Connection::open_with_flags(
@@ -177,13 +198,13 @@ pub fn codex_thread_exists(db: &Path, thread_id: &str) -> Option<bool> {
 /// A worktree's `.git` is a file pointing at that worktree's own directory inside the main repository, and the
 /// `HEAD` there is its branch; going back to the main repository via `project_root` would read the wrong one.
 pub fn git_branch(cwd: &str) -> Option<String> {
-    for dir in Path::new(cwd).ancestors() {
+    for dir in native_path(cwd).ancestors() {
         let git = dir.join(".git");
         let head = if git.is_dir() {
             git.join("HEAD")
         } else if git.is_file() {
             let text = std::fs::read_to_string(&git).ok()?;
-            PathBuf::from(text.strip_prefix("gitdir:")?.trim()).join("HEAD")
+            native_path(text.strip_prefix("gitdir:")?.trim()).join("HEAD")
         } else {
             continue;
         };
@@ -192,6 +213,25 @@ pub fn git_branch(cwd: &str) -> Option<String> {
         return is_feature_branch(branch).then(|| branch_tail(branch));
     }
     None
+}
+
+/// A path as this computer reads it. On Windows, a Codex session in a WSL workspace names its directory as Linux sees
+/// it (`/mnt/c/work`); the same directory is `C:\work` here.
+fn native_path(path: &str) -> PathBuf {
+    match cfg!(windows).then(|| mounted_drive_path(path)).flatten() {
+        Some(windows) => PathBuf::from(windows),
+        None => PathBuf::from(path),
+    }
+}
+
+/// `/mnt/c/work` as a Windows path, `C:\work`; None for any other path.
+fn mounted_drive_path(path: &str) -> Option<String> {
+    let rest = path.strip_prefix("/mnt/")?;
+    let (drive, rest) = rest.split_once('/').unwrap_or((rest, ""));
+    let [drive] = drive.as_bytes() else { return None };
+    drive
+        .is_ascii_alphabetic()
+        .then(|| format!("{}:\\{}", drive.to_ascii_uppercase() as char, rest.replace('/', "\\")))
 }
 
 fn is_feature_branch(branch: &str) -> bool {
@@ -260,6 +300,40 @@ mod tests {
             git_branch(worktree.to_str().unwrap()).as_deref(),
             Some("feature-x")
         );
+    }
+
+    #[test]
+    fn a_thread_the_database_lacks_takes_its_name_from_the_session_index() {
+        let dir = temp_dir("codex-index");
+        let db = dir.join("state_5.sqlite");
+        rusqlite::Connection::open(&db)
+            .unwrap()
+            .execute_batch("CREATE TABLE threads (id TEXT PRIMARY KEY, name TEXT, git_branch TEXT);")
+            .unwrap();
+        // A WSL session: its thread is in the database on the Linux side, its names here. The newest wins.
+        std::fs::write(
+            dir.join("session_index.jsonl"),
+            concat!(
+                r#"{"id":"wsl","thread_name":"测试","updated_at":"2026-11-16T04:08:05Z"}"#, "\n",
+                r#"{"id":"other","thread_name":"Other","updated_at":"2026-11-16T04:09:00Z"}"#, "\n",
+                r#"{"id":"wsl","thread_name":"测试 WSL","updated_at":"2026-11-16T04:10:00Z"}"#, "\n",
+                r#"{"id":"cleared","thread_name":"Old","updated_at":"2026-11-16T04:10:00Z"}"#, "\n",
+                r#"{"id":"cleared","thread_name":"","updated_at":"2026-11-16T04:11:00Z"}"#, "\n",
+            ),
+        )
+        .unwrap();
+        let mut titles = SessionTitles::with_codex_db(db);
+        assert_eq!(titles.codex("wsl").as_deref(), Some("测试 WSL"));
+        assert_eq!(titles.codex("cleared"), None);
+        assert_eq!(titles.codex("unknown"), None);
+    }
+
+    #[test]
+    fn a_wsl_directory_is_read_from_its_windows_drive() {
+        assert_eq!(mounted_drive_path("/mnt/c/work/vibebuddy").as_deref(), Some(r"C:\work\vibebuddy"));
+        assert_eq!(mounted_drive_path("/mnt/d").as_deref(), Some(r"D:\"));
+        assert_eq!(mounted_drive_path("/mnt/wsl/x"), None);
+        assert_eq!(mounted_drive_path("/home/me/work"), None);
     }
 
     #[test]
