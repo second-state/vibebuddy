@@ -43,6 +43,9 @@ pub struct CodexHook {
     pub host_focus_url: Option<String>,
     #[serde(default)]
     pub host_pids: Option<Vec<u32>>,
+    /// Whether Codex gave the hook a transcript; None from a hook older than this field.
+    #[serde(default)]
+    pub has_transcript: Option<bool>,
 }
 
 pub fn apply(
@@ -58,9 +61,12 @@ pub fn apply(
     let project = project_name(cwd);
     let thread_id = hook.thread_id.clone().unwrap_or_else(|| hook.session_id.clone());
     // Codex's background sessions (the ones that generate ambient suggestions after a turn) fire
-    // the same hooks: no working directory, and absent from the thread table. They aren't user activity:
-    // no card, no announcement, and certainly not a K2 target, since opening one gives a blank session.
-    if project.is_none() && titles.codex_thread_known(&thread_id) == Some(false) {
+    // the same hooks: no transcript, and absent from the thread table. They carry the project's working
+    // directory, so that tells nothing. They aren't user activity: no card, no announcement, and certainly not
+    // a K2 target, since opening one gives a blank session. A hook older than `has_transcript` can't tell: there,
+    // only a session without a project counts as background, as before.
+    let background_shape = hook.has_transcript.map_or(project.is_none(), |has| !has);
+    if background_shape && titles.codex_thread_known(&thread_id) == Some(false) {
         tracing::info!(
             session = %hook.session_id,
             event = %hook.hook_event_name,
@@ -159,6 +165,7 @@ mod tests {
             tmux_pane: None,
             host_focus_url: None,
             host_pids: None,
+            has_transcript: None,
         };
         assert!(apply(&mut tracker, &mut titles, ghost).is_none());
         assert!(tracker.focus_source().is_none());
@@ -178,6 +185,7 @@ mod tests {
             tmux_pane: None,
             host_focus_url: None,
             host_pids: None,
+            has_transcript: None,
         };
         assert!(apply(&mut tracker, &mut titles, fresh).is_some());
 
@@ -196,9 +204,35 @@ mod tests {
             tmux_pane: None,
             host_focus_url: None,
             host_pids: None,
+            has_transcript: None,
         };
         let event = apply(&mut tracker, &mut titles, known).expect("known thread should be visible");
         assert_eq!(event.title.as_deref(), Some("CX:REVIEW"));
+    }
+
+    #[test]
+    fn a_session_without_a_transcript_is_background_even_in_a_project() {
+        let dir = std::env::temp_dir().join(format!("codex-transcript-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let db = dir.join("state.sqlite");
+        rusqlite::Connection::open(&db)
+            .unwrap()
+            .execute_batch("CREATE TABLE threads (id TEXT PRIMARY KEY, name TEXT, git_branch TEXT);")
+            .unwrap();
+        let mut titles = SessionTitles::with_codex_db(db);
+        let mut tracker = ActivityTracker::default();
+
+        // After a turn, Codex's background session runs in the user's project, with no transcript.
+        let background = CodexHook { has_transcript: Some(false), ..hook("background", "UserPromptSubmit", "/work/vibe-buddy") };
+        assert!(apply(&mut tracker, &mut titles, background).is_none());
+        assert!(tracker.focus_source().is_none());
+
+        // A WSL session has a transcript, but its thread lives in the database on the Linux side: unknown here.
+        // It counts, even in a directory that names no project.
+        let wsl = CodexHook { has_transcript: Some(true), ..hook("wsl", "UserPromptSubmit", "/") };
+        assert!(apply(&mut tracker, &mut titles, wsl).is_some());
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     fn hook(session: &str, name: &str, cwd: &str) -> CodexHook {
@@ -220,6 +254,7 @@ mod tests {
             tmux_pane: None,
             host_focus_url: None,
             host_pids: None,
+            has_transcript: None,
         }
     }
 

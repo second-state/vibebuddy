@@ -166,6 +166,15 @@ pub async fn open(source: ActivitySource) -> Result<String, String> {
     Err(format!("failed to open the source: {}", stderr.trim()))
 }
 
+/// The Codex thread a source opens through its `codex://` link, if that is how it opens. A window or a host is
+/// focused instead, and the thread id plays no part there.
+pub fn codex_thread_link(source: &ActivitySource) -> Option<&str> {
+    match source {
+        ActivitySource::Codex { thread_id, surface: Surface::App { .. } } => Some(thread_id),
+        _ => None,
+    }
+}
+
 fn command_for(source: &ActivitySource, desktop: Option<&str>) -> Result<CommandSpec, String> {
     // First answer one question: is the user inside this agent's app? If not, don't use the deeplink;
     // it would import a terminal session into the app as a copy.
@@ -785,6 +794,16 @@ fn valid_repo(repo: &str) -> bool {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn only_a_codex_app_source_opens_by_its_thread() {
+        let codex = |surface| ActivitySource::Codex { thread_id: "t".to_owned(), surface };
+        assert_eq!(codex_thread_link(&codex(Surface::App { desktop_session_id: None })), Some("t"));
+        // On Windows and Linux the window is found from the agent's pids: a thread the local database
+        // doesn't know (a WSL session's lives on the Linux side) still opens.
+        assert_eq!(codex_thread_link(&codex(Surface::Window { pids: vec![42], tmux: None })), None);
+        assert_eq!(codex_thread_link(&codex(Surface::Headless)), None);
+    }
+
     use super::*;
 
     #[test]

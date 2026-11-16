@@ -324,6 +324,7 @@ mod tests {
             tmux_pane: None,
             host_focus_url: None,
             host_pids: None,
+            has_transcript: None,
         };
         let mixed = codex_hooks::apply(&mut tracker, &mut SessionTitles::disabled(), codex).expect("another agent should refresh the card stack");
 
