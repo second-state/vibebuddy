@@ -358,3 +358,9 @@ When a Mac App hangs, `sample <pid>` it before you guess. For a UI fix you can't
 For 0.6.0 I tagged `v0.6.0` and `firmware-v0.6.0` by hand on the same commit, not with `just release` and `just release-firmware`, which commit and tag separately. `build-app.sh` took the App's build number from `git describe --tags`, and that picked the firmware tag: the App shipped with CFBundleVersion `firmware-v0.6.0`. Sparkle compares build numbers, and `firmware-v0.6.0` sorts below `v0.5.0`, so every 0.5.0 App refused the update as a downgrade and only said "An error occurred while running the updater". The appcast, the EdDSA signature and the Team ID were all fine, which is why checking them found nothing.
 
 Each build now describes only its own tags (`--match "v[0-9]*"` for the App and the daemon, `--match "firmware-v[0-9]*"` for the firmware). Cut releases with the `just` recipes. Before announcing an App release, check the shipped bundle's CFBundleVersion against `sparkle:version` in the appcast.
+
+## A release tag must sit on a commit with every release's notes
+
+For App 0.6.3 and firmware 0.6.2 I made the four release commits by hand, the App's first, and tagged `v0.6.3` on its commit. The firmware notes came after it. The firmware went out first, so when the App's run built the update manifest from the `v0.6.3` commit, the manifest listed firmware-v0.6.2 and found no `docs/releases/firmware-v0.6.2.md`. The Release published, but the manifest failed, so installed Apps saw no update until `update-manifest` ran again on main.
+
+The manifest is built from the tagged commit and reads the notes of every firmware release and of the newest App release. Write and commit all the notes of a release before any version bump, and tag with `just release` and `just release-firmware` on main, one after the other. Both now refuse to tag when a note the manifest needs is missing.

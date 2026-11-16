@@ -68,6 +68,12 @@ release version:
     ! git rev-parse -q --verify "refs/tags/v${v}" >/dev/null || { echo "v${v} already exists" >&2; exit 2; }
     # The release notes start with what the version does, written by hand; CI adds the downloads after it.
     [[ -s "docs/releases/v${v}.md" ]] || { echo "write docs/releases/v${v}.md (what this release does) and commit it first" >&2; exit 2; }
+    # The update manifest is built from this commit, and it needs the notes of every firmware release and of the
+    # newest App release here (v0.6.3's manifest failed: its tag was on a commit before firmware-v0.6.2's notes).
+    git fetch -q --tags origin
+    for tag in $(git tag -l 'firmware-v[0-9]*') "$(git tag -l 'v[0-9]*' --sort=-v:refname | head -n 1)"; do
+        [[ -z "${tag}" || -s "docs/releases/${tag}.md" ]] || { echo "docs/releases/${tag}.md is missing here; the update manifest needs it" >&2; exit 2; }
+    done
     # Always write ${v}, not $v: a character right after $v can be read as part of the name
     # (full-width punctuation in the old Chinese messages did exactly that).
     # The two updates below run offline, so every dependency must already be in the cargo cache. A machine that has
@@ -108,6 +114,12 @@ release-firmware version:
     [[ -s "${notes}" ]] || { echo "write ${notes} (front matter with min_app, then what this firmware does) and commit it first" >&2; exit 2; }
     sed -n '2,/^---$/p' "${notes}" | grep -q '^min_app: [0-9]*\.[0-9]*\.[0-9]*$' \
         || { echo "${notes} must start with ---, min_app: X.Y.Z, ---" >&2; exit 2; }
+    # The update manifest is built from this commit, and it needs the notes of every firmware release and of the
+    # newest App release here (v0.6.3's manifest failed: its tag was on a commit before firmware-v0.6.2's notes).
+    git fetch -q --tags origin
+    for tag in $(git tag -l 'firmware-v[0-9]*') "$(git tag -l 'v[0-9]*' --sort=-v:refname | head -n 1)"; do
+        [[ -z "${tag}" || -s "docs/releases/${tag}.md" ]] || { echo "docs/releases/${tag}.md is missing here; the update manifest needs it" >&2; exit 2; }
+    done
     perl -pi -e 'BEGIN{$new=shift} s/^version = ".*"/version = "$new"/ && ($done++) unless $done' "${v}" firmware-rs/device/Cargo.toml
     RUSTUP_TOOLCHAIN=stable cargo update --manifest-path firmware-rs/device/Cargo.toml -p vibebuddy-firmware --offline -q
     git add firmware-rs/device/Cargo.toml firmware-rs/device/Cargo.lock
