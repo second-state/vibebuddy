@@ -1,8 +1,0 @@
-# Loaded last, after Muse's own sdkconfig.defaults, devices/sdkconfig.muse and
-# devices/sdkconfig.muse-atk-dnesp32s3-box. It moves Muse in flash, so that it lives next to Vibe Buddy
-# (firmware/partitions.csv), and turns off Muse's own updates. build.sh adds the path of partitions.csv.
-CONFIG_PARTITION_TABLE_CUSTOM=y
-CONFIG_PARTITION_TABLE_OFFSET=0xc14000
-# Muse has one app slot and no otadata here: the muse partition ends at the end of the 16 MB flash, so there is no
-# room for a second slot. With updates off, Muse skips an update request without downloading it, and setup finishes.
-CONFIG_HOMEHUB_OTA_ENABLED=n
