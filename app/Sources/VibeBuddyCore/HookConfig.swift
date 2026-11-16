@@ -32,7 +32,7 @@ public enum HookAgent: String, CaseIterable {
 
 /// For every hook in hooks.json, Codex keeps a trusted_hash under `[hooks.state]` in config.toml.
 /// Once the file changes, the changed entries are marked "pending review" and silently stop running until someone
-/// re-trusts them with /hooks in Codex. The app doesn't recompute that hash (it's Codex's internal format
+/// re-trusts them in Codex (/hooks in the terminal, Settings › Hooks in the app). The app doesn't recompute that hash (it's Codex's internal format
 /// and changes with its versions); it only looks at one observable fact: has any Codex event arrived since the config was written?
 public enum CodexTrustHint: Equatable {
     /// No event received yet: maybe it isn't trusted, maybe Codex just hasn't been used today. No verdict.

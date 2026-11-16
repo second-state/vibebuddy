@@ -149,14 +149,14 @@ struct KorekoreAgentRow: View {
         }
         if case .changedSinceLastEvent? = codexHint {
             return (KTag(String(localized: "Trust again"), color: Theme.Colors.korePinkText),
-                    String(localized: "The hook config changed after Codex's last event, so Codex turned the hooks off. Type /hooks in Codex and trust korekore's hooks again."))
+                    String(localized: "The hook config changed after Codex's last event, so Codex turned the hooks off. Trust korekore's hooks again in Codex: /hooks in the terminal, or Settings › Hooks in the app."))
         }
         if let lastEvent {
             return (KTag(String(localized: "Watching"), color: Theme.Colors.doneText),
                     String(localized: "last event \(lastEvent.formatted(date: .omitted, time: .shortened))"))
         }
         return (KTag(String(localized: "Waiting"), color: Theme.Colors.waitText),
-                agent == .codex ? String(localized: "for the first event… Codex runs the hooks once you trust them in /hooks.")
+                agent == .codex ? String(localized: "for the first event… Trust the hooks in Codex: /hooks in the terminal, or Settings › Hooks in the app. Still waiting after you use Codex? Click Repair, then trust them again.")
                     : String(localized: "for the first event…"))
     }
 }
@@ -189,7 +189,7 @@ struct KorekorePlanSheet: View {
                 .background(Theme.Colors.ink, in: RoundedRectangle(cornerRadius: Theme.Radius.sm))
             }
             if plan.agent == .codex {
-                KNote(String(localized: "After writing, open /hooks in Codex to review and trust this config — the app can't do that for you."))
+                KNote(String(localized: "After writing, trust this config in Codex: /hooks in the terminal, or Settings › Hooks in the app. The app can't do that for you."))
             }
             HStack {
                 Spacer()

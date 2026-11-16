@@ -84,17 +84,70 @@ fn is_ours(command: &str) -> bool {
     .any(|name| command.contains(name))
 }
 
-fn command(binary: &str, agent: Agent) -> String {
-    let call = format!("\"{binary}\" {}", agent.argument());
-    // Codex on Windows runs a hook's command in PowerShell, where a quoted path is a string, not a call: `&` calls
-    // it. Claude Code runs hooks in Git Bash there, as everywhere else.
-    if cfg!(windows) && agent == Agent::Codex { format!("& {call}") } else { call }
+/// What a hook entry runs: its `command`, and the `commandWindows` that Codex on Windows runs instead, if any.
+#[derive(PartialEq)]
+struct Call {
+    command: String,
+    windows: Option<String>,
+}
+
+impl Call {
+    fn of(entry: &Value) -> Option<Call> {
+        let command = entry.get("command")?.as_str()?.to_owned();
+        let windows = entry.get("commandWindows").and_then(Value::as_str).map(str::to_owned);
+        Some(Call { command, windows })
+    }
+
+    fn entry(&self) -> Value {
+        let mut entry = json!({ "type": "command", "command": self.command, "timeout": 2 });
+        if let Some(windows) = &self.windows {
+            entry["commandWindows"] = json!(windows);
+        }
+        entry
+    }
+
+    /// One line for the diff shown before writing.
+    fn shown(&self) -> String {
+        match &self.windows {
+            Some(windows) => format!("{} (Windows: {windows})", self.command),
+            None => self.command.clone(),
+        }
+    }
+}
+
+/// Claude Code runs hooks in Git Bash on Windows, as everywhere else, so one command does.
+fn wanted(binary: &str, agent: Agent) -> Call {
+    if cfg!(windows) && agent == Agent::Codex {
+        return windows_codex_call(binary);
+    }
+    Call { command: format!("\"{binary}\" {}", agent.argument()), windows: None }
+}
+
+/// Codex on Windows runs `commandWindows` in PowerShell, where a quoted path is a string, not a call: `&` calls it.
+/// Codex in a WSL workspace is the Linux build reading the same `hooks.json` through `/mnt/c`, and runs `command`
+/// in the user's POSIX shell. There `&` is a syntax error, which exits with 2, and Codex reads 2 as "block": so
+/// `command` holds the path as WSL sees it.
+fn windows_codex_call(binary: &str) -> Call {
+    let call = |path: &str| format!("\"{path}\" {}", Agent::Codex.argument());
+    Call { command: call(&wsl_path(binary)), windows: Some(format!("& {}", call(binary))) }
+}
+
+/// `C:\Users\me\x.exe` at WSL's default mount point: `/mnt/c/Users/me/x.exe`. Any other path stays as it is; WSL
+/// then doesn't find it, and exit code 127 is a hook failure that Codex doesn't treat as a block.
+fn wsl_path(path: &str) -> String {
+    let mut chars = path.chars();
+    match (chars.next(), chars.next(), chars.next()) {
+        (Some(drive), Some(':'), Some('\\')) if drive.is_ascii_alphabetic() => {
+            format!("/mnt/{}/{}", drive.to_ascii_lowercase(), path[3..].replace('\\', "/"))
+        }
+        _ => path.to_owned(),
+    }
 }
 
 /// Adds our hook to every event that lacks it and drops our stale entries; everything else keeps its place.
 fn install(root: Map<String, Value>, agent: Agent, binary: &str) -> Map<String, Value> {
-    let wanted = command(binary, agent);
-    let mut root = remove_where(root, |command| is_ours(command) && command != wanted);
+    let wanted = wanted(binary, agent);
+    let mut root = remove_where(root, |call| is_ours(&call.command) && *call != wanted);
     let hooks = root.entry("hooks").or_insert_with(|| json!({}));
     if !hooks.is_object() {
         *hooks = json!({});
@@ -112,24 +165,23 @@ fn install(root: Map<String, Value>, agent: Agent, binary: &str) -> Map<String, 
         };
         if !groups
             .iter()
-            .any(|group| commands(group).any(|command| command == wanted))
+            .any(|group| calls(group).any(|call| call == wanted))
         {
-            groups
-                .push(json!({ "hooks": [{ "type": "command", "command": wanted, "timeout": 2 }] }));
+            groups.push(json!({ "hooks": [wanted.entry()] }));
         }
     }
     root
 }
 
 fn uninstall(root: Map<String, Value>) -> Map<String, Value> {
-    remove_where(root, is_ours)
+    remove_where(root, |call| is_ours(&call.command))
 }
 
 /// Removes matching hook commands, then any group, event and `hooks` object left empty by that.
 /// Shapes we don't recognise are someone else's and are left alone.
 fn remove_where(
     mut root: Map<String, Value>,
-    matches: impl Fn(&str) -> bool,
+    matches: impl Fn(&Call) -> bool,
 ) -> Map<String, Value> {
     let Some(Value::Object(hooks)) = root.get_mut("hooks") else {
         return root;
@@ -142,12 +194,7 @@ fn remove_where(
             let Some(Value::Array(entries)) = group.get_mut("hooks") else {
                 return true;
             };
-            entries.retain(|entry| {
-                !entry
-                    .get("command")
-                    .and_then(Value::as_str)
-                    .is_some_and(&matches)
-            });
+            entries.retain(|entry| !Call::of(entry).is_some_and(|call| matches(&call)));
             !entries.is_empty()
         });
         !groups.is_empty()
@@ -158,13 +205,8 @@ fn remove_where(
     root
 }
 
-fn commands(group: &Value) -> impl Iterator<Item = &str> {
-    group
-        .get("hooks")
-        .and_then(Value::as_array)
-        .into_iter()
-        .flatten()
-        .filter_map(|entry| entry.get("command").and_then(Value::as_str))
+fn calls(group: &Value) -> impl Iterator<Item = Call> {
+    group.get("hooks").and_then(Value::as_array).into_iter().flatten().filter_map(Call::of)
 }
 
 /// One agent VibeBuddy connects to: entries merged into a config the agent shares with the user, or a whole file
@@ -272,13 +314,13 @@ fn is_installed(target: Target, home: &Path, binary: &str) -> bool {
     let path = target.path(home);
     match target {
         Target::Merged(agent) => {
-            let wanted = command(binary, agent);
+            let wanted = wanted(binary, agent);
             let Ok(root) = read(&path) else { return false };
             agent.events().iter().all(|event| {
                 root.get("hooks")
                     .and_then(|hooks| hooks.get(*event))
                     .and_then(Value::as_array)
-                    .is_some_and(|groups| groups.iter().any(|group| commands(group).any(|command| command == wanted)))
+                    .is_some_and(|groups| groups.iter().any(|group| calls(group).any(|call| call == wanted)))
             })
         }
         // Our files hold the path as a JSON string, so a Windows path's backslashes are doubled there.
@@ -296,7 +338,7 @@ fn describe_change(before: &Map<String, Value>, after: &Map<String, Value>) -> V
             .into_iter()
             .flatten()
             .map(|(event, groups)| {
-                let commands = groups.as_array().into_iter().flatten().flat_map(commands).map(str::to_owned).collect();
+                let commands = groups.as_array().into_iter().flatten().flat_map(calls).map(|call| call.shown()).collect();
                 (event.clone(), commands)
             })
             .collect()
@@ -366,7 +408,7 @@ pub fn run(installing: bool, only: Option<&str>) -> Result<(), String> {
         }
         if installing && change.target == Target::Merged(Agent::Codex) {
             println!(
-                "  Codex runs changed hooks only after you trust them: open /hooks in Codex and trust the VibeBuddy entries."
+                "  Codex runs changed hooks only after you trust them: open /hooks in Codex (Settings › Hooks in the Codex app) and trust the VibeBuddy entries."
             );
         }
     }
@@ -437,12 +479,22 @@ mod tests {
     use super::*;
 
     const BINARY: &str = "/home/me/.local/bin/vibebuddy-hook";
-    /// What our Codex entries run: PowerShell on Windows calls the quoted path with `&`.
-    const CODEX_CALL: &str = if cfg!(windows) {
-        "& \"/home/me/.local/bin/vibebuddy-hook\" codex"
-    } else {
-        "\"/home/me/.local/bin/vibebuddy-hook\" codex"
-    };
+    const CODEX_CALL: &str = "\"/home/me/.local/bin/vibebuddy-hook\" codex";
+    /// What v0.6.2 wrote on Windows: PowerShell only, a syntax error in a WSL workspace's shell.
+    const POWERSHELL_ONLY: &str = "& \"/home/me/.local/bin/vibebuddy-hook\" codex";
+
+    /// Our Codex entry. On Windows it adds the PowerShell call; BINARY isn't a drive path, so `command` keeps it.
+    fn codex_entry() -> Value {
+        if cfg!(windows) {
+            json!({ "type": "command", "command": CODEX_CALL, "commandWindows": POWERSHELL_ONLY, "timeout": 2 })
+        } else {
+            json!({ "type": "command", "command": CODEX_CALL, "timeout": 2 })
+        }
+    }
+
+    fn codex_shown() -> String {
+        if cfg!(windows) { format!("{CODEX_CALL} (Windows: {POWERSHELL_ONLY})") } else { CODEX_CALL.to_owned() }
+    }
 
     fn object(value: Value) -> Map<String, Value> {
         let Value::Object(map) = value else {
@@ -458,7 +510,7 @@ mod tests {
         assert_eq!(hooks.len(), Agent::Codex.events().len());
         assert_eq!(
             hooks["Stop"],
-            json!([{ "hooks": [{ "type": "command", "command": CODEX_CALL, "timeout": 2 }] }])
+            json!([{ "hooks": [codex_entry()] }])
         );
     }
 
@@ -483,11 +535,12 @@ mod tests {
     fn a_stale_path_is_replaced() {
         let stale = install(Map::new(), Agent::Claude, "/old/place/vibebuddy-hook");
         let fresh = install(stale, Agent::Claude, BINARY);
-        let all: Vec<&str> = fresh["hooks"]
+        let all: Vec<String> = fresh["hooks"]
             .as_object()
             .expect("hooks")
             .values()
-            .flat_map(|groups| groups.as_array().into_iter().flatten().flat_map(commands))
+            .flat_map(|groups| groups.as_array().into_iter().flatten().flat_map(calls))
+            .map(|call| call.command)
             .collect();
         assert!(
             all.iter()
@@ -497,11 +550,32 @@ mod tests {
     }
 
     #[test]
-    fn a_codex_entry_that_powershell_cannot_run_is_replaced() {
-        let old = object(json!({ "hooks": { "Stop": [{ "hooks": [{ "type": "command", "command": format!("\"{BINARY}\" codex") }] }] } }));
+    fn a_powershell_only_codex_entry_is_replaced() {
+        let old = object(json!({ "hooks": { "Stop": [{ "hooks": [{ "type": "command", "command": POWERSHELL_ONLY }] }] } }));
         let fresh = install(old, Agent::Codex, BINARY);
-        let stop: Vec<&str> = fresh["hooks"]["Stop"].as_array().into_iter().flatten().flat_map(commands).collect();
-        assert_eq!(stop, [CODEX_CALL]);
+        assert_eq!(fresh["hooks"]["Stop"], json!([{ "hooks": [codex_entry()] }]));
+    }
+
+    #[test]
+    fn codex_on_windows_gets_a_wsl_command_and_a_powershell_override() {
+        let call = windows_codex_call(r"C:\Users\me\AppData\Local\Programs\VibeBuddy\vibebuddy-hook.exe");
+        assert_eq!(
+            call.entry(),
+            json!({
+                "type": "command",
+                "command": "\"/mnt/c/Users/me/AppData/Local/Programs/VibeBuddy/vibebuddy-hook.exe\" codex",
+                "commandWindows": r#"& "C:\Users\me\AppData\Local\Programs\VibeBuddy\vibebuddy-hook.exe" codex"#,
+                "timeout": 2,
+            })
+        );
+        assert!(Call::of(&call.entry()) == Some(call));
+    }
+
+    #[test]
+    fn only_a_drive_path_is_moved_under_mnt() {
+        assert_eq!(wsl_path(r"D:\Tools\vibebuddy-hook.exe"), "/mnt/d/Tools/vibebuddy-hook.exe");
+        assert_eq!(wsl_path(r"\\server\share\vibebuddy-hook.exe"), r"\\server\share\vibebuddy-hook.exe");
+        assert_eq!(wsl_path("/home/me/vibebuddy-hook"), "/home/me/vibebuddy-hook");
     }
 
     #[test]
@@ -525,7 +599,7 @@ mod tests {
         let after = install(before.clone(), Agent::Codex, BINARY);
         let lines = describe_change(&before, &after);
         assert_eq!(lines.len(), Agent::Codex.events().len());
-        assert!(lines.contains(&format!("+ Stop: {CODEX_CALL}")));
+        assert!(lines.contains(&format!("+ Stop: {}", codex_shown())));
         assert_eq!(describe_change(&after, &uninstall(after.clone())).first().map(|line| &line[..2]), Some("- "));
         assert!(describe_change(&after, &after).is_empty());
     }

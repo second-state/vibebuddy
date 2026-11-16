@@ -304,7 +304,7 @@ struct KorekoreOnboarding: View {
                         .buttonStyle(KBigButtonStyle(.sun)).keyboardShortcut(.defaultAction)
                     Button(String(localized: "Not now")) { step = 3 }.buttonStyle(KBigButtonStyle(.paper, primary: false))
                 }
-                Text("Codex asks you to trust its hooks once, in /hooks.")
+                Text("Codex asks you to trust its hooks once: /hooks in the terminal, or Settings › Hooks in the app.")
                     .font(.rounded(12, weight: 400)).foregroundStyle(Theme.Colors.muted).padding(.leading, 6)
             }
         }

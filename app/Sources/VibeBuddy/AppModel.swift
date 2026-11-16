@@ -76,7 +76,7 @@ final class AppModel: ObservableObject {
             // as changed and silently disabled them, and the box announced nothing from Codex for four hours. This one ignores the
             // link-notification switch: the app itself made the change, so a person has to finish the job.
             Notifier.notify(title: String(localized: "Codex hook config updated"),
-                            body: String(localized: "Trust korekore's hooks again with /hooks in Codex."))
+                            body: String(localized: "Trust korekore's hooks again in Codex: /hooks in the terminal, or Settings › Hooks in the app."))
         }
         refreshHookStates()
         if managesDaemon { supervisor.start() }
