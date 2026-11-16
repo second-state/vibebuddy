@@ -117,6 +117,70 @@ public enum HookConfig {
         }
     }
 
+    /// Whether Codex trusts none of our entries. Codex skips a hook it hasn't trusted without a word, so this is the only
+    /// way to tell "not trusted" from "not used yet". It keeps each trusted hook under
+    /// `[hooks.state."<hooks.json>:<event>:<group>:<handler>"]` in `config.toml`, with a `trusted_hash`. Only whether one is
+    /// there counts: the hash is Codex's own format. False when there is nothing of ours to trust.
+    public static func codexTrustsNone(hooks root: [String: Any], config: String, hooksPath: String, binary: String) -> Bool {
+        let (bypass, trusted) = trustedHookKeys(in: config)
+        guard !bypass, let hooks = root["hooks"] as? [String: Any] else { return false }
+        let wanted = command(binary: binary, agent: .codex)
+        var ours: [String] = []
+        for (event, value) in hooks {
+            for (group, entry) in (value as? [[String: Any]] ?? []).enumerated() {
+                for (handler, hook) in (entry["hooks"] as? [[String: Any]] ?? []).enumerated()
+                    where (hook["command"] as? String) == wanted {
+                    ours.append("\(hooksPath):\(snakeCase(event)):\(group):\(handler)")
+                }
+            }
+        }
+        return !ours.isEmpty && !ours.contains { trusted.contains($0) }
+    }
+
+    /// The hook keys `config.toml` has a `trusted_hash` for, and whether `bypass_hook_trust` turns the check off.
+    static func trustedHookKeys(in config: String) -> (bypass: Bool, keys: Set<String>) {
+        var keys = Set<String>()
+        var bypass = false
+        var section: String?
+        var inTable = false
+        for raw in config.split(whereSeparator: \.isNewline) {
+            let line = raw.trimmingCharacters(in: .whitespaces)
+            if line.hasPrefix("[") {
+                inTable = true
+                let name = line.trimmingCharacters(in: CharacterSet(charactersIn: "[] "))
+                section = name.hasPrefix("hooks.state.") ? tomlKey(String(name.dropFirst("hooks.state.".count))) : nil
+            } else if let equals = line.firstIndex(of: "=") {
+                let name = line[..<equals].trimmingCharacters(in: .whitespaces)
+                let value = line[line.index(after: equals)...].trimmingCharacters(in: .whitespaces)
+                if name == "trusted_hash", let section { keys.insert(section) }
+                if name == "bypass_hook_trust", !inTable { bypass = value == "true" }
+            }
+        }
+        return (bypass, keys)
+    }
+
+    /// A quoted TOML key: `"…"` with `\\` and `\"` escapes, or `'…'` as it is.
+    static func tomlKey(_ quoted: String) -> String? {
+        if quoted.hasPrefix("'"), quoted.hasSuffix("'"), quoted.count >= 2 { return String(quoted.dropFirst().dropLast()) }
+        guard quoted.hasPrefix("\""), quoted.hasSuffix("\""), quoted.count >= 2 else { return nil }
+        var key = ""
+        var escaped = false
+        for character in quoted.dropFirst().dropLast() {
+            if escaped { key.append(character); escaped = false } else if character == "\\" { escaped = true } else { key.append(character) }
+        }
+        return key
+    }
+
+    /// `UserPromptSubmit` as Codex writes it in a hook key: `user_prompt_submit`.
+    static func snakeCase(_ event: String) -> String {
+        var out = ""
+        for (index, character) in event.enumerated() {
+            if character.isUppercase, index > 0 { out.append("_") }
+            out.append(contentsOf: character.lowercased())
+        }
+        return out
+    }
+
     /// The diff shown to the user before writing: what gets added and removed, event by event.
     public static func describeChange(from before: [String: Any], to after: [String: Any], agent: HookAgent) -> [String] {
         var lines: [String] = []

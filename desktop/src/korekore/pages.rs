@@ -396,6 +396,12 @@ impl crate::App {
             (tr("Not found", &[]), theme::MUTED_2, tr("install it, then connect", &[]))
         } else if !setup.installed {
             (tr("Not set up", &[]), theme::KORE_PINK_TEXT, tr("found on this computer", &[]))
+        } else if setup.agent == "codex" && setup.untrusted {
+            (
+                tr("Not trusted", &[]),
+                theme::KORE_PINK_TEXT,
+                tr("Codex hasn't trusted korekore's hooks, so it doesn't run them. Trust them in Codex: /hooks in the terminal, or Settings › Hooks in the app.", &[]),
+            )
         } else if let Some(agents::CodexTrust::ChangedSinceLastEvent(_)) = &codex {
             (
                 tr("Trust again", &[]),

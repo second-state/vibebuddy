@@ -13,6 +13,8 @@ final class AppModel: ObservableObject {
     @Published private(set) var screenshot: NSImage?
     @Published private(set) var screenshotBusy = false
     @Published private(set) var hookInstalled: [HookAgent: Bool] = [:]
+    /// Codex hasn't trusted any of korekore's hooks, so it runs none of them.
+    @Published private(set) var codexUntrusted = false
     /// Keyed by bundle id, for the supported terminals installed on this Mac.
     @Published private(set) var terminalAccess: [String: TerminalAccess.State] = [:]
     @Published private(set) var launchAtLogin = LoginItem.isEnabled
@@ -574,6 +576,8 @@ final class AppModel: ObservableObject {
         for agent in HookAgent.allCases {
             hookInstalled[agent] = HookInstaller.isInstalled(agent)
         }
+        let untrusted = (hookInstalled[.codex] ?? false) && HookInstaller.codexTrustsNone()
+        if codexUntrusted != untrusted { codexUntrusted = untrusted }
     }
 
     func hookPresent(_ agent: HookAgent) -> Bool { HookInstaller.isPresent(agent) }

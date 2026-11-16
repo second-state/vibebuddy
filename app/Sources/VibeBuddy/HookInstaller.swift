@@ -48,6 +48,15 @@ struct HookInstaller {
         (try? FileManager.default.attributesOfItem(atPath: configURL(for: agent).path))?[.modificationDate] as? Date
     }
 
+    /// Whether Codex trusts none of the entries we wrote (VibeBuddyCore.HookConfig.codexTrustsNone).
+    static func codexTrustsNone() -> Bool {
+        let hooks = configURL(for: .codex)
+        guard let config = try? String(contentsOf: directory(.codex).appendingPathComponent("config.toml"), encoding: .utf8) else {
+            return false
+        }
+        return HookConfig.codexTrustsNone(hooks: readConfig(hooks), config: config, hooksPath: hooks.path, binary: Resources.installedHookBinary.path)
+    }
+
     static func readConfig(_ url: URL) -> [String: Any] {
         guard let data = try? Data(contentsOf: url),
               let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return [:] }

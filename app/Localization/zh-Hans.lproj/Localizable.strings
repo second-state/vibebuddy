@@ -352,6 +352,8 @@
 "This is a %@ board." = "这是一块 %@ 板子。";
 "This version of korekore is no longer supported. It keeps working; update to keep getting firmware for the box." = "这个版本的 korekore 已不再受支持。它还能用；更新后才能继续为盒子获取固件。";
 "Trust again" = "需要重新信任";
+"Not trusted" = "未信任";
+"Codex hasn't trusted korekore's hooks, so it doesn't run them. Trust them in Codex: /hooks in the terminal, or Settings › Hooks in the app." = "Codex 还没信任 korekore 的钩子，所以不会运行它们。在 Codex 里信任：终端里用 /hooks，App 里在“设置 › Hooks”。";
 "Try again" = "再试一次";
 "Up to 15 seconds" = "最多 15 秒";
 "Update checks off" = "检查更新已关闭";
