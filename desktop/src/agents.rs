@@ -18,6 +18,9 @@ pub struct Setup {
     pub config: PathBuf,
     /// When the config file was last written (RFC 3339).
     pub modified: Option<String>,
+    /// Codex has trusted none of our hooks, so it runs none of them; false from an older hook, which doesn't say.
+    #[serde(default)]
+    pub untrusted: bool,
 }
 
 /// What Connect, Repair or Remove would write, shown before writing it.
@@ -103,6 +106,9 @@ mod tests {
         let setups: Vec<Setup> = serde_json::from_str(json).expect("status");
         assert_eq!(setups.len(), 2);
         assert!(setups[0].installed && !setups[1].present);
+        assert!(!setups[0].untrusted, "a hook that doesn't say isn't taken as untrusted");
+        let untrusted: Vec<Setup> = serde_json::from_str(&json.replacen("\"modified\":\"2026", "\"untrusted\":true,\"modified\":\"2026", 1)).unwrap();
+        assert!(untrusted[0].untrusted);
     }
 
     #[test]

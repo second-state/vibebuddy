@@ -147,6 +147,10 @@ struct KorekoreAgentRow: View {
         if !installed {
             return (KTag(String(localized: "Not set up"), color: Theme.Colors.korePinkText), String(localized: "found on this Mac"))
         }
+        if agent == .codex, model.codexUntrusted {
+            return (KTag(String(localized: "Not trusted"), color: Theme.Colors.korePinkText),
+                    String(localized: "Codex hasn't trusted korekore's hooks, so it doesn't run them. Trust them in Codex: /hooks in the terminal, or Settings › Hooks in the app."))
+        }
         if case .changedSinceLastEvent? = codexHint {
             return (KTag(String(localized: "Trust again"), color: Theme.Colors.korePinkText),
                     String(localized: "The hook config changed after Codex's last event, so Codex turned the hooks off. Trust korekore's hooks again in Codex: /hooks in the terminal, or Settings › Hooks in the app."))

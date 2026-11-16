@@ -273,6 +273,17 @@ check(HookConfig.codexTrustHint(configModifiedAt: later, lastEvent: nil) == .wai
 check(HookConfig.codexTrustHint(configModifiedAt: later, lastEvent: earlier) == .changedSinceLastEvent(later), "config newer than the last event: needs re-trust")
 check(HookConfig.codexTrustHint(configModifiedAt: earlier, lastEvent: later) == .trusted, "event received after the change: running")
 check(HookConfig.codexTrustHint(configModifiedAt: nil, lastEvent: later) == .trusted, "no alarm when the file time is unreadable")
+// Codex trust: untrusted only when none of our entries has a trusted_hash in config.toml.
+let hooksPath = "/Users/x/.codex/hooks.json"
+let trustsNone = { (config: String) in HookConfig.codexTrustsNone(hooks: installed, config: config, hooksPath: hooksPath, binary: binary) }
+let otherTool = "[features]\nhooks = true\n\n[hooks.state.\"omo@x:hooks/a.json:stop:0:0\"]\ntrusted_hash = \"sha256:aa\"\n"
+check(trustsNone(""), "no hook state at all: not trusted")
+check(trustsNone(otherTool), "only another tool's hooks trusted: not trusted")
+check(!trustsNone(otherTool + "\n[hooks.state.\"\(hooksPath):stop:0:0\"]\ntrusted_hash = \"sha256:bb\"\n"), "one of ours trusted")
+check(!trustsNone("[hooks.state.'\(hooksPath):user_prompt_submit:0:0']\ntrusted_hash = 'sha256:cc'\n"), "a literal-string key counts")
+check(!trustsNone("bypass_hook_trust = true\n"), "bypass_hook_trust turns the check off")
+check(trustsNone("[profiles.x]\nbypass_hook_trust = true\n"), "only the top-level bypass counts")
+check(!HookConfig.codexTrustsNone(hooks: existing, config: "", hooksPath: hooksPath, binary: binary), "nothing of ours: nothing to trust")
 
 // 3. Voice pack parsing.
 var pack = Data(count: 256)

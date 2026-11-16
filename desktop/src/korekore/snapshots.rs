@@ -102,6 +102,7 @@ fn draw_the_korekore_pages() {
         installed,
         config: std::path::PathBuf::from("/tmp/config"),
         modified: None,
+        untrusted: false,
     };
     app.agents = vec![
         setup("claude", "Claude Code", true, true),

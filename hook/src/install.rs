@@ -433,10 +433,90 @@ pub fn status() -> Result<String, String> {
                 "installed": is_installed(target, &home, &binary),
                 "config": path,
                 "modified": modified,
+                "untrusted": target == Target::Merged(Agent::Codex) && codex_untrusted(&home, &binary),
             })
         })
         .collect();
     serde_json::to_string(&agents).map_err(|error| error.to_string())
+}
+
+/// Whether Codex trusts none of our entries in `hooks.json`. Codex skips a hook it hasn't trusted without a word, so
+/// this is the only way to tell "not trusted" from "not used yet". It keeps each trusted hook under
+/// `[hooks.state."<hooks.json>:<event>:<group>:<handler>"]` in `config.toml`, with a `trusted_hash`. Only whether one
+/// is there counts: the hash is Codex's own format. False when it can't tell.
+fn codex_untrusted(home: &Path, binary: &str) -> bool {
+    let codex = home.join(Agent::Codex.dir());
+    let hooks_json = codex.join(Agent::Codex.config_file());
+    let (Ok(root), Ok(config)) = (read(&hooks_json), std::fs::read_to_string(codex.join("config.toml"))) else {
+        return false;
+    };
+    let path = hooks_json.display().to_string();
+    // In a WSL workspace, Codex's Linux build names the same file through /mnt/c, and trusts it under that name.
+    let sources = if cfg!(windows) { vec![wsl_path(&path), path] } else { vec![path] };
+    none_trusted(&root, &wanted(binary, Agent::Codex), &sources, &config)
+}
+
+fn none_trusted(root: &Map<String, Value>, wanted: &Call, sources: &[String], config: &str) -> bool {
+    let (bypass, trusted) = trusted_hook_keys(config);
+    let mut ours = Vec::new();
+    for (event, groups) in root.get("hooks").and_then(Value::as_object).into_iter().flatten() {
+        for (group, entries) in groups.as_array().into_iter().flatten().enumerate() {
+            for (handler, entry) in entries.get("hooks").and_then(Value::as_array).into_iter().flatten().enumerate() {
+                if Call::of(entry).as_ref() == Some(wanted) {
+                    ours.push(format!("{}:{group}:{handler}", snake_case(event)));
+                }
+            }
+        }
+    }
+    !bypass
+        && !ours.is_empty()
+        && !ours.iter().any(|key| sources.iter().any(|source| trusted.contains(&format!("{source}:{key}"))))
+}
+
+/// The hook keys `config.toml` has a `trusted_hash` for, and whether `bypass_hook_trust` turns the check off.
+fn trusted_hook_keys(config: &str) -> (bool, std::collections::HashSet<String>) {
+    let mut trusted = std::collections::HashSet::new();
+    let (mut bypass, mut section, mut in_table) = (false, None, false);
+    for line in config.lines().map(str::trim) {
+        if line.starts_with('[') {
+            in_table = true;
+            section = line.trim_start_matches('[').trim_end_matches(']').trim().strip_prefix("hooks.state.").and_then(toml_key);
+        } else if let Some((name, value)) = line.split_once('=') {
+            match (name.trim(), &section) {
+                ("trusted_hash", Some(key)) => {
+                    trusted.insert(key.clone());
+                }
+                ("bypass_hook_trust", _) if !in_table => bypass = value.trim() == "true",
+                _ => {}
+            }
+        }
+    }
+    (bypass, trusted)
+}
+
+/// A quoted TOML key: `"…"` with `\\` and `\"` escapes, or `'…'` as it is.
+fn toml_key(quoted: &str) -> Option<String> {
+    if let Some(literal) = quoted.strip_prefix('\'') {
+        return literal.strip_suffix('\'').map(str::to_owned);
+    }
+    let mut chars = quoted.strip_prefix('"')?.strip_suffix('"')?.chars();
+    let mut key = String::new();
+    while let Some(c) = chars.next() {
+        key.push(if c == '\\' { chars.next()? } else { c });
+    }
+    Some(key)
+}
+
+/// `UserPromptSubmit` as Codex writes it in a hook key: `user_prompt_submit`.
+fn snake_case(event: &str) -> String {
+    let mut out = String::new();
+    for (index, c) in event.chars().enumerate() {
+        if c.is_ascii_uppercase() && index > 0 {
+            out.push('_');
+        }
+        out.push(c.to_ascii_lowercase());
+    }
+    out
 }
 
 /// `vibebuddy-hook plan install|uninstall <agent>`: the change, as JSON, without writing it.
@@ -576,6 +656,34 @@ mod tests {
         assert_eq!(wsl_path(r"D:\Tools\vibebuddy-hook.exe"), "/mnt/d/Tools/vibebuddy-hook.exe");
         assert_eq!(wsl_path(r"\\server\share\vibebuddy-hook.exe"), r"\\server\share\vibebuddy-hook.exe");
         assert_eq!(wsl_path("/home/me/vibebuddy-hook"), "/home/me/vibebuddy-hook");
+    }
+
+    #[test]
+    fn codex_untrusted_means_none_of_our_entries_has_a_trusted_hash() {
+        let wanted = wanted(BINARY, Agent::Codex);
+        let source = "/home/me/.codex/hooks.json".to_owned();
+        // Another tool's hook comes first in Stop, so ours is that event's second group.
+        let theirs = json!({ "hooks": [{ "type": "command", "command": "other-tool" }] });
+        let mut root = install(Map::new(), Agent::Codex, BINARY);
+        root["hooks"]["Stop"].as_array_mut().unwrap().insert(0, theirs);
+        let untrusted = |config: &str| none_trusted(&root, &wanted, std::slice::from_ref(&source), config);
+
+        let others = "[features]\nhooks = true\n\n[hooks.state.\"omo@x:hooks/a.json:stop:0:0\"]\ntrusted_hash = \"sha256:aa\"\n";
+        assert!(untrusted(""), "no config state at all");
+        assert!(untrusted(others), "only another tool's hooks are trusted");
+        assert!(untrusted("[hooks.state.\"/home/me/.codex/hooks.json:stop:0:0\"]\ntrusted_hash = \"sha256:bb\"\n"), "that is the other tool's group");
+        assert!(!untrusted(&format!("{others}\n[hooks.state.\"/home/me/.codex/hooks.json:stop:1:0\"]\ntrusted_hash = \"sha256:cc\"\n")));
+        assert!(!untrusted("[hooks.state.'/home/me/.codex/hooks.json:user_prompt_submit:0:0']\ntrusted_hash = 'sha256:dd'\n"));
+        assert!(!untrusted("bypass_hook_trust = true\n"), "Codex doesn't check trust at all");
+        assert!(untrusted("[profiles.x]\nbypass_hook_trust = true\n"), "only the top-level setting counts");
+        assert!(!none_trusted(&Map::new(), &wanted, &[source], ""), "nothing of ours to trust");
+    }
+
+    #[test]
+    fn a_windows_hook_key_is_read_with_its_escapes() {
+        let (_, trusted) = trusted_hook_keys("[hooks.state.\"C:\\\\Users\\\\me\\\\.codex\\\\hooks.json:session_end:0:0\"]\ntrusted_hash = \"x\"\n");
+        assert!(trusted.contains(r"C:\Users\me\.codex\hooks.json:session_end:0:0"), "{trusted:?}");
+        assert_eq!(snake_case("PermissionRequest"), "permission_request");
     }
 
     #[test]
