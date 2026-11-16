@@ -75,13 +75,17 @@ release version:
     # before anything is changed, so a failure leaves the tree clean.
     cargo fetch -q
     RUSTUP_TOOLCHAIN=stable cargo fetch --manifest-path firmware-rs/device/Cargo.toml -q
+    cargo fetch --manifest-path vibeplay-app/Cargo.toml -q
     perl -pi -e 'BEGIN{$new=shift} s/^version = ".*"/version = "$new"/ && ($done++) unless $done' "${v}" Cargo.toml
     cargo update --workspace --offline -q
     # The firmware has its own lockfile, which also records these crates' versions; a stale one fails the
     # release's --locked license step (v0.3.0's first tag did). Stable is enough to rewrite a lockfile.
     RUSTUP_TOOLCHAIN=stable cargo update --manifest-path firmware-rs/device/Cargo.toml \
         -p vibebuddy-firmware-core -p vibebuddy-protocol --offline -q
-    git add Cargo.toml Cargo.lock firmware-rs/device/Cargo.lock
+    # The VibePlay app is a workspace of its own too, with the same two crates in its lockfile; CI tests it --locked
+    # (v0.6.3's main build failed there).
+    cargo update --manifest-path vibeplay-app/Cargo.toml -p vibebuddy-firmware-core -p vibebuddy-protocol --offline -q
+    git add Cargo.toml Cargo.lock firmware-rs/device/Cargo.lock vibeplay-app/Cargo.lock
     git commit -q -m "release: v${v}"
     git tag -a "v${v}" -m "VibeBuddy v${v}"
     git push -q origin main "v${v}"
