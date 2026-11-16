@@ -18,6 +18,12 @@ export IDF_PATH="${IDF_PATH:-${HOME}/esp/esp-idf-v6.0.3}"
 # shellcheck disable=SC1091
 . "${IDF_PATH}/export.sh" >/dev/null
 
+# CMake keeps the source directory in its cache and refuses another, so a build from a different SDK checkout starts
+# from an empty build directory.
+cache="${out}/CMakeCache.txt"
+if [ -f "${cache}" ] && ! grep -qxF "CMAKE_HOME_DIRECTORY:INTERNAL=${sdk}" "${cache}"; then
+    rm -rf "${out}"
+fi
 mkdir -p "${out}"
 # ESP-IDF applies the defaults only to a new sdkconfig, so a left-over one would keep old settings.
 rm -f "${out}/sdkconfig"
