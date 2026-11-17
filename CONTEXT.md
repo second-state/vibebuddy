@@ -254,7 +254,7 @@ One complete session within an Agent process. Its identifier comes from the Agen
 _Avoid_: connection, session instance
 
 **Turn**:
-The unit of work from the moment the user submits an input until the assistant stops generating. Codex identifies it with `turn_id` and Claude Code with `prompt_id`; the two have aligned semantics, so Turn is a general cross-Agent concept, not one Agent's private vocabulary.
+The unit of work from the moment the user submits an input until the assistant stops generating. Codex identifies it with `turn_id` and Claude Code with `prompt_id`; the two have aligned semantics, so Turn is a general cross-Agent concept, not one Agent's private vocabulary. An Agent can also start a Turn on its own, with no input from the user: Claude Code does so when a background task ends (a task notification), on auto-continuation and on a wakeup. Such an automatic Turn continues the user's task; it isn't a new one.
 _Avoid_: round, prompt, request
 
 **Activity**:
@@ -304,7 +304,7 @@ What the buddy calls the user in some of its lines, picked from a fixed list in 
 _Avoid_: nickname, username, name (the user's real name is never spoken)
 
 **Today's stats (当日战绩)**:
-The count of completions, the number of needs-input requests and the busy time, accumulated per local calendar day. It describes what happened during the day, not the current state, so it is only shown when idle and isn't deduplicated.
+The count of completions, the number of needs-input requests and the busy time, accumulated per local calendar day. It describes what happened during the day, not the current state, so it is only shown when idle and isn't deduplicated. A completion is a Turn the user started that ended normally, however short, or a CI run that passed. A subagent's end, an automatic Turn's end and a failure are not completions; an automatic Turn counts only when it wraps up a task whose done was put off for its subagents. The stats reset at local midnight, and the box gets the reset within a minute, with no event needed.
 _Avoid_: statistics, metrics, history
 
 **Needs input (需要确认)**:

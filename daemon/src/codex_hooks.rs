@@ -46,6 +46,9 @@ pub struct CodexHook {
     /// Whether Codex gave the hook a transcript; None from a hook older than this field.
     #[serde(default)]
     pub has_transcript: Option<bool>,
+    /// The hook found this session is a subagent's: work its parent delegated, not the user's task.
+    #[serde(default)]
+    pub subagent: bool,
 }
 
 pub fn apply(
@@ -93,12 +96,19 @@ pub fn apply(
         ),
     };
     let mut event = match hook.hook_event_name.as_str() {
+        "UserPromptSubmit" if hook.subagent => {
+            tracker.clear_session(&hook.session_id);
+            tracker.observe_child(&id, &title)
+        }
         "UserPromptSubmit" => {
             tracker.clear_session(&hook.session_id);
             tracker.observe(&id, &title, ActivityStatus::Working)
         }
         "PermissionRequest" => tracker.require_input(&id, &title),
+        "PostToolUse" if hook.subagent => tracker.observe_child(&id, &title),
         "PostToolUse" => tracker.observe(&id, &title, ActivityStatus::Working),
+        // A subagent reports to its parent, not to the user: drop its card without announcing or counting it.
+        "Stop" if hook.subagent => tracker.discard(&id, "ALL QUIET"),
         "Stop" => {
             if hook.response_kind.as_deref() == Some("input_required") {
                 tracker.require_input(&id, &title)
@@ -166,6 +176,7 @@ mod tests {
             host_focus_url: None,
             host_pids: None,
             has_transcript: None,
+            subagent: false,
         };
         assert!(apply(&mut tracker, &mut titles, ghost).is_none());
         assert!(tracker.focus_source().is_none());
@@ -186,6 +197,7 @@ mod tests {
             host_focus_url: None,
             host_pids: None,
             has_transcript: None,
+            subagent: false,
         };
         assert!(apply(&mut tracker, &mut titles, fresh).is_some());
 
@@ -205,6 +217,7 @@ mod tests {
             host_focus_url: None,
             host_pids: None,
             has_transcript: None,
+            subagent: false,
         };
         let event = apply(&mut tracker, &mut titles, known).expect("known thread should be visible");
         assert_eq!(event.title.as_deref(), Some("CX:REVIEW"));
@@ -255,7 +268,30 @@ mod tests {
             host_focus_url: None,
             host_pids: None,
             has_transcript: None,
+            subagent: false,
         }
+    }
+
+    #[test]
+    fn a_subagent_finishing_is_not_announced_or_counted() {
+        let mut tracker = ActivityTracker::default();
+        let mut titles = SessionTitles::disabled();
+        apply(&mut tracker, &mut titles, hook("parent", "UserPromptSubmit", "/work/vibe-buddy"));
+        let child = |name: &str| CodexHook {
+            thread_id: Some("parent".to_owned()),
+            subagent: true,
+            ..hook("child", name, "/work/vibe-buddy")
+        };
+        apply(&mut tracker, &mut titles, child("UserPromptSubmit"));
+        apply(&mut tracker, &mut titles, child("PostToolUse"));
+        let stopped = apply(&mut tracker, &mut titles, child("Stop")).expect("the child's card leaves the stack");
+        assert_eq!(stopped.event, "task.start", "the parent is still working");
+        assert!(!stopped.extra.contains_key("announcement"));
+        assert_eq!(tracker.today().done, 0);
+
+        let done = apply(&mut tracker, &mut titles, hook("parent", "Stop", "/work/vibe-buddy")).expect("the task ends");
+        assert_eq!(done.event, "task.done");
+        assert_eq!(tracker.today().done, 1);
     }
 
     #[test]
