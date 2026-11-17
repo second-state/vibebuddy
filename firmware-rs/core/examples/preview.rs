@@ -111,6 +111,7 @@ fn main() {
         leisure: Leisure::new(1, 0),
         now: 0,
     };
+    preview.display.set_key_hints(true);
     preview.display.start(&mut preview.screen, &scene!(preview)).unwrap();
     preview.display.set_stats(&[b"7 DONE", b"4 ASKS", b"1H23 BUSY"]);
     preview.pomodoro.restore_tally(Tally { day: 20260915, completed: 3, focus_s: 4500 });
@@ -194,4 +195,12 @@ fn main() {
     ];
     preview.show(State::Working, None, &three);
     preview.snapshot("pet_three_tasks");
+
+    // On a touchscreen the cards say they can be tapped; with voice commands offered, holding K0 says so.
+    preview.display.set_touch(true);
+    preview.display.set_voice_offered(true);
+    preview.show(State::Working, None, &three);
+    preview.snapshot("pet_three_tasks_touch");
+    preview.show(State::Working, None, &three[..1]);
+    preview.snapshot("pet_one_task_touch");
 }

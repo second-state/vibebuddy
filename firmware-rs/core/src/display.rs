@@ -32,6 +32,10 @@ const PAGE_PAUSE_MS: u32 = 30_000;
 pub const MAX_STATS: usize = 3;
 
 const COLOR_BACKGROUND: u16 = 0x0841;
+/// A duty screen's key hint: the key's name, what a press does and, when it does something, what holding it does.
+type KeyHint<'a> = (&'a str, &'a [u8], Option<&'a [u8]>);
+/// The top of the duty screen's key hints, two rows down to the bottom edge.
+const KEY_HINTS_Y: i32 = 213;
 const COLOR_MUTED: u16 = 0x8410;
 const COLOR_TEXT: u16 = 0xffff;
 const COLOR_READY: u16 = 0x2dff;
@@ -325,6 +329,12 @@ pub struct Display {
     decoration_at: u32,
     /// What the hints call the keys.
     keys: KeyNames,
+    /// The duty screen's key hints along the bottom: the box's own keys only, which the VibePlay doesn't share.
+    key_hints: bool,
+    /// The box has a touchscreen: task cards show they can be tapped.
+    touch: bool,
+    /// The computer offers voice commands, which holding K0 starts.
+    voice_offered: bool,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -948,12 +958,30 @@ impl Display {
             decoration_t: 0,
             decoration_at: 0,
             keys: KeyNames::BOX,
+            key_hints: false,
+            touch: false,
+            voice_offered: false,
         }
     }
 
     /// Names the keys in the hints from now on; the box keeps [`KeyNames::BOX`].
     pub fn set_keys(&mut self, keys: KeyNames) {
         self.keys = keys;
+    }
+
+    /// Shows what each key does along the bottom of the duty screen; the box turns it on.
+    pub fn set_key_hints(&mut self, on: bool) {
+        self.key_hints = on;
+    }
+
+    /// The box has a touchscreen; drawn from the next frame on.
+    pub fn set_touch(&mut self, touch: bool) {
+        self.touch = touch;
+    }
+
+    /// The computer offers voice commands; drawn from the next frame on.
+    pub fn set_voice_offered(&mut self, offered: bool) {
+        self.voice_offered = offered;
     }
 
     /// The screen hardware is initialized and the backlight is still off: draw the first frame, then turn on the backlight.
@@ -1026,7 +1054,14 @@ impl Display {
                 }
                 None => (x + 12, &task.title[..], 16),
             };
-            canvas.draw_str(text_x, y + 5, title, 1, COLOR_TEXT, (x + width - 8 - text_x).min(26 * 6 - 1));
+            // On a touchscreen a `>` at the right edge says the card opens its session when tapped.
+            let right = if self.touch {
+                canvas.draw_text(x + width - 12, y + 12, b">", 1, COLOR_TEXT, 1);
+                x + width - 18
+            } else {
+                x + width - 8
+            };
+            canvas.draw_str(text_x, y + 5, title, 1, COLOR_TEXT, (right - text_x).min(26 * 6 - 1));
             canvas.draw_text(text_x, y + 17, short_state_label(task.state), 1, color, 4);
             // When the first line is a session name, the project name moves to the second line; if the title is the
             // project name, don't repeat it.
@@ -1037,7 +1072,7 @@ impl Display {
             let elapsed_width = elapsed.len() as i32 * 6 - 1;
             // While waiting for input, light up the duration too: this column answers exactly "how long has it waited".
             let elapsed_color = if task.state == State::InputRequired { color } else { COLOR_MUTED };
-            canvas.draw_text(x + width - 8 - elapsed_width, y + 17, elapsed.as_bytes(), 1, elapsed_color, 8);
+            canvas.draw_text(right - elapsed_width, y + 17, elapsed.as_bytes(), 1, elapsed_color, 8);
         }
     }
 
@@ -1283,9 +1318,10 @@ impl Display {
         if petted {
             draw_heart(canvas, buddy_rect(x_offset).x + 96, 34 + if self.animation_frame.is_multiple_of(2) { 0 } else { 4 });
         }
-        // The third task card ends at y = 158: the label and the line under it move down, into the free space at the bottom, to keep clear of it.
+        // The third task card ends at y = 158: the label and the line under it move down to keep clear of it, but stay
+        // above the key hints.
         let crowded = self.tasks.len() >= 3;
-        let label_y = if crowded { 178 } else { 162 };
+        let label_y = if crowded { 170 } else { 162 };
         canvas.draw_text_centered(label_y, label, if self.state == State::InputRequired { 2 } else { 3 }, status_color);
         if !self.tasks.is_empty() {
             canvas.draw_text_centered(self.page_line_y(), self.page_line().as_bytes(), 1, COLOR_MUTED);
@@ -1296,7 +1332,33 @@ impl Display {
         } else if !self.title.is_empty() {
             canvas.draw_str_centered(195, &self.title, 2, COLOR_TEXT);
         }
+        if self.key_hints {
+            self.draw_key_hints(canvas);
+        }
         self.draw_pomodoro_badge(canvas, scene);
+    }
+
+    /// What the three keys do, along the bottom of the duty screen: each key's name in a white chip that reads
+    /// at a glance on the small screen, what a press does beside it, and what holding it does underneath.
+    fn draw_key_hints(&self, canvas: &mut Canvas) {
+        let k2_hold: &[u8] = if self.muted { b"UNMUTE" } else { b"MUTE" };
+        let hints: [KeyHint; 3] = [
+            (self.keys.k0, b"FOCUS", self.voice_offered.then_some(b"VOICE")),
+            (self.keys.k1, b"POMODORO", Some(b"MENU")),
+            (self.keys.k2, b"OPEN SESSION", Some(k2_hold)),
+        ];
+        for (column, (key, press, hold)) in hints.into_iter().enumerate() {
+            let x = 8 + column as i32 * 104;
+            let key = key.as_bytes();
+            let chip = text_width(key, 1) + 6;
+            canvas.fill_rect(x, KEY_HINTS_Y, chip, 11, COLOR_TEXT);
+            canvas.draw_text(x + 3, KEY_HINTS_Y + 2, key, 1, COLOR_BACKGROUND, 8);
+            canvas.draw_text(x + chip + 4, KEY_HINTS_Y + 2, press, 1, COLOR_TEXT, 12);
+            if let Some(hold) = hold {
+                canvas.draw_text(x, KEY_HINTS_Y + 15, b"HOLD", 1, COLOR_MUTED, 4);
+                canvas.draw_text(x + 28, KEY_HINTS_Y + 15, hold, 1, COLOR_TEXT, 12);
+            }
+        }
     }
 
     fn ensure_backlight(&mut self, screen: &mut dyn Screen, wanted: bool) {
@@ -1761,12 +1823,12 @@ impl Display {
         &self.tasks[start..(start + CARDS_PER_PAGE).min(self.tasks.len())]
     }
 
-    /// Under the cards: which page is up and how many activities aren't sent at all, or the old hint when it all
-    /// fits on one page.
+    /// Under the cards: which page is up and how many activities aren't sent at all; nothing when it all fits on
+    /// one page.
     fn page_line(&self) -> Text<24> {
         let unsent = self.tasks_total.saturating_sub(self.tasks.len());
         match (self.pages(), unsent) {
-            (1, 0) => text!(24, "LATEST ON TOP"),
+            (1, 0) => Text::new(),
             // The font has no `/` or `+`.
             (1, unsent) => text!(24, "{} MORE", unsent % 100),
             (pages, 0) => text!(24, "PAGE {} OF {}", self.page + 1, pages),
@@ -1780,7 +1842,7 @@ impl Display {
     }
 
     fn page_line_y(&self) -> i32 {
-        if self.tasks.len() >= 3 { 212 } else { 195 }
+        if self.tasks.len() >= 3 { 198 } else { 195 }
     }
 
     /// A thin bar beside the cards, one segment a page, the one up lit: there is more than what shows.

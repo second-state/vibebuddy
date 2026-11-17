@@ -104,6 +104,7 @@ fn main() {
         leisure: Leisure::new(1, 0),
         now: 0,
     };
+    preview.display.set_key_hints(true);
     preview.display.start(&mut preview.screen, &scene!(preview)).unwrap();
     preview.display.set_screens(&mut preview.screen, &scene!(preview), Screens::Korekore);
     preview.display.set_stats(&[b"7 done today", b"3 asks", b"4H12M busy"]);
@@ -121,6 +122,13 @@ fn main() {
     ];
     preview.show(State::Working, &working, 3);
     preview.shot("duty-working");
+    // On a touchscreen the cards say they can be tapped; with voice commands offered, holding K0 says so.
+    preview.display.set_touch(true);
+    preview.display.set_voice_offered(true);
+    preview.show(State::Working, &working, 3);
+    preview.shot("duty-working-touch");
+    preview.display.set_touch(false);
+    preview.display.set_voice_offered(false);
 
     preview.show(State::Idle, &[], 0);
     preview.frame(1);

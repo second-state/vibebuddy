@@ -414,7 +414,11 @@ impl Firmware {
         Self {
             pomodoro: Pomodoro::new(),
             leisure: Leisure::new(seed, now_ms),
-            display: Display::new(),
+            display: {
+                let mut display = Display::new();
+                display.set_key_hints(true);
+                display
+            },
             voices: Voices::new(),
             edition: None,
             edition_voices: None,
@@ -571,6 +575,7 @@ impl Firmware {
             None => Self::write_literal(board, "BUTTONS ERROR\n"),
         }
         self.touch = board.init_touch().map(|chip| (chip, Gestures::new(), board.now_ms()));
+        self.display.set_touch(self.touch.is_some());
         self.announce_touch(board);
 
         self.last_message_ms = board.now_ms();
@@ -1479,6 +1484,7 @@ impl Firmware {
     /// `voice.available` (with why voice is off, if the computer says), a new link or a lost one.
     fn set_voice_available<B: Board>(&mut self, board: &mut B, on: bool, reason: Option<&str>, message: Option<&str>) {
         let out = self.voice.offer(on, reason, message, board.now_ms());
+        self.display.set_voice_offered(self.voice.available());
         Self::write_voice(board, out);
         self.stop_voice_mic(board);
         if !on {

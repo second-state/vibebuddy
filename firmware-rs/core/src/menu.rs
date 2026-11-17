@@ -241,7 +241,8 @@ pub fn next_volume(current: u32) -> u32 {
 /// one row. `v0.3.2-11-g0adc18b-dirty 2026-10-06 16:34` becomes `0.3.2-11!` and `10-06 16:34`:
 /// the hash and year go, the commits past the tag stay (without them a dev build reads as the
 /// release), and `!` marks uncommitted changes since the font has no `+` or `*`. The daemon's stamp
-/// leads with the app version (`0.3.1 v0.3.1-12-ga4a667c ...`); the git description after it wins.
+/// leads with the app version (`0.3.1 v0.3.1-12-ga4a667c ...`); the git description after it wins. A firmware
+/// release tag (`firmware-v0.6.3`) loses its prefix too.
 pub fn short_build(build: &[u8]) -> (Text<16>, Text<12>) {
     let mut words: Vec<&[u8]> = build.split(|&byte| byte == b' ').filter(|word| !word.is_empty()).collect();
     let mut time = Text::new();
@@ -275,6 +276,8 @@ pub fn short_build(build: &[u8]) -> (Text<16>, Text<12>) {
         }
         _ => describe,
     };
+    // Firmware releases are tagged `firmware-v0.6.3`: the row is the firmware's already, so the version alone.
+    let describe = describe.strip_prefix(b"firmware-").unwrap_or(describe);
     let describe = match describe {
         [b'v' | b'V', digit, ..] if digit.is_ascii_digit() => &describe[1..],
         _ => describe,
@@ -304,6 +307,8 @@ mod tests {
         assert_eq!(short("0.3.1 v0.3.1-12-ga4a667c 2026-10-06 16:26"), pair("0.3.1-12", "10-06 16:26"));
         assert_eq!(short("v0.3.2-11-g0adc18b-dirty 2026-10-06 16:34"), pair("0.3.2-11!", "10-06 16:34"));
         assert_eq!(short("v0.3.2 2026-10-06 16:34"), pair("0.3.2", "10-06 16:34"));
+        assert_eq!(short("firmware-v0.6.3 2026-11-17 06:13"), pair("0.6.3", "11-17 06:13"));
+        assert_eq!(short("firmware-v0.6.3-2-g7a1f667-dirty 2026-11-17 06:13"), pair("0.6.3-2!", "11-17 06:13"));
         assert_eq!(short("abc1234-dirty 2026-09-16 13:11"), pair("abc1234!", "09-16 13:11"));
         assert_eq!(short("v0.2.0-rc1-3-gabc1234"), pair("0.2.0-rc1-3", ""));
         assert_eq!(short("abc1234"), pair("abc1234", ""));
