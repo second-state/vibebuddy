@@ -77,6 +77,9 @@ const STG: u16 = AGENT_CC;
 const METER_LOW: u16 = MINT;
 
 /// The card column on duty: x 104–312, from y 29, 46 high (two lines of 12 px type), 5 apart.
+/// The top of the key hints under the cards: three rows down to the page line.
+const KEY_HINTS_Y: i32 = 184;
+
 fn card_rect(slot: usize) -> Rect {
     Rect { x: 104, y: 29 + slot as i32 * 51, width: 208, height: 46 }
 }
@@ -424,6 +427,9 @@ impl Display {
         kt::draw_centered(canvas, &TYPE_9, 48, 222, sub, BOX_TEXT_MUTED);
 
         self.kk_top_line(canvas, scene);
+        if self.key_hints {
+            self.kk_key_hints(canvas);
+        }
         if self.tasks.is_empty() {
             let quiet: &[u8] = if self.link_lost { b"" } else { b"ALL QUIET" };
             kt::draw_centered(canvas, &TYPE_12, 208, 100, quiet, BOX_TEXT);
@@ -449,13 +455,32 @@ impl Display {
         for (slot, task) in self.tasks_on_page().iter().enumerate() {
             self.kk_card(canvas, scene, task, card_rect(slot), BOX_CARD, 8, &TYPE_11, false);
         }
-        kt::draw(canvas, &TYPE_9, 104, 223, self.page_line().as_bytes(), BOX_TEXT_MUTED, 150);
+        kt::draw(canvas, &TYPE_9, 104, 227, self.page_line().as_bytes(), BOX_TEXT_MUTED, 150);
         let pages = self.pages() as i32;
         if pages > 1 {
             for page in 0..pages {
                 let x = 312 - (pages - page) * 17 + 3;
                 let fill = if page == self.page as i32 { BOX_TEXT } else { BOX_FACE };
-                fill_round(canvas, Rect { x, y: 227, width: 14, height: 4 }, 2, fill);
+                fill_round(canvas, Rect { x, y: 231, width: 14, height: 4 }, 2, fill);
+            }
+        }
+    }
+
+    /// What the three keys do, under the cards: one row a key, its chip and what a press does, and on the right
+    /// what holding it does.
+    fn kk_key_hints(&self, canvas: &mut Canvas) {
+        let k2_hold: &[u8] = if self.muted { b"unmute" } else { b"mute" };
+        let hints: [KeyHint; 3] = [
+            (self.keys.k0, b"focus", self.voice_offered.then_some(b"voice")),
+            (self.keys.k1, b"pomodoro", Some(b"menu")),
+            (self.keys.k2, b"open session", Some(k2_hold)),
+        ];
+        for (row, (key, press, hold)) in hints.into_iter().enumerate() {
+            let y = KEY_HINTS_Y + row as i32 * 13;
+            hint(canvas, &TYPE_9, 104, y, key.as_bytes(), press, BOX_GROUND, BOX_TEXT, BOX_TEXT);
+            if let Some(hold) = hold {
+                let x = 220 + kt::draw(canvas, &TYPE_9, 220, y, b"hold ", BOX_TEXT_MUTED, i32::MAX);
+                kt::draw(canvas, &TYPE_9, x, y, hold, BOX_TEXT, i32::MAX);
             }
         }
     }
@@ -491,9 +516,15 @@ impl Display {
     fn kk_card(&self, canvas: &mut Canvas, scene: &Scene, task: &Task, rect: Rect, fill: u16, radius: i32, title_face: &Face, takeover: bool) {
         fill_round(canvas, rect, radius, fill);
         let padding = if takeover { 7 } else { 6 };
+        let mut right = rect.x + rect.width - padding;
+        // On a touchscreen a duty card says, with a pointer at its right edge, that a tap opens its session.
+        if self.touch && !takeover {
+            pointer(canvas, right - 4, rect.y + rect.height / 2 - 3, BOX_TEXT);
+            right -= 10;
+        }
         let (pill_fill, pill_word) = pill(task.state);
         let pill_width = kt::width(&TYPE_9, pill_word) + 8;
-        let pill_x = rect.x + rect.width - padding - pill_width;
+        let pill_x = right - pill_width;
         chip(canvas, &TYPE_9, pill_x, rect.y + (rect.height - TYPE_9.line()) / 2, pill_word, BOX_GROUND, pill_fill);
         let mut text_x = rect.x + padding;
         let mut title = &task.title[..];
