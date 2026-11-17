@@ -76,3 +76,5 @@ opt-level = "s"
 # The MP3 decoder for spoken replies, patched for the Xtensa backend (see its Cargo.toml).
 [patch.crates-io]
 nanomp3-core = { path = "../vendor/nanomp3-core" }
+# Sizes the flash from the bootloader header instead of RDID alone (see its Cargo.toml).
+esp-storage = { path = "../vendor/esp-storage" }
