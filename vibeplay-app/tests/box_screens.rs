@@ -4,7 +4,7 @@
 //! 640 × 480 frame and compares it with the preview's PPM.
 //!
 //! A preview also sets a few things directly that the VibePlay reaches only with time or never: the animation's
-//! frame, a leisure skit, the box's link icon (USB in korekore's) and the box's key names. Those go through
+//! frame, a leisure skit, the box's link icon (USB in korekore's) and the box's key names and key hints. Those go through
 //! `Buddy::preview`; everything else is the app's own path.
 //!
 //! `tools/compare-box-screens.sh` makes the previews and runs this. Without `VIBEPLAY_BOX_PREVIEW` it does nothing.
@@ -67,7 +67,10 @@ impl Bench {
         let mut app = App::new();
         let computer = Computer::link(&mut app, 2);
         app.buddy.set_screens(screens, 0);
-        app.buddy.preview(0, |_| {}, |display, _, _| display.set_keys(KeyNames::BOX));
+        app.buddy.preview(0, |_| {}, |display, _, _| {
+            display.set_keys(KeyNames::BOX);
+            display.set_key_hints(true);
+        });
         let shots = std::env::var_os("VIBEPLAY_SHOTS").map(|folder| PathBuf::from(folder).join("box-compare"));
         if let Some(shots) = &shots {
             std::fs::create_dir_all(shots).unwrap();
