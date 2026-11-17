@@ -28,6 +28,9 @@ pub struct ClaudeHook {
     pub agent_id: Option<String>,
     #[serde(default)]
     pub response_kind: Option<String>,
+    /// The hook found Claude Code started this turn itself, not the user.
+    #[serde(default)]
+    pub automatic: bool,
     /// Where it runs: the hook decides from the process environment on this Mac; the daemon only routes.
     #[serde(default)]
     pub surface: Option<String>,
@@ -76,7 +79,11 @@ pub fn apply(
     let mut event = match hook.hook_event_name.as_str() {
         "UserPromptSubmit" => {
             tracker.clear_turns(&hook.session_id);
-            tracker.observe(&id, &title, ActivityStatus::Working)
+            if hook.automatic {
+                tracker.observe_automatic(&id, &title)
+            } else {
+                tracker.observe(&id, &title, ActivityStatus::Working)
+            }
         }
         "PermissionRequest" => tracker.require_input(&id, &title),
         "PostToolUse" | "SubagentStart" if hook.agent_id.is_some() => tracker.observe_child(&id, &title),
@@ -134,6 +141,7 @@ mod tests {
             cwd: Some(cwd.to_owned()),
             agent_id: None,
             response_kind: None,
+            automatic: false,
             surface: None,
             host_bundle_id: None,
             host_ttys: None,
@@ -242,6 +250,64 @@ mod tests {
     }
 
     #[test]
+    fn a_turn_claude_code_started_itself_is_not_another_done() {
+        // Recorded on 2026-11-17: 13 of 55 dones were turns a background task's notification started, each announced.
+        let mut tracker = ActivityTracker::default();
+        let turn = |name: &str, prompt: &str, automatic: bool| ClaudeHook {
+            prompt_id: Some(prompt.to_owned()),
+            automatic,
+            ..hook(name, "/work/vibe-buddy")
+        };
+        apply(&mut tracker, &mut SessionTitles::disabled(), turn("UserPromptSubmit", "ask", false));
+        let done = apply(&mut tracker, &mut SessionTitles::disabled(), turn("Stop", "ask", false)).expect("the task ends");
+        assert_eq!(done.event, "task.done");
+
+        apply(&mut tracker, &mut SessionTitles::disabled(), turn("UserPromptSubmit", "notification", true));
+        apply(&mut tracker, &mut SessionTitles::disabled(), turn("PostToolUse", "notification", true));
+        let quiet = apply(&mut tracker, &mut SessionTitles::disabled(), turn("Stop", "notification", true));
+        assert!(quiet.as_ref().is_none_or(|event| event.event == "agent.idle" && !event.extra.contains_key("announcement")), "{quiet:?}");
+        assert_eq!(tracker.today().done, 1);
+
+        // A short answer is still a task the user gave.
+        apply(&mut tracker, &mut SessionTitles::disabled(), turn("UserPromptSubmit", "short", false));
+        apply(&mut tracker, &mut SessionTitles::disabled(), turn("Stop", "short", false));
+        assert_eq!(tracker.today().done, 2);
+    }
+
+    #[test]
+    fn work_put_off_for_subagents_is_done_once_in_the_turn_that_wraps_it_up() {
+        let mut tracker = ActivityTracker::default();
+        let mut events = Vec::new();
+        let turn = |name: &str, prompt: &str, automatic: bool| ClaudeHook {
+            prompt_id: Some(prompt.to_owned()),
+            automatic,
+            ..hook(name, "/work/vibe-buddy")
+        };
+        let send = |tracker: &mut ActivityTracker, events: &mut Vec<Event>, hook: ClaudeHook| {
+            if let Some(event) = apply(tracker, &mut SessionTitles::disabled(), hook) {
+                events.push(event);
+            }
+        };
+
+        send(&mut tracker, &mut events, turn("UserPromptSubmit", "ask", false));
+        send(&mut tracker, &mut events, subagent_hook("SubagentStart", "reviewer-1"));
+        send(&mut tracker, &mut events, turn("Stop", "ask", false));
+        send(&mut tracker, &mut events, turn("UserPromptSubmit", "ci-event", true));
+        send(&mut tracker, &mut events, turn("Stop", "ci-event", true));
+        assert!(events.iter().all(|event| !event.extra.contains_key("announcement")), "a reviewer still runs");
+
+        send(&mut tracker, &mut events, subagent_hook("SubagentStop", "reviewer-1"));
+        send(&mut tracker, &mut events, turn("UserPromptSubmit", "notification", true));
+        send(&mut tracker, &mut events, turn("Stop", "notification", true));
+        send(&mut tracker, &mut events, turn("UserPromptSubmit", "later", true));
+        send(&mut tracker, &mut events, turn("Stop", "later", true));
+        let announced: Vec<_> = events.iter().filter(|event| event.extra.contains_key("announcement")).collect();
+        assert_eq!(announced.len(), 1);
+        assert_eq!(announced[0].event, "task.done");
+        assert_eq!(tracker.today().done, 1);
+    }
+
+    #[test]
     fn a_new_prompt_keeps_the_cards_of_subagents_still_running() {
         let mut tracker = ActivityTracker::default();
         apply(&mut tracker, &mut SessionTitles::disabled(), hook("UserPromptSubmit", "/work/vibe-buddy"));
@@ -325,6 +391,7 @@ mod tests {
             host_focus_url: None,
             host_pids: None,
             has_transcript: None,
+            subagent: false,
         };
         let mixed = codex_hooks::apply(&mut tracker, &mut SessionTitles::disabled(), codex).expect("another agent should refresh the card stack");
 

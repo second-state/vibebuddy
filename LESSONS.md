@@ -1,5 +1,11 @@
 # Lessons learned
 
+## A Turn is not a task, and a stat shown on the box must reach the box
+
+On 2026-11-17 the box said 67 done with 55 minutes busy, and in the morning it already showed several dones before any work. Two causes. First, the box only gets today's stats with a state event, so after midnight it kept showing yesterday's numbers until the first event of the day: the daemon had reset them, but nothing sent the reset. Second, every Stop counted as a done: of Claude Code's 55, 13 were Turns it started on its own after a background task ended, and each one was also announced again. Codex subagents counted too.
+
+A number on the box is only right if something sends it when it changes, including changes made by the clock. And before you count "tasks" from hook events, ask who started the Turn: Claude Code says so in the `source` of `UserPromptSubmit` (`user`, `sdk`, `system`, the wakeups), and Codex says a session is a subagent's in its transcript's `session_meta`.
+
 ## Where a process runs is not the product surface the user wants to go back to
 
 Claude Code can run inside Ghostty, but that doesn't mean K2 should send the user back to the terminal. The first implementation mistook "where the process runs" for "where the user wants to continue the session", and overlooked that the Claude App can already import and open the matching Code session through `claude://resume?session=<UUID>`.

@@ -36,30 +36,31 @@ fn windows_path(path: &str) -> Option<String> {
         .then(|| format!("{}:\\{}", drive.to_ascii_uppercase() as char, rest.replace('/', "\\")))
 }
 
-/// Maps a subagent's lifecycle session to the parent session the desktop app can open.
-pub fn navigable_thread_id(source: &Map<String, Value>) -> Option<String> {
+/// Maps a subagent's lifecycle session to the parent session the desktop app can open. True with it when the
+/// session is a subagent's: work the parent delegated, not the user's task.
+pub fn navigable_thread_id(source: &Map<String, Value>) -> Option<(String, bool)> {
     let session_id = source.get("session_id")?.as_str()?.to_owned();
     let Some(transcript_path) = source.get("transcript_path").and_then(Value::as_str) else {
-        return Some(session_id);
+        return Some((session_id, false));
     };
     let Some(payload) = transcript_meta(transcript_path) else {
-        return Some(session_id);
+        return Some((session_id, false));
     };
     let own_thread_id = payload
         .get("id")
         .and_then(Value::as_str)
         .map_or(session_id, str::to_owned);
     if payload.get("thread_source").and_then(Value::as_str) != Some("subagent") {
-        return Some(own_thread_id);
+        return Some((own_thread_id, false));
     }
-    payload
+    let parent = payload
         .get("source")
         .and_then(|origin| origin.get("subagent"))
         .and_then(|subagent| subagent.get("thread_spawn"))
         .and_then(|spawn| spawn.get("parent_thread_id"))
         .and_then(Value::as_str)
-        .map(str::to_owned)
-        .or(Some(own_thread_id))
+        .map(str::to_owned);
+    Some((parent.unwrap_or(own_thread_id), true))
 }
 
 pub fn sanitized_payload(source: &Value) -> Option<Map<String, Value>> {
@@ -73,13 +74,20 @@ pub fn sanitized_payload(source: &Value) -> Option<Map<String, Value>> {
     if !payload.contains_key("session_id") || !payload.contains_key("hook_event_name") {
         return None;
     }
-    if let Some(thread_id) = navigable_thread_id(source) {
+    let mut subagent = false;
+    if let Some((thread_id, is_subagent)) = navigable_thread_id(source) {
         payload.insert("thread_id".to_owned(), Value::String(thread_id));
+        subagent = is_subagent;
+    }
+    if subagent {
+        payload.insert("subagent".to_owned(), Value::Bool(true));
     }
     // Only whether there is one, never the path: Codex's background sessions after a turn have none.
     let has_transcript = source.get("transcript_path").and_then(Value::as_str).is_some();
     payload.insert("has_transcript".to_owned(), Value::Bool(has_transcript));
-    if payload.get("hook_event_name").and_then(Value::as_str) == Some("Stop")
+    // A subagent's last message is a report to its parent, not a question for the user.
+    if !subagent
+        && payload.get("hook_event_name").and_then(Value::as_str) == Some("Stop")
         && requires_user_input(source.get("last_assistant_message").and_then(Value::as_str))
     {
         payload.insert("response_kind".to_owned(), Value::String("input_required".to_owned()));
@@ -166,6 +174,7 @@ mod tests {
         });
         let payload = sanitized_payload(&source).expect("should have a payload");
         assert_eq!(payload["thread_id"], "parent-thread");
+        assert_eq!(payload["subagent"], true);
         assert!(!payload.contains_key("transcript_path"));
     }
 
@@ -184,6 +193,7 @@ mod tests {
         });
         let payload = sanitized_payload(&source).expect("should have a payload");
         assert_eq!(payload["thread_id"], "user-session");
+        assert!(!payload.contains_key("subagent"));
         assert!(!payload.contains_key("transcript_path"));
         assert_eq!(payload["has_transcript"], true);
     }
