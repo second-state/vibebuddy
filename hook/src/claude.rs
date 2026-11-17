@@ -30,6 +30,9 @@ pub fn sanitized_payload(source: &Value) -> Option<Map<String, Value>> {
     {
         payload.insert("response_kind".to_owned(), Value::String("input_required".to_owned()));
     }
+    if payload.get("hook_event_name").and_then(Value::as_str) == Some("UserPromptSubmit") && is_automatic_turn(source) {
+        payload.insert("automatic".to_owned(), Value::Bool(true));
+    }
     let desktop_session = std::env::var(DESKTOP_SESSION_ENV).ok().filter(|value| !value.is_empty());
     let surface = resolve_surface(surface::detect(BUNDLE_ID), desktop_session.as_deref());
     if surface == Surface::App && let Some(id) = desktop_session {
@@ -37,6 +40,21 @@ pub fn sanitized_payload(source: &Value) -> Option<Map<String, Value>> {
     }
     surface::write_into(&mut payload, &surface);
     Some(payload)
+}
+
+/// A turn the user didn't start: Claude Code injected it (a background task's notification, auto-continuation,
+/// a wakeup). It continues the user's task, so it isn't a new one. Claude Code names the author in `source`; payloads
+/// may still omit it, so a task notification is also known by its tag. `sdk` is the desktop app's composer: the user.
+/// Only the flag leaves the machine, never the prompt.
+fn is_automatic_turn(source: &Map<String, Value>) -> bool {
+    match source.get("source").and_then(Value::as_str) {
+        Some("system" | "loop_wakeup" | "schedule_wakeup" | "poll_event") => true,
+        Some(_) => false,
+        None => source
+            .get("prompt")
+            .and_then(Value::as_str)
+            .is_some_and(|prompt| prompt.trim_start().starts_with("<task-notification>")),
+    }
 }
 
 /// Claude App's embedded terminal panel also has Claude App as `__CFBundleIdentifier`, but it
@@ -78,6 +96,23 @@ mod tests {
             Value::Object(without_surface(payload)),
             serde_json::json!({"session_id": "s1", "prompt_id": "p1", "hook_event_name": "UserPromptSubmit", "cwd": "/work/vibe-buddy"})
         );
+    }
+
+    #[test]
+    fn a_turn_claude_code_injected_is_flagged_without_the_prompt() {
+        let flagged = |extra: Value| {
+            let mut hook = serde_json::json!({"session_id": "s1", "prompt_id": "p1", "hook_event_name": "UserPromptSubmit"});
+            hook.as_object_mut().unwrap().extend(extra.as_object().unwrap().clone());
+            let payload = sanitized_payload(&hook).expect("should have a payload");
+            assert!(!payload.contains_key("prompt") && !payload.contains_key("source"));
+            payload.get("automatic") == Some(&Value::Bool(true))
+        };
+        assert!(flagged(serde_json::json!({"source": "system", "prompt": "<task-notification>done</task-notification>"})));
+        assert!(flagged(serde_json::json!({"source": "schedule_wakeup", "prompt": "check the deploy"})));
+        assert!(flagged(serde_json::json!({"prompt": "  <task-notification>\n<task-id>b1</task-id>"})));
+        assert!(!flagged(serde_json::json!({"source": "user", "prompt": "<task-notification> pasted by hand"})));
+        assert!(!flagged(serde_json::json!({"source": "sdk", "prompt": "你在做吗"})));
+        assert!(!flagged(serde_json::json!({"prompt": "<!-- reply 1 -->\n> 同意"})));
     }
 
     #[test]

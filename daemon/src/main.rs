@@ -1794,7 +1794,7 @@ async fn sweep_expired_activities(state: AppState) {
         ticker.tick().await;
         let event = {
             let mut tracker = state.activities.lock().await;
-            tracker.sweep_expired().map(|mut event| {
+            tracker.sweep_expired().or_else(|| tracker.new_day_screen()).map(|mut event| {
                 tracker.stamp_live_fields(&mut event);
                 event
             })
@@ -1802,7 +1802,7 @@ async fn sweep_expired_activities(state: AppState) {
         let Some(event) = event else {
             continue;
         };
-        info!(event = %event.event, "clearing expired activity");
+        info!(event = %event.event, "sweep refreshed the screen (expired activity or new day)");
         send_event(&state, event);
     }
 }

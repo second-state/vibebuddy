@@ -3,7 +3,7 @@
 //! Adapters translate one agent's events into calls here; task-card ordering, global state
 //! priority, dedup, one-shot announcements and expiry are implemented here exactly once.
 
-use std::collections::{HashMap, VecDeque};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
@@ -177,6 +177,9 @@ struct Activity {
     /// Work an agent delegated inside its own session (a Claude Code subagent). It gets a card but is not the
     /// user's task: its end is never announced, and while it runs the session's work isn't done.
     child: bool,
+    /// A turn the agent started on its own (a background task's notification, a wakeup), not the user. It continues
+    /// the user's task, which was already announced and counted, so its end is put away quietly.
+    automatic: bool,
 }
 
 /// Snapshot of today's stats: done count, times input was needed, busy seconds.
@@ -322,6 +325,9 @@ pub struct ActivityTracker {
     pending_say: Option<Event>,
     /// The last Activities that ended, newest first, at most `RECENTLY_ENDED`; never written to disk.
     recently_ended: VecDeque<Ended>,
+    /// Sessions whose user turn ended while its subagents still ran: that task is still owed its done, which the
+    /// first turn to wrap up after the last subagent gets, even one the agent started on its own.
+    owed_done: HashSet<String>,
 }
 
 impl ActivityTracker {
@@ -467,6 +473,15 @@ impl ActivityTracker {
         self.visible_activity()
     }
 
+    /// Like `observe`, for a turn the agent started on its own.
+    pub fn observe_automatic(&mut self, id: &ActivityId, title: &str) -> Option<Event> {
+        self.set_activity(id, title, ActivityStatus::Working);
+        if let Some(activity) = self.activities.get_mut(&id.key) {
+            activity.automatic = true;
+        }
+        self.visible_activity()
+    }
+
     pub fn has_activity(&self, id: &ActivityId) -> bool {
         self.activities.contains_key(&id.key)
     }
@@ -500,9 +515,20 @@ impl ActivityTracker {
         // The agent ended its turn to wait for work it delegated: the user's task is not done yet. The child's cards
         // keep the screen busy, and the turn that wraps up after the last child is the one announced.
         if !finished.child && self.has_children(&id.session_id) {
+            if !finished.automatic {
+                self.owed_done.insert(id.session_id.clone());
+            }
             self.sync_busy();
             return self.visible_activity();
         }
+        // A turn the agent started on its own continues a task already announced and counted, unless that task's
+        // done was put off for its subagents: then this turn is the one that wraps it up.
+        if finished.automatic && !self.owed_done.remove(&id.session_id) {
+            self.remember_ended(&id.key, &finished, Ending::Done, Instant::now());
+            self.sync_busy();
+            return self.idle_or_refresh(&id.session_id, "ALL QUIET");
+        }
+        self.owed_done.remove(&id.session_id);
         self.remember_ended(&id.key, &finished, Ending::Done, Instant::now());
         self.remember_announced(&id.key, finished, "done");
         self.sync_busy();
@@ -616,6 +642,7 @@ impl ActivityTracker {
     pub fn clear_session(&mut self, session_id: &str) {
         self.activities
             .retain(|_, activity| activity.session_id != session_id);
+        self.owed_done.remove(session_id);
         self.sync_busy();
     }
 
@@ -697,6 +724,7 @@ impl ActivityTracker {
         let existing = self.activities.get(&id.key);
         let source = existing.and_then(|existing| existing.source.clone());
         let child = existing.is_some_and(|existing| existing.child);
+        let automatic = existing.is_some_and(|existing| existing.automatic);
         self.activities.insert(
             id.key.clone(),
             Activity {
@@ -708,6 +736,7 @@ impl ActivityTracker {
                 status_since,
                 source,
                 child,
+                automatic,
             },
         );
         self.sync_busy();
@@ -1002,11 +1031,24 @@ impl ActivityTracker {
         self.save_stats();
     }
 
+    /// The screen as it is, with today's stats reset, once the local calendar day has changed; None until then.
+    ///
+    /// The box gets the stats only with a state event. Without this, on a quiet night it would keep showing
+    /// yesterday's numbers under "today" until the first event of the morning. The sweep calls it every minute.
+    pub fn new_day_screen(&mut self) -> Option<Event> {
+        if !self.roll_day() {
+            return None;
+        }
+        self.save_stats();
+        Some(self.current_screen())
+    }
+
     /// Reset when the local calendar day changes. The screen says "today", so it has to count today.
-    fn roll_day(&mut self) {
+    /// True when it reset.
+    fn roll_day(&mut self) -> bool {
         let today = chrono::Local::now().format("%Y-%m-%d").to_string();
         if self.stats.day == today {
-            return;
+            return false;
         }
         self.stats.day = today;
         self.stats.done = 0;
@@ -1017,6 +1059,7 @@ impl ActivityTracker {
             // Activities still running across midnight restart their timer at midnight; yesterday doesn't count toward today.
             self.stats.busy_since = Some(Instant::now());
         }
+        true
     }
 
     /// Maintain the accumulated time with at least one activity.
@@ -1843,6 +1886,23 @@ mod tests {
         let lines = tracker.stats_lines();
         assert_eq!(lines[0], "1 DONE");
         assert_eq!(lines[1], "1 ASKS");
+    }
+
+    #[test]
+    fn a_new_day_sends_the_reset_stats_once() {
+        let mut tracker = ActivityTracker::default();
+        let turn = id("s", "s:1");
+        tracker.observe(&turn, "ALPHA", ActivityStatus::Working);
+        tracker.finish(&turn, "ALPHA");
+        assert!(tracker.new_day_screen().is_none(), "the day has not changed");
+
+        tracker.stats.day = "2000-01-01".to_owned();
+        let mut screen = tracker.new_day_screen().expect("a new day refreshes the screen");
+        tracker.stamp_live_fields(&mut screen);
+        assert_eq!(screen.event, "agent.idle");
+        assert_eq!(screen.extra["stats"][0], "0 DONE");
+        assert_eq!(screen.extra["suppress_audio"], true);
+        assert!(tracker.new_day_screen().is_none(), "the reset is sent once");
     }
 
     #[test]
