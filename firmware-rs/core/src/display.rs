@@ -1186,7 +1186,7 @@ impl Display {
         } else {
             b"FOCUS"
         };
-        draw_tomato(canvas, PANEL_X, 43, 2);
+        draw_tomato(canvas, PANEL_X, 43, 2, TOMATO);
         canvas.draw_text(PANEL_X + 22, 44, phase_label, 2, color, 9);
         // K0 in the same style as the duty screen's key hints: the key's name in a white chip, what a press does
         // beside it, and what holding it does underneath.
@@ -1211,8 +1211,15 @@ impl Display {
             let more = text!(7, "+{}", (view.completed - 8) % 1000);
             canvas.draw_text(PANEL_X + 96, 130, more.as_bytes(), 1, COLOR_FOCUS, 8);
         }
+        // The numbers in white, the word between them in the squares' colour.
         let tally_line = format_tally(view.completed, view.focus_s);
-        canvas.draw_text(PANEL_X, 144, tally_line.as_bytes(), 1, if view.completed > 0 { COLOR_FOCUS } else { COLOR_MUTED }, 18);
+        let word_color = if view.completed > 0 { COLOR_FOCUS } else { COLOR_MUTED };
+        let mut x = PANEL_X;
+        for word in tally_line.as_bytes().split(|&byte| byte == b' ') {
+            let color = if word.iter().any(u8::is_ascii_digit) { COLOR_TEXT } else { word_color };
+            canvas.draw_text(x, 144, word, 1, color, 18);
+            x += text_width(word, 1) + 7;
+        }
 
         self.draw_agent_summary(canvas, label, status_color);
     }
@@ -1227,7 +1234,7 @@ impl Display {
         // A small tomato, then the countdown in the phase's colour: red while focusing, green on a break.
         let countdown = format_countdown(view.remaining_ms);
         let x = WIDTH - 8 - (7 * 6 - 1);
-        draw_tomato(canvas, x, 14, 1);
+        draw_tomato(canvas, x, 14, 1, TOMATO);
         canvas.draw_text(x + 12, 15, countdown.as_bytes(), 1, phase_color(&view), 5);
     }
 
@@ -2172,8 +2179,12 @@ const ICON_RELAY: [u16; ICON_HEIGHT] = [
     0b011111111110,
 ];
 
-/// The Pomodoro's mark: a tomato 9 × 8 pixels at scale 1, in its own colours whatever the phase.
-fn draw_tomato(canvas: &mut Canvas, x: i32, y: i32, scale: i32) {
+/// The robot screens' tomato: leaf, body and highlight.
+const TOMATO: [u16; 3] = [COLOR_BREAK, COLOR_FOCUS, 0xfe59];
+
+/// The Pomodoro's mark: a tomato 9 × 8 pixels at scale 1, in its own colours (leaf, body, highlight) whatever the
+/// phase.
+fn draw_tomato(canvas: &mut Canvas, x: i32, y: i32, scale: i32, [leaf, body, highlight]: [u16; 3]) {
     const ROWS: [&[u8; 9]; 8] = [
         b"....g....",
         b"..ggggg..",
@@ -2187,9 +2198,9 @@ fn draw_tomato(canvas: &mut Canvas, x: i32, y: i32, scale: i32) {
     for (row, pixels) in ROWS.iter().enumerate() {
         for (column, pixel) in pixels.iter().enumerate() {
             let color = match pixel {
-                b'g' => COLOR_BREAK,
-                b'r' => COLOR_FOCUS,
-                b'h' => 0xfe59,
+                b'g' => leaf,
+                b'r' => body,
+                b'h' => highlight,
                 _ => continue,
             };
             canvas.fill_rect(x + column as i32 * scale, y + row as i32 * scale, scale, scale, color);

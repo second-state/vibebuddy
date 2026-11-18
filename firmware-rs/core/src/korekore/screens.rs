@@ -160,6 +160,19 @@ fn chip(canvas: &mut Canvas, face: &Face, x: i32, y: i32, label: &[u8], ink: u16
     width
 }
 
+/// Korekore's tomato: leaf, body and highlight.
+const KK_TOMATO: [u16; 3] = [MINT, KORE_PINK, BLUSH];
+
+/// The running Pomodoro, ending at `right`: a small tomato, then the countdown in a chip of the phase's colour,
+/// `kore-pink` for focus and `mint` for a break.
+fn pomodoro_badge(canvas: &mut Canvas, right: i32, y: i32, view: &pomodoro::View) {
+    let countdown = format_countdown(view.remaining_ms);
+    let fill = if view.phase == Phase::Focus { KORE_PINK } else { MINT };
+    let width = kt::width(&TYPE_10, countdown.as_bytes()) + 8;
+    chip(canvas, &TYPE_10, right - width, y, countdown.as_bytes(), BOX_GROUND, fill);
+    draw_tomato(canvas, right - width - 13, y + (TYPE_10.line() - 8) / 2, 1, KK_TOMATO);
+}
+
 /// A chip and what the key does, as the design's key hints are drawn. Returns the width used.
 #[allow(clippy::too_many_arguments, reason = "where, what and in which colours")]
 fn hint(canvas: &mut Canvas, face: &Face, x: i32, y: i32, key: &[u8], action: &[u8], chip_ink: u16, chip_fill: u16, color: u16) -> i32 {
@@ -503,11 +516,7 @@ impl Display {
         }
         let view = scene.pomodoro.view(scene.now_ms);
         if !view.is_idle() && !(view.run == Run::Paused && self.animation_frame % 2 == 1) {
-            let mut badge = Text::<11>::new();
-            badge.push_bytes(if view.phase == Phase::Focus { b"F " } else { b"B " });
-            badge.push_bytes(format_countdown(view.remaining_ms).as_bytes());
-            let width = kt::width(&TYPE_10, badge.as_bytes()) + 8;
-            chip(canvas, &TYPE_10, right - width, 10, badge.as_bytes(), BOX_GROUND, KORE_PINK);
+            pomodoro_badge(canvas, right, 10, &view);
         }
     }
 
@@ -686,7 +695,8 @@ impl Display {
             b"FOCUS"
         };
         // Paused shows under the digits and in the keys; the narrow column has no room for a chip beside the label.
-        kt::draw(canvas, &TYPE_22, COLUMN_X, tight(&TYPE_22, 11), label, color, COLUMN_WIDTH);
+        draw_tomato(canvas, COLUMN_X, 13, 2, KK_TOMATO);
+        kt::draw(canvas, &TYPE_22, COLUMN_X + 23, tight(&TYPE_22, 11), label, color, COLUMN_WIDTH - 23);
         let (k0, hold_k0) = (self.keys.k0.as_bytes(), self.keys.hold_k0.as_bytes());
         let hints: [(&[u8], &[u8]); 2] = match (view.run, view.is_idle()) {
             (Run::Pending, true) => [(k0, b"start focus"), (b"", b"")],
@@ -705,7 +715,12 @@ impl Display {
             let fill = if (square as u32) < view.completed { KORE_PINK } else { BOX_FACE };
             fill_round(canvas, Rect { x: COLUMN_X + square * 11, y: 100, width: 8, height: 8 }, 2, fill);
         }
-        kt::draw(canvas, &TYPE_10, COLUMN_X, 112, format_tally(view.completed, view.focus_s).as_bytes(), KORE_PINK, COLUMN_WIDTH);
+        // The numbers in the text colour, the word between them in the squares' colour.
+        let mut x = COLUMN_X;
+        for word in format_tally(view.completed, view.focus_s).as_bytes().split(|&byte| byte == b' ') {
+            let color = if word.iter().any(u8::is_ascii_digit) { BOX_TEXT } else { KORE_PINK };
+            x += kt::draw(canvas, &TYPE_10, x, 112, word, color, COLUMN_X + COLUMN_WIDTH - x) + kt::width(&TYPE_10, b" ");
+        }
 
         let expr = match (view.is_idle(), view.phase, paused) {
             (true, _, _) | (_, _, true) => Expr::Normal,
@@ -791,11 +806,7 @@ impl Display {
         kt::draw(canvas, &TYPE_9, 8, 6, b"LEISURE", BOX_TEXT_MUTED, i32::MAX);
         let pomodoro = scene.pomodoro.view(scene.now_ms);
         if !pomodoro.is_idle() {
-            let mut badge = Text::<11>::new();
-            badge.push_bytes(if pomodoro.phase == Phase::Focus { b"F " } else { b"B " });
-            badge.push_bytes(format_countdown(pomodoro.remaining_ms).as_bytes());
-            let width = kt::width(&TYPE_10, badge.as_bytes()) + 8;
-            chip(canvas, &TYPE_10, 312 - width, 5, badge.as_bytes(), BOX_GROUND, KORE_PINK);
+            pomodoro_badge(canvas, 312, 5, &pomodoro);
         } else if let Some(stat) = self.stats.first() {
             kt::draw_right(canvas, &TYPE_9, 312, 6, stat, BOX_TEXT_MUTED);
         }
