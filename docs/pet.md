@@ -32,14 +32,14 @@ The little moves are not decoration. A device that is always lit and always on t
 
 The build identifiers of both sides live in the device menu's STATUS view (see [`device-menu.md`](device-menu.md)), not on the main screen: they matter when diagnosing, not at a glance, and two full `git describe` lines along the bottom of a 320×240 screen cost more than they gave. Until 2026-10-06 they were a two-line footer.
 
-The view shows the box's own firmware and the Mac side as reported in the heartbeat, each shortened to the version plus the build time:
+The view shows the box's own firmware and the Mac side as reported in the heartbeat, each shortened to the version alone:
 
 ```text
 FIRMWARE  0.3.2-11      (v0.3.2-11-g0adc18b 2026-10-06 16:34)
 APP       0.3.1-12      (0.3.1 v0.3.1-12-ga4a667c 2026-10-06 16:26)
 ```
 
-The hash and the year go; the commits past the tag stay, since without them a dev build reads as the release, and a trailing `!` marks uncommitted changes (the font has no `+` or `*`). The build time sits under the label as `10-06 16:34`. The full stamps still travel unchanged on the serial port and in the daemon's status, where the app compares them to offer firmware updates.
+The hash and the build time go; the commits past the tag stay, since without them a dev build reads as the release, and a trailing `!` marks uncommitted changes (the font has no `+` or `*`). The full stamps still travel unchanged on the serial port and in the daemon's status, where the app compares them to offer firmware updates.
 
 The `APP` value isn't cleared when the link drops; it goes gray: when disconnected, the most valuable piece of information is exactly "which version was I last connected to". When the Mac side is too old to send this field at all, it shows `?`, which is itself the answer.
 
