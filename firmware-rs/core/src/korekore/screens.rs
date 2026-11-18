@@ -696,7 +696,7 @@ impl Display {
         };
         for (row, (key, action)) in hints.iter().enumerate() {
             if !key.is_empty() {
-                hint(canvas, &TYPE_9, COLUMN_X, 42 + row as i32 * 18, key, action, BOX_GROUND, BOX_TEXT, BOX_TEXT_MUTED);
+                hint(canvas, &TYPE_9, COLUMN_X, 42 + row as i32 * 18, key, action, BOX_GROUND, BOX_TEXT, BOX_TEXT);
             }
         }
         kt::draw(canvas, &TYPE_9, COLUMN_X, 82, b"TODAY", BOX_TEXT_MUTED, COLUMN_WIDTH);
