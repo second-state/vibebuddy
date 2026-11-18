@@ -1760,15 +1760,7 @@ impl Firmware {
                 }
             }
             View::Status => {
-                let build_line = |label: &[u8], build: &[u8], tone| {
-                    let (version, time) = menu::short_build(build);
-                    let mut label = label.to_vec();
-                    if !time.is_empty() {
-                        label.push(b'\n');
-                        label.extend_from_slice(time.as_bytes());
-                    }
-                    line(&label, version.as_bytes(), tone)
-                };
+                let build_line = |label: &[u8], build: &[u8], tone| line(label, menu::short_build(build).as_bytes(), tone);
                 let voice = self.voices.current_id().to_ascii_uppercase();
                 let tally = self.pomodoro.tally();
                 let minutes = tally.focus_s / 60;

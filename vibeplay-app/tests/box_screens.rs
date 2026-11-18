@@ -163,8 +163,8 @@ fn robot(previews: &Path) -> (Vec<String>, Vec<String>) {
     b.shoot("pomodoro_idle");
 
     let tasks = [
-        json!({"title": "CC:POMODORO TIMER FEATURE", "status": "working", "elapsed_s": 75, "project": "AGENT-BEACON"}),
-        json!({"title": "CX:EROS-TRAINING-INFRA", "status": "input_required", "elapsed_s": 900, "project": "EROS-TRAINING-INFRA"}),
+        json!({"title": "CC:POMODORO TIMER FEATURE", "status": "working", "elapsed_s": 75, "project": "AGENT-BEACON", "agent": "claude-code"}),
+        json!({"title": "CX:EROS-TRAINING-INFRA", "status": "input_required", "elapsed_s": 900, "project": "EROS-TRAINING-INFRA", "agent": "codex"}),
     ];
     b.send(event("agent.input_required", Some("CC:AGENT-BEACON"), &tasks, 2, None));
     b.app.buddy.start(1000);

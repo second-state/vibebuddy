@@ -1151,7 +1151,16 @@ impl Display {
         canvas.draw_text(PANEL_X, 176, b"AGENT", 1, COLOR_MUTED, 18);
         canvas.draw_text(PANEL_X, 188, label, 1, status_color, 18);
         if let Some(task) = self.tasks.first() {
-            canvas.draw_str(PANEL_X, 200, &task.title, 1, if self.link_lost { COLOR_MUTED } else { COLOR_TEXT }, 18 * 6 - 1);
+            // The agent's icon stands in for the title's prefix, as on the task cards.
+            let (text_x, title) = match task.icon {
+                Some(icon) => {
+                    icon.draw(canvas, PANEL_X, 196);
+                    (PANEL_X + 20, task.title.strip_prefix(icon.prefix()).unwrap_or(&task.title))
+                }
+                None => (PANEL_X, &task.title[..]),
+            };
+            let max_width = PANEL_X + 18 * 6 - 1 - text_x;
+            canvas.draw_str(text_x, 200, title, 1, if self.link_lost { COLOR_MUTED } else { COLOR_TEXT }, max_width);
         }
     }
 
@@ -1177,18 +1186,16 @@ impl Display {
         } else {
             b"FOCUS"
         };
-        canvas.draw_text(PANEL_X, 44, phase_label, 2, color, 9);
-        let keys = self.keys;
-        if view.run == Run::Pending {
-            canvas.draw_text(PANEL_X, 66, text!(24, "{} START", keys.k0).as_bytes(), 1, COLOR_MUTED, 18);
-            if !view.is_idle() {
-                canvas.draw_text(PANEL_X, 78, text!(24, "{} SKIP", keys.hold_k0).as_bytes(), 1, COLOR_MUTED, 18);
-            }
-        } else {
-            let action = if paused { "RESUME" } else { "PAUSE" };
-            canvas.draw_text(PANEL_X, 66, text!(24, "{} {}", keys.k0, action).as_bytes(), 1, COLOR_MUTED, 18);
-            canvas.draw_text(PANEL_X, 78, text!(24, "{} STOP", keys.hold_k0).as_bytes(), 1, COLOR_MUTED, 18);
-        }
+        draw_tomato(canvas, PANEL_X, 43, 2, TOMATO);
+        canvas.draw_text(PANEL_X + 22, 44, phase_label, 2, color, 9);
+        // K0 in the same style as the duty screen's key hints: the key's name in a white chip, what a press does
+        // beside it, and what holding it does underneath.
+        let (press, hold): (&[u8], Option<&[u8]>) = match view.run {
+            Run::Pending => (b"START", (!view.is_idle()).then_some(b"SKIP")),
+            Run::Paused => (b"RESUME", Some(b"STOP")),
+            Run::Running => (b"PAUSE", Some(b"STOP")),
+        };
+        draw_key_hint(canvas, PANEL_X, 66, (self.keys.k0, press, hold));
         if paused {
             canvas.draw_text(PANEL_X, 98, b"PAUSED", 2, color, 9);
         }
@@ -1204,8 +1211,15 @@ impl Display {
             let more = text!(7, "+{}", (view.completed - 8) % 1000);
             canvas.draw_text(PANEL_X + 96, 130, more.as_bytes(), 1, COLOR_FOCUS, 8);
         }
+        // The numbers in white, the word between them in the squares' colour.
         let tally_line = format_tally(view.completed, view.focus_s);
-        canvas.draw_text(PANEL_X, 144, tally_line.as_bytes(), 1, if view.completed > 0 { COLOR_FOCUS } else { COLOR_MUTED }, 18);
+        let word_color = if view.completed > 0 { COLOR_FOCUS } else { COLOR_MUTED };
+        let mut x = PANEL_X;
+        for word in tally_line.as_bytes().split(|&byte| byte == b' ') {
+            let color = if word.iter().any(u8::is_ascii_digit) { COLOR_TEXT } else { word_color };
+            canvas.draw_text(x, 144, word, 1, color, 18);
+            x += text_width(word, 1) + 7;
+        }
 
         self.draw_agent_summary(canvas, label, status_color);
     }
@@ -1217,11 +1231,11 @@ impl Display {
         if view.is_idle() || (view.run == Run::Paused && self.animation_frame % 2 == 1) {
             return;
         }
+        // A small tomato, then the countdown in the phase's colour: red while focusing, green on a break.
         let countdown = format_countdown(view.remaining_ms);
-        let mut badge = Text::<11>::new();
-        badge.push_bytes(if view.phase == Phase::Focus { b"F " } else { b"B " });
-        badge.push_bytes(countdown.as_bytes());
-        canvas.draw_text(WIDTH - 8 - (7 * 6 - 1), 15, badge.as_bytes(), 1, phase_color(&view), 12);
+        let x = WIDTH - 8 - (7 * 6 - 1);
+        draw_tomato(canvas, x, 14, 1, TOMATO);
+        canvas.draw_text(x + 12, 15, countdown.as_bytes(), 1, phase_color(&view), 5);
     }
 
     /// Sleep talking: asleep, with a string of small bubbles overhead showing today's stats.
@@ -1347,17 +1361,8 @@ impl Display {
             (self.keys.k1, b"POMODORO", Some(b"MENU")),
             (self.keys.k2, b"OPEN SESSION", Some(k2_hold)),
         ];
-        for (column, (key, press, hold)) in hints.into_iter().enumerate() {
-            let x = 8 + column as i32 * 104;
-            let key = key.as_bytes();
-            let chip = text_width(key, 1) + 6;
-            canvas.fill_rect(x, KEY_HINTS_Y, chip, 11, COLOR_TEXT);
-            canvas.draw_text(x + 3, KEY_HINTS_Y + 2, key, 1, COLOR_BACKGROUND, 8);
-            canvas.draw_text(x + chip + 4, KEY_HINTS_Y + 2, press, 1, COLOR_TEXT, 12);
-            if let Some(hold) = hold {
-                canvas.draw_text(x, KEY_HINTS_Y + 15, b"HOLD", 1, COLOR_MUTED, 4);
-                canvas.draw_text(x + 28, KEY_HINTS_Y + 15, hold, 1, COLOR_TEXT, 12);
-            }
+        for (column, hint) in hints.into_iter().enumerate() {
+            draw_key_hint(canvas, 8 + column as i32 * 104, KEY_HINTS_Y, hint);
         }
     }
 
@@ -2081,8 +2086,9 @@ fn draw_panel(canvas: &mut Canvas, panel: &Panel) {
     }
     canvas.fill_rect(PANEL_LEFT, 196, PANEL_RIGHT - PANEL_LEFT, 1, COLOR_MUTED);
     let mut x = PANEL_LEFT;
+    // The key's name in a white chip, as in the duty screen's key hints.
     for (key, action) in &panel.hints {
-        canvas.fill_rect(x, 204, text_width(key, 1) + 6, 11, COLOR_MUTED);
+        canvas.fill_rect(x, 204, text_width(key, 1) + 6, 11, COLOR_TEXT);
         canvas.draw_text(x + 3, 206, key, 1, COLOR_SCREEN, 4);
         x += text_width(key, 1) + 10;
         canvas.draw_text(x, 206, action, 1, COLOR_TEXT, 12);
@@ -2172,6 +2178,49 @@ const ICON_RELAY: [u16; ICON_HEIGHT] = [
     0b100000000001,
     0b011111111110,
 ];
+
+/// The robot screens' tomato: leaf, body and highlight.
+const TOMATO: [u16; 3] = [COLOR_BREAK, COLOR_FOCUS, 0xfe59];
+
+/// The Pomodoro's mark: a tomato 9 × 8 pixels at scale 1, in its own colours (leaf, body, highlight) whatever the
+/// phase.
+fn draw_tomato(canvas: &mut Canvas, x: i32, y: i32, scale: i32, [leaf, body, highlight]: [u16; 3]) {
+    const ROWS: [&[u8; 9]; 8] = [
+        b"....g....",
+        b"..ggggg..",
+        b".rrrgrrr.",
+        b"rrhrrrrrr",
+        b"rrhrrrrrr",
+        b"rrrrrrrrr",
+        b".rrrrrrr.",
+        b"..rrrrr..",
+    ];
+    for (row, pixels) in ROWS.iter().enumerate() {
+        for (column, pixel) in pixels.iter().enumerate() {
+            let color = match pixel {
+                b'g' => leaf,
+                b'r' => body,
+                b'h' => highlight,
+                _ => continue,
+            };
+            canvas.fill_rect(x + column as i32 * scale, y + row as i32 * scale, scale, scale, color);
+        }
+    }
+}
+
+/// One key's hint, two rows from `y`: the key's name in a white chip that reads at a glance on the small screen,
+/// what a press does beside it, and what holding it does underneath.
+fn draw_key_hint(canvas: &mut Canvas, x: i32, y: i32, (key, press, hold): KeyHint) {
+    let key = key.as_bytes();
+    let chip = text_width(key, 1) + 6;
+    canvas.fill_rect(x, y, chip, 11, COLOR_TEXT);
+    canvas.draw_text(x + 3, y + 2, key, 1, COLOR_BACKGROUND, 8);
+    canvas.draw_text(x + chip + 4, y + 2, press, 1, COLOR_TEXT, 12);
+    if let Some(hold) = hold {
+        canvas.draw_text(x, y + 15, b"HOLD", 1, COLOR_MUTED, 4);
+        canvas.draw_text(x + 28, y + 15, hold, 1, COLOR_TEXT, 12);
+    }
+}
 
 fn draw_icon(canvas: &mut Canvas, x: i32, y: i32, rows: &[u16; ICON_HEIGHT], color: u16) {
     for (row, bits) in rows.iter().enumerate() {

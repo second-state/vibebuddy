@@ -52,7 +52,7 @@ Volume steps are coarse on purpose: six presses cover the range, and the app's s
 
 ![The status view](images/menu-status.png)
 
-What the box knows about itself, with nothing to change: the firmware and app builds (version over build time, see [`pet.md`](pet.md#build-identifiers)), how it is linked to its computer (LINK, as in the network view), the voice pack, today's focus tally and whether the box has a touchscreen (TOUCH: the chip's name, or NONE). Volume and mute aren't repeated here: the menu's own rows already show them. It's where "is it the box or the computer?" gets answered without opening the app.
+What the box knows about itself, with nothing to change: the firmware and app versions (see [`pet.md`](pet.md#build-identifiers)), how it is linked to its computer (LINK, as in the network view), the voice pack, today's focus tally and whether the box has a touchscreen (TOUCH: the chip's name, or NONE). Volume and mute aren't repeated here: the menu's own rows already show them. It's where "is it the box or the computer?" gets answered without opening the app.
 
 ### Computers
 
