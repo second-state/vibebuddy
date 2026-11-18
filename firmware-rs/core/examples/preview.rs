@@ -9,6 +9,7 @@ use std::path::{Path, PathBuf};
 use vibebuddy_firmware_core::canvas::{FRAME_BYTES, HEIGHT, WIDTH};
 use vibebuddy_firmware_core::display::{Display, Mode, Scene, Screen, State, TaskInput};
 use vibebuddy_firmware_core::leisure::{self, Leisure, Skit};
+use vibebuddy_firmware_core::agent_icon::AgentIcon;
 use vibebuddy_firmware_core::pomodoro::{Pomodoro, Tally};
 
 struct Frame {
@@ -125,13 +126,13 @@ fn main() {
     preview.snapshot("pomodoro_idle");
 
     let tasks = [
-        TaskInput { title: Some(b"CC:POMODORO TIMER FEATURE"), state: State::Working, elapsed_s: 75, project: Some(b"AGENT-BEACON"), id: None, icon: None },
+        TaskInput { title: Some(b"CC:POMODORO TIMER FEATURE"), state: State::Working, elapsed_s: 75, project: Some(b"AGENT-BEACON"), id: None, icon: Some(AgentIcon::ClaudeCode) },
         TaskInput {
             title: Some(b"CX:EROS-TRAINING-INFRA"),
             state: State::InputRequired,
             elapsed_s: 900,
             project: Some(b"EROS-TRAINING-INFRA"),
-            id: None, icon: None,
+            id: None, icon: Some(AgentIcon::Codex),
         },
     ];
     preview.show(State::InputRequired, Some(b"CC:AGENT-BEACON"), &tasks);

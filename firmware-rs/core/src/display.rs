@@ -1151,7 +1151,16 @@ impl Display {
         canvas.draw_text(PANEL_X, 176, b"AGENT", 1, COLOR_MUTED, 18);
         canvas.draw_text(PANEL_X, 188, label, 1, status_color, 18);
         if let Some(task) = self.tasks.first() {
-            canvas.draw_str(PANEL_X, 200, &task.title, 1, if self.link_lost { COLOR_MUTED } else { COLOR_TEXT }, 18 * 6 - 1);
+            // The agent's icon stands in for the title's prefix, as on the task cards.
+            let (text_x, title) = match task.icon {
+                Some(icon) => {
+                    icon.draw(canvas, PANEL_X, 196);
+                    (PANEL_X + 20, task.title.strip_prefix(icon.prefix()).unwrap_or(&task.title))
+                }
+                None => (PANEL_X, &task.title[..]),
+            };
+            let max_width = PANEL_X + 18 * 6 - 1 - text_x;
+            canvas.draw_str(text_x, 200, title, 1, if self.link_lost { COLOR_MUTED } else { COLOR_TEXT }, max_width);
         }
     }
 
@@ -1178,17 +1187,14 @@ impl Display {
             b"FOCUS"
         };
         canvas.draw_text(PANEL_X, 44, phase_label, 2, color, 9);
-        let keys = self.keys;
-        if view.run == Run::Pending {
-            canvas.draw_text(PANEL_X, 66, text!(24, "{} START", keys.k0).as_bytes(), 1, COLOR_MUTED, 18);
-            if !view.is_idle() {
-                canvas.draw_text(PANEL_X, 78, text!(24, "{} SKIP", keys.hold_k0).as_bytes(), 1, COLOR_MUTED, 18);
-            }
-        } else {
-            let action = if paused { "RESUME" } else { "PAUSE" };
-            canvas.draw_text(PANEL_X, 66, text!(24, "{} {}", keys.k0, action).as_bytes(), 1, COLOR_MUTED, 18);
-            canvas.draw_text(PANEL_X, 78, text!(24, "{} STOP", keys.hold_k0).as_bytes(), 1, COLOR_MUTED, 18);
-        }
+        // K0 in the same style as the duty screen's key hints: the key's name in a white chip, what a press does
+        // beside it, and what holding it does underneath.
+        let (press, hold): (&[u8], Option<&[u8]>) = match view.run {
+            Run::Pending => (b"START", (!view.is_idle()).then_some(b"SKIP")),
+            Run::Paused => (b"RESUME", Some(b"STOP")),
+            Run::Running => (b"PAUSE", Some(b"STOP")),
+        };
+        draw_key_hint(canvas, PANEL_X, 66, (self.keys.k0, press, hold));
         if paused {
             canvas.draw_text(PANEL_X, 98, b"PAUSED", 2, color, 9);
         }
@@ -1347,17 +1353,8 @@ impl Display {
             (self.keys.k1, b"POMODORO", Some(b"MENU")),
             (self.keys.k2, b"OPEN SESSION", Some(k2_hold)),
         ];
-        for (column, (key, press, hold)) in hints.into_iter().enumerate() {
-            let x = 8 + column as i32 * 104;
-            let key = key.as_bytes();
-            let chip = text_width(key, 1) + 6;
-            canvas.fill_rect(x, KEY_HINTS_Y, chip, 11, COLOR_TEXT);
-            canvas.draw_text(x + 3, KEY_HINTS_Y + 2, key, 1, COLOR_BACKGROUND, 8);
-            canvas.draw_text(x + chip + 4, KEY_HINTS_Y + 2, press, 1, COLOR_TEXT, 12);
-            if let Some(hold) = hold {
-                canvas.draw_text(x, KEY_HINTS_Y + 15, b"HOLD", 1, COLOR_MUTED, 4);
-                canvas.draw_text(x + 28, KEY_HINTS_Y + 15, hold, 1, COLOR_TEXT, 12);
-            }
+        for (column, hint) in hints.into_iter().enumerate() {
+            draw_key_hint(canvas, 8 + column as i32 * 104, KEY_HINTS_Y, hint);
         }
     }
 
@@ -2172,6 +2169,20 @@ const ICON_RELAY: [u16; ICON_HEIGHT] = [
     0b100000000001,
     0b011111111110,
 ];
+
+/// One key's hint, two rows from `y`: the key's name in a white chip that reads at a glance on the small screen,
+/// what a press does beside it, and what holding it does underneath.
+fn draw_key_hint(canvas: &mut Canvas, x: i32, y: i32, (key, press, hold): KeyHint) {
+    let key = key.as_bytes();
+    let chip = text_width(key, 1) + 6;
+    canvas.fill_rect(x, y, chip, 11, COLOR_TEXT);
+    canvas.draw_text(x + 3, y + 2, key, 1, COLOR_BACKGROUND, 8);
+    canvas.draw_text(x + chip + 4, y + 2, press, 1, COLOR_TEXT, 12);
+    if let Some(hold) = hold {
+        canvas.draw_text(x, y + 15, b"HOLD", 1, COLOR_MUTED, 4);
+        canvas.draw_text(x + 28, y + 15, hold, 1, COLOR_TEXT, 12);
+    }
+}
 
 fn draw_icon(canvas: &mut Canvas, x: i32, y: i32, rows: &[u16; ICON_HEIGHT], color: u16) {
     for (row, bits) in rows.iter().enumerate() {
