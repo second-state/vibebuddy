@@ -1186,7 +1186,8 @@ impl Display {
         } else {
             b"FOCUS"
         };
-        canvas.draw_text(PANEL_X, 44, phase_label, 2, color, 9);
+        draw_tomato(canvas, PANEL_X, 43, 2);
+        canvas.draw_text(PANEL_X + 22, 44, phase_label, 2, color, 9);
         // K0 in the same style as the duty screen's key hints: the key's name in a white chip, what a press does
         // beside it, and what holding it does underneath.
         let (press, hold): (&[u8], Option<&[u8]>) = match view.run {
@@ -1223,11 +1224,11 @@ impl Display {
         if view.is_idle() || (view.run == Run::Paused && self.animation_frame % 2 == 1) {
             return;
         }
+        // A small tomato, then the countdown in the phase's colour: red while focusing, green on a break.
         let countdown = format_countdown(view.remaining_ms);
-        let mut badge = Text::<11>::new();
-        badge.push_bytes(if view.phase == Phase::Focus { b"F " } else { b"B " });
-        badge.push_bytes(countdown.as_bytes());
-        canvas.draw_text(WIDTH - 8 - (7 * 6 - 1), 15, badge.as_bytes(), 1, phase_color(&view), 12);
+        let x = WIDTH - 8 - (7 * 6 - 1);
+        draw_tomato(canvas, x, 14, 1);
+        canvas.draw_text(x + 12, 15, countdown.as_bytes(), 1, phase_color(&view), 5);
     }
 
     /// Sleep talking: asleep, with a string of small bubbles overhead showing today's stats.
@@ -2170,6 +2171,31 @@ const ICON_RELAY: [u16; ICON_HEIGHT] = [
     0b100000000001,
     0b011111111110,
 ];
+
+/// The Pomodoro's mark: a tomato 9 × 8 pixels at scale 1, in its own colours whatever the phase.
+fn draw_tomato(canvas: &mut Canvas, x: i32, y: i32, scale: i32) {
+    const ROWS: [&[u8; 9]; 8] = [
+        b"....g....",
+        b"..ggggg..",
+        b".rrrgrrr.",
+        b"rrhrrrrrr",
+        b"rrhrrrrrr",
+        b"rrrrrrrrr",
+        b".rrrrrrr.",
+        b"..rrrrr..",
+    ];
+    for (row, pixels) in ROWS.iter().enumerate() {
+        for (column, pixel) in pixels.iter().enumerate() {
+            let color = match pixel {
+                b'g' => COLOR_BREAK,
+                b'r' => COLOR_FOCUS,
+                b'h' => 0xfe59,
+                _ => continue,
+            };
+            canvas.fill_rect(x + column as i32 * scale, y + row as i32 * scale, scale, scale, color);
+        }
+    }
+}
 
 /// One key's hint, two rows from `y`: the key's name in a white chip that reads at a glance on the small screen,
 /// what a press does beside it, and what holding it does underneath.

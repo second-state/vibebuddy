@@ -49,7 +49,7 @@ Build identifiers are used instead of semantic version numbers alone: both sides
 
 ## Pomodoro badge
 
-On duty is not the buddy's only mode: K1 switches to Pomodoro (see [`pomodoro.md`](pomodoro.md)), and after being idle on duty long enough it wanders off into Leisure on its own (see [`leisure.md`](leisure.md)). When a Pomodoro is running and the user switches back to On duty, a small badge sits in the top-right corner, `F 18:21` (focus) or `B 04:59` (break), blinking while paused. It takes up a single line of small text and doesn't change any of the buddy's expressions.
+On duty is not the buddy's only mode: K1 switches to Pomodoro (see [`pomodoro.md`](pomodoro.md)), and after being idle on duty long enough it wanders off into Leisure on its own (see [`leisure.md`](leisure.md)). When a Pomodoro is running and the user switches back to On duty, a small badge sits in the top-right corner: a small tomato and the countdown, red for focus and green for a break, blinking while paused. It takes up a single line of small text and doesn't change any of the buddy's expressions.
 
 ## Multiple task cards
 
