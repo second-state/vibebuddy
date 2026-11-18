@@ -733,13 +733,26 @@ impl Display {
         };
         fill_round(canvas, rect, 6, fill);
         kt::draw(canvas, &TYPE_9, rect.x + 5, rect.y + 4, word, word_color, rect.width - 10);
+        let title_y = rect.y + 19;
+        let mut text_x = rect.x + 5;
         let title: &[u8] = if self.link_lost {
             b"timer keeps going"
         } else {
             let task = self.tasks.iter().find(|task| task.state == State::InputRequired).or(self.tasks.first());
-            task.map(|task| task.icon.and_then(|icon| task.title.strip_prefix(icon.prefix())).unwrap_or(&task.title)).unwrap_or(b"all quiet")
+            match task {
+                // The agent's icon stands in for the title's prefix, as on the duty cards.
+                Some(task) => match task.icon {
+                    Some(icon) => {
+                        icon.draw(canvas, text_x, title_y + (TYPE_9.line() - crate::agent_icon::SIZE) / 2);
+                        text_x += crate::agent_icon::SIZE + 4;
+                        task.title.strip_prefix(icon.prefix()).unwrap_or(&task.title)
+                    }
+                    None => &task.title,
+                },
+                None => b"all quiet",
+            }
         };
-        kt::draw(canvas, &TYPE_9, rect.x + 5, rect.y + 19, title, ink, rect.width - 10);
+        kt::draw(canvas, &TYPE_9, text_x, title_y, title, ink, rect.x + rect.width - 5 - text_x);
     }
 
     /// A phase just ended: the screen fills, pink after focus and lavender after a break, until a key.
