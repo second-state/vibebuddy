@@ -2078,8 +2078,9 @@ fn draw_panel(canvas: &mut Canvas, panel: &Panel) {
     }
     canvas.fill_rect(PANEL_LEFT, 196, PANEL_RIGHT - PANEL_LEFT, 1, COLOR_MUTED);
     let mut x = PANEL_LEFT;
+    // The key's name in a white chip, as in the duty screen's key hints.
     for (key, action) in &panel.hints {
-        canvas.fill_rect(x, 204, text_width(key, 1) + 6, 11, COLOR_MUTED);
+        canvas.fill_rect(x, 204, text_width(key, 1) + 6, 11, COLOR_TEXT);
         canvas.draw_text(x + 3, 206, key, 1, COLOR_SCREEN, 4);
         x += text_width(key, 1) + 10;
         canvas.draw_text(x, 206, action, 1, COLOR_TEXT, 12);
