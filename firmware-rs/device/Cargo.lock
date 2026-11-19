@@ -3316,7 +3316,7 @@ dependencies = [
 
 [[package]]
 name = "vibebuddy-firmware-core"
-version = "0.6.3"
+version = "0.6.4"
 dependencies = [
  "clatter",
  "ed25519-dalek",
@@ -3330,7 +3330,7 @@ dependencies = [
 
 [[package]]
 name = "vibebuddy-protocol"
-version = "0.6.3"
+version = "0.6.4"
 dependencies = [
  "serde",
  "serde_json",
